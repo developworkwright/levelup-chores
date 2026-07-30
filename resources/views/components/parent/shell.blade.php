@@ -18,7 +18,7 @@
 @endphp
 
 <div class="mx-auto max-w-[1080px] px-[14px] pb-10">
-    <div class="sticky top-0 z-20 bg-fq-bg pt-[14px] pb-[10px]">
+    <div class="sticky top-0 z-20 pt-[14px] pb-[10px]">
         <div class="flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-fq-line bg-fq-panel p-[14px_16px]">
             <div>
                 <p class="font-mono-fq text-[10px] tracking-[0.22em] text-fq-cyan uppercase">Parent Console</p>
