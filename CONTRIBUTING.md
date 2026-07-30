@@ -38,7 +38,9 @@ php artisan test          # full suite
 vendor/bin/pint           # fix code style
 ```
 
-Both run in CI on every pull request, across PHP 8.3 and 8.4. Tests use an in-memory SQLite database and never touch your real one.
+Both run in CI on every pull request, across PHP 8.4 and 8.5. Tests use an in-memory SQLite database and never touch your real one.
+
+PHP **8.4.1** is the hard floor — Laravel 13 depends on Symfony 8, which requires it. Anything older fails at `composer install`.
 
 Add or update a test for anything you change. The suite is the main defence against subtle regressions in the points and streak maths, which are easy to break in ways nobody notices for a week.
 

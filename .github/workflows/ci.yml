@@ -21,10 +21,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 8.3 is the floor composer.json declares, 8.5 is what production
-        # runs. Testing both ends keeps the declared support range honest
-        # rather than aspirational.
-        php: ['8.3', '8.4', '8.5']
+        # 8.4 is the real floor — Laravel 13 pulls in Symfony 8, which
+        # requires php >=8.4.1 — and 8.5 is what production runs. Testing
+        # both ends keeps the declared range honest rather than aspirational.
+        php: ['8.4', '8.5']
 
     steps:
       - uses: actions/checkout@v4
