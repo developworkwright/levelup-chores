@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "levelup-chores",
+      "runtimeExecutable": "php",
+      "runtimeArgs": ["artisan", "serve", "--host=127.0.0.1", "--port=${PORT}"],
+      "port": 8000,
+      "autoPort": true
+    }
+  ]
+}

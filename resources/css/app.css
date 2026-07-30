@@ -1,0 +1,30 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+@source '../views/livewire/**/*.blade.php';
+@source '../views/pages/**/*.blade.php';
+@source '../views/layouts/**/*.blade.php';
+
+@theme {
+    --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
+}
+
+body {
+    background: var(--fq-bg-glow);
+    background-color: var(--fq-bg);
+    color: var(--fq-text);
+    font-family: var(--font-outfit);
+    min-height: 100vh;
+}
+
+.fq-wordmark {
+    background: linear-gradient(96deg, var(--fq-lime), var(--fq-cyan) 45%, var(--fq-gold));
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: fq-shimmer 6s linear infinite alternate;
+}
