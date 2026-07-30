@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\Profile;
-use App\Services\ChoreService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Volt;

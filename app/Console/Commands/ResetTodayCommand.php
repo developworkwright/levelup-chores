@@ -148,9 +148,9 @@ class ResetTodayCommand extends Command
 
         return [
             $kid->name,
-            "{$pointsBefore} → " . max(0, $pointsBefore + $pointsDelta),
-            "{$xpBefore} → " . max(0, $xpBefore + $xpDelta),
-            "{$streakBefore} → " . ($questWasClaimedToday ? max(0, $streakBefore - 1) : $streakBefore),
+            "{$pointsBefore} → ".max(0, $pointsBefore + $pointsDelta),
+            "{$xpBefore} → ".max(0, $xpBefore + $xpDelta),
+            "{$streakBefore} → ".($questWasClaimedToday ? max(0, $streakBefore - 1) : $streakBefore),
             $quest ? 'yes' : 'no',
             $spinsCleared > 0 ? 'yes' : 'no',
             $completions->count(),

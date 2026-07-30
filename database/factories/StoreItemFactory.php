@@ -3,11 +3,12 @@
 namespace Database\Factories;
 
 use App\Models\Household;
+use App\Models\StoreItem;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 class StoreItemFactory extends Factory
 {
-    protected $model = \App\Models\StoreItem::class;
+    protected $model = StoreItem::class;
 
     public function definition(): array
     {

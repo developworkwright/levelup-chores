@@ -21,9 +21,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Lower bound is what composer.json declares (^8.3) — testing it
-        # catches contributions that quietly use newer-only syntax.
-        php: ['8.3', '8.4']
+        # 8.3 is the floor composer.json declares, 8.5 is what production
+        # runs. Testing both ends keeps the declared support range honest
+        # rather than aspirational.
+        php: ['8.3', '8.4', '8.5']
 
     steps:
       - uses: actions/checkout@v4
@@ -74,7 +75,7 @@ jobs:
 
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
           coverage: none
 
       - name: Install PHP dependencies

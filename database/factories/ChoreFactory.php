@@ -2,12 +2,13 @@
 
 namespace Database\Factories;
 
+use App\Models\Chore;
 use App\Models\Household;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 class ChoreFactory extends Factory
 {
-    protected $model = \App\Models\Chore::class;
+    protected $model = Chore::class;
 
     public function definition(): array
     {

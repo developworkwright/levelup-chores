@@ -167,7 +167,7 @@ class MysteryChoreTest extends TestCase
         );
     }
 
-    public function test_stateFor_shows_ready_for_others_until_claimed_then_done(): void
+    public function test_state_for_shows_ready_for_others_until_claimed_then_done(): void
     {
         $household = Household::factory()->create();
         $first = Profile::factory()->for($household)->create();

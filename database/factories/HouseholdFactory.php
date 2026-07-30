@@ -2,11 +2,12 @@
 
 namespace Database\Factories;
 
+use App\Models\Household;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 class HouseholdFactory extends Factory
 {
-    protected $model = \App\Models\Household::class;
+    protected $model = Household::class;
 
     public function definition(): array
     {

@@ -43,7 +43,7 @@ class ParentChoresAdminTest extends TestCase
         $this->assertSame(ChoreCadence::Unlimited, $chore->refresh()->cadence);
     }
 
-    public function test_setCadence_ignores_an_invalid_value(): void
+    public function test_set_cadence_ignores_an_invalid_value(): void
     {
         $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
