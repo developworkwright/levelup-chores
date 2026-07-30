@@ -6,11 +6,11 @@
 
 A self-hosted, gamified chore and allowance tracker for households — daily quests, a hidden bonus chore, a bonus wheel, streak rewards, and a loot shop kids actually cash out at.
 
-[![PHP](https://img.shields.io/badge/PHP-8.3+-777BB4?logo=php&logoColor=white)](https://php.net)
+[![PHP](https://img.shields.io/badge/PHP-8.4+-777BB4?logo=php&logoColor=white)](https://php.net)
 [![Laravel](https://img.shields.io/badge/Laravel-13-FF2D20?logo=laravel&logoColor=white)](https://laravel.com)
 [![Livewire](https://img.shields.io/badge/Livewire-4-FB70A9?logo=livewire&logoColor=white)](https://livewire.laravel.com)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
-[![Tests](https://img.shields.io/badge/tests-73%20passing-3ECF8E)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-87%20passing-3ECF8E)](#-testing)
 [![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8)](#-install-it-like-an-app)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
@@ -152,11 +152,11 @@ A chore finished at 1am should count for the day that's ending, not the one star
 
 | Layer | Choice |
 |---|---|
-| Backend | **Laravel 13**, PHP 8.3+ |
+| Backend | **Laravel 13**, PHP 8.4.1+ |
 | Frontend | **Livewire 4** + **Volt** single-file components, Alpine.js |
 | Styling | **Tailwind CSS v4** (CSS-first `@theme`), self-hosted fonts |
 | Database | MySQL / MariaDB (in-memory SQLite for tests) |
-| Testing | PHPUnit 12 — 73 feature tests |
+| Testing | PHPUnit 12 — 87 feature tests |
 | Push | Web Push (VAPID) for parent alerts |
 | Deploy | Built for [Laravel Cloud](https://cloud.laravel.com) |
 
@@ -260,15 +260,41 @@ This is designed to be internet-facing, with kids' balances on the line:
 php artisan test
 ```
 
-73 feature tests covering PIN lockout and role isolation, quest gating, cooldown maths across the day boundary, mystery-chore fairness rules, streak recomputation and milestone payouts, redemption deduct-then-fulfil, and ledger integrity. Tests run against in-memory SQLite and never touch a real database.
+87 feature tests covering PIN lockout and role isolation, quest gating, cooldown maths across the day boundary, mystery-chore fairness rules, streak recomputation and milestone payouts, redemption deduct-then-fulfil, profile management, and ledger integrity. Tests run against in-memory SQLite and never touch a real database.
 
 ---
 
 ## 🧰 Artisan commands
 
+### Managing kids
+
+```bash
+php artisan kid:save Nova --age=12
+```
+
+Creates a kid's profile, or updates an existing one. **First name is the key** — matched case-insensitively, so `nova` finds `Nova`.
+
+Birthdays aren't stored anywhere, deliberately: the app keeps as little personal data as possible, and a chore board only ever needs to know whether someone is old enough for a given chore. The trade-off is that ages don't advance on their own, so once a year:
+
+```bash
+php artisan kid:save Nova --age=13
+```
+
+Any option you leave off is left untouched, so that command changes the age and nothing else.
+
+| Option | Default | Notes |
+|---|:---:|---|
+| `--age=` | — | Whole number, 1–25. Required when creating. |
+| `--color=` | first unused | `lime`, `cyan`, `gold`, `magenta`, `coral`, `violet` |
+| `--pin=` | `1111` when creating | Exactly 4 digits. Omit when updating to keep the current one. |
+
+New profiles start on PIN **`1111`** — change it from **Kids & Points** in the parent console once they've logged in.
+
+### Resetting a day for testing
+
 | Command | Purpose |
 |---|---|
-| `php artisan quest:reset-today` | Undo today's quest/spin/chore/loot activity for testing. Leaves accounts, chores, PINs, and prior days untouched. |
+| `php artisan quest:reset-today` | Undo today's quest/spin/chore/loot activity. Leaves accounts, chores, PINs, and prior days untouched. |
 | `php artisan wheel:reset-spin` | Clear today's spin so a kid can spin again. |
 
 Both accept `--kid=Name` to scope to one profile and `--dry-run` to preview without writing.
