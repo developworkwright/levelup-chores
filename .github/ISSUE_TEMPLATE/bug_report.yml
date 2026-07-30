@@ -1,0 +1,79 @@
+name: Bug report
+description: Something isn't working the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. If this is a **security** issue — authentication,
+        PIN handling, or one profile reaching another's data — please report it
+        privately instead of here.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you get instead?
+      placeholder: The mystery chore bonus paid twice after the parent re-approved it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app?
+      options:
+        - Quests / chore board
+        - Mystery chore
+        - Bonus wheel
+        - Streaks and streak chest
+        - Loot shop / redemptions
+        - Points, balances, or the ledger
+        - Badges
+        - Parent console
+        - Login / PIN entry
+        - Setup, install, or deployment
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: ledger
+    attributes:
+      label: Relevant ledger entries
+      description: >
+        For anything involving points or streaks, the parent Activity tab shows
+        every balance change and is usually the fastest way to see what
+        actually happened. Paste anything relevant here.
+      render: text
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `git rev-parse --short HEAD`, or the release you're on.
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: PHP version, database, and how you're serving it (Herd, Sail, Laravel Cloud, something else).
+      placeholder: PHP 8.4, MariaDB 11, Herd on macOS
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Errors from `storage/logs/laravel.log`
+      description: Anything relevant. Scrub names or PINs before pasting.
+      render: shell

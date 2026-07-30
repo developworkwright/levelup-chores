@@ -1,0 +1,61 @@
+name: Feature request
+description: Suggest a new mechanic or improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas welcome. The bar is roughly: does this make the app more fun for
+        kids or less work for parents, without making it harder to self-host?
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem?
+      description: What's frustrating or missing today? Describe the situation, not the solution.
+      placeholder: Kids lose their streak when we're travelling and nobody remembers to approve anything.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to see?
+      description: Your proposed solution, if you have one in mind.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app?
+      options:
+        - Quests / chore board
+        - Mystery chore
+        - Bonus wheel
+        - Streaks and streak chest
+        - Loot shop / redemptions
+        - Points, balances, or the ledger
+        - Badges
+        - Parent console
+        - Setup, install, or deployment
+        - Something new entirely
+    validations:
+      required: true
+
+  - type: textarea
+    id: fairness
+    attributes:
+      label: Fairness considerations
+      description: >
+        Several mechanics are deliberately constrained so younger kids aren't
+        disadvantaged — the mystery chore only picks any-age chores, and there
+        is no kid-vs-kid ranking anywhere. If your idea touches rewards or
+        competition, how does it stay fair across different ages?
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Would you like to build it?
+      options:
+        - label: I'd be up for opening a PR for this
