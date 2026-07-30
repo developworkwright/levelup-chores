@@ -26,6 +26,14 @@ Everything is scoped to one household. There's no public sign-up, no email/passw
 
 ---
 
+## Screenshots that are more than likely out of date, but it looked like this at one point
+
+<img width="1271" height="671" alt="Loot Management" src="https://github.com/user-attachments/assets/7e7d4ea2-705e-4220-9e6f-c908116b82a6" />
+<img width="1278" height="673" alt="BonusWheel" src="https://github.com/user-attachments/assets/9fc37cac-46b8-4a15-bfb5-985be0cb5c1a" />
+<img width="1268" height="672" alt="KidsManagement" src="https://github.com/user-attachments/assets/58eb0126-a96e-418e-9667-84489061c8c9" />
+<img width="1267" height="671" alt="KidQuests" src="https://github.com/user-attachments/assets/31943b84-30d9-43a0-9e0d-257570f620bb" />
+
+
 ## 🔁 The daily loop
 
 ```mermaid
