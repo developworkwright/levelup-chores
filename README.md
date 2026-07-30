@@ -12,6 +12,7 @@ A self-hosted, gamified chore and allowance tracker for households — daily que
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
 [![Tests](https://img.shields.io/badge/tests-73%20passing-3ECF8E)](#-testing)
 [![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8)](#-install-it-like-an-app)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 </div>
 
@@ -274,7 +275,9 @@ The repo ships [Claude Code](https://claude.com/claude-code) skills under `.clau
 
 ## 📄 License
 
-No license file yet — add one before sharing publicly if you want others to reuse this. [choosealicense.com](https://choosealicense.com) is a good starting point.
+[MIT](LICENSE) — take it, fork it, run it for your own family, change whatever you like, even use it commercially. The only ask is that the copyright notice rides along with copies of the source.
+
+It comes with no warranty. If your kid games the streak system, that's between the two of you.
 
 ---
 
