@@ -58,15 +58,16 @@ new class extends Component
 
         $service->claimQuest($this->profile);
 
-        // The streak-milestone bonus (if any) is banked immediately, but its
-        // reveal waits for the streak chest — no spoilers here.
+        // The streak (and any milestone bonus) now moves on a parent's
+        // approval, so don't quote a day count here that hasn't been earned
+        // yet — and when it is earned, the chest still does the reveal.
         if (! $wasDone) {
             if ($todaysMystery && $todaysMystery->id === $quest->chore_id) {
                 $this->dispatch('celebrate', message: 'You found the Mystery Chore! +'.\App\Services\ChoreService::MYSTERY_BONUS_POINTS.' bonus!');
             } elseif ($boosted) {
                 $this->dispatch('celebrate', message: 'Quest cleared! Bonus wheel treat earned.', treat: 'cookie');
             } else {
-                $this->dispatch('celebrate', message: "Quest cleared! {$this->profile->streak}-day streak.");
+                $this->dispatch('celebrate', message: 'Quest cleared! Your streak grows once a parent approves.');
             }
         }
     }

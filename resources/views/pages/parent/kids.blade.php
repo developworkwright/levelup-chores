@@ -300,13 +300,13 @@ new class extends Component
 
                 <div>
                     <p class="mb-2 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Adjust Points</p>
-                    <div class="flex gap-2">
+                    <div class="flex flex-wrap gap-2">
                         @foreach ([-100, -25, 25, 100, 500] as $delta)
                             @php $positive = $delta > 0; @endphp
                             <button
                                 type="button"
                                 wire:click="adjustPoints({{ $kid->id }}, {{ $delta }})"
-                                class="min-w-[56px] flex-1 rounded-[12px] px-[6px] py-[10px] font-mono-fq text-xs font-semibold"
+                                class="min-w-[48px] flex-1 rounded-[12px] px-[6px] py-[10px] font-mono-fq text-xs font-semibold"
                                 style="
                                     background: {{ $positive ? 'oklch(0.7 0.14 140 / 0.22)' : 'oklch(0.6 0.14 20 / 0.18)' }};
                                     border: 1px solid {{ $positive ? 'oklch(0.7 0.16 140 / 0.5)' : 'oklch(0.65 0.16 20 / 0.45)' }};

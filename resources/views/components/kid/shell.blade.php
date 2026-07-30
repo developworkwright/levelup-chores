@@ -10,7 +10,7 @@
 @endphp
 
 <div class="mx-auto max-w-[1080px] px-[14px] pb-10">
-    <div class="sticky top-0 z-20 bg-fq-bg pt-[14px] pb-[10px]">
+    <div class="top-0 z-20 bg-fq-bg pt-[14px] pb-[10px]">
         <div class="flex flex-wrap items-center gap-3 rounded-[22px] border border-fq-line bg-fq-panel p-[12px_14px]">
             <div
                 class="flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-[15px] font-baloo text-xl font-extrabold text-fq-bg"

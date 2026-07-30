@@ -1,58 +1,283 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+<div align="center">
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+# 🎮 LevelUp Chores
 
-## About Laravel
+**Turn the family chore list into a game worth showing up for.**
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+A self-hosted, gamified chore and allowance tracker for households — daily quests, a hidden bonus chore, a bonus wheel, streak rewards, and a loot shop kids actually cash out at.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+[![PHP](https://img.shields.io/badge/PHP-8.3+-777BB4?logo=php&logoColor=white)](https://php.net)
+[![Laravel](https://img.shields.io/badge/Laravel-13-FF2D20?logo=laravel&logoColor=white)](https://laravel.com)
+[![Livewire](https://img.shields.io/badge/Livewire-4-FB70A9?logo=livewire&logoColor=white)](https://livewire.laravel.com)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![Tests](https://img.shields.io/badge/tests-73%20passing-3ECF8E)](#-testing)
+[![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8)](#-install-it-like-an-app)
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+</div>
 
-## Learning Laravel
+---
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+## Why this exists
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+Chore charts fail because they're a list of obligations with a delayed, abstract payoff. This one borrows from games instead: a surprise assignment each morning, a secret chore worth a jackpot, a wheel that multiplies your take, streaks that compound, and a shop where points become real things.
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+Everything is scoped to one household. There's no public sign-up, no email/password, and no kid-vs-kid leaderboard — just a profile picker, a 4-digit PIN, and a shared family goal everyone's points feed into.
 
-## Agentic Development
+---
 
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## 🔁 The daily loop
 
-```bash
-composer require laravel/boost --dev
+```mermaid
+flowchart LR
+    A["🎁 Open the chest<br/><i>reveals today's quest</i>"] --> B["✅ Clear the quest"]
+    B --> C["🔓 Side quests unlock<br/><i>instantly, no waiting</i>"]
+    C --> D["🎯 Claim chores<br/><i>one is secretly the Mystery</i>"]
+    D --> E["🧑‍⚖️ Parent approves"]
+    E --> F["💰 Points · XP · Streak"]
+    F --> G["🛒 Cash out in the Loot Shop"]
 
-php artisan boost:install
+    style A fill:#2a1f4d,stroke:#8b5cf6,color:#fff
+    style D fill:#4d3a1f,stroke:#f59e0b,color:#fff
+    style E fill:#1f3a4d,stroke:#06b6d4,color:#fff
+    style F fill:#1f4d2a,stroke:#22c55e,color:#fff
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+The board **unlocks on the claim, not the approval** — deliberately. A kid should never be blocked waiting on a parent to check their phone. Points and streaks, however, only land once a parent signs off.
 
-## Contributing
+---
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## ✨ What's in it
 
-## Code of Conduct
+### For kids
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+| | Feature | How it works |
+|---|---|---|
+| 🎁 | **Daily Quest** | One randomly assigned chore per kid per day, hidden inside a chest. Opening it is the reveal moment. Optionally gates the rest of the board until cleared. |
+| 🕵️ | **Mystery Chore** | Each day one chore is secretly worth **+500 points**. Nobody knows which. The first kid in the household to finish it wins — then everyone sees who got it. |
+| 🎡 | **Bonus Wheel** | One spin a day. Lands on a chore and multiplies it **2×**, or **3×** on a 35% roll. |
+| 🔥 | **Streak Chest** | Consecutive days of approved quests build a streak. Milestones pay real money and unlock a chest with a reveal animation. |
+| 🛒 | **Loot Shop** | Spend points on rewards the parent defines — screen time, Robux, dessert pick, a family outing. |
+| 🏅 | **Badges** | 13 achievements, 5 of them hidden until earned. |
+| 🎯 | **Family Goal** | A shared thermometer every kid's points feed. No rankings, no sibling competition — by design. |
 
-## Security Vulnerabilities
+### For parents
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+| | Tab | What you do there |
+|---|---|---|
+| ✅ | **Approvals** | One queue for chore completions *and* reward redemptions. Approve or send back. |
+| 📋 | **Quests** | Add chores; set point values, cadence, minimum age, and quest eligibility. |
+| 🎁 | **Loot Shop** | Manage the reward catalog and pricing. |
+| 👨‍👩‍👧 | **Kids & Points** | Balances, manual adjustments, cash-in/payout, PIN resets, per-kid spin reset. |
+| 📜 | **Activity** | The full append-only ledger — every point in or out, with its source. |
 
-## License
+Parents can opt into **web push notifications**, so a claim buzzes their phone instead of requiring them to check the app.
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+---
+
+## 🧠 The systems, in detail
+
+<details>
+<summary><b>Mystery Chore — fair by construction</b></summary>
+
+<br>
+
+Picked automatically each day, with no parent setup. The candidate pool is filtered so the game stays fair:
+
+- **Any-age chores only** — an age-gated chore would lock the youngest kid out before the race began.
+- **No unlimited-cadence chores** — those are freely repeatable by everyone, which is incompatible with "first one to find it wins."
+- **Nothing already claimed today** — picking a chore someone already finished would make the reveal meaningless.
+
+The pick is persisted per household per day, so it stays the same chore for everyone all day no matter how many times the page is loaded. Claiming it locks it household-wide; a parent rejecting the claim reopens it.
+
+</details>
+
+<details>
+<summary><b>Streaks — earned on approval, not on the honour system</b></summary>
+
+<br>
+
+A day counts toward the streak only if that day's quest was **approved**. The streak is *recomputed* by walking back over approved days rather than incremented — so a parent clearing several days of backlog can approve them in any order and still land on the right number.
+
+| Streak | Bonus |
+|:---:|:---:|
+| 3 days | $1 |
+| 5 days | $3 |
+| 7 days | $5 |
+| 14 days | $15 |
+| 30 days | $40 |
+
+Bonuses hit the ledger the moment they're earned, but the *reveal* waits for the kid to open the streak chest. Milestones only pay for days newly crossed, so a recompute can never double-credit.
+
+</details>
+
+<details>
+<summary><b>Bonus Wheel — random result, stable display</b></summary>
+
+<br>
+
+One spin per kid per day. The result is genuinely random. The *wheel itself* is not: above 10 eligible chores, the displayed subset is chosen by a deterministic per-kid, per-day hash, and always force-includes whatever chore was actually landed on. Without that, the wheel would silently show a different set of options on every page load — including forgetting the chore it just landed on.
+
+</details>
+
+<details>
+<summary><b>Points ledger — one source of truth</b></summary>
+
+<br>
+
+`profiles.points` is a **cache**. The `ledger_entries` table is the truth. Every balance change — earn, spend, cash-in, cash-out, manual adjustment — goes through a single service that writes the entry and updates the cached balance inside one transaction, so the two can never drift.
+
+</details>
+
+<details>
+<summary><b>Household clock — the day ends at 4am</b></summary>
+
+<br>
+
+A chore finished at 1am should count for the day that's ending, not the one starting. Every cooldown, streak, quest assignment, and daily reset resolves through a household clock with a configurable day-boundary hour (default `4`), never raw `now()`.
+
+</details>
+
+---
+
+## 🛠 Tech stack
+
+| Layer | Choice |
+|---|---|
+| Backend | **Laravel 13**, PHP 8.3+ |
+| Frontend | **Livewire 4** + **Volt** single-file components, Alpine.js |
+| Styling | **Tailwind CSS v4** (CSS-first `@theme`), self-hosted fonts |
+| Database | MySQL / MariaDB (in-memory SQLite for tests) |
+| Testing | PHPUnit 12 — 73 feature tests |
+| Push | Web Push (VAPID) for parent alerts |
+| Deploy | Built for [Laravel Cloud](https://cloud.laravel.com) |
+
+No SPA framework, no heavy client build. The wheel is a `conic-gradient`, the avatars are coloured tiles, the badges are single glyphs — there isn't a raster image in the UI.
+
+---
+
+## 🚀 Getting started
+
+```bash
+git clone <your-repo-url> levelup-chores
+cd levelup-chores
+composer install
+npm install
+```
+
+```bash
+cp .env.example .env
+php artisan key:generate
+```
+
+Point the `DB_*` values at your database, then:
+
+```bash
+php artisan migrate --seed
+```
+
+```bash
+npm run build
+php artisan serve
+```
+
+Open <http://localhost:8000> and pick a profile.
+
+### Demo profiles
+
+The seeder creates a placeholder household. **Change these PINs immediately** from *Kids & Points* — anything shipped in a seeder is public by definition.
+
+| Profile | Age | PIN |
+|---|:---:|:---:|
+| Nova | 12 | `1111` |
+| Scout | 9 | `2222` |
+| Ziggy | 6 | `3333` |
+| Parent | — | `4444` |
+
+---
+
+## ⚙️ Configuration
+
+Name the app whatever your family calls it — the title flows from `APP_NAME` into the login wordmark, the parent console header, the browser tab, and the installed PWA:
+
+```dotenv
+APP_NAME="LevelUp Chores"
+```
+
+Per-household settings live in the `households` row rather than in config:
+
+| Setting | Default | Meaning |
+|---|:---:|---|
+| `timezone` | `America/Chicago` | Household-local time |
+| `day_boundary_hour` | `4` | Hour the household "day" rolls over |
+| `points_per_dollar` | `100` | Conversion rate for cash-out |
+| `require_quest_first` | `true` | Gate side quests behind the daily quest |
+| `spin_enabled` | `true` | Bonus wheel on/off |
+| `goal_name` / `goal_target` | — | The shared family goal |
+
+### Push notifications (optional)
+
+Generate a VAPID pair **per environment** and set `VAPID_SUBJECT`, `VAPID_PUBLIC_KEY`, and `VAPID_PRIVATE_KEY`:
+
+```bash
+php artisan webpush:vapid
+```
+
+Approval alerts are best-effort — if push fails, it's logged and the kid's chore claim still succeeds.
+
+---
+
+## 📱 Install it like an app
+
+The app ships a PWA manifest and service worker, so it installs to a home screen or desktop and runs without browser chrome. On Android use *Add to Home Screen*; on Windows, Edge's *Install this site as an app*. The manifest is served dynamically, so the installed name follows `APP_NAME`.
+
+---
+
+## 🔐 Security
+
+This is designed to be internet-facing, with kids' balances on the line:
+
+- **PINs are hashed**, never stored in plaintext.
+- **Lockout on brute force** — 5 failed attempts locks the profile for 15 minutes, doubling on repeat lockouts up to 4 hours, backed by the database rather than a resettable rate limiter alone.
+- **Route middleware *and* in-component role checks** — a kid session can't reach `/parent/*` even if a route guard were misconfigured.
+- **Session ID regeneration** on login; `secure` / `httponly` / `samesite` cookies.
+- **No public registration** — the route simply doesn't exist.
+- `noindex, nofollow` on every page.
+
+---
+
+## 🧪 Testing
+
+```bash
+php artisan test
+```
+
+73 feature tests covering PIN lockout and role isolation, quest gating, cooldown maths across the day boundary, mystery-chore fairness rules, streak recomputation and milestone payouts, redemption deduct-then-fulfil, and ledger integrity. Tests run against in-memory SQLite and never touch a real database.
+
+---
+
+## 🧰 Artisan commands
+
+| Command | Purpose |
+|---|---|
+| `php artisan quest:reset-today` | Undo today's quest/spin/chore/loot activity for testing. Leaves accounts, chores, PINs, and prior days untouched. |
+| `php artisan wheel:reset-spin` | Clear today's spin so a kid can spin again. |
+
+Both accept `--kid=Name` to scope to one profile and `--dry-run` to preview without writing.
+
+---
+
+## 🤖 Working on this with an AI agent
+
+The repo ships [Claude Code](https://claude.com/claude-code) skills under `.claude/skills/`, documenting the non-obvious mechanics of each subsystem — mystery-chore candidacy rules, wheel determinism, streak recomputation, ledger invariants, badge evaluation — alongside the official Laravel/Livewire/Volt/Tailwind skills from [Laravel Boost](https://laravel.com/docs/boost). An agent picks up the domain rules automatically instead of rediscovering them.
+
+---
+
+## 📄 License
+
+No license file yet — add one before sharing publicly if you want others to reuse this. [choosealicense.com](https://choosealicense.com) is a good starting point.
+
+---
+
+<div align="center">
+<sub>Built for one family's kitchen wall. Fork it for yours.</sub>
+</div>

@@ -11,7 +11,9 @@ use App\Models\Redemption;
 use App\Models\StoreItem;
 use App\Notifications\ParentApprovalNeeded;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
+use Throwable;
 
 class StoreService
 {
@@ -55,10 +57,19 @@ class StoreService
             ->where('role', ProfileRole::Parent)
             ->get();
 
-        Notification::send($parents, new ParentApprovalNeeded(
-            'Reward requested',
-            "{$profile->name} wants to redeem {$item->name}.",
-        ));
+        // Best-effort: the points are already deducted and the redemption
+        // recorded, so a failed notification must not fail the request.
+        try {
+            Notification::send($parents, new ParentApprovalNeeded(
+                'Reward requested',
+                "{$profile->name} wants to redeem {$item->name}.",
+            ));
+        } catch (Throwable $e) {
+            Log::error('Parent approval notification failed for redemption.', [
+                'redemption_id' => $redemption->id,
+                'exception' => $e,
+            ]);
+        }
 
         return $redemption;
     }

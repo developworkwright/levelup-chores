@@ -6,6 +6,7 @@ use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
+use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\LedgerEntry;
 use App\Models\Profile;
@@ -15,6 +16,7 @@ use App\Services\HouseholdClock;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Notification;
+use RuntimeException;
 use Tests\TestCase;
 
 class ChoreFlowTest extends TestCase
@@ -24,6 +26,24 @@ class ChoreFlowTest extends TestCase
     private function service(): ChoreService
     {
         return app(ChoreService::class);
+    }
+
+    /**
+     * The full daily loop: the kid claims the day's quest and the parent
+     * approves it. Since the streak now moves on approval, streak tests have
+     * to run both halves, not just the claim.
+     */
+    private function clearQuest(Profile $kid, Profile $parent): void
+    {
+        $quest = $this->service()->claimQuest($kid);
+
+        $completion = ChoreCompletion::where('profile_id', $kid->id)
+            ->where('chore_id', $quest->chore_id)
+            ->where('status', CompletionStatus::Pending)
+            ->latest('id')
+            ->firstOrFail();
+
+        $this->service()->approve($completion, $parent);
     }
 
     public function test_board_is_locked_until_quest_is_claimed(): void
@@ -136,38 +156,106 @@ class ChoreFlowTest extends TestCase
     public function test_streak_increments_on_consecutive_days_and_resets_on_a_gap(): void
     {
         $household = Household::factory()->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create();
         Chore::factory()->for($household)->create();
 
         // Day 1.
-        $this->service()->claimQuest($kid);
+        $this->clearQuest($kid, $parent);
         $this->assertSame(1, $kid->refresh()->streak);
 
         // Day 2, consecutive.
-        \Illuminate\Support\Carbon::setTestNow(now()->addDay());
-        $this->service()->claimQuest($kid);
+        Carbon::setTestNow(now()->addDay());
+        $this->clearQuest($kid, $parent);
         $this->assertSame(2, $kid->refresh()->streak);
 
         // Day 4, gap — resets to 1.
-        \Illuminate\Support\Carbon::setTestNow(now()->addDays(2));
-        $this->service()->claimQuest($kid);
+        Carbon::setTestNow(now()->addDays(2));
+        $this->clearQuest($kid, $parent);
         $this->assertSame(1, $kid->refresh()->streak);
 
-        \Illuminate\Support\Carbon::setTestNow();
+        Carbon::setTestNow();
+    }
+
+    public function test_claiming_the_quest_alone_does_not_move_the_streak(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
+
+        $this->service()->claimQuest($kid);
+
+        // The board unlocks on the claim, but the streak waits for a parent.
+        $this->assertSame(0, $kid->refresh()->streak);
+        $this->assertNull($kid->pending_streak_chest);
+    }
+
+    public function test_a_rejected_quest_does_not_count_toward_the_streak(): void
+    {
+        $household = Household::factory()->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
+
+        $quest = $this->service()->claimQuest($kid);
+        $completion = ChoreCompletion::where('profile_id', $kid->id)
+            ->where('chore_id', $quest->chore_id)
+            ->firstOrFail();
+
+        $this->service()->sendBack($completion, $parent);
+
+        $this->assertSame(0, $kid->refresh()->streak);
+    }
+
+    public function test_a_backlog_approved_out_of_order_still_lands_on_the_right_streak(): void
+    {
+        $household = Household::factory()->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
+
+        // Three days claimed, nothing approved yet.
+        $completions = [];
+        for ($day = 0; $day < 3; $day++) {
+            if ($day > 0) {
+                Carbon::setTestNow(now()->addDay());
+            }
+
+            $quest = $this->service()->claimQuest($kid);
+            $completions[] = ChoreCompletion::where('profile_id', $kid->id)
+                ->where('chore_id', $quest->chore_id)
+                ->where('status', CompletionStatus::Pending)
+                ->latest('id')
+                ->firstOrFail();
+        }
+
+        $this->assertSame(0, $kid->refresh()->streak);
+
+        // The parent works through the backlog newest-first, which an
+        // incrementing counter would get wrong.
+        foreach (array_reverse($completions) as $completion) {
+            $this->service()->approve($completion, $parent);
+        }
+
+        Carbon::setTestNow();
+
+        $this->assertSame(3, $kid->refresh()->streak);
     }
 
     public function test_streak_bonus_is_credited_at_the_three_day_milestone(): void
     {
         $household = Household::factory()->create(['points_per_dollar' => 100]);
+        $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->create();
+        // Worth no points and age-gated, so approving it adds neither chore
+        // points nor a mystery bonus — the balance is pure streak money.
+        Chore::factory()->for($household)->create(['points' => 0, 'min_age' => 1]);
 
-        $service = $this->service();
-        $service->claimQuest($kid); // Day 1.
+        $this->clearQuest($kid, $parent); // Day 1.
         Carbon::setTestNow(now()->addDay());
-        $service->claimQuest($kid); // Day 2.
+        $this->clearQuest($kid, $parent); // Day 2.
         Carbon::setTestNow(now()->addDay());
-        $service->claimQuest($kid); // Day 3 — hits the $1 milestone.
+        $this->clearQuest($kid, $parent); // Day 3 — hits the $1 milestone.
         Carbon::setTestNow();
 
         $kid->refresh();
@@ -186,18 +274,18 @@ class ChoreFlowTest extends TestCase
     public function test_opening_the_streak_chest_clears_the_pending_flag_and_reveals_the_prize(): void
     {
         $household = Household::factory()->create(['points_per_dollar' => 100]);
+        $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->create();
+        Chore::factory()->for($household)->create(['points' => 0, 'min_age' => 1]);
 
-        $service = $this->service();
-        $service->claimQuest($kid);
+        $this->clearQuest($kid, $parent);
         Carbon::setTestNow(now()->addDay());
-        $service->claimQuest($kid);
+        $this->clearQuest($kid, $parent);
         Carbon::setTestNow(now()->addDay());
-        $service->claimQuest($kid); // Day 3 milestone.
+        $this->clearQuest($kid, $parent); // Day 3 milestone.
         Carbon::setTestNow();
 
-        $result = $service->openStreakChest($kid->refresh());
+        $result = $this->service()->openStreakChest($kid->refresh());
 
         $this->assertSame(['day' => 3, 'dollars' => 1], $result);
         $this->assertNull($kid->refresh()->pending_streak_chest);
@@ -222,16 +310,15 @@ class ChoreFlowTest extends TestCase
     public function test_streak_bonuses_accumulate_correctly_through_day_seven(): void
     {
         $household = Household::factory()->create(['points_per_dollar' => 100]);
+        $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->create();
-
-        $service = $this->service();
+        Chore::factory()->for($household)->create(['points' => 0, 'min_age' => 1]);
 
         for ($day = 1; $day <= 7; $day++) {
             if ($day > 1) {
                 Carbon::setTestNow(now()->addDay());
             }
-            $service->claimQuest($kid);
+            $this->clearQuest($kid, $parent);
         }
 
         Carbon::setTestNow();
@@ -246,16 +333,17 @@ class ChoreFlowTest extends TestCase
     public function test_no_streak_bonus_on_a_non_milestone_day(): void
     {
         $household = Household::factory()->create(['points_per_dollar' => 100]);
+        $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->create();
+        Chore::factory()->for($household)->create(['points' => 0, 'min_age' => 1]);
 
-        $service = $this->service();
-        $service->claimQuest($kid); // Day 1.
+        $this->clearQuest($kid, $parent); // Day 1.
         Carbon::setTestNow(now()->addDay());
-        $service->claimQuest($kid); // Day 2 — not a milestone.
+        $this->clearQuest($kid, $parent); // Day 2 — not a milestone.
         Carbon::setTestNow();
 
-        $this->assertSame(0, $kid->refresh()->points);
+        $this->assertSame(2, $kid->refresh()->streak);
+        $this->assertSame(0, $kid->points);
     }
 
     public function test_board_excludes_chores_the_kid_is_too_young_for(): void
@@ -306,7 +394,7 @@ class ChoreFlowTest extends TestCase
 
         // Pin the quest to the filler chore so the restricted one is guaranteed
         // to still be sitting on the board, regardless of random assignment.
-        \App\Models\DailyQuest::create([
+        DailyQuest::create([
             'household_id' => $household->id,
             'profile_id' => $kid->id,
             'chore_id' => $filler->id,
@@ -333,5 +421,26 @@ class ChoreFlowTest extends TestCase
 
         Notification::assertSentTo($parent, ParentApprovalNeeded::class);
         Notification::assertNotSentTo($kid, ParentApprovalNeeded::class);
+    }
+
+    public function test_a_failed_parent_notification_does_not_break_the_claim(): void
+    {
+        // Production hit this: QUEUE_CONNECTION fell back to "database" with
+        // no jobs table, so queueing the alert threw and 500'd the kid's
+        // claim. Finishing a chore is the critical path; alerting is not.
+        Notification::shouldReceive('send')->andThrow(new RuntimeException('queue unavailable'));
+
+        $household = Household::factory()->create();
+        Profile::factory()->parent()->for($household)->create();
+        $kid = Profile::factory()->for($household)->create();
+        $chore = Chore::factory()->for($household)->create();
+
+        $completion = $this->service()->claim($kid, $chore);
+
+        $this->assertDatabaseHas('chore_completions', [
+            'id' => $completion->id,
+            'profile_id' => $kid->id,
+            'status' => CompletionStatus::Pending->value,
+        ]);
     }
 }

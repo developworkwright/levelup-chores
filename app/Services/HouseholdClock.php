@@ -25,10 +25,20 @@ class HouseholdClock
 
     public function today(): Carbon
     {
-        $now = $this->now();
-        $date = $now->copy()->startOfDay();
+        return $this->dayFor($this->now());
+    }
 
-        if ($now->hour < $this->household->day_boundary_hour) {
+    /**
+     * The household day a given instant belongs to. A chore finished at 1am
+     * counts for the previous day, so approving it later must resolve to the
+     * same date the kid was working against.
+     */
+    public function dayFor(Carbon $moment): Carbon
+    {
+        $local = $moment->copy()->setTimezone($this->household->timezone);
+        $date = $local->copy()->startOfDay();
+
+        if ($local->hour < $this->household->day_boundary_hour) {
             $date = $date->subDay();
         }
 

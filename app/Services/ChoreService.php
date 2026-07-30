@@ -14,9 +14,12 @@ use App\Models\Household;
 use App\Models\Profile;
 use App\Notifications\ParentApprovalNeeded;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 use RuntimeException;
+use Throwable;
 
 class ChoreService
 {
@@ -31,6 +34,9 @@ class ChoreService
 
     /** Bonus paid on top of whatever chore gets picked as the day's mystery. */
     public const MYSTERY_BONUS_POINTS = 500;
+
+    /** Safety bound on the streak walk-back so odd data can't loop forever. */
+    private const MAX_STREAK_DAYS = 366;
 
     public function __construct(
         private LedgerService $ledger,
@@ -258,17 +264,27 @@ class ChoreService
             ->where('role', ProfileRole::Parent)
             ->get();
 
-        Notification::send($parents, new ParentApprovalNeeded(
-            'Chore ready for approval',
-            "{$profile->name} finished {$chore->name}.",
-        ));
+        // Best-effort: a kid's claim must never fail because the parent's
+        // push notification couldn't be queued or delivered.
+        try {
+            Notification::send($parents, new ParentApprovalNeeded(
+                'Chore ready for approval',
+                "{$profile->name} finished {$chore->name}.",
+            ));
+        } catch (Throwable $e) {
+            Log::error('Parent approval notification failed for chore claim.', [
+                'completion_id' => $completion->id,
+                'exception' => $e,
+            ]);
+        }
 
         return $completion;
     }
 
     /**
      * Claiming (not approval) is what unlocks the rest of the board —
-     * deliberate, so a kid isn't blocked by a parent's response time.
+     * deliberate, so a kid isn't blocked by a parent's response time. The
+     * streak is not touched here; it only moves once a parent approves.
      */
     public function claimQuest(Profile $profile): DailyQuest
     {
@@ -278,41 +294,110 @@ class ChoreService
             $quest->completed_at = now();
             $quest->save();
 
-            $this->bumpStreak($profile, $quest);
             $this->claim($profile, $quest->chore);
         }
 
         return $quest;
     }
 
-    private function bumpStreak(Profile $profile, DailyQuest $quest): void
+    /**
+     * Recomputes the streak and pays out any milestone bonus newly crossed.
+     * Driven by approval, not by claiming, so a kid can't bank a bonus for
+     * work a parent hasn't signed off on.
+     *
+     * Deliberately a recompute rather than an increment: a parent working
+     * through several days of backlog can approve them in any order, and
+     * every one of those approvals still has to land on the same number.
+     */
+    private function refreshStreak(Profile $profile): void
     {
-        $completedYesterday = DailyQuest::where('profile_id', $profile->id)
-            ->whereDate('quest_date', $quest->quest_date->copy()->subDay())
-            ->whereNotNull('completed_at')
-            ->exists();
+        $previous = $profile->streak;
+        $profile->streak = $this->currentStreak($profile);
 
-        $profile->streak = $completedYesterday ? $profile->streak + 1 : 1;
+        $reached = null;
 
-        $bonusDollars = self::STREAK_BONUSES[$profile->streak] ?? null;
-
-        if ($bonusDollars !== null) {
-            $bonusPoints = $bonusDollars * $profile->household->points_per_dollar;
+        foreach (self::STREAK_BONUSES as $day => $bonusDollars) {
+            // Only milestones this approval newly crossed pay out, so
+            // recomputing can never double-credit one already banked.
+            if ($day <= $previous || $day > $profile->streak) {
+                continue;
+            }
 
             $this->ledger->record(
                 $profile->household,
                 $profile,
                 LedgerKind::Earn,
-                $bonusPoints,
-                "{$profile->name} — {$profile->streak}-day streak bonus (\${$bonusDollars})",
+                $bonusDollars * $profile->household->points_per_dollar,
+                "{$profile->name} — {$day}-day streak bonus (\${$bonusDollars})",
             );
 
+            $reached = $day;
+        }
+
+        if ($reached !== null) {
             // Credited immediately above, but the reveal waits for the kid
             // to open the streak chest — that's the surprise moment.
-            $profile->pending_streak_chest = $profile->streak;
+            $profile->pending_streak_chest = $reached;
         }
 
         $profile->save();
+    }
+
+    /**
+     * Consecutive household-days ending today (or yesterday, if today's
+     * quest isn't approved yet) that have an approved quest completion.
+     */
+    private function currentStreak(Profile $profile): int
+    {
+        $cursor = HouseholdClock::for($profile->household)->today();
+
+        // Today being unapproved doesn't end a streak — it just means the
+        // chain is still anchored on yesterday.
+        if (! $this->questApprovedOn($profile, $cursor)) {
+            $cursor = $cursor->copy()->subDay();
+        }
+
+        $streak = 0;
+
+        while ($streak < self::MAX_STREAK_DAYS && $this->questApprovedOn($profile, $cursor)) {
+            $streak++;
+            $cursor = $cursor->copy()->subDay();
+        }
+
+        return $streak;
+    }
+
+    /** Whether the quest assigned for a given household-day was approved. */
+    private function questApprovedOn(Profile $profile, Carbon $date): bool
+    {
+        $quest = DailyQuest::where('profile_id', $profile->id)
+            ->whereDate('quest_date', $date)
+            ->first();
+
+        if (! $quest) {
+            return false;
+        }
+
+        $clock = HouseholdClock::for($profile->household);
+
+        return ChoreCompletion::where('profile_id', $profile->id)
+            ->where('chore_id', $quest->chore_id)
+            ->where('status', CompletionStatus::Approved)
+            ->where('submitted_at', '>=', $clock->startOf($date))
+            ->where('submitted_at', '<', $clock->startOf($date->copy()->addDay()))
+            ->exists();
+    }
+
+    /** Whether this completion is the one that clears its day's main quest. */
+    private function isQuestCompletion(ChoreCompletion $completion, Profile $profile): bool
+    {
+        $questDate = HouseholdClock::for($profile->household)->dayFor($completion->submitted_at);
+
+        $quest = DailyQuest::where('profile_id', $profile->id)
+            ->whereDate('quest_date', $questDate)
+            ->first();
+
+        return $quest !== null && $quest->chore_id === $completion->chore_id;
     }
 
     /**
@@ -350,6 +435,13 @@ class ChoreService
 
     public function approve(ChoreCompletion $completion, Profile $approver): void
     {
+        // The approvals screen only ever lists pending items, so this is a
+        // guard rather than a real path — but approving twice would credit
+        // the ledger twice, which is not something to leave to chance.
+        if ($completion->status === CompletionStatus::Approved) {
+            return;
+        }
+
         $completion->status = CompletionStatus::Approved;
         $completion->decided_at = now();
         $completion->decided_by_profile_id = $approver->id;
@@ -372,6 +464,12 @@ class ChoreService
 
         $household->goal_now = min($household->goal_target, $household->goal_now + $completion->points_awarded);
         $household->save();
+
+        // Before badges, not after — the streak_3/7/14 badges read the
+        // profile's streak, so it has to be current by the time they run.
+        if ($this->isQuestCompletion($completion, $profile)) {
+            $this->refreshStreak($profile);
+        }
 
         $this->badges->evaluate($profile);
         $this->badges->evaluateHouseholdGoal($household);
