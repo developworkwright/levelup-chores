@@ -291,6 +291,43 @@ Any option you leave off is left untouched, so that command changes the age and 
 
 New profiles start on PIN **`1111`** — change it from **Kids & Points** in the parent console once they've logged in.
 
+### Household settings
+
+```bash
+php artisan household:set
+```
+
+With no options it just prints the current settings, including the one people actually come looking for — what time the day rolls over, and which day chores are counting toward right now:
+
+```
+| Timezone              | America/New_York |
+| Day resets at         | 04:00            |
+| Points per dollar     | 100              |
+| Quest gates the board | yes              |
+| Bonus wheel           | enabled          |
+
+It is Thu 30 Jul 2026, 21:50 EDT in this household, and chores counts toward Jul 30, 2026.
+```
+
+Pass any of these to change it:
+
+| Option | Default | Notes |
+|---|:---:|---|
+| `--timezone=` | `America/Chicago` | Any IANA name, e.g. `America/New_York` |
+| `--day-boundary-hour=` | `4` | 0–23, in household-local time |
+| `--points-per-dollar=` | `100` | Cash-out conversion rate |
+| `--require-quest-first=` | `true` | Gate side quests behind the daily quest |
+| `--spin-enabled=` | `true` | Turn the bonus wheel on or off |
+| `--name=` | — | Display name for the household |
+
+```bash
+php artisan household:set --timezone=America/New_York --day-boundary-hour=6
+```
+
+The reset time is evaluated in the household's own timezone, so **set the timezone first** — a boundary of `4` means 4am wherever the household says it is, which is 5am Eastern if the timezone is still the seeded Chicago default. The timezone also decides whether the Early Bird and Night Owl badges fire at the right hour.
+
+Moving the boundary **earlier** is safe. Moving it **later** starts today later, pushing the hours in between into yesterday — so a chore already done this morning can come off cooldown and be claimed a second time. The command warns when you do this.
+
 ### Resetting a day for testing
 
 | Command | Purpose |

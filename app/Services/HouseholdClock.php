@@ -45,9 +45,19 @@ class HouseholdClock
         return $date;
     }
 
-    /** The instant the household day starting on $date actually begins. */
+    /**
+     * The instant the household day starting on $date actually begins.
+     *
+     * Returned in UTC deliberately. Every caller uses this as a query bound
+     * against timestamp columns, which are stored in the app timezone (UTC),
+     * and Eloquent binds a Carbon using its own timezone — so a household-local
+     * Carbon would compare 04:00 Eastern against 04:00 UTC as if they were the
+     * same moment, putting every cooldown out by the household's UTC offset.
+     */
     public function startOf(Carbon $date): Carbon
     {
-        return $date->copy()->setTime($this->household->day_boundary_hour, 0);
+        return $date->copy()
+            ->setTime($this->household->day_boundary_hour, 0)
+            ->utc();
     }
 }
