@@ -5,6 +5,7 @@
         'quests' => ['label' => 'Quests', 'route' => 'kid.quests'],
         'wheel' => ['label' => 'Bonus Wheel', 'route' => 'kid.wheel'],
         'loot' => ['label' => 'Loot Shop', 'route' => 'kid.loot'],
+        'badges' => ['label' => 'Badges', 'route' => 'kid.badges'],
     ];
     $dollars = number_format($profile->points / $profile->household->points_per_dollar, 2);
 @endphp

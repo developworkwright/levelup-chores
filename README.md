@@ -67,7 +67,7 @@ The board **unlocks on the claim, not the approval** — deliberately. A kid sho
 | 🎡 | **Bonus Wheel** | One spin a day. Lands on a chore and multiplies it **2×**, or **3×** on a 35% roll. |
 | 🔥 | **Streak Chest** | Consecutive days of approved quests build a streak. Milestones pay real money and unlock a chest with a reveal animation. |
 | 🛒 | **Loot Shop** | Spend points on rewards the parent defines — screen time, Robux, dessert pick, a family outing. |
-| 🏅 | **Badges** | 13 achievements, 5 of them hidden until earned. |
+| 🏅 | **Badges** | 13 achievements on their own tab, each with what unlocks it. 5 are secret — name and description stay hidden until earned. |
 | 🎯 | **Family Goal** | A shared thermometer every kid's points feed. No rankings, no sibling competition — by design. |
 
 ### For parents

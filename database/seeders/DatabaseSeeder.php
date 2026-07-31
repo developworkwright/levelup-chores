@@ -2,7 +2,6 @@
 
 namespace Database\Seeders;
 
-use App\Models\Badge;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\Profile;
@@ -12,8 +11,9 @@ use Illuminate\Database\Seeder;
 class DatabaseSeeder extends Seeder
 {
     /**
-     * Seeds a single demo household: profiles, chores, store items, and the
-     * four badges.
+     * Seeds a single demo household: profiles, chores, and store items.
+     * Badges are not seeded here — migrations own the full set, so they exist
+     * after a plain `php artisan migrate` with no seeding step.
      *
      * These are placeholder demo names and PINs, not a real family — rotate
      * every profile's PIN from the Kids & Points screen after first login
@@ -31,7 +31,6 @@ class DatabaseSeeder extends Seeder
         $this->seedProfiles($household);
         $this->seedChores($household);
         $this->seedStoreItems($household);
-        $this->seedBadges();
     }
 
     private function seedProfiles(Household $household): void
@@ -92,20 +91,6 @@ class DatabaseSeeder extends Seeder
                 'household_id' => $household->id,
                 ...$item,
             ]);
-        }
-    }
-
-    private function seedBadges(): void
-    {
-        $badges = [
-            ['key' => 'first_quest', 'name' => 'First Quest', 'glyph' => 'Q', 'color' => 'lime'],
-            ['key' => 'streak_3', 'name' => '3-Day Streak', 'glyph' => '3', 'color' => 'coral'],
-            ['key' => 'streak_7', 'name' => '7-Day Streak', 'glyph' => '7', 'color' => 'gold'],
-            ['key' => 'big_spender', 'name' => 'Big Spender', 'glyph' => '$', 'color' => 'magenta'],
-        ];
-
-        foreach ($badges as $badge) {
-            Badge::create($badge);
         }
     }
 }
