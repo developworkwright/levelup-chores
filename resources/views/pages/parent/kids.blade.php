@@ -196,11 +196,21 @@ new class extends Component
             ->orderByDesc('age')
             ->get();
 
+        $chores = app(ChoreService::class);
+        $household = $this->profile->household;
+        $mysteryChore = $chores->mysteryChoreFor($household);
+
         return [
             'kids' => $kids,
             'questSummaries' => $kids->mapWithKeys(fn (Profile $kid) => [$kid->id => $this->questSummaryFor($kid)]),
-            'spins' => $kids->mapWithKeys(fn (Profile $kid) => [$kid->id => app(SpinService::class)->today($kid)]),
-            'household' => $this->profile->household,
+            'spins' => $kids->mapWithKeys(function (Profile $kid) {
+                $spin = app(SpinService::class)->today($kid);
+
+                return [$kid->id => $spin?->loadMissing('chore')];
+            }),
+            'mysteryChore' => $mysteryChore,
+            'mysteryClaimant' => $mysteryChore ? $chores->mysteryClaimant($mysteryChore) : null,
+            'household' => $household,
         ];
     }
 }; ?>
@@ -258,6 +268,34 @@ new class extends Component
                 class="ml-auto rounded-[12px] border border-dashed border-fq-line-4 bg-fq-sunk px-3 py-2 text-xs text-fq-text-3"
             >Start a new goal</button>
         </div>
+    </div>
+
+    <div
+        class="mb-[14px] rounded-[22px] border p-[18px]"
+        style="background:linear-gradient(135deg, #3a1f4d, var(--fq-panel)); border-color: oklch(0.65 0.19 320 / .5)"
+    >
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="min-w-0">
+                <p class="font-mono-fq text-[10px] tracking-[0.22em] uppercase" style="color: var(--fq-magenta)">Today's Mystery Chore</p>
+                <h3 class="mt-1 font-baloo text-lg font-bold">
+                    {{ $mysteryChore?->name ?? 'Nothing eligible today' }}
+                </h3>
+            </div>
+
+            @if ($mysteryChore)
+                <span
+                    class="rounded-[10px] border px-3 py-2 font-mono-fq text-[11px] whitespace-nowrap"
+                    style="border-color: var(--fq-line-2); color: {{ $mysteryClaimant ? 'var(--fq-lime)' : 'var(--fq-gold)' }}"
+                >
+                    {{ $mysteryClaimant ? 'FOUND BY '.strtoupper($mysteryClaimant->profile->name) : 'UP FOR GRABS' }}
+                </span>
+            @endif
+        </div>
+
+        <p class="mt-2 text-xs text-fq-text-5">
+            Only visible here — on the kids' boards this looks like any other chore, worth
+            +{{ \App\Services\ChoreService::MYSTERY_BONUS_POINTS }} to whoever finishes it first.
+        </p>
     </div>
 
     <div class="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-[14px]">
@@ -331,19 +369,26 @@ new class extends Component
                 >Record payout — zero balance</button>
 
                 <div class="flex items-center justify-between gap-2 rounded-[14px] border border-fq-line-2 bg-fq-sunk px-3 py-[10px]">
-                    <span class="text-sm text-fq-text-3">
+                    <div class="min-w-0 flex-1">
+                        <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Bonus Wheel</p>
                         @if ($spin)
-                            Spun today &middot; {{ $spin->multiplier }}x
+                            <p class="mt-[2px] flex items-baseline gap-2">
+                                <span class="truncate text-sm font-semibold">{{ $spin->chore->name }}</span>
+                                <span
+                                    class="font-mono-fq text-[11px] font-semibold"
+                                    style="color: {{ $spin->multiplier === 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)' }}"
+                                >{{ $spin->multiplier }}x</span>
+                            </p>
                         @else
-                            Hasn't spun today
+                            <p class="mt-[2px] text-sm text-fq-text-4">Hasn't spun today</p>
                         @endif
-                    </span>
+                    </div>
                     <button
                         type="button"
                         wire:click="resetSpin({{ $kid->id }})"
                         @disabled(! $spin)
-                        class="rounded-[12px] border border-fq-line-3 bg-fq-panel px-3 py-[6px] text-xs text-fq-text-3 disabled:opacity-40"
-                    >Reset spin</button>
+                        class="flex-shrink-0 rounded-[12px] border border-fq-line-3 bg-fq-panel px-3 py-[6px] text-xs text-fq-text-3 disabled:opacity-40"
+                    >Reset</button>
                 </div>
 
                 <div class="border-t border-fq-divider pt-3">

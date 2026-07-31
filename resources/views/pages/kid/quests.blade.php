@@ -21,7 +21,15 @@ new class extends Component
      */
     public ?int $pendingChestDay = null;
 
-    public ?int $pendingChestDollars = null;
+    public ?int $pendingChestPoints = null;
+
+    /**
+     * Also snapshotted at mount. Arriving with the quest already cleared
+     * collapses the hero so the chore board isn't pushed down the page on
+     * every tab switch — but clearing it *during* this visit keeps the full
+     * card on screen, so the moment still gets its celebration.
+     */
+    public bool $questDoneOnArrival = false;
 
     public function mount(): void
     {
@@ -30,9 +38,13 @@ new class extends Component
         abort_unless($this->profile->isKid(), 403);
 
         $this->pendingChestDay = $this->profile->pending_streak_chest;
-        $this->pendingChestDollars = $this->pendingChestDay
-            ? (ChoreService::STREAK_BONUSES[$this->pendingChestDay] ?? 0)
+        // STREAK_BONUSES is denominated in dollars, but every other number a
+        // kid sees is points — so convert once here and never show dollars.
+        $this->pendingChestPoints = $this->pendingChestDay
+            ? (ChoreService::STREAK_BONUSES[$this->pendingChestDay] ?? 0) * $this->profile->household->points_per_dollar
             : null;
+
+        $this->questDoneOnArrival = app(ChoreService::class)->isQuestDoneToday($this->profile);
     }
 
     public function revealQuest(): void
@@ -133,10 +145,12 @@ new class extends Component
 
         $nextMilestone = $service->nextStreakMilestone($this->profile);
 
+        $pointsPerDollar = $this->profile->household->points_per_dollar;
+
         $streakBonuses = collect(ChoreService::STREAK_BONUSES)
             ->map(fn ($dollars, $day) => [
                 'day' => $day,
-                'dollars' => $dollars,
+                'points' => $dollars * $pointsPerDollar,
                 'reached' => $this->profile->streak >= $day,
             ])
             ->values();
@@ -182,7 +196,7 @@ new class extends Component
                     closed-title="Streak Chest"
                     closed-text="Your streak paid off — tap to open your reward!"
                     opening-text="Something's rattling inside..."
-                    :prize-label="'+$' . $pendingChestDollars"
+                    :prize-label="'+' . $pendingChestPoints . ' PTS'"
                     :prize-sub="$pendingChestDay . '-Day Streak Bonus!'"
                 >
                     <div
@@ -191,7 +205,7 @@ new class extends Component
                         style="animation: fq-pop .3s ease both; background:linear-gradient(135deg, #2a2050, #171c38); border-color: oklch(0.65 0.19 320 / .5)"
                     >
                         <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-violet uppercase">Streak Chest</p>
-                        <h2 class="mt-2 font-baloo text-xl font-bold">+${{ $pendingChestDollars }} banked!</h2>
+                        <h2 class="mt-2 font-baloo text-xl font-bold">+{{ $pendingChestPoints }} pts banked!</h2>
                         <p class="mt-1 max-w-[320px] text-sm text-fq-text-2">
                             {{ $pendingChestDay }}-day streak bonus.
                             @if ($nextMilestone)
@@ -223,7 +237,7 @@ new class extends Component
                                     class="flex h-9 w-9 items-center justify-center rounded-full border-2 font-baloo text-[11px] font-extrabold"
                                     style="background: {{ $milestone['reached'] ? 'var(--fq-violet)' : 'var(--fq-sunk)' }}; border-color: {{ $milestone['reached'] ? 'var(--fq-violet)' : 'var(--fq-line-3)' }}; color: {{ $milestone['reached'] ? 'var(--fq-bg)' : 'var(--fq-text-4)' }}"
                                 >{{ $milestone['reached'] ? '✓' : $milestone['day'] }}</div>
-                                <span class="font-mono-fq text-[9px] text-fq-text-5">D{{ $milestone['day'] }} · ${{ $milestone['dollars'] }}</span>
+                                <span class="font-mono-fq text-[9px] whitespace-nowrap text-fq-text-5">D{{ $milestone['day'] }} · {{ $milestone['points'] }}</span>
                             </div>
                             @unless ($loop->last)
                                 <div class="mt-[-14px] h-[2px] w-5 flex-shrink-0" style="background: {{ $milestone['reached'] ? 'var(--fq-violet)' : 'var(--fq-line-3)' }}"></div>
@@ -233,6 +247,26 @@ new class extends Component
                 </div>
             @endif
 
+            @if ($questDoneOnArrival)
+                {{-- Already cleared before this visit — shrink it to a line so
+                     hopping between tabs doesn't mean scrolling past a hero
+                     card for a quest that's finished. --}}
+                <div
+                    wire:key="quest-cleared"
+                    class="flex items-center gap-3 rounded-[18px] border p-[14px]"
+                    style="background:linear-gradient(135deg, #1c2a4d, var(--fq-panel)); border-color: oklch(0.7 0.16 140 / 0.4)"
+                >
+                    <div
+                        class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[12px] font-baloo text-lg font-extrabold text-fq-bg"
+                        style="background:var(--fq-lime)"
+                    >&#10003;</div>
+                    <div class="min-w-0 flex-1">
+                        <p class="font-mono-fq text-[10px] tracking-[0.2em] text-fq-text-4 uppercase">Today's Main Quest</p>
+                        <p class="truncate text-[15px] font-semibold">{{ $quest->chore->name }}</p>
+                    </div>
+                    <span class="font-mono-fq text-[11px] whitespace-nowrap text-fq-lime">Cleared</span>
+                </div>
+            @else
             <x-chest
                 wire-key="quest-chest"
                 :revealed="$questRevealed"
@@ -278,6 +312,7 @@ new class extends Component
                     </div>
                 </div>
             </x-chest>
+            @endif
 
             @if ($mysteryChore)
                 <div
