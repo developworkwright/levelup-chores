@@ -15,6 +15,7 @@ class Badge extends Model
         'key',
         'name',
         'description',
+        'xp_reward',
         'glyph',
         'color',
         'hidden',

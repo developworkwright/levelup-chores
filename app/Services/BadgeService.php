@@ -158,8 +158,17 @@ class BadgeService
 
         $badge = Badge::where('key', $key)->first();
 
-        if ($badge) {
-            $profile->badges()->attach($badge->id, ['earned_at' => now()]);
+        if (! $badge) {
+            return;
+        }
+
+        $profile->badges()->attach($badge->id, ['earned_at' => now()]);
+
+        // The exists() check above is what keeps this from paying twice —
+        // a badge can only ever be attached once, so its XP lands once.
+        if ($badge->xp_reward > 0) {
+            $profile->xp += $badge->xp_reward;
+            $profile->save();
         }
     }
 }

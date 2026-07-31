@@ -16,6 +16,7 @@ class Chore extends Model
     protected $fillable = [
         'household_id',
         'name',
+        'hint',
         'points',
         'cadence',
         'min_age',

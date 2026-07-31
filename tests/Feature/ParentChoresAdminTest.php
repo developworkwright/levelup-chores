@@ -15,6 +15,45 @@ class ParentChoresAdminTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_a_parent_can_write_a_hint_for_a_chore(): void
+    {
+        $household = Household::factory()->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $chore = Chore::factory()->for($household)->create(['hint' => null]);
+
+        Auth::guard('profile')->login($parent);
+
+        Volt::test('parent.chores')
+            ->call('setHint', $chore->id, "  The hungry ones can't ask for it themselves.  ");
+
+        $this->assertSame("The hungry ones can't ask for it themselves.", $chore->refresh()->hint);
+    }
+
+    public function test_blanking_the_hint_clears_it(): void
+    {
+        $household = Household::factory()->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $chore = Chore::factory()->for($household)->create(['hint' => 'An existing clue']);
+
+        Auth::guard('profile')->login($parent);
+
+        Volt::test('parent.chores')->call('setHint', $chore->id, '   ');
+
+        $this->assertNull($chore->refresh()->hint);
+    }
+
+    public function test_a_parent_cannot_write_a_hint_on_another_households_chore(): void
+    {
+        $parent = Profile::factory()->parent()->for(Household::factory())->create();
+        $foreign = Chore::factory()->for(Household::factory())->create(['hint' => null]);
+
+        Auth::guard('profile')->login($parent);
+
+        Volt::test('parent.chores')->call('setHint', $foreign->id, 'Leaked clue');
+
+        $this->assertNull($foreign->refresh()->hint);
+    }
+
     public function test_a_parent_can_toggle_a_chores_quest_eligibility(): void
     {
         $household = Household::factory()->create();

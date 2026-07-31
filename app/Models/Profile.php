@@ -103,14 +103,17 @@ class Profile extends Model implements Authenticatable
         return $this->role === ProfileRole::Kid;
     }
 
+    /** Flat curve on purpose — "200 XP is a level" is something a six-year-old can hold. */
+    public const XP_PER_LEVEL = 200;
+
     public function level(): int
     {
-        return 1 + intdiv($this->xp, 200);
+        return 1 + intdiv($this->xp, self::XP_PER_LEVEL);
     }
 
     public function xpBarPercent(): float
     {
-        return ($this->xp % 200) / 2;
+        return ($this->xp % self::XP_PER_LEVEL) / (self::XP_PER_LEVEL / 100);
     }
 
     public function isLocked(): bool

@@ -37,6 +37,20 @@ new class extends Component
         }
     }
 
+    public function setHint(int $choreId, string $hint): void
+    {
+        $chore = $this->ownedChore($choreId);
+
+        if (! $chore) {
+            return;
+        }
+
+        $hint = trim($hint);
+        // Blank clears it, so a chore can go back to having no clue at all.
+        $chore->hint = $hint === '' ? null : $hint;
+        $chore->save();
+    }
+
     public function setCadence(int $choreId, string $cadence): void
     {
         $chore = $this->ownedChore($choreId);
@@ -166,6 +180,18 @@ new class extends Component
                         wire:confirm="Remove '{{ $chore->name }}' from the board?"
                         class="rounded-[12px] border border-fq-danger-border bg-transparent px-3 py-2 text-xs text-fq-danger hover:bg-fq-danger-bg"
                     >Remove</button>
+
+                    <div class="w-full">
+                        <input
+                            type="text"
+                            value="{{ $chore->hint }}"
+                            wire:blur="setHint({{ $chore->id }}, $event.target.value)"
+                            placeholder="Mystery hint — a clue, not the answer"
+                            maxlength="255"
+                            class="w-full rounded-[12px] border border-dashed px-3 py-2 text-sm outline-none focus:border-fq-magenta"
+                            style="border-color: {{ $chore->hint ? 'oklch(0.65 0.19 320 / .5)' : 'var(--fq-line-2)' }}; background: var(--fq-sunk)"
+                        >
+                    </div>
                 </div>
             @endforeach
         </div>
@@ -204,6 +230,9 @@ new class extends Component
             </p>
             <p class="text-xs text-fq-text-5">
                 Each day, one any-age chore is automatically picked as a hidden bonus — first kid to finish it wins extra points. No setup needed here.
+            </p>
+            <p class="text-xs text-fq-text-5">
+                The hint on each chore is the clue a kid gets if they spend tickets on a mystery hint. Write it like a riddle — "the hungry ones can't ask for it themselves" — so it narrows the field without giving the answer away.
             </p>
         </div>
     </div>
