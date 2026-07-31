@@ -2,6 +2,7 @@
 
 use App\Enums\AccentColor;
 use App\Enums\LedgerKind;
+use App\Models\BonusPerk;
 use App\Models\Profile;
 use App\Models\StoreItem;
 use App\Services\LedgerService;
@@ -40,6 +41,45 @@ new class extends Component
     private function ownedItem(int $itemId): ?StoreItem
     {
         return StoreItem::where('household_id', $this->profile->household_id)->find($itemId);
+    }
+
+    private function ownedPerk(int $perkId): ?BonusPerk
+    {
+        return BonusPerk::where('household_id', $this->profile->household_id)->find($perkId);
+    }
+
+    public function updatePerkName(int $perkId, string $value): void
+    {
+        $value = trim($value);
+
+        if ($value !== '' && ($perk = $this->ownedPerk($perkId))) {
+            $perk->name = $value;
+            $perk->save();
+        }
+    }
+
+    public function updatePerkDescription(int $perkId, string $value): void
+    {
+        if ($perk = $this->ownedPerk($perkId)) {
+            $perk->description = trim($value);
+            $perk->save();
+        }
+    }
+
+    public function adjustPerkCost(int $perkId, int $delta): void
+    {
+        if ($perk = $this->ownedPerk($perkId)) {
+            $perk->cost = max(1, $perk->cost + $delta);
+            $perk->save();
+        }
+    }
+
+    public function togglePerk(int $perkId): void
+    {
+        if ($perk = $this->ownedPerk($perkId)) {
+            $perk->enabled = ! $perk->enabled;
+            $perk->save();
+        }
     }
 
     public function updateName(int $itemId, string $value): void
@@ -137,6 +177,7 @@ new class extends Component
     {
         return [
             'items' => StoreItem::where('household_id', $this->profile->household_id)->orderBy('id')->get(),
+            'perks' => BonusPerk::where('household_id', $this->profile->household_id)->orderBy('cost')->get(),
             'colors' => AccentColor::cases(),
             'presets' => self::PRESETS,
         ];
@@ -245,5 +286,63 @@ new class extends Component
                 </div>
             </div>
         </div>
+    </div>
+
+    <div class="mt-[18px]">
+        <div class="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+            <h3 class="font-baloo text-lg font-bold">Bonus Shop</h3>
+            <p class="text-xs text-fq-text-5">
+                Bought with tickets, not points — and they apply instantly, so nothing lands in your approvals queue.
+            </p>
+        </div>
+
+        <div class="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-3">
+            @foreach ($perks as $perk)
+                <div
+                    wire:key="perk-{{ $perk->id }}"
+                    class="flex flex-col gap-3 rounded-[18px] border p-[14px] {{ $perk->enabled ? '' : 'opacity-60' }}"
+                    style="background: var(--fq-panel); border-color: {{ $perk->enabled ? 'oklch(0.65 0.19 320 / .4)' : 'var(--fq-line)' }}"
+                >
+                    <div class="flex items-center gap-3">
+                        <div
+                            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] font-baloo text-lg font-extrabold"
+                            style="background: var(--fq-sunk); color: var(--fq-magenta)"
+                        >{{ $perk->glyph }}</div>
+                        <input
+                            type="text"
+                            value="{{ $perk->name }}"
+                            wire:blur="updatePerkName({{ $perk->id }}, $event.target.value)"
+                            class="min-w-0 flex-1 border-0 border-b border-fq-line-2 bg-transparent py-[3px] text-[15px] font-semibold outline-none focus:border-fq-magenta"
+                        >
+                    </div>
+
+                    <input
+                        type="text"
+                        value="{{ $perk->description }}"
+                        wire:blur="updatePerkDescription({{ $perk->id }}, $event.target.value)"
+                        class="w-full border-0 border-b border-fq-line-2 bg-transparent py-[3px] text-[13px] text-fq-text-2 outline-none focus:border-fq-magenta"
+                    >
+
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div class="flex items-center gap-2">
+                            <button type="button" wire:click="adjustPerkCost({{ $perk->id }}, -1)" class="h-8 w-8 rounded-[10px] border border-fq-line-3 bg-fq-sunk text-lg">&minus;</button>
+                            <span class="w-14 text-center font-baloo text-[17px] font-extrabold" style="color: var(--fq-magenta)">{{ $perk->cost }}</span>
+                            <button type="button" wire:click="adjustPerkCost({{ $perk->id }}, 1)" class="h-8 w-8 rounded-[10px] border border-fq-line-3 bg-fq-sunk text-lg">+</button>
+                            <span class="font-mono-fq text-[10px] text-fq-text-4">TICKETS</span>
+                        </div>
+
+                        <button
+                            type="button"
+                            wire:click="togglePerk({{ $perk->id }})"
+                            class="ml-auto rounded-[12px] border px-3 py-2 text-xs {{ $perk->enabled ? 'border-fq-line-3 bg-fq-sunk text-fq-text-3' : 'border-fq-coral bg-fq-sunk text-fq-coral' }}"
+                        >{{ $perk->enabled ? 'Disable' : 'Enable' }}</button>
+                    </div>
+                </div>
+            @endforeach
+        </div>
+
+        <p class="mt-3 text-xs text-fq-text-5">
+            What each perk actually does is built into the app, so perks can't be added or removed here — only renamed, repriced, or switched off.
+        </p>
     </div>
 </x-parent.shell>

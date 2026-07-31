@@ -5,6 +5,7 @@
         'quests' => ['label' => 'Quests', 'route' => 'kid.quests'],
         'wheel' => ['label' => 'Bonus Wheel', 'route' => 'kid.wheel'],
         'loot' => ['label' => 'Loot Shop', 'route' => 'kid.loot'],
+        'bonus' => ['label' => 'Bonus Shop', 'route' => 'kid.bonus'],
         'badges' => ['label' => 'Badges', 'route' => 'kid.badges'],
     ];
     $dollars = number_format($profile->points / $profile->household->points_per_dollar, 2);
@@ -44,6 +45,15 @@
                     <div class="font-baloo text-xl font-extrabold text-fq-coral">{{ $profile->streak }}d</div>
                     <div class="font-mono-fq text-[9px] text-fq-text-4">STREAK</div>
                 </div>
+                <a
+                    href="{{ route('kid.bonus') }}"
+                    wire:navigate
+                    class="rounded-[14px] border px-3 py-[7px] text-right transition hover:border-fq-line-focus"
+                    style="border-color: oklch(0.65 0.19 320 / .4); background: var(--fq-sunk)"
+                >
+                    <div class="font-baloo text-xl font-extrabold" style="color: var(--fq-magenta)">{{ $profile->bonus_tickets }}</div>
+                    <div class="font-mono-fq text-[9px] text-fq-text-4">TICKETS</div>
+                </a>
                 <x-sound-toggle />
                 <form method="POST" action="{{ route('logout') }}">
                     @csrf

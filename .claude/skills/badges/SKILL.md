@@ -13,6 +13,12 @@ Covers the achievement system, owned by `app/Services/BadgeService.php`. All bad
 - `app/Models/Badge.php` + `profile_badges` pivot (has `earned_at`)
 - Seeded badge rows in `database/seeders/DatabaseSeeder.php` — a badge must exist in the `badges` table (by `key`) before `maybeAward()` can attach it; adding a new condition to `evaluate()` without seeding the matching `Badge` row is a silent no-op.
 
+## Badges pay XP and a ticket
+
+Each badge carries an `xp_reward` (50–400, tiered by difficulty). `maybeAward()` adds that XP, mints one bonus ticket, and re-syncs level tickets — all guarded by the same `exists()` check, so a badge pays exactly once no matter how often `evaluate()` runs. See [[xp-and-tickets]].
+
+Adding a badge means seeding a row *with* an `xp_reward`; a zero reward is silently a badge worth nothing.
+
 ## How evaluation works
 
 `evaluate(Profile $profile)` runs a fixed list of `maybeAward($profile, $key, $condition)` checks. `maybeAward()` is idempotent by construction — it first checks `$profile->badges()->where('key', $key)->exists()` and bails immediately if already earned, so `evaluate()` is safe to call repeatedly/liberally.

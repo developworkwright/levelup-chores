@@ -10,7 +10,7 @@ A self-hosted, gamified chore and allowance tracker for households — daily que
 [![Laravel](https://img.shields.io/badge/Laravel-13-FF2D20?logo=laravel&logoColor=white)](https://laravel.com)
 [![Livewire](https://img.shields.io/badge/Livewire-4-FB70A9?logo=livewire&logoColor=white)](https://livewire.laravel.com)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
-[![Tests](https://img.shields.io/badge/tests-87%20passing-3ECF8E)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-184%20passing-3ECF8E)](#-testing)
 [![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8)](#-install-it-like-an-app)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
@@ -67,7 +67,8 @@ The board **unlocks on the claim, not the approval** — deliberately. A kid sho
 | 🎡 | **Bonus Wheel** | One spin a day. Lands on a chore and multiplies it **2×**, or **3×** on a 35% roll. |
 | 🔥 | **Streak Chest** | Consecutive days of approved quests build a streak. Milestones pay real money and unlock a chest with a reveal animation. |
 | 🛒 | **Loot Shop** | Spend points on rewards the parent defines — screen time, Robux, dessert pick, a family outing. |
-| 🏅 | **Badges** | 13 achievements on their own tab, each with what unlocks it. 5 are secret — name and description stay hidden until earned. |
+| 🏅 | **Badges** | 13 achievements on their own tab, each with what unlocks it and the XP it pays. 5 are secret — name and description stay hidden until earned. |
+| 🎟️ | **Bonus Shop** | Levelling up and earning badges mint **tickets**. Spend them on wheel respins, quest rerolls, streak repairs, and hints about the Mystery Chore. Spending never costs XP — your level is permanent. |
 | 🎯 | **Family Goal** | A shared thermometer every kid's points feed. No rankings, no sibling competition — by design. |
 
 ### For parents
@@ -76,8 +77,8 @@ The board **unlocks on the claim, not the approval** — deliberately. A kid sho
 |---|---|---|
 | ✅ | **Approvals** | One queue for chore completions *and* reward redemptions. Approve or send back. |
 | 📋 | **Quests** | Add chores; set point values, cadence, minimum age, and quest eligibility. |
-| 🎁 | **Loot Shop** | Manage the reward catalog and pricing. |
-| 👨‍👩‍👧 | **Kids & Points** | Balances, manual adjustments, cash-in/payout, PIN resets, per-kid spin reset. |
+| 🎁 | **Loot Shop** | Manage the reward catalog and pricing, plus perk pricing and which perks are switched on. |
+| 👨‍👩‍👧 | **Kids & Points** | Balances, tickets, levels, manual adjustments, cash-in/payout, PIN resets, per-kid spin reset, quest swap, and today's Mystery Chore. |
 | 📜 | **Activity** | The full append-only ledger — every point in or out, with its source. |
 
 Parents can opt into **web push notifications**, so a claim buzzes their phone instead of requiring them to check the app.
@@ -130,6 +131,27 @@ One spin per kid per day. The result is genuinely random. The *wheel itself* is 
 </details>
 
 <details>
+<summary><b>XP, levels and tickets — progress you can't spend</b></summary>
+
+<br>
+
+Three currencies, doing three different jobs:
+
+| | Earned by | Spent on |
+|---|---|---|
+| **Points** | Approved chores | Loot Shop — real-world rewards a parent hands over |
+| **XP** | Chores (+25) and badges (50–400) | **Nothing.** It only ever goes up, and it drives your level |
+| **Tickets** | 1 per level crossed, 1 per badge | Bonus Shop — perks that bend the game's own rules |
+
+The point of the split: a kid should never have to choose between keeping their progress and buying something. XP *mints* tickets, it isn't *converted* into them, so a level once reached is permanent no matter how much gets spent.
+
+Both minting paths are guarded by high-water marks — `tickets_granted_through_level` and `streak_milestone_paid_through`. XP can fall (`quest:reset-today` claws back 25 per undone approval) and a streak can lapse and be repaired, so without them the same threshold could pay out twice.
+
+Perks apply **instantly** with no parent approval, which is the line between the two shops: loot is a promise someone has to keep, a perk is a rule bending itself.
+
+</details>
+
+<details>
 <summary><b>Points ledger — one source of truth</b></summary>
 
 <br>
@@ -157,7 +179,7 @@ A chore finished at 1am should count for the day that's ending, not the one star
 | Frontend | **Livewire 4** + **Volt** single-file components, Alpine.js |
 | Styling | **Tailwind CSS v4** (CSS-first `@theme`), self-hosted fonts |
 | Database | MySQL / MariaDB (in-memory SQLite for tests) |
-| Testing | PHPUnit 12 — 87 feature tests |
+| Testing | PHPUnit 12 — 184 feature tests |
 | Push | Web Push (VAPID) for parent alerts |
 | Deploy | Built for [Laravel Cloud](https://cloud.laravel.com) |
 
@@ -261,7 +283,7 @@ This is designed to be internet-facing, with kids' balances on the line:
 php artisan test
 ```
 
-87 feature tests covering PIN lockout and role isolation, quest gating, cooldown maths across the day boundary, mystery-chore fairness rules, streak recomputation and milestone payouts, redemption deduct-then-fulfil, profile management, and ledger integrity. Tests run against in-memory SQLite and never touch a real database.
+184 feature tests covering PIN lockout and role isolation, quest gating, cooldown maths across the day boundary, mystery-chore fairness rules, streak recomputation and milestone payouts, the XP/ticket economy and its double-payout guards, perk purchase and refusal paths, redemption deduct-then-fulfil, profile management, and ledger integrity. Tests run against in-memory SQLite and never touch a real database.
 
 ---
 

@@ -33,6 +33,14 @@ Only the *visual reveal* is deferred: `pending_streak_chest` is set to the miles
 
 `nextStreakMilestone(Profile)` returns the smallest key in `STREAK_BONUSES` still greater than the profile's current streak, or `null` past day 30 — used for "X days to your next bonus" UI copy. There's no interpolation between milestones; days between keys (e.g. day 4, day 10) earn no bonus.
 
+## Streak restore
+
+The Bonus Shop's Streak Restore perk writes a `streak_repairs` row for the missed day. `questApprovedOn()` treats a repaired date exactly like an approved one, so the existing walk-back recompute needs no special casing.
+
+`repairableStreakDate()` only offers yesterday, and only when the day before it counted — repairing a day with nothing behind it would just manufacture a one-day streak rather than saving a real run.
+
+**`profiles.streak_milestone_paid_through` is a high-water mark, and it must stay one.** `refreshStreak()` gates payouts on it rather than on the live `streak` value. Gating on the live value was a genuine exploit: let a streak lapse (it recomputes down), buy a repair, and every milestone pays a second time — at day 30 that's $40 for a 5-ticket purchase.
+
 ## Badge tie-ins
 
 `streak_3`, `streak_7`, `streak_14` badges are evaluated against `profile->streak` directly in `BadgeService::evaluate()` — see [[badges]]. They key off the raw streak counter, not off whether that specific claim was a milestone-bonus day.

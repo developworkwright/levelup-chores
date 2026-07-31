@@ -4,8 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\ProfileRole;
 use App\Models\Profile;
-use App\Models\Spin;
-use App\Services\HouseholdClock;
+use App\Services\SpinService;
 use Illuminate\Console\Command;
 
 class ResetSpinCommand extends Command
@@ -33,16 +32,10 @@ class ResetSpinCommand extends Command
         $dryRun = (bool) $this->option('dry-run');
         $rows = [];
 
+        $spins = app(SpinService::class);
+
         foreach ($kids as $kid) {
-            $today = HouseholdClock::for($kid->household)->today();
-
-            $spin = Spin::where('profile_id', $kid->id)
-                ->whereDate('spin_date', $today)
-                ->first();
-
-            if ($spin && ! $dryRun) {
-                $spin->delete();
-            }
+            $spin = $dryRun ? $spins->today($kid) : $spins->clearToday($kid);
 
             $rows[] = [
                 $kid->name,

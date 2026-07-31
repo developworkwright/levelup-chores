@@ -31,6 +31,20 @@ class SpinService
     }
 
     /**
+     * Drops today's spin so the wheel is available again. Returns the spin
+     * that was cleared, or null if there wasn't one — callers use that to
+     * avoid charging for a respin that had nothing to undo.
+     */
+    public function clearToday(Profile $profile): ?Spin
+    {
+        $spin = $this->today($profile);
+
+        $spin?->delete();
+
+        return $spin;
+    }
+
+    /**
      * The chores eligible to appear on the bonus wheel today — age
      * appropriate, not today's daily quest — capped to MAX_WHEEL_CHORES.
      *

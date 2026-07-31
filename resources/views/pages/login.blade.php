@@ -53,7 +53,7 @@ new class extends Component
                     </div>
                     <span class="text-sm font-semibold">{{ $profile->name }}</span>
                     <span class="font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-4 uppercase">
-                        {{ $profile->isParent() ? 'Console' : 'Age '.$profile->age }}
+                        {{ $profile->isParent() ? 'Console' : 'Level '.$profile->level() }}
                     </span>
                 </a>
             @endforeach

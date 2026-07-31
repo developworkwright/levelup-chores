@@ -165,6 +165,7 @@ new class extends Component
             'board' => $service->boardFor($this->profile),
             'mysteryChore' => $mysteryChore,
             'mysteryClaimant' => $mysteryClaimant,
+            'mysteryHint' => $service->mysteryHintFor($this->profile),
             'nextMilestone' => $nextMilestone,
             'streakBonuses' => $streakBonuses,
             'pending' => ChoreCompletion::where('profile_id', $this->profile->id)
@@ -326,6 +327,13 @@ new class extends Component
                         <p class="mt-1 max-w-[420px] text-sm text-fq-text-2">
                             One of today's chores is secretly worth a bonus — nobody knows which one until someone finishes it. First to find it earns +{{ \App\Services\ChoreService::MYSTERY_BONUS_POINTS }} pts!
                         </p>
+
+                        @if ($mysteryHint)
+                            <div class="mt-3 rounded-[14px] border px-4 py-3" style="border-color: oklch(0.65 0.19 320 / .5); background: var(--fq-sunk)">
+                                <p class="font-mono-fq text-[10px] tracking-[0.2em] uppercase" style="color: var(--fq-magenta)">Your Hint</p>
+                                <p class="mt-1 text-sm text-fq-text-2">{{ $mysteryHint }}</p>
+                            </div>
+                        @endif
                     @elseif ($mysteryClaimant->profile_id === $profile->id)
                         <h2 class="mt-2 font-baloo text-xl font-bold">You found it!</h2>
                         <p class="mt-1 max-w-[420px] text-sm text-fq-text-2">

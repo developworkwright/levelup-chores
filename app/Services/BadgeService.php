@@ -33,6 +33,8 @@ class BadgeService
     /** How quickly the main quest must be claimed after reveal to earn "Speed Runner". */
     private const SPEED_RUNNER_SECONDS = 300;
 
+    public function __construct(private TicketService $tickets) {}
+
     public function evaluate(Profile $profile): void
     {
         $this->maybeAward($profile, 'first_quest', fn () => DailyQuest::where('profile_id', $profile->id)
@@ -170,5 +172,10 @@ class BadgeService
             $profile->xp += $badge->xp_reward;
             $profile->save();
         }
+
+        $this->tickets->awardForBadge($profile, $badge);
+
+        // That XP may have crossed a level, which mints again on its own.
+        $this->tickets->syncLevelTickets($profile);
     }
 }

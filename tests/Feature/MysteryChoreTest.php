@@ -98,6 +98,40 @@ class MysteryChoreTest extends TestCase
         $this->assertSame($stillOpen->id, $chore->id);
     }
 
+    public function test_a_hinted_chore_wins_the_draw_over_unhinted_ones(): void
+    {
+        // Keeps the Bonus Shop's mystery hint sellable — there's no point
+        // charging tickets for a clue on a chore the parent never wrote one for.
+        $household = Household::factory()->create();
+        Chore::factory()->for($household)->count(5)->create(['hint' => null]);
+        $hinted = Chore::factory()->for($household)->create([
+            'name' => 'The hinted one',
+            'hint' => 'It lives under the sink.',
+        ]);
+
+        $this->assertSame($hinted->id, $this->service()->mysteryChoreFor($household)->id);
+    }
+
+    public function test_it_falls_back_to_unhinted_chores_when_none_have_hints(): void
+    {
+        $household = Household::factory()->create();
+        Chore::factory()->for($household)->count(3)->create(['hint' => null]);
+
+        $this->assertNotNull($this->service()->mysteryChoreFor($household));
+    }
+
+    public function test_a_hinted_chore_still_has_to_meet_every_other_rule(): void
+    {
+        $household = Household::factory()->create();
+        // Hinted but age-gated, and hinted but unlimited — a hint doesn't buy
+        // a chore past the fairness rules.
+        Chore::factory()->for($household)->create(['hint' => 'Age gated', 'min_age' => 10]);
+        Chore::factory()->for($household)->create(['hint' => 'Unlimited', 'cadence' => 'unlimited']);
+        $eligible = Chore::factory()->for($household)->create(['name' => 'Plain but eligible', 'hint' => null]);
+
+        $this->assertSame($eligible->id, $this->service()->mysteryChoreFor($household)->id);
+    }
+
     public function test_returns_null_when_nothing_is_eligible(): void
     {
         $household = Household::factory()->create();

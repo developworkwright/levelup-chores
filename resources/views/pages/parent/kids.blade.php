@@ -2,14 +2,15 @@
 
 use App\Enums\LedgerKind;
 use App\Enums\ProfileRole;
+use App\Enums\TicketKind;
+use App\Models\BonusTicketEntry;
 use App\Models\ChoreCompletion;
 use App\Models\Profile;
-use App\Models\Spin;
 use App\Services\BadgeService;
 use App\Services\ChoreService;
-use App\Services\HouseholdClock;
 use App\Services\LedgerService;
 use App\Services\SpinService;
+use App\Services\TicketService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
@@ -22,6 +23,9 @@ new class extends Component
 
     /** @var array<int, string> */
     public array $pinMessages = [];
+
+    /** @var array<int, string> */
+    public array $questMessages = [];
 
     public function mount(): void
     {
@@ -100,7 +104,7 @@ new class extends Component
         );
     }
 
-    public function resetSpin(int $profileId): void
+    public function adjustTickets(int $profileId, int $delta): void
     {
         $kid = $this->ownedKid($profileId);
 
@@ -108,9 +112,41 @@ new class extends Component
             return;
         }
 
-        Spin::where('profile_id', $kid->id)
-            ->whereDate('spin_date', HouseholdClock::for($kid->household)->today())
-            ->delete();
+        $sign = $delta > 0 ? '+' : '';
+        app(TicketService::class)->record(
+            $kid,
+            TicketKind::Adjustment,
+            $delta,
+            "Parent adjustment: {$sign}{$delta} tickets",
+        );
+    }
+
+    public function resetSpin(int $profileId): void
+    {
+        $kid = $this->ownedKid($profileId);
+
+        if ($kid) {
+            app(SpinService::class)->clearToday($kid);
+        }
+    }
+
+    /**
+     * Same logic the kid's Quest Reroll perk uses, minus the ticket charge —
+     * so a parent can veto a chore without it costing anyone anything.
+     */
+    public function rerollQuest(int $profileId): void
+    {
+        $kid = $this->ownedKid($profileId);
+
+        if (! $kid) {
+            return;
+        }
+
+        $quest = app(ChoreService::class)->rerollQuest($kid);
+
+        $this->questMessages[$profileId] = $quest
+            ? "Swapped to \"{$quest->chore->name}\"."
+            : 'Nothing to swap — the quest is already cleared, or there is no other eligible chore.';
     }
 
     public function updateGoalName(string $value): void
@@ -210,6 +246,12 @@ new class extends Component
             }),
             'mysteryChore' => $mysteryChore,
             'mysteryClaimant' => $mysteryChore ? $chores->mysteryClaimant($mysteryChore) : null,
+            'ticketHistory' => BonusTicketEntry::whereIn('profile_id', $kids->pluck('id'))
+                ->latest('created_at')
+                ->latest('id')
+                ->limit(8)
+                ->with('profile')
+                ->get(),
             'household' => $household,
         ];
     }
@@ -329,11 +371,37 @@ new class extends Component
                         <span class="text-sm font-semibold">{{ $quest['chore']->name }}</span>
                         <span class="font-mono-fq text-[10px] font-semibold whitespace-nowrap" style="color: {{ $questLabels['color'] }}">{{ $questLabels['label'] }}</span>
                     </div>
+                    <button
+                        type="button"
+                        wire:click="rerollQuest({{ $kid->id }})"
+                        @disabled($quest['status'] !== 'not_started')
+                        class="mt-2 w-full rounded-[10px] border border-fq-line-3 bg-fq-panel py-[6px] text-xs text-fq-text-3 disabled:opacity-40"
+                    >Swap for a different chore</button>
+                    @if (! empty($questMessages[$kid->id]))
+                        <p class="mt-1 text-[11px] text-fq-text-4">{{ $questMessages[$kid->id] }}</p>
+                    @endif
                 </div>
 
                 <div class="flex items-baseline justify-between rounded-[14px] border border-fq-line-2 bg-fq-sunk p-[14px]">
                     <span class="font-baloo text-[26px] font-extrabold text-fq-lime">{{ $kid->points }}</span>
                     <span class="font-mono-fq text-[10px] text-fq-text-4">PTS · ${{ $dollars }}</span>
+                </div>
+
+                <div class="rounded-[14px] border p-[14px]" style="border-color: oklch(0.65 0.19 320 / .4); background: var(--fq-sunk)">
+                    <div class="flex items-baseline justify-between">
+                        <span class="font-baloo text-[22px] font-extrabold" style="color: var(--fq-magenta)">{{ $kid->bonus_tickets }}</span>
+                        <span class="font-mono-fq text-[10px] text-fq-text-4">TICKETS · LVL {{ $kid->level() }}</span>
+                    </div>
+                    <div class="mt-2 flex gap-2">
+                        @foreach ([-1, 1, 5] as $delta)
+                            <button
+                                type="button"
+                                wire:click="adjustTickets({{ $kid->id }}, {{ $delta }})"
+                                class="flex-1 rounded-[10px] border px-2 py-[6px] font-mono-fq text-xs font-semibold"
+                                style="border-color: oklch(0.65 0.19 320 / .4); color: var(--fq-magenta)"
+                            >{{ $delta > 0 ? '+' : '' }}{{ $delta }}</button>
+                        @endforeach
+                    </div>
                 </div>
 
                 <div>
@@ -408,6 +476,31 @@ new class extends Component
                 </div>
             </div>
         @endforeach
+    </div>
+
+    <div class="mt-[14px] rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
+        <p class="mb-3 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Recent Ticket Activity</p>
+
+        @if ($ticketHistory->isEmpty())
+            <p class="text-sm text-fq-text-5">Nothing yet. Tickets arrive when a kid levels up or earns a badge.</p>
+        @else
+            <div class="flex flex-col gap-2">
+                @foreach ($ticketHistory as $entry)
+                    <div wire:key="ticket-{{ $entry->id }}" class="flex items-center gap-3 border-b border-fq-divider pb-2 last:border-0 last:pb-0">
+                        <span
+                            class="w-10 shrink-0 text-right font-baloo text-[15px] font-extrabold"
+                            style="color: {{ $entry->amount > 0 ? 'var(--fq-lime)' : 'var(--fq-coral)' }}"
+                        >{{ $entry->amount > 0 ? '+' : '' }}{{ $entry->amount }}</span>
+                        <div class="min-w-0 flex-1">
+                            <p class="truncate text-sm">{{ $entry->description }}</p>
+                            <p class="font-mono-fq text-[10px] text-fq-text-5">
+                                {{ $entry->profile->name }} · {{ $entry->kind->label() }} · {{ $entry->created_at->diffForHumans() }}
+                            </p>
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+        @endif
     </div>
 
     <div class="mt-[14px] rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">

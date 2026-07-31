@@ -41,6 +41,8 @@ class Profile extends Model implements Authenticatable
         'pin_hash',
         'points',
         'xp',
+        'bonus_tickets',
+        'tickets_granted_through_level',
         'streak',
         'pending_streak_chest',
     ];
@@ -86,6 +88,11 @@ class Profile extends Model implements Authenticatable
     public function ledgerEntries(): HasMany
     {
         return $this->hasMany(LedgerEntry::class);
+    }
+
+    public function bonusTicketEntries(): HasMany
+    {
+        return $this->hasMany(BonusTicketEntry::class);
     }
 
     public function badges(): BelongsToMany

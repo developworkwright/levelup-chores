@@ -11,7 +11,9 @@ use App\Models\ChoreCompletion;
 use App\Models\DailyMystery;
 use App\Models\DailyQuest;
 use App\Models\Household;
+use App\Models\MysteryHintPurchase;
 use App\Models\Profile;
+use App\Models\StreakRepair;
 use App\Notifications\ParentApprovalNeeded;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
@@ -42,6 +44,7 @@ class ChoreService
         private LedgerService $ledger,
         private SpinService $spin,
         private BadgeService $badges,
+        private TicketService $tickets,
     ) {}
 
     public function questFor(Profile $profile): DailyQuest
@@ -69,6 +72,43 @@ class ChoreService
             'chore_id' => $choreId,
             'quest_date' => $today,
         ]);
+    }
+
+    /**
+     * Swaps today's quest for a different chore. Shared by the kid's ticket
+     * purchase and the parent's override button so both behave identically.
+     *
+     * Returns null when there's nothing to do — the quest is already cleared,
+     * or the household has no other eligible chore to offer — which is how
+     * callers know not to charge for it.
+     */
+    public function rerollQuest(Profile $profile): ?DailyQuest
+    {
+        $quest = $this->questFor($profile);
+
+        if ($quest->completed_at !== null) {
+            return null;
+        }
+
+        $choreId = $profile->household->chores()
+            ->appropriateFor($profile)
+            ->questEligible()
+            ->where('id', '!=', $quest->chore_id)
+            ->inRandomOrder()
+            ->value('id');
+
+        if (! $choreId) {
+            return null;
+        }
+
+        $quest->chore_id = $choreId;
+        // Re-hidden on purpose — a new quest deserves the chest animation
+        // again, so the swap lands as a fresh reveal rather than a silent
+        // relabel. Also means the board stays gated until they open it.
+        $quest->revealed_at = null;
+        $quest->save();
+
+        return $quest->refresh();
     }
 
     public function isQuestRevealedToday(Profile $profile): bool
@@ -126,6 +166,10 @@ class ChoreService
      * has a fair shot at it) that don't already have a claimant today —
      * picking one that's already been completed would make the "reveal"
      * moment meaningless before it even started.
+     *
+     * Chores with a parent-written hint win the draw outright, so the Bonus
+     * Shop's mystery hint always has something to sell. Only when none of the
+     * eligible chores has a hint does the pick fall back to the whole pool.
      */
     public function mysteryChoreFor(Household $household): ?Chore
     {
@@ -139,15 +183,17 @@ class ChoreService
             return $existing->chore;
         }
 
-        $choreId = $household->chores
+        $eligible = $household->chores
             ->filter(fn (Chore $chore) => $chore->min_age === null)
             // Unlimited-cadence chores are always freely repeatable by
             // everyone — that's fundamentally at odds with "first one to
             // find it wins," so they're never in the running.
             ->reject(fn (Chore $chore) => $chore->cadence === ChoreCadence::Unlimited)
-            ->reject(fn (Chore $chore) => $this->mysteryClaimant($chore) !== null)
-            ->pluck('id')
-            ->all();
+            ->reject(fn (Chore $chore) => $this->mysteryClaimant($chore) !== null);
+
+        $hinted = $eligible->filter(fn (Chore $chore) => filled($chore->hint));
+
+        $choreId = ($hinted->isNotEmpty() ? $hinted : $eligible)->pluck('id')->all();
 
         if (empty($choreId)) {
             return null;
@@ -162,6 +208,44 @@ class ChoreService
         ]);
 
         return $chore;
+    }
+
+    /** Whether this kid has already bought today's mystery hint. */
+    public function hasBoughtMysteryHint(Profile $profile): bool
+    {
+        return MysteryHintPurchase::where('profile_id', $profile->id)
+            ->whereDate('hint_date', HouseholdClock::for($profile->household)->today())
+            ->exists();
+    }
+
+    /**
+     * The hint for today's mystery chore, but only for a kid who has paid for
+     * it — hints are per-kid so one sibling buying doesn't clue in the rest.
+     */
+    public function mysteryHintFor(Profile $profile): ?string
+    {
+        if (! $this->hasBoughtMysteryHint($profile)) {
+            return null;
+        }
+
+        return $this->mysteryChoreFor($profile->household)?->hint;
+    }
+
+    /** Records the purchase. Returns the revealed hint, or null if there's nothing to reveal. */
+    public function buyMysteryHint(Profile $profile): ?string
+    {
+        $chore = $this->mysteryChoreFor($profile->household);
+
+        if (! $chore || blank($chore->hint)) {
+            return null;
+        }
+
+        MysteryHintPurchase::firstOrCreate([
+            'profile_id' => $profile->id,
+            'hint_date' => HouseholdClock::for($profile->household)->today(),
+        ]);
+
+        return $chore->hint;
     }
 
     /**
@@ -301,6 +385,45 @@ class ChoreService
     }
 
     /**
+     * The day a streak repair would actually buy back, or null when there's
+     * nothing worth fixing — yesterday already counts, or there was no live
+     * chain to save in the first place.
+     */
+    public function repairableStreakDate(Profile $profile): ?Carbon
+    {
+        $yesterday = HouseholdClock::for($profile->household)->today()->subDay();
+
+        if ($this->questApprovedOn($profile, $yesterday)) {
+            return null;
+        }
+
+        // Only a break in a running chain is worth buying back; repairing a
+        // day with nothing behind it just manufactures a one-day streak.
+        return $this->questApprovedOn($profile, $yesterday->copy()->subDay())
+            ? $yesterday
+            : null;
+    }
+
+    /** Buys back the missed day and recomputes. Null when there was nothing to repair. */
+    public function repairStreak(Profile $profile): ?Carbon
+    {
+        $date = $this->repairableStreakDate($profile);
+
+        if (! $date) {
+            return null;
+        }
+
+        StreakRepair::create([
+            'profile_id' => $profile->id,
+            'repaired_date' => $date,
+        ]);
+
+        $this->refreshStreak($profile);
+
+        return $date;
+    }
+
+    /**
      * Recomputes the streak and pays out any milestone bonus newly crossed.
      * Driven by approval, not by claiming, so a kid can't bank a bonus for
      * work a parent hasn't signed off on.
@@ -311,15 +434,18 @@ class ChoreService
      */
     private function refreshStreak(Profile $profile): void
     {
-        $previous = $profile->streak;
+        // A high-water mark, not the current streak. Gating on the live value
+        // would let a kid lapse a streak and buy a repair to collect every
+        // milestone a second time.
+        $paidThrough = $profile->streak_milestone_paid_through;
         $profile->streak = $this->currentStreak($profile);
 
         $reached = null;
 
         foreach (self::STREAK_BONUSES as $day => $bonusDollars) {
-            // Only milestones this approval newly crossed pay out, so
-            // recomputing can never double-credit one already banked.
-            if ($day <= $previous || $day > $profile->streak) {
+            // Only milestones never paid before pay out, so recomputing — or
+            // repairing — can never double-credit one already banked.
+            if ($day <= $paidThrough || $day > $profile->streak) {
                 continue;
             }
 
@@ -338,6 +464,7 @@ class ChoreService
             // Credited immediately above, but the reveal waits for the kid
             // to open the streak chest — that's the surprise moment.
             $profile->pending_streak_chest = $reached;
+            $profile->streak_milestone_paid_through = $reached;
         }
 
         $profile->save();
@@ -367,9 +494,21 @@ class ChoreService
         return $streak;
     }
 
-    /** Whether the quest assigned for a given household-day was approved. */
+    /**
+     * Whether the quest assigned for a given household-day counts toward the
+     * streak — either it was approved, or the day was bought back with a
+     * streak repair, which the walk-back treats identically.
+     */
     private function questApprovedOn(Profile $profile, Carbon $date): bool
     {
+        $repaired = StreakRepair::where('profile_id', $profile->id)
+            ->whereDate('repaired_date', $date)
+            ->exists();
+
+        if ($repaired) {
+            return true;
+        }
+
         $quest = DailyQuest::where('profile_id', $profile->id)
             ->whereDate('quest_date', $date)
             ->first();
@@ -473,6 +612,10 @@ class ChoreService
 
         $this->badges->evaluate($profile);
         $this->badges->evaluateHouseholdGoal($household);
+
+        // After badges, so a level crossed by badge XP is caught in the same
+        // pass. Idempotent, so the badge path having already synced is fine.
+        $this->tickets->syncLevelTickets($profile);
     }
 
     public function sendBack(ChoreCompletion $completion, Profile $approver): void

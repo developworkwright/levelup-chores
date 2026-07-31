@@ -2,6 +2,8 @@
 
 namespace Database\Seeders;
 
+use App\Enums\PerkEffect;
+use App\Models\BonusPerk;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\Profile;
@@ -31,6 +33,22 @@ class DatabaseSeeder extends Seeder
         $this->seedProfiles($household);
         $this->seedChores($household);
         $this->seedStoreItems($household);
+        $this->seedBonusPerks($household);
+    }
+
+    /**
+     * The perk catalogue is per household, and the migration that creates the
+     * table can only seed households that already exist — so a household born
+     * here needs its own copy.
+     */
+    private function seedBonusPerks(Household $household): void
+    {
+        foreach (PerkEffect::cases() as $effect) {
+            BonusPerk::firstOrCreate(
+                ['household_id' => $household->id, 'effect' => $effect],
+                $effect->defaults(),
+            );
+        }
     }
 
     private function seedProfiles(Household $household): void

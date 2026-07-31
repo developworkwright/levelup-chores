@@ -43,6 +43,8 @@ Cooldown/pending boundaries always use `HouseholdClock`, never raw `now()` — t
 2. `cadence !== ChoreCadence::Unlimited` — an unlimited chore is freely repeatable by everyone, which is incompatible with "first to find it wins." This was a real bug caught by a test, not a spec item — keep it if adding new cadences.
 3. No existing `mysteryClaimant()` — a chore someone has already claimed today (pending or approved-within-cooldown) can't retroactively become the mystery pick.
 
+Among the survivors, chores with a parent-written `hint` win the draw outright; the full pool is only used when none of them has one. That keeps the Bonus Shop's mystery-hint perk sellable — it should never charge tickets for a chore nobody wrote a clue for. Practical consequence: **if only one or two chores have hints, the mystery becomes guessable**, so hints want to be written broadly rather than on a favourite few.
+
 The pick uses genuine randomness (`Arr::random()`), matching the spin's actual result — **not** the bonus wheel's deterministic display-subset hash (see [[bonus-wheel]]); those are unrelated mechanisms. `ChoreService::MYSTERY_BONUS_POINTS = 500` is added on top of normal points (with spin multiplier) when the claimed chore matches today's pick — see `claim()`.
 
 Exclusivity is household-wide via `mysteryClaimant()`: whoever claims it first locks it for everyone else until a parent rejects the claim (which reopens it) or the cadence cooldown resets.
