@@ -1,7 +1,10 @@
 <?php
 
+use App\Enums\PerkEffect;
+use App\Exceptions\PerkUnavailableException;
 use App\Models\Profile;
 use App\Services\BadgeService;
+use App\Services\PerkInventoryService;
 use App\Services\SpinService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
@@ -15,6 +18,8 @@ new class extends Component
     public bool $spinning = false;
 
     public bool $revealed = false;
+
+    public ?string $perkMessage = null;
 
     public function mount(): void
     {
@@ -94,14 +99,43 @@ new class extends Component
         return -90 - ($index * $slice + $slice / 2);
     }
 
+    public function usePerk(string $effect): void
+    {
+        $case = PerkEffect::tryFrom($effect);
+
+        if ($case !== PerkEffect::WheelRespin) {
+            return;
+        }
+
+        try {
+            app(PerkInventoryService::class)->use($this->profile, $case);
+            $this->perkMessage = null;
+            // Reset the wheel so it's ready to spin again in place.
+            $this->revealed = false;
+            $this->spinning = false;
+            $this->wheelDeg = 0;
+            $this->dispatch('celebrate', message: 'Wheel reset — take another spin!');
+        } catch (PerkUnavailableException $e) {
+            $this->perkMessage = $e->getMessage();
+        }
+    }
+
     public function with(): array
     {
         $chores = app(SpinService::class)->eligibleChoresFor($this->profile);
+        $inventory = app(PerkInventoryService::class);
 
         return [
             'boost' => app(SpinService::class)->today($this->profile),
             'wheelChores' => $chores,
             'wheelSlice' => 360 / max(1, $chores->count()),
+            'respin' => $inventory->holds($this->profile, PerkEffect::WheelRespin)
+                ? [
+                    'effect' => PerkEffect::WheelRespin,
+                    'count' => $inventory->countOf($this->profile, PerkEffect::WheelRespin),
+                    'blocked' => $inventory->blockedReason($this->profile, PerkEffect::WheelRespin),
+                ]
+                : null,
         ];
     }
 }; ?>
@@ -246,6 +280,16 @@ new class extends Component
                     </div>
                 @else
                     <p class="mt-3 text-[13px] text-fq-text-5">No boost yet today.</p>
+                @endif
+
+                @if ($respin)
+                    <div class="mt-3">
+                        <x-perk-button :entry="$respin" />
+                    </div>
+                @endif
+
+                @if ($perkMessage)
+                    <p class="mt-2 text-[13px] text-fq-text-4">{{ $perkMessage }}</p>
                 @endif
             </div>
         </div>

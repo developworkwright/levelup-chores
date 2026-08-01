@@ -12,6 +12,7 @@ use App\Models\MysteryHintPurchase;
 use App\Models\Profile;
 use App\Services\BonusShopService;
 use App\Services\ChoreService;
+use App\Services\PerkInventoryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -34,6 +35,14 @@ class PerkStreakAndHintTest extends TestCase
         return BonusPerk::where('household_id', $kid->household_id)
             ->where('effect', $effect)
             ->firstOrFail();
+    }
+
+    /** Buys a perk and immediately spends it — the old one-step behaviour. */
+    private function buyAndUse(Profile $kid, PerkEffect $effect): string
+    {
+        app(BonusShopService::class)->purchase($kid, $this->perk($kid, $effect));
+
+        return app(PerkInventoryService::class)->use($kid, $effect);
     }
 
     /** Clears the day's quest end to end so it counts toward the streak. */
@@ -72,7 +81,7 @@ class PerkStreakAndHintTest extends TestCase
         // own through levelling and badges.
         $before = $kid->bonus_tickets;
 
-        app(BonusShopService::class)->purchase($kid, $this->perk($kid, PerkEffect::StreakRestore));
+        $this->buyAndUse($kid, PerkEffect::StreakRestore);
 
         // Yesterday now counts, reconnecting the run.
         $this->assertSame(4, $kid->refresh()->streak);
@@ -90,14 +99,16 @@ class PerkStreakAndHintTest extends TestCase
         Carbon::setTestNow(now()->addDay());
         $this->clearQuest($kid, $parent);
 
-        $before = $kid->refresh()->bonus_tickets;
+        // Buying is always allowed — holding one against a future slip is the
+        // point. Using it is what gets refused while nothing is broken.
+        app(BonusShopService::class)->purchase($kid, $this->perk($kid, PerkEffect::StreakRestore));
 
         $this->expectException(PerkUnavailableException::class);
 
         try {
-            app(BonusShopService::class)->purchase($kid, $this->perk($kid, PerkEffect::StreakRestore));
+            app(PerkInventoryService::class)->use($kid, PerkEffect::StreakRestore);
         } finally {
-            $this->assertSame($before, $kid->refresh()->bonus_tickets);
+            $this->assertSame(1, app(PerkInventoryService::class)->countOf($kid, PerkEffect::StreakRestore));
         }
     }
 
@@ -125,7 +136,7 @@ class PerkStreakAndHintTest extends TestCase
         // Miss a day, come back, then buy the repair.
         Carbon::setTestNow(now()->addDays(2));
         $this->clearQuest($kid, $parent);
-        app(BonusShopService::class)->purchase($kid, $this->perk($kid, PerkEffect::StreakRestore));
+        $this->buyAndUse($kid, PerkEffect::StreakRestore);
 
         $this->assertSame(1, LedgerEntry::where('profile_id', $kid->id)
             ->where('description', 'like', '%3-day streak bonus%')->count());
@@ -140,7 +151,7 @@ class PerkStreakAndHintTest extends TestCase
             'hint' => 'The hungry ones cannot ask for it themselves.',
         ]);
 
-        $outcome = app(BonusShopService::class)->purchase($kid, $this->perk($kid, PerkEffect::MysteryHint));
+        $outcome = $this->buyAndUse($kid, PerkEffect::MysteryHint);
 
         $this->assertStringContainsString('hungry ones', $outcome);
         $this->assertSame(10 - $this->perk($kid, PerkEffect::MysteryHint)->cost, $kid->refresh()->bonus_tickets);
@@ -153,7 +164,7 @@ class PerkStreakAndHintTest extends TestCase
         $sibling = Profile::factory()->for($household)->create(['bonus_tickets' => 10]);
         Chore::factory()->for($household)->create(['hint' => 'It lives under the sink.']);
 
-        app(BonusShopService::class)->purchase($buyer, $this->perk($buyer, PerkEffect::MysteryHint));
+        $this->buyAndUse($buyer, PerkEffect::MysteryHint);
 
         $chores = app(ChoreService::class);
         $this->assertNotNull($chores->mysteryHintFor($buyer));
@@ -167,16 +178,17 @@ class PerkStreakAndHintTest extends TestCase
         $kid = Profile::factory()->for($household)->create(['bonus_tickets' => 20]);
         Chore::factory()->for($household)->create(['hint' => 'A clue.']);
 
-        $shop = app(BonusShopService::class);
-        $shop->purchase($kid, $this->perk($kid, PerkEffect::MysteryHint));
-        $afterFirst = $kid->refresh()->bonus_tickets;
+        $this->buyAndUse($kid, PerkEffect::MysteryHint);
+
+        app(BonusShopService::class)->purchase($kid, $this->perk($kid, PerkEffect::MysteryHint));
 
         $this->expectException(PerkUnavailableException::class);
 
         try {
-            $shop->purchase($kid, $this->perk($kid, PerkEffect::MysteryHint));
+            app(PerkInventoryService::class)->use($kid, PerkEffect::MysteryHint);
         } finally {
-            $this->assertSame($afterFirst, $kid->refresh()->bonus_tickets);
+            // The second perk is kept for another day rather than wasted.
+            $this->assertSame(1, app(PerkInventoryService::class)->countOf($kid, PerkEffect::MysteryHint));
             $this->assertSame(1, MysteryHintPurchase::where('profile_id', $kid->id)->count());
         }
     }
@@ -190,12 +202,15 @@ class PerkStreakAndHintTest extends TestCase
 
         app(ChoreService::class)->claim($finder, $chore);
 
+        app(BonusShopService::class)->purchase($kid, $this->perk($kid, PerkEffect::MysteryHint));
+
         $this->expectException(PerkUnavailableException::class);
 
         try {
-            app(BonusShopService::class)->purchase($kid, $this->perk($kid, PerkEffect::MysteryHint));
+            app(PerkInventoryService::class)->use($kid, PerkEffect::MysteryHint);
         } finally {
-            $this->assertSame(10, $kid->refresh()->bonus_tickets);
+            // A clue is worthless once the race is over, so it keeps for tomorrow.
+            $this->assertSame(1, app(PerkInventoryService::class)->countOf($kid, PerkEffect::MysteryHint));
         }
     }
 
@@ -205,7 +220,7 @@ class PerkStreakAndHintTest extends TestCase
         $kid = Profile::factory()->for($household)->create(['bonus_tickets' => 10]);
         Chore::factory()->for($household)->create(['hint' => 'It lives under the sink.']);
 
-        app(BonusShopService::class)->purchase($kid, $this->perk($kid, PerkEffect::MysteryHint));
+        $this->buyAndUse($kid, PerkEffect::MysteryHint);
 
         Auth::guard('profile')->login($kid);
 
@@ -221,7 +236,7 @@ class PerkStreakAndHintTest extends TestCase
         $sibling = Profile::factory()->for($household)->create();
         Chore::factory()->for($household)->create(['hint' => 'It lives under the sink.']);
 
-        app(BonusShopService::class)->purchase($buyer, $this->perk($buyer, PerkEffect::MysteryHint));
+        $this->buyAndUse($buyer, PerkEffect::MysteryHint);
 
         Auth::guard('profile')->login($sibling);
 

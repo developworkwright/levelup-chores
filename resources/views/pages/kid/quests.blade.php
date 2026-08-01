@@ -1,11 +1,15 @@
 <?php
 
 use App\Enums\CompletionStatus;
+use App\Enums\PerkEffect;
+use App\Exceptions\PerkUnavailableException;
 use App\Models\Badge;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\Profile;
+use App\Services\ChestService;
 use App\Services\ChoreService;
+use App\Services\PerkInventoryService;
 use App\Services\SpinService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
@@ -31,6 +35,16 @@ new class extends Component
      */
     public bool $questDoneOnArrival = false;
 
+    /**
+     * Snapshotted for the same reason as the streak chest — the reveal
+     * animation must not be yanked away the moment the roll resolves.
+     */
+    public bool $dailyChestAvailable = false;
+
+    public ?string $dailyChestPrize = null;
+
+    public ?string $perkMessage = null;
+
     public function mount(): void
     {
         $this->profile = Auth::guard('profile')->user();
@@ -45,6 +59,7 @@ new class extends Component
             : null;
 
         $this->questDoneOnArrival = app(ChoreService::class)->isQuestDoneToday($this->profile);
+        $this->dailyChestAvailable = app(ChestService::class)->isAvailable($this->profile);
     }
 
     public function revealQuest(): void
@@ -81,6 +96,32 @@ new class extends Component
             } else {
                 $this->dispatch('celebrate', message: 'Quest cleared! Your streak grows once a parent approves.');
             }
+        }
+    }
+
+    public function openDailyChest(): void
+    {
+        $chest = app(ChestService::class)->open($this->profile);
+
+        if ($chest) {
+            $this->dailyChestPrize = app(ChestService::class)->describe($chest);
+        }
+    }
+
+    public function usePerk(string $effect): void
+    {
+        $case = PerkEffect::tryFrom($effect);
+
+        if (! $case) {
+            return;
+        }
+
+        try {
+            $outcome = app(PerkInventoryService::class)->use($this->profile, $case);
+            $this->perkMessage = null;
+            $this->dispatch('celebrate', message: $outcome);
+        } catch (PerkUnavailableException $e) {
+            $this->perkMessage = $e->getMessage();
         }
     }
 
@@ -131,6 +172,7 @@ new class extends Component
     {
         $service = app(ChoreService::class);
         $spin = app(SpinService::class);
+        $inventory = app(PerkInventoryService::class);
 
         $quest = $service->questFor($this->profile);
         $questRevealed = $quest->revealed_at !== null;
@@ -166,6 +208,15 @@ new class extends Component
             'mysteryChore' => $mysteryChore,
             'mysteryClaimant' => $mysteryClaimant,
             'mysteryHint' => $service->mysteryHintFor($this->profile),
+            // Contextual "use it here" buttons for the perks that act on this
+            // page, so a kid doesn't have to go hunting in the shop.
+            'heldPerks' => collect([PerkEffect::QuestReroll, PerkEffect::MysteryHint, PerkEffect::StreakRestore])
+                ->filter(fn (PerkEffect $effect) => $inventory->holds($this->profile, $effect))
+                ->mapWithKeys(fn (PerkEffect $effect) => [$effect->value => [
+                    'effect' => $effect,
+                    'count' => $inventory->countOf($this->profile, $effect),
+                    'blocked' => $inventory->blockedReason($this->profile, $effect),
+                ]]),
             'nextMilestone' => $nextMilestone,
             'streakBonuses' => $streakBonuses,
             'pending' => ChoreCompletion::where('profile_id', $this->profile->id)
@@ -188,6 +239,37 @@ new class extends Component
     <div class="grid grid-cols-1 gap-[14px] lg:grid-cols-[minmax(0,1.6fr)_minmax(260px,1fr)]">
         {{-- Left column --}}
         <div class="flex flex-col gap-[14px]">
+            {{-- Its own block, not an arm of the streak-chest branch: the
+                 milestone track below is useful every day and shouldn't
+                 disappear just because a chest happens to be waiting.
+                 ChestService already guarantees the two chests never
+                 both show. --}}
+            @if ($dailyChestAvailable)
+                <x-chest
+                    wire-key="daily-chest"
+                    :revealed="$dailyChestPrize !== null"
+                    open-action="openDailyChest"
+                    accent="var(--fq-magenta)"
+                    closed-title="Daily Chest"
+                    closed-text="A prize is waiting — clear today's quest first for better odds!"
+                    opening-text="Something's rattling inside..."
+                    :prize-label="$dailyChestPrize ?? ''"
+                    prize-sub="Daily Chest"
+                >
+                    <div
+                        wire:key="daily-chest-opened"
+                        class="flex flex-col items-center rounded-[24px] border p-8 text-center"
+                        style="animation: fq-pop .3s ease both; background:linear-gradient(135deg, #3a1f4d, #171c38); border-color: oklch(0.65 0.19 320 / .5)"
+                    >
+                        <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: var(--fq-magenta)">Daily Chest</p>
+                        <h2 class="mt-2 font-baloo text-xl font-bold">{{ $dailyChestPrize }}</h2>
+                        <p class="mt-1 max-w-[320px] text-sm text-fq-text-2">
+                            Come back tomorrow for another one.
+                        </p>
+                    </div>
+                </x-chest>
+            @endif
+
             @if ($pendingChestDay)
                 <x-chest
                     wire-key="streak-chest"
@@ -311,8 +393,29 @@ new class extends Component
                             +{{ $questPoints }} PTS
                         </span>
                     </div>
+
+                    @if (isset($heldPerks['quest_reroll']))
+                        <div class="mt-3">
+                            <x-perk-button :entry="$heldPerks['quest_reroll']" />
+                        </div>
+                    @endif
                 </div>
             </x-chest>
+            @endif
+
+            @if ($perkMessage)
+                <div class="rounded-[16px] border border-fq-line-2 bg-fq-sunk px-4 py-3 text-sm text-fq-text-2">
+                    {{ $perkMessage }}
+                </div>
+            @endif
+
+            @if (isset($heldPerks['streak_restore']))
+                <div class="flex flex-wrap items-center gap-3 rounded-[18px] border p-[14px]" style="border-color: oklch(0.65 0.19 320 / .4); background: var(--fq-panel)">
+                    <p class="min-w-0 flex-1 text-sm text-fq-text-2">
+                        You're holding a Streak Restore — it can buy back a day you missed.
+                    </p>
+                    <x-perk-button :entry="$heldPerks['streak_restore']" />
+                </div>
             @endif
 
             @if ($mysteryChore)
@@ -332,6 +435,10 @@ new class extends Component
                             <div class="mt-3 rounded-[14px] border px-4 py-3" style="border-color: oklch(0.65 0.19 320 / .5); background: var(--fq-sunk)">
                                 <p class="font-mono-fq text-[10px] tracking-[0.2em] uppercase" style="color: var(--fq-magenta)">Your Hint</p>
                                 <p class="mt-1 text-sm text-fq-text-2">{{ $mysteryHint }}</p>
+                            </div>
+                        @elseif (isset($heldPerks['mystery_hint']))
+                            <div class="mt-3">
+                                <x-perk-button :entry="$heldPerks['mystery_hint']" />
                             </div>
                         @endif
                     @elseif ($mysteryClaimant->profile_id === $profile->id)
