@@ -85,67 +85,140 @@ new class extends Component
 }; ?>
 
 <x-parent.shell :profile="$profile" active="approvals">
+    {{--
+        Every way this can fail is silent by nature: a denied permission, a
+        browser without push, an unconfigured server, a subscription the
+        database has forgotten. All of them look identical from the sofa —
+        no notification — so the button states each one out loud rather than
+        quietly doing nothing.
+    --}}
     <div
         x-data="{
-            supported: 'serviceWorker' in navigator && 'PushManager' in window,
-            subscribed: @js($pushSubscribed),
+            state: @js($vapidPublicKey ? 'off' : 'unconfigured'),
             busy: false,
-            vapidPublicKey: @js($vapidPublicKey),
-            urlBase64ToUint8Array(base64String) {
-                const padding = '='.repeat((4 - base64String.length % 4) % 4);
-                const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-                const rawData = window.atob(base64);
-                return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+            labels: {
+                off: 'Enable approval alerts',
+                on: 'Approval alerts on — tap to turn off',
+                blocked: 'Approval alerts are blocked',
+                unsupported: 'Approval alerts unavailable here',
+                unconfigured: 'Approval alerts not set up',
+                error: 'Could not turn alerts on — tap to retry',
             },
-            async enable() {
-                if (!this.supported || this.busy || !this.vapidPublicKey) return;
-                this.busy = true;
-                try {
-                    const permission = await Notification.requestPermission();
-                    if (permission !== 'granted') return;
+            notes: {
+                blocked: 'This browser is blocking notifications for the site. Re-allow them in your browser settings, then reload this page.',
+                unsupported: 'This browser cannot receive push notifications. On an iPhone or iPad, add the app to your Home Screen and open it from there.',
+                unconfigured: 'The server has no VAPID keys. Run `php artisan webpush:vapid`, then redeploy.',
+                error: 'The browser refused the subscription. Reload and try again.',
+            },
+            supported() {
+                return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+            },
+            applicationServerKey() {
+                const raw = @js($vapidPublicKey) ?? '';
+                const padded = (raw + '='.repeat((4 - raw.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/');
 
-                    const registration = await navigator.serviceWorker.ready;
-                    const sub = await registration.pushManager.subscribe({
-                        userVisibleOnly: true,
-                        applicationServerKey: this.urlBase64ToUint8Array(this.vapidPublicKey),
-                    });
-                    const json = sub.toJSON();
+                return Uint8Array.from([...atob(padded)].map((c) => c.charCodeAt(0)));
+            },
+            async existing() {
+                const registration = await navigator.serviceWorker.getRegistration();
+
+                return registration ? await registration.pushManager.getSubscription() : null;
+            },
+            async sync() {
+                if (this.state === 'unconfigured') return;
+                if (!this.supported()) { this.state = 'unsupported'; return; }
+                if (Notification.permission === 'denied') { this.state = 'blocked'; return; }
+
+                const subscription = await this.existing();
+                this.state = subscription ? 'on' : 'off';
+
+                // The browser and the database drift apart easily — the
+                // subscription outlives the row that backs it. Showing 'on'
+                // for alerts that can never arrive is the worst outcome, so
+                // re-register instead.
+                if (subscription && ! @js($pushSubscribed)) {
+                    const json = subscription.toJSON();
                     await $wire.subscribeToPush(json.endpoint, json.keys.p256dh, json.keys.auth);
-                    this.subscribed = true;
-                } finally {
-                    this.busy = false;
                 }
             },
-            async disable() {
-                if (this.busy) return;
-                this.busy = true;
-                try {
-                    const registration = await navigator.serviceWorker.ready;
-                    const sub = await registration.pushManager.getSubscription();
-                    if (sub) {
-                        await $wire.unsubscribeFromPush(sub.endpoint);
-                        await sub.unsubscribe();
+            async enable() {
+                const permission = await Notification.requestPermission();
+
+                if (permission !== 'granted') {
+                    this.state = permission === 'denied' ? 'blocked' : 'off';
+
+                    return;
+                }
+
+                const registration = await navigator.serviceWorker.ready;
+                let subscription = await registration.pushManager.getSubscription();
+
+                // A subscription minted under a different VAPID key is dead on
+                // arrival — the push service rejects every send against it, and
+                // nothing surfaces. Keys change whenever they're regenerated,
+                // so re-subscribe rather than trusting the old one.
+                if (subscription) {
+                    const current = new Uint8Array(subscription.options?.applicationServerKey ?? []);
+                    const wanted = this.applicationServerKey();
+
+                    if (current.length !== wanted.length || !current.every((b, i) => b === wanted[i])) {
+                        await subscription.unsubscribe();
+                        subscription = null;
                     }
-                    this.subscribed = false;
+                }
+
+                subscription ??= await registration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: this.applicationServerKey(),
+                });
+
+                const json = subscription.toJSON();
+                await $wire.subscribeToPush(json.endpoint, json.keys.p256dh, json.keys.auth);
+                this.state = 'on';
+            },
+            async disable() {
+                const subscription = await this.existing();
+
+                if (subscription) {
+                    // Server first — a row left behind here keeps a dead
+                    // endpoint on file with no way to clear it.
+                    await $wire.unsubscribeFromPush(subscription.endpoint);
+                    await subscription.unsubscribe();
+                }
+
+                this.state = 'off';
+            },
+            async toggle() {
+                if (this.busy || ['unsupported', 'unconfigured', 'blocked'].includes(this.state)) return;
+
+                this.busy = true;
+
+                try {
+                    await (this.state === 'on' ? this.disable() : this.enable());
+                } catch (e) {
+                    this.state = 'error';
                 } finally {
                     this.busy = false;
                 }
             },
         }"
+        x-init="sync()"
         class="mb-4"
     >
         <button
             type="button"
-            x-show="supported"
-            x-cloak
-            @click="subscribed ? disable() : enable()"
-            :disabled="busy"
-            class="rounded-[13px] border px-4 py-[10px] text-sm font-semibold disabled:opacity-50"
-            :style="subscribed ? 'border-color: var(--fq-success-border); background: oklch(0.7 0.16 140 / 0.15); color: var(--fq-lime)' : 'border-color: var(--fq-line-2); background: var(--fq-sunk); color: var(--fq-text-3)'"
-        >
-            <span x-show="!subscribed" x-cloak>Enable approval alerts</span>
-            <span x-show="subscribed" x-cloak>Approval alerts on — tap to turn off</span>
-        </button>
+            @click="toggle()"
+            :disabled="busy || ['unsupported', 'unconfigured', 'blocked'].includes(state)"
+            class="rounded-[13px] border px-4 py-[10px] text-sm font-semibold disabled:opacity-60"
+            :style="state === 'on'
+                ? 'border-color: var(--fq-success-border); background: oklch(0.7 0.16 140 / 0.15); color: var(--fq-lime)'
+                : (['blocked', 'error'].includes(state)
+                    ? 'border-color: var(--fq-line-2); background: var(--fq-sunk); color: var(--fq-gold)'
+                    : 'border-color: var(--fq-line-2); background: var(--fq-sunk); color: var(--fq-text-3)')"
+            x-text="busy ? 'Working…' : labels[state]"
+        ></button>
+
+        <p x-show="notes[state]" x-cloak x-text="notes[state]" class="mt-2 max-w-[52ch] text-xs text-fq-text-5"></p>
     </div>
 
     <h2 class="font-baloo text-xl font-bold">Chore Approvals</h2>
