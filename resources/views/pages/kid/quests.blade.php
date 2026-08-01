@@ -45,6 +45,13 @@ new class extends Component
 
     public ?string $perkMessage = null;
 
+    public string $search = '';
+
+    public function clearSearch(): void
+    {
+        $this->search = '';
+    }
+
     public function mount(): void
     {
         $this->profile = Auth::guard('profile')->user();
@@ -174,6 +181,8 @@ new class extends Component
         $spin = app(SpinService::class);
         $inventory = app(PerkInventoryService::class);
 
+        $board = $service->boardFor($this->profile);
+
         $quest = $service->questFor($this->profile);
         $questRevealed = $quest->revealed_at !== null;
         $questDone = $quest->completed_at !== null;
@@ -204,7 +213,11 @@ new class extends Component
             'boost' => $boost,
             'questBoosted' => $questBoosted,
             'questPoints' => $quest->chore->points * ($questBoosted ? $boost->multiplier : 1),
-            'board' => $service->boardFor($this->profile),
+            // Filtered in PHP rather than re-queried — the board is already
+            // loaded, and Chore::matches() is the in-memory twin of the
+            // scope the parent admin searches with.
+            'board' => $board->filter(fn (array $entry) => $entry['chore']->matches($this->search))->values(),
+            'boardTotal' => $board->count(),
             'mysteryChore' => $mysteryChore,
             'mysteryClaimant' => $mysteryClaimant,
             'mysteryHint' => $service->mysteryHintFor($this->profile),
@@ -255,6 +268,7 @@ new class extends Component
                     opening-text="Something's rattling inside..."
                     :prize-label="$dailyChestPrize ?? ''"
                     prize-sub="Daily Chest"
+                    prize-property="dailyChestPrize"
                 >
                     <div
                         wire:key="daily-chest-opened"
@@ -461,6 +475,31 @@ new class extends Component
                     {{ $allUnlocked ? 'All Unlocked' : 'Locked Until Main Quest Is Done' }}
                 </span>
             </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <input
+                    type="search"
+                    wire:model.live.debounce.300ms="search"
+                    placeholder="Find a chore"
+                    class="min-w-[160px] flex-1 rounded-[14px] border border-fq-line-2 bg-fq-sunk px-4 py-[10px] text-sm outline-none focus:border-fq-cyan"
+                >
+                @if (trim($search) !== '')
+                    <span class="font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4">
+                        {{ $board->count() }} / {{ $boardTotal }}
+                    </span>
+                    <button
+                        type="button"
+                        wire:click="clearSearch"
+                        class="rounded-[14px] border border-fq-line-3 bg-fq-sunk px-3 py-[10px] text-xs text-fq-text-3"
+                    >Clear</button>
+                @endif
+            </div>
+
+            @if ($board->isEmpty() && trim($search) !== '')
+                <div class="rounded-[18px] border border-dashed border-fq-line-3 bg-fq-panel p-6 text-center text-sm text-fq-text-5">
+                    Nothing matches "{{ $search }}".
+                </div>
+            @endif
 
             <div class="flex flex-col gap-3">
                 @foreach ($board as $entry)

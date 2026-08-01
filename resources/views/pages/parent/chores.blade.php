@@ -16,6 +16,8 @@ new class extends Component
 
     public string $newChoreCadence = 'daily';
 
+    public string $search = '';
+
     public function mount(): void
     {
         $this->profile = Auth::guard('profile')->user();
@@ -112,12 +114,23 @@ new class extends Component
         $this->newChoreName = '';
         $this->newChorePoints = '100';
         $this->newChoreCadence = 'daily';
+
+        // Otherwise a chore added while a search is active appears to vanish.
+        $this->search = '';
+    }
+
+    public function clearSearch(): void
+    {
+        $this->search = '';
     }
 
     public function with(): array
     {
+        $scoped = Chore::where('household_id', $this->profile->household_id);
+
         return [
-            'chores' => Chore::where('household_id', $this->profile->household_id)->orderBy('id')->get(),
+            'chores' => (clone $scoped)->matching($this->search)->orderBy('id')->get(),
+            'totalChores' => $scoped->count(),
         ];
     }
 }; ?>
@@ -125,6 +138,40 @@ new class extends Component
 <x-parent.shell :profile="$profile" active="chores">
     <div class="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-[14px]">
         <div class="flex flex-col gap-3">
+            <div class="flex flex-wrap items-center gap-2 rounded-[18px] border border-fq-line bg-fq-panel p-[12px_14px]">
+                <input
+                    type="search"
+                    wire:model.live.debounce.300ms="search"
+                    placeholder="Search chores by name"
+                    class="min-w-[160px] flex-1 rounded-[12px] border border-fq-line-2 bg-fq-sunk px-3 py-2 text-sm outline-none focus:border-fq-cyan"
+                >
+
+                @if (trim($search) !== '')
+                    <span class="font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4">
+                        {{ $chores->count() }} / {{ $totalChores }}
+                    </span>
+                    <button
+                        type="button"
+                        wire:click="clearSearch"
+                        class="rounded-[12px] border border-fq-line-3 bg-fq-sunk px-3 py-2 text-xs text-fq-text-3"
+                    >Clear</button>
+                @else
+                    <span class="font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4">
+                        {{ $totalChores }} {{ Str::plural('CHORE', $totalChores) }}
+                    </span>
+                @endif
+            </div>
+
+            @if ($chores->isEmpty())
+                <div class="rounded-[18px] border border-dashed border-fq-line-3 bg-fq-panel p-6 text-center text-sm text-fq-text-5">
+                    @if (trim($search) !== '')
+                        No chores match "{{ $search }}".
+                    @else
+                        No chores yet — add one on the right to get started.
+                    @endif
+                </div>
+            @endif
+
             @foreach ($chores as $chore)
                 <div wire:key="chore-{{ $chore->id }}" class="flex flex-wrap items-center gap-3 rounded-[18px] border border-fq-line bg-fq-panel p-[14px]">
                     <div class="min-w-[140px] flex-1">

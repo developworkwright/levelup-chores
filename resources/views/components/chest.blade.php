@@ -9,19 +9,35 @@
     'prizeLabel',
     'prizeSub',
     'celebrateMessage' => null,
+    'prizeProperty' => null,
 ])
 
+{{--
+    prizeProperty names a Livewire property to read the prize from once the
+    open action has run. Chests whose prize is known up front (the streak
+    chest) don't need it — but one that's only decided on opening does,
+    because the reveal card below sits inside an <template x-if> and gets
+    cloned from markup Blade rendered before the prize existed.
+--}}
 <div
     wire:key="{{ $wireKey }}"
     x-data="{
         phase: @js($revealed ? 'revealed' : 'closed'),
-        open() {
+        label: @js($prizeLabel),
+        {{-- Only ever set by open(). A chest that was already open when the
+             page loaded starts in the 'revealed' phase too, so gating the
+             prize overlay on the phase alone re-fires the whole celebration
+             every time a kid navigates back to the tab. --}}
+        justOpened: false,
+        async open() {
             if (this.phase !== 'closed') return;
             this.phase = 'opening';
-            @if ($openAction) $wire.{{ $openAction }}(); @endif
+            @if ($openAction) await $wire.{{ $openAction }}(); @endif
+            @if ($prizeProperty) this.label = $wire.{{ $prizeProperty }} ?? this.label; @endif
             setTimeout(() => {
                 this.phase = 'revealed';
-                window.dispatchEvent(new CustomEvent('celebrate', { detail: { message: @js($celebrateMessage ?? $prizeLabel), style: 'confetti' } }));
+                this.justOpened = true;
+                window.dispatchEvent(new CustomEvent('celebrate', { detail: { message: @js($celebrateMessage) ?? this.label, style: 'confetti' } }));
             }, 4600);
         },
     }"
@@ -64,7 +80,7 @@
         {{ $slot }}
     </div>
 
-    <template x-if="phase === 'revealed'">
+    <template x-if="phase === 'revealed' && justOpened">
         <div
             x-data="{ show: true }"
             x-init="setTimeout(() => show = false, 2800)"
@@ -88,7 +104,7 @@
                     style="animation: fq-pop .4s ease both; background:#1d2440; border-color: {{ $accent }}; box-shadow: 0 26px 60px -20px #000"
                 >
                     <p class="font-mono-fq text-[11px] tracking-[0.2em] uppercase" style="color: {{ $accent }}">{{ $prizeSub }}</p>
-                    <p class="mt-2 max-w-[70vw] font-baloo text-[28px] leading-tight font-extrabold">{{ $prizeLabel }}</p>
+                    <p class="mt-2 max-w-[70vw] font-baloo text-[28px] leading-tight font-extrabold" x-text="label"></p>
                 </div>
             </div>
         </div>

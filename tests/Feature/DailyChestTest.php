@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\PerkEffect;
 use App\Models\BonusPerk;
 use App\Models\Chore;
 use App\Models\DailyChest;
@@ -178,6 +179,49 @@ class DailyChestTest extends TestCase
         Volt::test('kid.quests')
             ->assertSee('Daily Chest')
             ->assertSee('D3 · 100', false);
+    }
+
+    public function test_opening_from_the_page_exposes_the_prize_for_the_reveal(): void
+    {
+        // The reveal card reads this property through Alpine after the open
+        // action resolves — the prize isn't known when Blade first renders,
+        // so an empty value here shows a card with no prize on it.
+        $kid = $this->kid();
+
+        Auth::guard('profile')->login($kid);
+
+        $component = Volt::test('kid.quests')->call('openDailyChest');
+
+        $prize = $component->get('dailyChestPrize');
+
+        $this->assertNotNull($prize);
+        $this->assertNotSame('', trim($prize));
+        $this->assertSame($this->chests()->describe(DailyChest::where('profile_id', $kid->id)->firstOrFail()), $prize);
+    }
+
+    public function test_every_reward_kind_describes_itself(): void
+    {
+        $kid = $this->kid();
+
+        $cases = [
+            [ChestService::KIND_TICKETS, 1, null],
+            [ChestService::KIND_TICKETS, 3, null],
+            [ChestService::KIND_POINTS, 150, null],
+            [ChestService::KIND_XP, 50, null],
+            [ChestService::KIND_PERK, 1, PerkEffect::WheelRespin],
+        ];
+
+        foreach ($cases as [$kind, $amount, $effect]) {
+            $chest = new DailyChest([
+                'profile_id' => $kid->id,
+                'chest_date' => now()->toDateString(),
+                'reward_kind' => $kind,
+                'reward_amount' => $amount,
+                'reward_effect' => $effect,
+            ]);
+
+            $this->assertNotSame('', trim($this->chests()->describe($chest)), "{$kind} described as empty.");
+        }
     }
 
     public function test_the_quests_page_hides_the_chest_once_opened(): void

@@ -62,4 +62,72 @@ class Chore extends Model
     {
         return $query->where('quest_eligible', true);
     }
+
+    /**
+     * Columns free-text search looks at.
+     *
+     * Searching happens two ways — as SQL on the parent admin, and in PHP on
+     * the kid's board, which is already an in-memory collection. Both read
+     * this list so they can't drift, and tags only need adding here plus the
+     * matching join.
+     *
+     * @var array<int, string>
+     */
+    public const SEARCHABLE = ['name'];
+
+    /**
+     * Free-text search across a chore's searchable columns.
+     *
+     * The conditions are wrapped in their own group deliberately: the
+     * orWhere below would otherwise escape and swallow the household scope on
+     * the outer query, leaking another family's chores into the results.
+     */
+    public function scopeMatching(Builder $query, ?string $term): Builder
+    {
+        $term = trim((string) $term);
+
+        if ($term === '') {
+            return $query;
+        }
+
+        // Escape the LIKE wildcards so searching for "50%" doesn't match
+        // everything, and a literal underscore stays a literal underscore.
+        $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $term);
+
+        return $query->where(function (Builder $group) use ($escaped) {
+            foreach (self::SEARCHABLE as $column) {
+                // ESCAPE has to be stated outright: MySQL defaults to
+                // backslash but SQLite has no default at all, so without this
+                // the escaping above would quietly stop working on one engine
+                // and not the other. Bound as a parameter rather than a SQL
+                // literal, since the two also disagree about backslashes
+                // inside quotes. Column names come from the constant above,
+                // never from user input.
+                $group->orWhereRaw("{$column} LIKE ? ESCAPE ?", ["%{$escaped}%", '\\']);
+            }
+        });
+    }
+
+    /**
+     * The in-memory twin of scopeMatching(), for filtering a board that's
+     * already been loaded rather than issuing a second query.
+     */
+    public function matches(?string $term): bool
+    {
+        $term = trim((string) $term);
+
+        if ($term === '') {
+            return true;
+        }
+
+        $needle = mb_strtolower($term);
+
+        foreach (self::SEARCHABLE as $column) {
+            if (str_contains(mb_strtolower((string) $this->{$column}), $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

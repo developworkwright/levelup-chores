@@ -51,6 +51,25 @@ Exclusivity is household-wide via `mysteryClaimant()`: whoever claims it first l
 
 `rerollMysteryChore()` lets a parent swap the pick from Kids & Points. It refuses once anyone has claimed it — moving the finish line after someone crossed it would rob the winner. Both it and the daily draw go through the private `drawMysteryChore()`, so the fairness rules can't drift apart between them. A kid who already bought a hint sees the *new* chore's hint automatically, since `mysteryHintFor()` resolves against the current pick rather than storing the text.
 
+## Searching chores
+
+Search exists on both the parent Chores admin and the kid's side-quest board, via **two implementations of the same idea**:
+
+- `Chore::scopeMatching($term)` — SQL, for the parent page's query
+- `Chore::matches($term)` — PHP, for the kid's board, which is already an in-memory collection and shouldn't be re-queried
+
+Both read the **`Chore::SEARCHABLE`** constant, so the field list lives in one place. **Tags are planned and belong there** — add the column to `SEARCHABLE` (or join it in for the tag relation) and both surfaces pick it up. `ChoreSearchTest` runs a set of terms through both paths and asserts they return identical results, so a change to one that doesn't reach the other fails loudly.
+
+Three things exist for a reason and shouldn't be simplified away:
+
+- **The SQL conditions are wrapped in their own `where()` group.** The `orWhere` inside would otherwise escape and swallow the outer `household_id` condition, leaking another family's chores. Tested.
+- **`ESCAPE` is stated explicitly** via `whereRaw`. MySQL defaults the LIKE escape character to backslash; SQLite has no default. Since tests run on SQLite and production on MySQL, relying on the default means the escaping works on one engine and silently fails on the other — searching `50%` would return every chore.
+- **Filtering the kid's board narrows what `boardFor()` already returned**, never re-queries. That matters: the board has already excluded today's quest and anything age-gated, and search must not reach past those.
+
+### Gotcha: board tests and the daily quest
+
+`boardFor()` excludes whichever chore became today's quest, so a test that creates three chores and asserts on all three will flake — one of them is randomly the quest and won't appear. Give the fixtures one `quest_eligible => true` chore to absorb the assignment and mark the rest `quest_eligible => false`.
+
 ### Gotcha: setting up "already completed" test fixtures
 
 `claim()` calls `mysteryChoreFor()` internally (to compute the bonus) **before** creating the chore's own `ChoreCompletion`. In real usage this is always safe because a kid must load the Quests page first — which calls `mysteryChoreFor()` via `with()` — before any claim action can fire, so the day's pick is already locked in by the time `claim()` runs. But if a test calls `service()->claim($kid, $chore)` as its *first* mystery-related call of the day, that call can itself make (and persist) the day's random pick — possibly picking the very chore being claimed, before its completion exists to exclude it. To set up an "already completed today" precondition in a test without tripping this, create the `ChoreCompletion` directly:
