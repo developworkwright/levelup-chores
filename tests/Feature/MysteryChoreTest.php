@@ -132,6 +132,51 @@ class MysteryChoreTest extends TestCase
         $this->assertSame($eligible->id, $this->service()->mysteryChoreFor($household)->id);
     }
 
+    public function test_a_reroll_keeps_the_pick_stable_for_the_rest_of_the_day(): void
+    {
+        // The swap has to persist, not just return a different chore — every
+        // kid in the house must see the same one for the rest of the day.
+        $household = Household::factory()->create();
+        Chore::factory()->for($household)->count(5)->create();
+
+        $service = $this->service();
+        $service->mysteryChoreFor($household);
+        $rerolled = $service->rerollMysteryChore($household);
+
+        $this->assertSame($rerolled->id, $service->mysteryChoreFor($household)->id);
+        $this->assertSame(1, DailyMystery::where('household_id', $household->id)->count());
+    }
+
+    public function test_a_reroll_never_lands_on_the_same_chore(): void
+    {
+        $household = Household::factory()->create();
+        Chore::factory()->for($household)->count(6)->create();
+
+        $service = $this->service();
+        $before = $service->mysteryChoreFor($household);
+
+        $this->assertNotSame($before->id, $service->rerollMysteryChore($household)->id);
+    }
+
+    public function test_a_reroll_with_no_alternative_returns_null(): void
+    {
+        $household = Household::factory()->create();
+        Chore::factory()->for($household)->create();
+
+        $service = $this->service();
+        $service->mysteryChoreFor($household);
+
+        $this->assertNull($service->rerollMysteryChore($household));
+    }
+
+    public function test_a_reroll_assigns_one_when_none_was_drawn_yet(): void
+    {
+        $household = Household::factory()->create();
+        Chore::factory()->for($household)->count(3)->create();
+
+        $this->assertNotNull($this->service()->rerollMysteryChore($household));
+    }
+
     public function test_returns_null_when_nothing_is_eligible(): void
     {
         $household = Household::factory()->create();

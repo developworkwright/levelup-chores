@@ -183,23 +183,11 @@ class ChoreService
             return $existing->chore;
         }
 
-        $eligible = $household->chores
-            ->filter(fn (Chore $chore) => $chore->min_age === null)
-            // Unlimited-cadence chores are always freely repeatable by
-            // everyone — that's fundamentally at odds with "first one to
-            // find it wins," so they're never in the running.
-            ->reject(fn (Chore $chore) => $chore->cadence === ChoreCadence::Unlimited)
-            ->reject(fn (Chore $chore) => $this->mysteryClaimant($chore) !== null);
+        $chore = $this->drawMysteryChore($household);
 
-        $hinted = $eligible->filter(fn (Chore $chore) => filled($chore->hint));
-
-        $choreId = ($hinted->isNotEmpty() ? $hinted : $eligible)->pluck('id')->all();
-
-        if (empty($choreId)) {
+        if (! $chore) {
             return null;
         }
-
-        $chore = Chore::find(Arr::random($choreId));
 
         DailyMystery::create([
             'household_id' => $household->id,
@@ -208,6 +196,66 @@ class ChoreService
         ]);
 
         return $chore;
+    }
+
+    /**
+     * Swaps today's mystery for a different eligible chore. Returns null when
+     * there's nothing to swap to, or when someone has already won it — once
+     * the race is over, moving the finish line would rob the winner.
+     */
+    public function rerollMysteryChore(Household $household): ?Chore
+    {
+        $today = HouseholdClock::for($household)->today();
+
+        $existing = DailyMystery::where('household_id', $household->id)
+            ->whereDate('mystery_date', $today)
+            ->first();
+
+        if ($existing && $this->mysteryClaimant($existing->chore)) {
+            return null;
+        }
+
+        $chore = $this->drawMysteryChore($household, $existing?->chore_id);
+
+        if (! $chore) {
+            return null;
+        }
+
+        if ($existing) {
+            $existing->chore_id = $chore->id;
+            $existing->save();
+        } else {
+            DailyMystery::create([
+                'household_id' => $household->id,
+                'mystery_date' => $today,
+                'chore_id' => $chore->id,
+            ]);
+        }
+
+        return $chore;
+    }
+
+    /**
+     * Picks a chore that may serve as the mystery, applying every fairness
+     * rule. Shared by the daily draw and the parent's reroll so the two can't
+     * drift apart on what counts as eligible.
+     */
+    private function drawMysteryChore(Household $household, ?int $excludeChoreId = null): ?Chore
+    {
+        $eligible = $household->chores
+            ->filter(fn (Chore $chore) => $chore->min_age === null)
+            // Unlimited-cadence chores are always freely repeatable by
+            // everyone — that's fundamentally at odds with "first one to
+            // find it wins," so they're never in the running.
+            ->reject(fn (Chore $chore) => $chore->cadence === ChoreCadence::Unlimited)
+            ->reject(fn (Chore $chore) => $this->mysteryClaimant($chore) !== null)
+            ->reject(fn (Chore $chore) => $excludeChoreId !== null && $chore->id === $excludeChoreId);
+
+        $hinted = $eligible->filter(fn (Chore $chore) => filled($chore->hint));
+
+        $choreId = ($hinted->isNotEmpty() ? $hinted : $eligible)->pluck('id')->all();
+
+        return empty($choreId) ? null : Chore::find(Arr::random($choreId));
     }
 
     /** Whether this kid has already bought today's mystery hint. */

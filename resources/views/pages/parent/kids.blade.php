@@ -3,7 +3,6 @@
 use App\Enums\LedgerKind;
 use App\Enums\ProfileRole;
 use App\Enums\TicketKind;
-use App\Models\BonusTicketEntry;
 use App\Models\ChoreCompletion;
 use App\Models\Profile;
 use App\Services\BadgeService;
@@ -26,6 +25,8 @@ new class extends Component
 
     /** @var array<int, string> */
     public array $questMessages = [];
+
+    public ?string $mysteryMessage = null;
 
     public function mount(): void
     {
@@ -128,6 +129,15 @@ new class extends Component
         if ($kid) {
             app(SpinService::class)->clearToday($kid);
         }
+    }
+
+    public function rerollMystery(): void
+    {
+        $chore = app(ChoreService::class)->rerollMysteryChore($this->profile->household);
+
+        $this->mysteryMessage = $chore
+            ? "Swapped to \"{$chore->name}\"."
+            : 'Nothing to swap to — someone has already found it, or there is no other eligible chore.';
     }
 
     /**
@@ -246,12 +256,6 @@ new class extends Component
             }),
             'mysteryChore' => $mysteryChore,
             'mysteryClaimant' => $mysteryChore ? $chores->mysteryClaimant($mysteryChore) : null,
-            'ticketHistory' => BonusTicketEntry::whereIn('profile_id', $kids->pluck('id'))
-                ->latest('created_at')
-                ->latest('id')
-                ->limit(8)
-                ->with('profile')
-                ->get(),
             'household' => $household,
         ];
     }
@@ -324,15 +328,29 @@ new class extends Component
                 </h3>
             </div>
 
-            @if ($mysteryChore)
-                <span
-                    class="rounded-[10px] border px-3 py-2 font-mono-fq text-[11px] whitespace-nowrap"
-                    style="border-color: var(--fq-line-2); color: {{ $mysteryClaimant ? 'var(--fq-lime)' : 'var(--fq-gold)' }}"
-                >
-                    {{ $mysteryClaimant ? 'FOUND BY '.strtoupper($mysteryClaimant->profile->name) : 'UP FOR GRABS' }}
-                </span>
-            @endif
+            <div class="flex items-center gap-2">
+                @if ($mysteryChore)
+                    <span
+                        class="rounded-[10px] border px-3 py-2 font-mono-fq text-[11px] whitespace-nowrap"
+                        style="border-color: var(--fq-line-2); color: {{ $mysteryClaimant ? 'var(--fq-lime)' : 'var(--fq-gold)' }}"
+                    >
+                        {{ $mysteryClaimant ? 'FOUND BY '.strtoupper($mysteryClaimant->profile->name) : 'UP FOR GRABS' }}
+                    </span>
+                @endif
+
+                <button
+                    type="button"
+                    wire:click="rerollMystery"
+                    @disabled($mysteryClaimant !== null)
+                    class="rounded-[10px] border bg-fq-sunk px-3 py-2 text-xs whitespace-nowrap text-fq-text-3 disabled:opacity-40"
+                    style="border-color: var(--fq-line-3)"
+                >Pick a different one</button>
+            </div>
         </div>
+
+        @if ($mysteryMessage)
+            <p class="mt-2 text-xs text-fq-text-4">{{ $mysteryMessage }}</p>
+        @endif
 
         <p class="mt-2 text-xs text-fq-text-5">
             Only visible here — on the kids' boards this looks like any other chore, worth
@@ -476,31 +494,6 @@ new class extends Component
                 </div>
             </div>
         @endforeach
-    </div>
-
-    <div class="mt-[14px] rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
-        <p class="mb-3 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Recent Ticket Activity</p>
-
-        @if ($ticketHistory->isEmpty())
-            <p class="text-sm text-fq-text-5">Nothing yet. Tickets arrive when a kid levels up or earns a badge.</p>
-        @else
-            <div class="flex flex-col gap-2">
-                @foreach ($ticketHistory as $entry)
-                    <div wire:key="ticket-{{ $entry->id }}" class="flex items-center gap-3 border-b border-fq-divider pb-2 last:border-0 last:pb-0">
-                        <span
-                            class="w-10 shrink-0 text-right font-baloo text-[15px] font-extrabold"
-                            style="color: {{ $entry->amount > 0 ? 'var(--fq-lime)' : 'var(--fq-coral)' }}"
-                        >{{ $entry->amount > 0 ? '+' : '' }}{{ $entry->amount }}</span>
-                        <div class="min-w-0 flex-1">
-                            <p class="truncate text-sm">{{ $entry->description }}</p>
-                            <p class="font-mono-fq text-[10px] text-fq-text-5">
-                                {{ $entry->profile->name }} · {{ $entry->kind->label() }} · {{ $entry->created_at->diffForHumans() }}
-                            </p>
-                        </div>
-                    </div>
-                @endforeach
-            </div>
-        @endif
     </div>
 
     <div class="mt-[14px] rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">

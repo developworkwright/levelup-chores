@@ -142,7 +142,7 @@ class ParentKidsPageTest extends TestCase
         $this->assertSame(0, $foreign->refresh()->bonus_tickets);
     }
 
-    public function test_it_lists_recent_ticket_activity(): void
+    public function test_ticket_activity_lives_on_the_activity_tab_not_here(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['name' => 'Nova', 'bonus_tickets' => 0]);
@@ -151,10 +151,60 @@ class ParentKidsPageTest extends TestCase
 
         app(TicketService::class)->record($kid, TicketKind::LevelUp, 1, 'Reached level 4');
 
+        Volt::test('parent.kids')->assertDontSee('Reached level 4');
+    }
+
+    public function test_a_parent_can_swap_the_mystery_chore(): void
+    {
+        $household = Household::factory()->create();
+        Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->count(4)->create();
+        $this->actingAsParent($household);
+
+        $before = app(ChoreService::class)->mysteryChoreFor($household);
+
+        Volt::test('parent.kids')->call('rerollMystery');
+
+        $after = app(ChoreService::class)->mysteryChoreFor($household->refresh());
+
+        $this->assertNotSame($before->id, $after->id);
+    }
+
+    public function test_the_mystery_cannot_be_swapped_once_someone_has_found_it(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->count(4)->create();
+        $this->actingAsParent($household);
+
+        $mystery = app(ChoreService::class)->mysteryChoreFor($household);
+        app(ChoreService::class)->claim($kid, $mystery);
+
         Volt::test('parent.kids')
-            ->assertSee('Recent Ticket Activity')
-            ->assertSee('Reached level 4')
-            ->assertSee('Level up');
+            ->call('rerollMystery')
+            ->assertSee('already found it');
+
+        // Moving the finish line after someone crossed it would rob the winner.
+        $this->assertSame($mystery->id, app(ChoreService::class)->mysteryChoreFor($household)->id);
+    }
+
+    public function test_swapping_the_mystery_respects_the_fairness_rules(): void
+    {
+        $household = Household::factory()->create();
+        Profile::factory()->for($household)->create();
+        $eligible = Chore::factory()->for($household)->create(['name' => 'Plain and eligible']);
+        Chore::factory()->for($household)->create(['name' => 'Age gated', 'min_age' => 10]);
+        Chore::factory()->for($household)->create(['name' => 'Unlimited', 'cadence' => 'unlimited']);
+        $this->actingAsParent($household);
+
+        $before = app(ChoreService::class)->mysteryChoreFor($household);
+
+        Volt::test('parent.kids')->call('rerollMystery');
+
+        // Only one other chore qualifies, so a swap either lands on it or is
+        // refused — it must never reach for the gated or unlimited ones.
+        $after = app(ChoreService::class)->mysteryChoreFor($household);
+        $this->assertContains($after->id, [$before->id, $eligible->id]);
     }
 
     public function test_a_parent_can_swap_a_kids_quest_for_free(): void
