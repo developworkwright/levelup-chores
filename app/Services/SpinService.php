@@ -46,7 +46,8 @@ class SpinService
 
     /**
      * The chores eligible to appear on the bonus wheel today — age
-     * appropriate, not today's daily quest — capped to MAX_WHEEL_CHORES.
+     * appropriate, not today's daily quest, and not already claimed by
+     * anyone in the household — capped to MAX_WHEEL_CHORES.
      *
      * Above the cap, a random subset is used instead of the full list, but
      * it's picked with a per-profile-per-day deterministic shuffle (not a
@@ -63,11 +64,21 @@ class SpinService
     {
         // Resolved lazily (not constructor-injected) to avoid a circular
         // dependency — ChoreService itself depends on SpinService.
-        $questChoreId = app(ChoreService::class)->questFor($profile)->chore_id;
+        $chores = app(ChoreService::class);
+        $questChoreId = $chores->questFor($profile)->chore_id;
+
+        $spinToday = $this->today($profile);
 
         $eligible = $profile->household->chores
             ->filter(fn (Chore $chore) => $chore->isAppropriateFor($profile))
             ->reject(fn (Chore $chore) => $chore->id === $questChoreId)
+            // Cooldowns are household-wide, so a chore a sibling already
+            // claimed can no longer be earned — landing a 3x boost on it
+            // would be a prize that pays nothing. Whatever today's spin
+            // already landed on stays regardless: the wheel has to keep
+            // showing the result it gave, even once that chore is spent.
+            ->filter(fn (Chore $chore) => ($spinToday && $chore->id === $spinToday->chore_id)
+                || $chores->stateFor($profile, $chore) === 'ready')
             ->sortBy('id')
             ->values();
 
@@ -78,7 +89,6 @@ class SpinService
         $today = HouseholdClock::for($profile->household)->today()->toDateString();
         $seed = "{$profile->id}-{$today}";
 
-        $spinToday = $this->today($profile);
         $mustInclude = $spinToday ? $eligible->firstWhere('id', $spinToday->chore_id) : null;
 
         $pool = $mustInclude
@@ -107,7 +117,7 @@ class SpinService
         $eligible = $this->eligibleChoresFor($profile);
 
         if ($eligible->isEmpty()) {
-            throw new RuntimeException('No age-appropriate chores to spin for.');
+            throw new RuntimeException('No chores available to spin for.');
         }
 
         $chore = $eligible->random();

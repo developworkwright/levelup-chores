@@ -49,14 +49,34 @@ Four conditions guard it, each protecting something real:
 
 ## Chore board state machine
 
-`boardFor(Profile)` returns each appropriate chore annotated with a state from `stateFor(Profile, Chore)`:
+`boardFor(Profile)` returns each appropriate chore as `['chore' => Chore, 'state' => string, 'takenBy' => ?Profile]`, where `takenBy` is the claimant when it isn't this kid. States:
 
 - `'locked'` — quest not done yet and `require_quest_first` is on.
 - `'pending'` — **this** profile holds the in-flight claim.
 - `'done'` — someone in the household holds it: another kid's pending claim, or anyone's approved claim inside the cadence boundary (`ChoreCadence::Weekly` → last 7 household-days; otherwise last 1).
 - `'ready'` — claimable now. Always `'ready'` for `ChoreCadence::Unlimited` chores — no cooldown, ever.
 
-`'pending'` vs `'done'` is the *only* place the viewing profile matters; both come off the same `claimantFor()` lookup. There is no separate mystery-chore branch — mystery exclusivity and ordinary cooldown are now the same mechanism.
+`'pending'` vs `'done'` is the *only* place the viewing profile matters; both come off the same `claimantFor()` lookup, resolved through the shared private `stateFrom()` so `stateFor()` and `boardFor()` can't drift. `boardFor()` calls `claimantFor()` itself rather than `stateFor()`, so naming the claimant costs no extra queries — `claimantFor()` already eager-loads `profile`. There is no separate mystery-chore branch — mystery exclusivity and ordinary cooldown are now the same mechanism.
+
+## Keeping an open board honest
+
+Kids leave the quests page open for hours, and cooldowns are household-wide, so a board goes stale on its own. The danger is **not** a bad write — `claimChore()` re-checks `stateFor()` server-side and the quest path is covered by the reveal guard, so a stale tap can never double-claim. The danger is a kid *doing the physical work* on a chore a sibling already claimed and only finding out at submit time.
+
+A chore locks the moment it's **claimed**, not when it's approved — `claimantFor()` counts a Pending completion — and `sendBack()` reopens it. So the two events that change the board are claim and reject; approval changes nothing about availability.
+
+Three things address staleness, in order of how much they matter:
+
+1. **The board names the claimant.** A taken chore reads "Taken by Nova" with the title struck through. It previously said "Back tomorrow" — indistinguishable from the kid's *own* completed chore, and the one wording that could send someone off to redo it.
+2. **Refresh on focus/visibility**, via a small Alpine block on the board list calling `$wire.$refresh()`, throttled to 2s because returning to a tab fires both events. Paired with an explicit **Refresh button in the kid shell header**, sitting with the points/streak/tickets tiles it also updates — the automatic refresh is invisible, and a kid about to start a chore wants to *check*.
+
+   The shell takes a `refreshAction` prop defaulting to `$refresh`, so all five kid tabs get the button; Quests passes `refresh-action="refreshBoard"` so it can additionally clear `boardMessage`. Anything added to the shell header that calls a component method needs that same treatment — the shell is shared, and a method that exists on only one tab breaks the other four.
+3. **`boardMessage`** explains a late tap ("Nova got to Feed animals first!") — a silently no-oping button reads as broken.
+
+**Do not add `wire:poll` here.** It was tried and removed: the production server scales to zero when idle, so a tablet left open on the quests page would hold it awake and billing indefinitely. Websockets are worse for the same reason — Reverb needs an always-on process. Refresh-on-focus costs one request at the only moment a stale board can mislead anyone: when someone looks at it.
+
+Refreshes re-run `with()`, not `mount()` — which is what keeps the mount-snapshotted animation properties (`pendingChestDay`, `questDoneOnArrival`, `dailyChestAvailable`) stable. Anything that must survive a refresh belongs in `mount()`, never in `with()`.
+
+One knock-on: a refresh re-runs `questFor()`, so a quest a sibling took is auto-rerolled then, clearing `revealed_at` and re-closing the quest chest. Correct, but abrupt — if that needs softening, it's the reroll that needs a notice.
 
 Cooldown/pending boundaries always use `HouseholdClock`, never raw `now()` — the household day rolls over at `day_boundary_hour` (default 4am), not midnight.
 

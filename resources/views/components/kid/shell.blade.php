@@ -1,4 +1,7 @@
-@props(['profile', 'active'])
+{{-- `refreshAction` is the Livewire method the Refresh button calls. Defaults
+     to the generic `$refresh` since most kid tabs just need re-rendering; the
+     Quests tab passes its own so it can also clear a stale board message. --}}
+@props(['profile', 'active', 'refreshAction' => '$refresh'])
 
 @php
     $tabs = [
@@ -54,6 +57,22 @@
                     <div class="font-baloo text-xl font-extrabold" style="color: var(--fq-magenta)">{{ $profile->bonus_tickets }}</div>
                     <div class="font-mono-fq text-[9px] text-fq-text-4">TICKETS</div>
                 </a>
+                {{-- Pulls down points, streak, tickets and — on the Quests tab —
+                     the chore board. The page already refreshes itself when it
+                     regains focus, but that's invisible; this is the version a
+                     kid can reach for to check nobody beat them to a chore. --}}
+                <button
+                    type="button"
+                    wire:click="{{ $refreshAction }}"
+                    wire:loading.attr="disabled"
+                    wire:target="{{ $refreshAction }}"
+                    title="Check for the latest points and chores"
+                    class="flex items-center gap-[6px] rounded-[14px] border border-fq-line-2 bg-fq-sunk px-3 py-[7px] text-xs whitespace-nowrap text-fq-text-4 transition hover:text-fq-text disabled:opacity-60"
+                >
+                    <span wire:loading.class="animate-spin" wire:target="{{ $refreshAction }}" class="inline-block">↻</span>
+                    <span wire:loading.remove wire:target="{{ $refreshAction }}">Refresh</span>
+                    <span wire:loading wire:target="{{ $refreshAction }}">Checking…</span>
+                </button>
                 <x-sound-toggle />
                 <form method="POST" action="{{ route('logout') }}">
                     @csrf

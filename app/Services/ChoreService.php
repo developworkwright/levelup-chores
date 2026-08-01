@@ -210,10 +210,23 @@ class ChoreService
         return $profile->household->chores
             ->filter(fn (Chore $chore) => $chore->isAppropriateFor($profile))
             ->reject(fn (Chore $chore) => $chore->id === $quest->chore_id)
-            ->map(fn (Chore $chore) => [
-                'chore' => $chore,
-                'state' => $gated ? 'locked' : $this->stateFor($profile, $chore),
-            ])
+            ->map(function (Chore $chore) use ($profile, $gated) {
+                $claimant = $chore->cadence === ChoreCadence::Unlimited
+                    ? null
+                    : $this->claimantFor($chore);
+
+                return [
+                    'chore' => $chore,
+                    'state' => $gated ? 'locked' : $this->stateFrom($profile, $claimant),
+                    // Who took it, when that someone isn't this kid. The board
+                    // names them so nobody starts scrubbing a bathtub a sibling
+                    // already claimed — finding that out at submit time means
+                    // the work is already done, for nothing.
+                    'takenBy' => $claimant && $claimant->profile_id !== $profile->id
+                        ? $claimant->profile
+                        : null,
+                ];
+            })
             ->values();
     }
 
@@ -403,8 +416,15 @@ class ChoreService
             return 'ready';
         }
 
-        $claimant = $this->claimantFor($chore);
+        return $this->stateFrom($profile, $this->claimantFor($chore));
+    }
 
+    /**
+     * Shared by stateFor() and boardFor() so the board can name the claimant
+     * without looking it up a second time — and so the two can't drift.
+     */
+    private function stateFrom(Profile $profile, ?ChoreCompletion $claimant): string
+    {
         if ($claimant === null) {
             return 'ready';
         }

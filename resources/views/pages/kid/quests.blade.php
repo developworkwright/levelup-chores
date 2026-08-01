@@ -45,11 +45,29 @@ new class extends Component
 
     public ?string $perkMessage = null;
 
+    /**
+     * Why a tap on the board didn't take. Cooldowns are household-wide, so
+     * the board a kid is looking at can go stale between renders — without
+     * this the claim just silently no-ops and reads as a broken button.
+     */
+    public ?string $boardMessage = null;
+
     public string $search = '';
 
     public function clearSearch(): void
     {
         $this->search = '';
+    }
+
+    /**
+     * Livewire re-renders after any action, so the refresh is the round trip
+     * itself. Clearing the message matters though: the board is about to show
+     * whoever took the chore, and leaving the older wording next to it just
+     * says the same thing twice.
+     */
+    public function refreshBoard(): void
+    {
+        $this->boardMessage = null;
     }
 
     public function mount(): void
@@ -139,6 +157,8 @@ new class extends Component
 
     public function claimChore(int $choreId): void
     {
+        $this->boardMessage = null;
+
         $chore = Chore::find($choreId);
 
         if (! $chore || $chore->household_id !== $this->profile->household_id) {
@@ -156,8 +176,20 @@ new class extends Component
             $gated
             || $chore->id === $quest->chore_id
             || ! $chore->isAppropriateFor($this->profile)
-            || $service->stateFor($this->profile, $chore) !== 'ready'
         ) {
+            return;
+        }
+
+        // The one rejection worth explaining: nothing about this kid changed,
+        // someone else in the house just got there first. Polling shrinks the
+        // window but can never close it, so the message has to exist.
+        if ($service->stateFor($this->profile, $chore) !== 'ready') {
+            $claimant = $service->claimantFor($chore);
+
+            $this->boardMessage = $claimant && $claimant->profile_id !== $this->profile->id
+                ? "{$claimant->profile->name} got to {$chore->name} first!"
+                : "{$chore->name} isn't available right now.";
+
             return;
         }
 
@@ -248,7 +280,7 @@ new class extends Component
     }
 }; ?>
 
-<x-kid.shell :profile="$profile" active="quests">
+<x-kid.shell :profile="$profile" active="quests" refresh-action="refreshBoard">
     <div class="grid grid-cols-1 gap-[14px] lg:grid-cols-[minmax(0,1.6fr)_minmax(260px,1fr)]">
         {{-- Left column --}}
         <div class="flex flex-col gap-[14px]">
@@ -456,12 +488,18 @@ new class extends Component
                             </div>
                         @endif
                     @elseif ($mysteryClaimant->profile_id === $profile->id)
-                        <h2 class="mt-2 font-baloo text-xl font-bold">You found it!</h2>
+                        {{-- Naming the chore matters here: a kid with several
+                             claims waiting on a parent has no way to tell which
+                             one carried the bonus. --}}
+                        <h2 class="mt-2 font-baloo text-xl font-bold">You found it — {{ $mysteryChore->name }}!</h2>
                         <p class="mt-1 max-w-[420px] text-sm text-fq-text-2">
                             Nice work — you banked a +{{ \App\Services\ChoreService::MYSTERY_BONUS_POINTS }} pt bonus.
                         </p>
                     @else
-                        <h2 class="mt-2 font-baloo text-xl font-bold">Completed by {{ $mysteryClaimant->profile->name }}!</h2>
+                        {{-- Named for everyone: once it's found the secret is
+                             spent, and knowing which chore it was is half the
+                             fun of losing. --}}
+                        <h2 class="mt-2 font-baloo text-xl font-bold">Completed by {{ $mysteryClaimant->profile->name }} — {{ $mysteryChore->name }}!</h2>
                         <p class="mt-1 max-w-[420px] text-sm text-fq-text-2">
                             They found it and banked a +{{ \App\Services\ChoreService::MYSTERY_BONUS_POINTS }} pt bonus. Better luck next time.
                         </p>
@@ -501,11 +539,43 @@ new class extends Component
                 </div>
             @endif
 
-            <div class="flex flex-col gap-3">
+            {{-- The backstop for the seconds between polls. Polling narrows
+                 that window but can't close it, so the tap still has to
+                 explain itself rather than silently doing nothing. --}}
+            @if ($boardMessage)
+                <div class="rounded-[18px] border p-4 text-sm" style="border-color: var(--fq-gold); background: color-mix(in oklch, var(--fq-gold) 12%, transparent); color: var(--fq-gold)">
+                    {{ $boardMessage }}
+                </div>
+            @endif
+
+            {{-- Refreshed when the kid comes back to the page, not on a timer.
+                 The server scales to zero when idle, so a poll on a tablet
+                 left open all afternoon would keep it awake and billing for
+                 nothing. This fires one request at the only moment a stale
+                 board can actually mislead someone: when they look at it. --}}
+            <div
+                x-data="{
+                    last: 0,
+                    refresh() {
+                        if (document.visibilityState !== 'visible') return;
+
+                        // Returning to a tab fires focus and visibilitychange
+                        // together; one refresh covers both.
+                        if (Date.now() - this.last < 2000) return;
+
+                        this.last = Date.now();
+                        $wire.$refresh();
+                    },
+                }"
+                x-on:visibilitychange.window="refresh()"
+                x-on:focus.window="refresh()"
+                class="flex flex-col gap-3"
+            >
                 @foreach ($board as $entry)
                     @php
                         $chore = $entry['chore'];
                         $state = $entry['state'];
+                        $takenBy = $entry['takenBy'];
                         $boosted = $questBoosted === false && $boost && $boost->chore_id === $chore->id;
                         $payout = $chore->points * ($boosted ? $boost->multiplier : 1);
                         $boostColor = $boosted && $boost->multiplier === 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)';
@@ -518,27 +588,38 @@ new class extends Component
                             'ready' => 'Mark it done',
                             'locked' => 'Locked',
                             'pending' => 'Pending approval',
-                            'done' => $chore->cadence->value === 'weekly' ? 'Back in 7 days' : 'Back tomorrow',
+                            // "Back tomorrow" on a chore a sibling took reads as
+                            // "you already did this" — the one wording that could
+                            // send a kid off to redo it. Name them instead.
+                            'done' => $takenBy
+                                ? $takenBy->name.' got this one'
+                                : ($chore->cadence->value === 'weekly' ? 'Back in 7 days' : 'Back tomorrow'),
                         ];
                     @endphp
                     <div
                         wire:key="chore-{{ $chore->id }}"
-                        class="rounded-[20px] border border-fq-line bg-fq-panel p-4 {{ $state === 'locked' ? 'opacity-50' : '' }}"
+                        class="rounded-[20px] border border-fq-line bg-fq-panel p-4 {{ $state === 'locked' ? 'opacity-50' : '' }} {{ $takenBy ? 'opacity-70' : '' }}"
                         style="{{ $state === 'pending' ? 'border-color: var(--fq-success-border)' : '' }}"
                     >
                         <div class="flex items-start justify-between gap-2">
                             <div>
-                                <p class="text-[16px] font-semibold">{{ $chore->name }}</p>
+                                <p class="text-[16px] font-semibold {{ $takenBy ? 'line-through decoration-2' : '' }}">{{ $chore->name }}</p>
                                 <p class="font-mono-fq text-[10px] text-fq-text-4 uppercase">
                                     {{ $cadenceLabels[$chore->cadence->value] ?? 'Once a day' }}
                                 </p>
                             </div>
-                            <span class="font-baloo text-[19px] font-extrabold" style="color: {{ $boosted ? $boostColor : 'var(--fq-lime)' }}">
+                            <span class="font-baloo text-[19px] font-extrabold" style="color: {{ $takenBy ? 'var(--fq-text-5)' : ($boosted ? $boostColor : 'var(--fq-lime)') }}">
                                 +{{ $payout }} pts
                             </span>
                         </div>
 
-                        @if ($boosted)
+                        {{-- Loud on purpose: this has to be readable at a glance,
+                             from across the room, before any work starts. --}}
+                        @if ($takenBy)
+                            <span class="mt-2 inline-block rounded-[8px] px-[10px] py-1 font-mono-fq text-[10px]" style="background: color-mix(in oklch, var(--fq-gold) 22%, transparent); color: var(--fq-gold)">
+                                Taken by {{ $takenBy->name }}
+                            </span>
+                        @elseif ($boosted)
                             <span class="mt-2 inline-block rounded-[8px] px-[10px] py-1 font-mono-fq text-[10px]" style="background: color-mix(in oklch, {{ $boostColor }} 28%, transparent); color: {{ $boostColor }}">
                                 {{ $boost->multiplier }}x wheel boost
                             </span>

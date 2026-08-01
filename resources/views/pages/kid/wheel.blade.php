@@ -53,6 +53,13 @@ new class extends Component
             return;
         }
 
+        // The family can clear the board before a kid gets round to spinning.
+        // SpinService throws on an empty pool, and nothing here catches it, so
+        // the guard has to be in front of the call rather than around it.
+        if ($service->eligibleChoresFor($this->profile)->isEmpty()) {
+            return;
+        }
+
         $spinResult = $service->spin($this->profile);
 
         $chores = $service->eligibleChoresFor($this->profile);

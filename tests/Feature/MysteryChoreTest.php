@@ -308,21 +308,23 @@ class MysteryChoreTest extends TestCase
         $household = Household::factory()->create(['require_quest_first' => false]);
         $winner = Profile::factory()->for($household)->create(['name' => 'Winner Kid']);
         $other = Profile::factory()->for($household)->create();
-        $chore = Chore::factory()->for($household)->create();
+        $chore = Chore::factory()->for($household)->create(['name' => 'Scrub the tub']);
         Chore::factory()->for($household)->create(['name' => 'Filler chore', 'cadence' => 'unlimited']);
 
         $this->service()->claim($winner, $chore);
 
         Auth::guard('profile')->login($other);
 
-        Volt::test('kid.quests')->assertSee('Completed by Winner Kid');
+        // The secret is spent once it's found, so the losers are told which
+        // chore it was too.
+        Volt::test('kid.quests')->assertSee('Completed by Winner Kid — Scrub the tub!', escape: false);
     }
 
     public function test_the_winner_sees_their_own_congratulations_not_better_luck_next_time(): void
     {
         $household = Household::factory()->create(['require_quest_first' => false]);
         $winner = Profile::factory()->for($household)->create(['name' => 'Winner Kid']);
-        $chore = Chore::factory()->for($household)->create();
+        $chore = Chore::factory()->for($household)->create(['name' => 'Scrub the tub']);
         Chore::factory()->for($household)->create(['name' => 'Filler chore', 'cadence' => 'unlimited']);
 
         $this->service()->claim($winner, $chore);
@@ -333,5 +335,21 @@ class MysteryChoreTest extends TestCase
             ->assertSee('You found it')
             ->assertDontSee('Better luck next time')
             ->assertDontSee('Completed by Winner Kid');
+    }
+
+    public function test_the_winner_is_told_which_chore_it_was(): void
+    {
+        $household = Household::factory()->create(['require_quest_first' => false]);
+        $winner = Profile::factory()->for($household)->create();
+        $chore = Chore::factory()->for($household)->create(['name' => 'Scrub the tub']);
+        Chore::factory()->for($household)->create(['name' => 'Filler chore', 'cadence' => 'unlimited']);
+
+        $this->service()->claim($winner, $chore);
+
+        Auth::guard('profile')->login($winner);
+
+        // A kid with several claims waiting on a parent can't otherwise tell
+        // which one carried the bonus.
+        Volt::test('kid.quests')->assertSee('You found it — Scrub the tub!', escape: false);
     }
 }
