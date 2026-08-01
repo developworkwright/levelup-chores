@@ -56,15 +56,21 @@ class ChoreService
             ->first();
 
         if ($quest) {
-            return $quest;
+            return $this->rerollIfTaken($profile, $quest);
         }
 
-        $choreId = $profile->household->chores()->appropriateFor($profile)->questEligible()
-            ->inRandomOrder()->value('id');
+        $candidates = $this->questCandidates($profile);
 
-        if (! $choreId) {
+        if ($candidates->isEmpty()) {
             throw new RuntimeException('Household has no chores to assign as a quest.');
         }
+
+        $free = $this->unclaimed($candidates);
+
+        // Prefer something the kid can actually do, but fall back to the full
+        // list so they always get a quest — on a day the family has already
+        // cleared the board, a blocked quest beats no quest and a crash.
+        $choreId = ($free->isNotEmpty() ? $free : $candidates)->random()->id;
 
         return DailyQuest::create([
             'household_id' => $profile->household_id,
@@ -90,18 +96,50 @@ class ChoreService
             return null;
         }
 
-        $choreId = $profile->household->chores()
-            ->appropriateFor($profile)
-            ->questEligible()
-            ->where('id', '!=', $quest->chore_id)
-            ->inRandomOrder()
-            ->value('id');
+        return $this->assignDifferentChore($profile, $quest);
+    }
 
-        if (! $choreId) {
+    /**
+     * Swaps a quest a sibling has taken out from under the kid.
+     *
+     * Cooldowns are household-wide, so another kid finishing your quest chore
+     * would otherwise leave you unable to clear your quest at all — no streak,
+     * and a board that stays gated. Rerolling keeps the day recoverable
+     * without anyone having to intervene.
+     */
+    private function rerollIfTaken(Profile $profile, DailyQuest $quest): DailyQuest
+    {
+        if ($quest->completed_at !== null) {
+            return $quest;
+        }
+
+        // Unlimited chores never lock, so a claim on one blocks nobody.
+        if ($quest->chore->cadence === ChoreCadence::Unlimited) {
+            return $quest;
+        }
+
+        $claimant = $this->claimantFor($quest->chore);
+
+        // Nobody holds it, or the kid holds it themselves — nothing to fix.
+        if (! $claimant || $claimant->profile_id === $profile->id) {
+            return $quest;
+        }
+
+        return $this->assignDifferentChore($profile, $quest) ?? $quest;
+    }
+
+    /** Moves a quest onto a different, actually-doable chore. Null when there isn't one. */
+    private function assignDifferentChore(Profile $profile, DailyQuest $quest): ?DailyQuest
+    {
+        // Swapping onto a chore someone else has already claimed would leave
+        // the kid exactly as stuck, so only free chores count here.
+        $free = $this->unclaimed($this->questCandidates($profile, $quest->chore_id));
+
+        if ($free->isEmpty()) {
             return null;
         }
 
-        $quest->chore_id = $choreId;
+        $quest->chore_id = $free->random()->id;
         // Re-hidden on purpose — a new quest deserves the chest animation
         // again, so the swap lands as a fresh reveal rather than a silent
         // relabel. Also means the board stays gated until they open it.
@@ -109,6 +147,26 @@ class ChoreService
         $quest->save();
 
         return $quest->refresh();
+    }
+
+    /** @return Collection<int, Chore> */
+    private function questCandidates(Profile $profile, ?int $excludeChoreId = null): Collection
+    {
+        return $profile->household->chores()
+            ->appropriateFor($profile)
+            ->questEligible()
+            ->when($excludeChoreId !== null, fn ($query) => $query->where('id', '!=', $excludeChoreId))
+            ->get();
+    }
+
+    /**
+     * @param  Collection<int, Chore>  $chores
+     * @return Collection<int, Chore>
+     */
+    private function unclaimed(Collection $chores): Collection
+    {
+        return $chores->reject(fn (Chore $chore) => $chore->cadence !== ChoreCadence::Unlimited
+            && $this->claimantFor($chore) !== null);
     }
 
     public function isQuestRevealedToday(Profile $profile): bool
@@ -143,14 +201,18 @@ class ChoreService
     {
         $quest = $this->questFor($profile);
         $gated = $profile->household->require_quest_first && $quest->completed_at === null;
-        $todaysMystery = $this->mysteryChoreFor($profile->household);
+
+        // Resolved here even though the board no longer needs it for state:
+        // this is the call that lazily assigns the day's mystery chore, and
+        // dropping it would leave that to whichever page happened to ask first.
+        $this->mysteryChoreFor($profile->household);
 
         return $profile->household->chores
             ->filter(fn (Chore $chore) => $chore->isAppropriateFor($profile))
             ->reject(fn (Chore $chore) => $chore->id === $quest->chore_id)
             ->map(fn (Chore $chore) => [
                 'chore' => $chore,
-                'state' => $gated ? 'locked' : $this->stateForChore($profile, $chore, $todaysMystery),
+                'state' => $gated ? 'locked' : $this->stateFor($profile, $chore),
             ])
             ->values();
     }
@@ -211,7 +273,7 @@ class ChoreService
             ->whereDate('mystery_date', $today)
             ->first();
 
-        if ($existing && $this->mysteryClaimant($existing->chore)) {
+        if ($existing && $this->claimantFor($existing->chore)) {
             return null;
         }
 
@@ -248,7 +310,7 @@ class ChoreService
             // everyone — that's fundamentally at odds with "first one to
             // find it wins," so they're never in the running.
             ->reject(fn (Chore $chore) => $chore->cadence === ChoreCadence::Unlimited)
-            ->reject(fn (Chore $chore) => $this->mysteryClaimant($chore) !== null)
+            ->reject(fn (Chore $chore) => $this->claimantFor($chore) !== null)
             ->reject(fn (Chore $chore) => $excludeChoreId !== null && $chore->id === $excludeChoreId);
 
         $hinted = $eligible->filter(fn (Chore $chore) => filled($chore->hint));
@@ -297,12 +359,15 @@ class ChoreService
     }
 
     /**
-     * The completion that currently "holds" the mystery chore for its
-     * cadence window — pending or approved both count, since claiming (not
-     * just approval) is what wins the race and locks it for everyone else.
-     * A rejected claim doesn't count, so the chore reopens automatically.
+     * The completion that currently "holds" a chore for its cadence window.
+     *
+     * Household-wide, not per-kid: the dishes only need doing once, so whoever
+     * claims a daily chore first takes it off everyone's board until the
+     * cadence resets. Pending and approved both count, since claiming — not
+     * approval — is what wins the race. A rejected claim doesn't, so the chore
+     * reopens on its own.
      */
-    public function mysteryClaimant(Chore $chore): ?ChoreCompletion
+    public function claimantFor(Chore $chore): ?ChoreCompletion
     {
         $clock = HouseholdClock::for($chore->household);
         $boundary = $chore->cadence === ChoreCadence::Weekly
@@ -322,60 +387,33 @@ class ChoreService
             ->first();
     }
 
+    /**
+     * How a chore reads on a kid's board.
+     *
+     * Cooldowns are household-wide: a once-a-day chore is done once by the
+     * family, not once per kid. That makes the mystery chore's "first one to
+     * find it wins" exclusivity the ordinary rule rather than a special case,
+     * which is why there's no separate branch for it here.
+     */
     public function stateFor(Profile $profile, Chore $chore): string
     {
-        return $this->stateForChore($profile, $chore, $this->mysteryChoreFor($profile->household));
-    }
-
-    /**
-     * Split out from stateFor() so boardFor() can resolve today's mystery
-     * chore once and reuse it across the whole board instead of re-querying
-     * it per chore.
-     */
-    private function stateForChore(Profile $profile, Chore $chore, ?Chore $todaysMystery): string
-    {
-        // The mystery chore is claimed household-wide, not per-kid — once
-        // anyone has it (pending or approved), it's off the board for
-        // everyone else until the cadence resets.
-        if ($todaysMystery && $todaysMystery->id === $chore->id) {
-            $claimant = $this->mysteryClaimant($chore);
-
-            if ($claimant === null) {
-                return 'ready';
-            }
-
-            return $claimant->profile_id === $profile->id && $claimant->status === CompletionStatus::Pending
-                ? 'pending'
-                : 'done';
-        }
-
-        // No cooldown, no waiting on a prior pending claim — always
-        // claimable, for chores that can happen more than once a day.
+        // No cooldown and no waiting on a prior claim — several kids can do
+        // an unlimited chore, repeatedly, on the same day.
         if ($chore->cadence === ChoreCadence::Unlimited) {
             return 'ready';
         }
 
-        $pending = ChoreCompletion::where('profile_id', $profile->id)
-            ->where('chore_id', $chore->id)
-            ->where('status', CompletionStatus::Pending)
-            ->exists();
+        $claimant = $this->claimantFor($chore);
 
-        if ($pending) {
-            return 'pending';
+        if ($claimant === null) {
+            return 'ready';
         }
 
-        $clock = HouseholdClock::for($profile->household);
-        $boundary = $chore->cadence === ChoreCadence::Weekly
-            ? $clock->startOf($clock->today()->subDays(6))
-            : $clock->startOf($clock->today());
-
-        $onCooldown = ChoreCompletion::where('profile_id', $profile->id)
-            ->where('chore_id', $chore->id)
-            ->where('status', CompletionStatus::Approved)
-            ->where('decided_at', '>=', $boundary)
-            ->exists();
-
-        return $onCooldown ? 'done' : 'ready';
+        // 'pending' is the kid's own claim awaiting approval; anyone else
+        // holding it just means the chore is spoken for.
+        return $claimant->profile_id === $profile->id && $claimant->status === CompletionStatus::Pending
+            ? 'pending'
+            : 'done';
     }
 
     public function claim(Profile $profile, Chore $chore): ChoreCompletion

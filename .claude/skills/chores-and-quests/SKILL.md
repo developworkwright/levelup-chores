@@ -14,26 +14,53 @@ Covers the chore board, the daily quest, and the automatic mystery chore — all
 - `app/Enums/{ChoreCadence,CompletionStatus}.php`
 - `resources/views/pages/kid/quests.blade.php` — kid-facing board, quest reveal, mystery reveal.
 - `resources/views/pages/parent/chores.blade.php` — chore CRUD (points, cadence, min age, quest eligibility). No mystery controls here — mystery is fully automatic.
-- Tests: `tests/Feature/ChoreFlowTest.php`, `tests/Feature/MysteryChoreTest.php`.
+- Tests: `tests/Feature/ChoreFlowTest.php`, `tests/Feature/MysteryChoreTest.php`, `tests/Feature/HouseholdCooldownTest.php`, `tests/Feature/BlockedQuestTest.php`.
+
+## Cooldowns are household-wide
+
+**A chore's cooldown belongs to the family, not the kid.** If one kid claims "Load the dishwasher," it goes `'done'` on *everyone's* board until the cadence boundary passes. The dishes don't need doing three times because there are three children.
+
+`claimantFor(Chore)` is the single source of truth: it returns the completion currently holding a chore — anyone's pending claim, or anyone's approved claim inside the cadence window — or null. A rejected claim clears it, reopening the chore for the whole household.
+
+This is the rule that most invites accidental regression. Any new "has this been done" check must go through `claimantFor()` rather than filtering completions by `profile_id`.
 
 ## Daily quest
 
-`questFor(Profile)` lazily assigns one random `quest_eligible` chore appropriate for the profile's age, once per `HouseholdClock::for($household)->today()`, persisted in `daily_quests` keyed by `(profile_id, quest_date)`. Repeated calls the same household-day return the same row — never re-roll on refresh.
+`questFor(Profile)` lazily assigns one random `quest_eligible` chore appropriate for the profile's age, once per `HouseholdClock::for($household)->today()`, persisted in `daily_quests` keyed by `(profile_id, quest_date)`. Repeated calls the same household-day return the same row — never re-roll on refresh, **except** when the quest is blocked (below).
 
-If `household.require_quest_first` is true, every other chore on the board is `'locked'` until `quest.completed_at` is set (`claimQuest()`). Claiming the quest also runs `bumpStreak()` (see [[streaks]]) and calls `claim()` for the quest's chore, so it flows through the same points/mystery path as any other chore.
+Quests are assigned per kid and independently, so two kids can draw the same chore. Assignment prefers chores nobody has claimed yet, but falls back to the full eligible pool rather than failing — a kid logging in after the family cleared the board still gets a quest. Only a household with zero eligible chores throws.
+
+If `household.require_quest_first` is true, every other chore on the board is `'locked'` until `quest.completed_at` is set (`claimQuest()`). Claiming the quest also calls `claim()` for the quest's chore, so it flows through the same points/mystery path as any other chore. The streak moves at parent approval, not here (see [[streaks]]).
+
+### Auto-reroll of a blocked quest
+
+Because cooldowns are household-wide, a sibling can finish the chore that was handed to you as today's quest. That would dead-end the kid's day: no quest completion, no streak day, and with `require_quest_first` on, a board that never unlocks.
+
+`questFor()` therefore runs `rerollIfTaken()` on every read. If the quest is uncompleted and `claimantFor()` returns a completion belonging to **someone else**, the quest silently moves to a different unclaimed chore. It's invisible to the kid beyond the chore changing — no prompt, no cost.
+
+Four conditions guard it, each protecting something real:
+
+- **Completed quests are never rerolled.** After `claimQuest()` the chore reads as claimed-by-them, which would otherwise look identical to blocked — rerolling would erase a finished quest and cost a streak day.
+- **The kid's own claim doesn't count.** Their pending claim is progress, not a blockage.
+- **`ChoreCadence::Unlimited` quest chores are never rerolled.** They don't lock, so a sibling doing one blocks nobody.
+- **It only swaps onto unclaimed chores.** Landing on another blocked chore leaves the kid exactly as stuck; if nothing is free, the blocked quest is kept so the page still renders.
+
+`rerollQuest()` (the ticket-priced perk and the parent's manual button) shares the same private `assignDifferentChore()`, so both paths avoid claimed chores identically and both clear `revealed_at` — a swapped quest replays the chest animation rather than silently relabelling a card the kid already opened. When nothing is free, `rerollQuest()` returns null, which is how the perk knows to refuse and keep the kid's ticket.
 
 ## Chore board state machine
 
-`boardFor(Profile)` returns each appropriate chore annotated with a state computed by `stateForChore()`:
+`boardFor(Profile)` returns each appropriate chore annotated with a state from `stateFor(Profile, Chore)`:
 
 - `'locked'` — quest not done yet and `require_quest_first` is on.
-- `'pending'` — the profile (or, for the mystery chore, anyone) has an unapproved claim in flight.
-- `'done'` — on cooldown: an `Approved` completion exists within the cadence boundary (`ChoreCadence::Weekly` → last 7 household-days; otherwise last 1).
+- `'pending'` — **this** profile holds the in-flight claim.
+- `'done'` — someone in the household holds it: another kid's pending claim, or anyone's approved claim inside the cadence boundary (`ChoreCadence::Weekly` → last 7 household-days; otherwise last 1).
 - `'ready'` — claimable now. Always `'ready'` for `ChoreCadence::Unlimited` chores — no cooldown, ever.
+
+`'pending'` vs `'done'` is the *only* place the viewing profile matters; both come off the same `claimantFor()` lookup. There is no separate mystery-chore branch — mystery exclusivity and ordinary cooldown are now the same mechanism.
 
 Cooldown/pending boundaries always use `HouseholdClock`, never raw `now()` — the household day rolls over at `day_boundary_hour` (default 4am), not midnight.
 
-**Performance rule:** `boardFor()` resolves `mysteryChoreFor()` **once** before its loop and passes the result into `stateForChore()`. Never call `mysteryChoreFor()` (or any other per-board lookup) inside a per-chore loop — that reintroduces an N+1. `stateFor(Profile, Chore)` (the single-chore convenience wrapper) is the only place that resolves it fresh.
+`boardFor()` still calls `mysteryChoreFor()` once before its loop even though state no longer needs it: that call is what lazily assigns the day's mystery pick, and dropping it would leave the assignment to whichever page happened to ask first.
 
 ## Mystery chore
 
@@ -41,13 +68,13 @@ Cooldown/pending boundaries always use `HouseholdClock`, never raw `now()` — t
 
 1. `min_age === null` only — age-gated chores are never eligible, so the youngest kid always has a fair shot.
 2. `cadence !== ChoreCadence::Unlimited` — an unlimited chore is freely repeatable by everyone, which is incompatible with "first to find it wins." This was a real bug caught by a test, not a spec item — keep it if adding new cadences.
-3. No existing `mysteryClaimant()` — a chore someone has already claimed today (pending or approved-within-cooldown) can't retroactively become the mystery pick.
+3. No existing `claimantFor()` — a chore someone has already claimed today (pending or approved-within-cooldown) can't retroactively become the mystery pick.
 
 Among the survivors, chores with a parent-written `hint` win the draw outright; the full pool is only used when none of them has one. That keeps the Bonus Shop's mystery-hint perk sellable — it should never charge tickets for a chore nobody wrote a clue for. Practical consequence: **if only one or two chores have hints, the mystery becomes guessable**, so hints want to be written broadly rather than on a favourite few.
 
 The pick uses genuine randomness (`Arr::random()`), matching the spin's actual result — **not** the bonus wheel's deterministic display-subset hash (see [[bonus-wheel]]); those are unrelated mechanisms. `ChoreService::MYSTERY_BONUS_POINTS = 500` is added on top of normal points (with spin multiplier) when the claimed chore matches today's pick — see `claim()`.
 
-Exclusivity is household-wide via `mysteryClaimant()`: whoever claims it first locks it for everyone else until a parent rejects the claim (which reopens it) or the cadence cooldown resets.
+Exclusivity is household-wide via `claimantFor()` — the same lock every other chore now uses, so the mystery needs no special-casing on the board.
 
 `rerollMysteryChore()` lets a parent swap the pick from Kids & Points. It refuses once anyone has claimed it — moving the finish line after someone crossed it would rob the winner. Both it and the daily draw go through the private `drawMysteryChore()`, so the fairness rules can't drift apart between them. A kid who already bought a hint sees the *new* chore's hint automatically, since `mysteryHintFor()` resolves against the current pick rather than storing the text.
 

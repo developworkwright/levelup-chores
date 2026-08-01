@@ -197,7 +197,7 @@ class MysteryChoreTest extends TestCase
 
         $this->assertSame(100 + ChoreService::MYSTERY_BONUS_POINTS, $completion->points_awarded);
 
-        $claimant = $this->service()->mysteryClaimant($chore);
+        $claimant = $this->service()->claimantFor($chore);
         $this->assertNotNull($claimant);
         $this->assertSame($winner->id, $claimant->profile_id);
     }
@@ -271,7 +271,7 @@ class MysteryChoreTest extends TestCase
         $completion = $this->service()->claim($first, $chore);
         $this->service()->sendBack($completion, $parent);
 
-        $this->assertNull($this->service()->mysteryClaimant($chore));
+        $this->assertNull($this->service()->claimantFor($chore));
     }
 
     public function test_the_quests_page_teases_the_bonus_amount_without_the_board_entry_showing_it(): void

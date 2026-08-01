@@ -167,6 +167,6 @@ class PerkInventoryService
         }
 
         // A clue is worthless once the race is over.
-        return $this->chores->mysteryClaimant($chore) ? 'Already found today' : null;
+        return $this->chores->claimantFor($chore) ? 'Already found today' : null;
     }
 }

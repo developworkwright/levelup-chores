@@ -192,7 +192,7 @@ new class extends Component
         $household = $this->profile->household;
 
         $mysteryChore = $service->mysteryChoreFor($household);
-        $mysteryClaimant = $mysteryChore ? $service->mysteryClaimant($mysteryChore) : null;
+        $mysteryClaimant = $mysteryChore ? $service->claimantFor($mysteryChore) : null;
 
         $nextMilestone = $service->nextStreakMilestone($this->profile);
 

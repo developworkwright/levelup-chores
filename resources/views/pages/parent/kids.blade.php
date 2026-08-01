@@ -255,7 +255,7 @@ new class extends Component
                 return [$kid->id => $spin?->loadMissing('chore')];
             }),
             'mysteryChore' => $mysteryChore,
-            'mysteryClaimant' => $mysteryChore ? $chores->mysteryClaimant($mysteryChore) : null,
+            'mysteryClaimant' => $mysteryChore ? $chores->claimantFor($mysteryChore) : null,
             'household' => $household,
         ];
     }

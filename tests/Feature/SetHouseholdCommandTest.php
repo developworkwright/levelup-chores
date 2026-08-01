@@ -64,6 +64,19 @@ class SetHouseholdCommandTest extends TestCase
         $this->assertSame(4, $household->day_boundary_hour);
     }
 
+    /**
+     * Re-reads both models before asking. The cooldown window comes from the
+     * chore's household, so a chore loaded before `household:set` ran would
+     * still be carrying the old boundary hour on its cached relation.
+     */
+    private function stateNow(Profile $kid, Chore $chore): string
+    {
+        return app(ChoreService::class)->stateFor(
+            Profile::findOrFail($kid->id),
+            Chore::findOrFail($chore->id),
+        );
+    }
+
     public function test_it_warns_when_the_boundary_moves_later(): void
     {
         // A later boundary starts today later, so a chore already done this
@@ -94,22 +107,20 @@ class SetHouseholdCommandTest extends TestCase
         ]);
         $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create();
-        // Age-gated so it can't be picked as the mystery chore, whose state
-        // rules would mask the cooldown behaviour under test.
-        $chore = Chore::factory()->for($household)->create(['cadence' => 'daily', 'min_age' => 1]);
+        $chore = Chore::factory()->for($household)->create(['cadence' => 'daily']);
 
         Carbon::setTestNow(Carbon::parse('2026-07-30 06:00', 'America/New_York'));
         $completion = app(ChoreService::class)->claim($kid, $chore);
         app(ChoreService::class)->approve($completion, $parent);
 
         Carbon::setTestNow(Carbon::parse('2026-07-30 21:00', 'America/New_York'));
-        $this->assertSame('done', app(ChoreService::class)->stateFor(Profile::find($kid->id), $chore));
+        $this->assertSame('done', $this->stateNow($kid, $chore));
 
         $this->artisan('household:set', ['--day-boundary-hour' => 8])->assertSuccessful();
 
         // 06:00 now falls before the 08:00 boundary, so it counts as
         // yesterday and today's cooldown is clear again.
-        $this->assertSame('ready', app(ChoreService::class)->stateFor(Profile::find($kid->id), $chore));
+        $this->assertSame('ready', $this->stateNow($kid, $chore));
 
         Carbon::setTestNow();
     }
