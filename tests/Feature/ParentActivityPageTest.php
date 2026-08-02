@@ -3,10 +3,13 @@
 namespace Tests\Feature;
 
 use App\Enums\LedgerKind;
+use App\Enums\SiblingOfferKind;
 use App\Enums\TicketKind;
 use App\Models\Household;
 use App\Models\Profile;
+use App\Models\SiblingOffer;
 use App\Services\LedgerService;
+use App\Services\SiblingOfferService;
 use App\Services\TicketService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -36,6 +39,34 @@ class ParentActivityPageTest extends TestCase
         Volt::test('parent.activity')
             ->assertSee('Activity Log')
             ->assertSee('Nova — Feed animals', false);
+    }
+
+    public function test_it_shows_both_legs_of_a_sibling_deal(): void
+    {
+        $household = Household::factory()->create();
+        // Alex does the dishes, Sam pays for it — so Sam is the one who needs a balance.
+        $alex = Profile::factory()->for($household)->create(['name' => 'Alex']);
+        $sam = Profile::factory()->for($household)->create(['name' => 'Sam', 'points' => 400]);
+        $this->actingAsParent($household);
+
+        $offer = SiblingOffer::factory()->create([
+            'household_id' => $household->id,
+            'from_profile_id' => $alex->id,
+            'to_profile_id' => $sam->id,
+            'kind' => SiblingOfferKind::Earning,
+            'description' => 'do your dishes',
+            'points' => 100,
+        ]);
+
+        app(SiblingOfferService::class)->accept($offer, $sam);
+
+        // Transfer is a newer LedgerKind than the feed's colour map — an
+        // unhandled case would blow the whole page up rather than one row.
+        Volt::test('parent.activity')
+            ->assertOk()
+            ->assertSee('Sam → Alex: do your dishes', false)
+            ->assertSee('-100')
+            ->assertSee('+100');
     }
 
     public function test_it_shows_ticket_activity_in_its_own_card(): void

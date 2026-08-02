@@ -25,6 +25,7 @@ new class extends Component
             LedgerKind::Spend => 'var(--fq-negative)',
             LedgerKind::CashIn, LedgerKind::CashOut => 'var(--fq-cyan)',
             LedgerKind::Adjustment => 'var(--fq-violet)',
+            LedgerKind::Transfer => 'var(--fq-magenta)',
         };
     }
 

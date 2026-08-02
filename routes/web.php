@@ -42,6 +42,7 @@ Route::middleware(['auth:profile', 'role:kid'])->prefix('kid')->group(function (
     Volt::route('/quests', 'kid.quests')->name('kid.quests');
     Volt::route('/wheel', 'kid.wheel')->name('kid.wheel');
     Volt::route('/loot', 'kid.loot')->name('kid.loot');
+    Volt::route('/offers', 'kid.offers')->name('kid.offers');
     Volt::route('/bonus', 'kid.bonus')->name('kid.bonus');
     Volt::route('/badges', 'kid.badges')->name('kid.badges');
 });

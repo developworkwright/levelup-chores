@@ -8,10 +8,16 @@
         'quests' => ['label' => 'Quests', 'route' => 'kid.quests'],
         'wheel' => ['label' => 'Bonus Wheel', 'route' => 'kid.wheel'],
         'loot' => ['label' => 'Loot Shop', 'route' => 'kid.loot'],
+        'offers' => ['label' => 'Deals', 'route' => 'kid.offers'],
         'bonus' => ['label' => 'Bonus Shop', 'route' => 'kid.bonus'],
         'badges' => ['label' => 'Badges', 'route' => 'kid.badges'],
     ];
     $dollars = number_format($profile->points / $profile->household->points_per_dollar, 2);
+
+    // The count lives in the shell rather than on the Deals page itself, so a
+    // kid sees a deal waiting from Quests or the Wheel — not only once they
+    // have already gone looking for it.
+    $offersWaiting = App\Models\SiblingOffer::where('to_profile_id', $profile->id)->live()->count();
 @endphp
 
 <div class="mx-auto max-w-[1080px] px-[14px] pb-10">
@@ -103,9 +109,22 @@
                 <a
                     href="{{ route($tab['route']) }}"
                     wire:navigate
-                    class="flex-1 rounded-[14px] border border-transparent px-4 py-[10px] text-center text-sm font-semibold whitespace-nowrap"
+                    class="flex flex-1 items-center justify-center gap-[6px] rounded-[14px] border border-transparent px-4 py-[10px] text-center text-sm font-semibold whitespace-nowrap"
                     style="{{ $active === $key ? 'background: var(--fq-tab-active); color: var(--fq-lime)' : 'background:transparent; color: var(--fq-ink)' }}"
-                >{{ $tab['label'] }}</a>
+                >
+                    {{ $tab['label'] }}
+                    @if ($key === 'offers' && $offersWaiting > 0)
+                        <span
+                            class="inline-flex items-center justify-center font-mono-fq font-bold"
+                            {{-- Geometry inline rather than in arbitrary-value
+                                 utilities: a count badge that silently degrades
+                                 to a bare superscript numeral when the CSS is a
+                                 build behind is worse than no badge at all. --}}
+                            style="background: var(--fq-magenta); color: var(--fq-bg); min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; font-size: 11px; line-height: 1"
+                            title="{{ $offersWaiting }} sibling {{ Str::plural('deal', $offersWaiting) }} waiting on you"
+                        >{{ $offersWaiting }}</span>
+                    @endif
+                </a>
             @endforeach
         </x-quest-board>
     </div>

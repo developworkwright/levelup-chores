@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\Profile;
+use App\Models\SiblingOffer;
 use App\Models\StoreItem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -21,6 +22,29 @@ class KidLootShopTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         return $kid;
+    }
+
+    public function test_the_shop_stays_out_of_the_sibling_deal_business(): void
+    {
+        // Deals live on their own tab: a catalogue of things to buy from a
+        // parent and a negotiation with a sibling are unrelated errands, and
+        // the deal notification deep-links to /kid/offers, not here.
+        $household = Household::factory()->create();
+        $alex = Profile::factory()->for($household)->create(['name' => 'Alex', 'points' => 400]);
+        $sam = $this->loginKid($household, ['name' => 'Sam', 'points' => 0]);
+
+        SiblingOffer::factory()->create([
+            'household_id' => $household->id,
+            'from_profile_id' => $alex->id,
+            'to_profile_id' => $sam->id,
+            'description' => 'Play a game for 30 minutes',
+        ]);
+
+        Volt::test('kid.loot')
+            ->assertOk()
+            ->assertDontSee('Deals for you')
+            ->assertDontSee('Make a deal with a sibling')
+            ->assertDontSee('Play a game for 30 minutes');
     }
 
     public function test_it_groups_the_catalog_into_price_bands(): void

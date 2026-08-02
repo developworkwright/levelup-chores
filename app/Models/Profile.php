@@ -6,6 +6,7 @@ use App\Enums\AccentColor;
 use App\Enums\ProfileRole;
 use Illuminate\Auth\Authenticatable as AuthenticatableTrait;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -105,6 +106,31 @@ class Profile extends Model implements Authenticatable
     public function badges(): BelongsToMany
     {
         return $this->belongsToMany(Badge::class, 'profile_badges')->withPivot('earned_at');
+    }
+
+    public function siblingOffersSent(): HasMany
+    {
+        return $this->hasMany(SiblingOffer::class, 'from_profile_id');
+    }
+
+    public function siblingOffersReceived(): HasMany
+    {
+        return $this->hasMany(SiblingOffer::class, 'to_profile_id');
+    }
+
+    /**
+     * The other kids in the household — who a sibling offer can be pointed at.
+     * Parents are excluded: these are kid-to-kid deals.
+     *
+     * @return Collection<int, self>
+     */
+    public function siblings(): Collection
+    {
+        return self::where('household_id', $this->household_id)
+            ->where('role', ProfileRole::Kid)
+            ->whereKeyNot($this->getKey())
+            ->orderBy('name')
+            ->get();
     }
 
     public function isParent(): bool
