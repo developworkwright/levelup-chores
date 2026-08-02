@@ -12,12 +12,15 @@ use App\Models\Profile;
 use Illuminate\Support\Arr;
 
 /**
- * The daily bonus chest — one per kid per household-day, on the days a streak
- * milestone chest isn't already waiting.
+ * The daily bonus chest — one per kid per household-day, every day.
  *
  * Everyone gets one whether or not they've done anything, because the habit of
  * turning up is worth building. Clearing the day's quest doesn't unlock it, it
  * improves the roll — so effort shifts the odds rather than the entitlement.
+ *
+ * Independent of the streak chest (see ChoreService): a milestone day hands
+ * over both, because the milestone is meant to add to the day rather than
+ * spend the reward that was already coming.
  */
 class ChestService
 {
@@ -71,13 +74,13 @@ class ChestService
     }
 
     /**
-     * A bonus chest is available on any day the kid hasn't already opened one
-     * and doesn't have a streak chest waiting — one chest a day, and the
-     * milestone one takes precedence when both would apply.
+     * A bonus chest is available on any day the kid hasn't already opened one.
+     * A pending streak chest is beside the point — that one is earned, this one
+     * just turns up.
      */
     public function isAvailable(Profile $profile): bool
     {
-        return $profile->pending_streak_chest === null && ! $this->openedToday($profile);
+        return ! $this->openedToday($profile);
     }
 
     /** Rolls, grants and records. Null when there's no chest to open. */

@@ -66,7 +66,7 @@ Buying grants an `owned_perks` row; the effect fires when the kid chooses, via `
 
 Rewards are tickets, points, XP, or a perk straight into the inventory. A perk roll in a household with every perk disabled falls back to tickets rather than handing over an empty chest.
 
-`isAvailable()` returns false while a streak chest is pending — one chest a day, and the milestone one wins. The daily chest renders as **its own block** on the Quests page, not as a branch of the streak-chest conditional, so the milestone track stays visible.
+`isAvailable()` gates on nothing but "has today's chest already been opened" — a pending streak chest is irrelevant to it. The two chests are independent, and on a milestone day both stack on the Quests page: the daily one turns up regardless, the streak one is earned, and the milestone adds to the day rather than spending what was already coming. The daily chest renders as **its own block**, not as a branch of the streak-chest conditional, so the milestone track stays visible.
 
 ## The perks themselves
 

@@ -77,6 +77,18 @@ new class extends Component
 
         abort_unless($this->profile->isKid(), 403);
 
+        $this->syncChests();
+
+        $this->questDoneOnArrival = app(ChoreService::class)->isQuestDoneToday($this->profile);
+    }
+
+    /**
+     * Points both chest snapshots at what's true right now. Only ever called
+     * when nothing is mid-reveal — see the property docblocks for why these
+     * are snapshots in the first place.
+     */
+    private function syncChests(): void
+    {
         $this->pendingChestDay = $this->profile->pending_streak_chest;
         // STREAK_BONUSES is denominated in dollars, but every other number a
         // kid sees is points — so convert once here and never show dollars.
@@ -84,7 +96,6 @@ new class extends Component
             ? (ChoreService::STREAK_BONUSES[$this->pendingChestDay] ?? 0) * $this->profile->household->points_per_dollar
             : null;
 
-        $this->questDoneOnArrival = app(ChoreService::class)->isQuestDoneToday($this->profile);
         $this->dailyChestAvailable = app(ChestService::class)->isAvailable($this->profile);
     }
 
@@ -129,9 +140,17 @@ new class extends Component
     {
         $chest = app(ChestService::class)->open($this->profile);
 
-        if ($chest) {
-            $this->dailyChestPrize = app(ChestService::class)->describe($chest);
+        // Nothing to open means today's chest was already claimed elsewhere —
+        // another tab, or a back-button visit to a page rendered before it was.
+        // Re-snapshot instead of revealing a chest with nothing in it: an empty
+        // prize card is the one outcome the chest must never show.
+        if (! $chest) {
+            $this->syncChests();
+
+            return;
         }
+
+        $this->dailyChestPrize = app(ChestService::class)->describe($chest);
     }
 
     public function usePerk(string $effect): void
@@ -308,11 +327,10 @@ new class extends Component
     <div class="grid grid-cols-1 gap-[14px] lg:grid-cols-[minmax(0,1.6fr)_minmax(260px,1fr)]">
         {{-- Left column --}}
         <div class="flex flex-col gap-[14px]">
-            {{-- Its own block, not an arm of the streak-chest branch: the
-                 milestone track below is useful every day and shouldn't
-                 disappear just because a chest happens to be waiting.
-                 ChestService already guarantees the two chests never
-                 both show. --}}
+            {{-- The two chests are independent, and on a milestone day both
+                 stack here — the daily one turns up regardless, the streak one
+                 is earned. The milestone track below stays put either way; it's
+                 useful every day, not only when a chest is waiting. --}}
             @if ($dailyChestAvailable)
                 <x-chest
                     wire-key="daily-chest"

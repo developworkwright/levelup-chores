@@ -82,13 +82,26 @@ class DailyChestTest extends TestCase
         $this->assertSame(2, DailyChest::where('profile_id', $kid->id)->count());
     }
 
-    public function test_a_pending_streak_chest_takes_precedence(): void
+    public function test_a_pending_streak_chest_does_not_hold_back_the_daily_one(): void
     {
-        // One chest a day — a milestone day is the streak chest's, not this one's.
+        // The two are independent: a milestone adds a chest to the day rather
+        // than spending the one that was already coming.
         $kid = $this->kid(['pending_streak_chest' => 3]);
 
-        $this->assertFalse($this->chests()->isAvailable($kid));
-        $this->assertNull($this->chests()->open($kid));
+        $this->assertTrue($this->chests()->isAvailable($kid));
+        $this->assertNotNull($this->chests()->open($kid));
+        $this->assertSame(3, $kid->refresh()->pending_streak_chest);
+    }
+
+    public function test_a_milestone_day_shows_both_chests(): void
+    {
+        $kid = $this->kid(['pending_streak_chest' => 3, 'streak' => 3]);
+
+        Auth::guard('profile')->login($kid);
+
+        Volt::test('kid.quests')
+            ->assertSee('Daily Chest')
+            ->assertSee('Streak Chest');
     }
 
     public function test_the_chest_records_whether_the_quest_was_done(): void
@@ -222,6 +235,49 @@ class DailyChestTest extends TestCase
 
             $this->assertNotSame('', trim($this->chests()->describe($chest)), "{$kind} described as empty.");
         }
+    }
+
+    public function test_a_streak_chest_queued_after_render_leaves_the_daily_chest_alone(): void
+    {
+        // A parent approving a milestone quest mid-visit queues the streak
+        // chest. That used to cancel the daily chest out from under the kid,
+        // revealing an empty prize card; now the two simply coexist.
+        $kid = $this->kid();
+
+        Auth::guard('profile')->login($kid);
+
+        $component = Volt::test('kid.quests')->assertSee('Daily Chest');
+
+        $kid->update(['pending_streak_chest' => 3]);
+
+        $component->call('openDailyChest');
+
+        $prize = $component->get('dailyChestPrize');
+
+        $this->assertNotNull($prize);
+        $this->assertNotSame('', trim($prize));
+        $this->assertSame(1, DailyChest::where('profile_id', $kid->id)->count());
+        $this->assertSame(3, $kid->refresh()->pending_streak_chest);
+    }
+
+    public function test_a_chest_already_opened_elsewhere_disappears_instead_of_revealing_nothing(): void
+    {
+        $kid = $this->kid();
+
+        Auth::guard('profile')->login($kid);
+
+        $component = Volt::test('kid.quests')->assertSee('Daily Chest');
+
+        // A second tab (or a back-button visit) gets there first.
+        $this->chests()->open($kid->refresh());
+
+        $component->call('openDailyChest');
+
+        $this->assertNull($component->get('dailyChestPrize'));
+        $this->assertFalse($component->get('dailyChestAvailable'));
+        $this->assertSame(1, DailyChest::where('profile_id', $kid->id)->count());
+
+        $component->assertDontSee('Daily Chest');
     }
 
     public function test_the_quests_page_hides_the_chest_once_opened(): void
