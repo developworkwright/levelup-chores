@@ -10,7 +10,7 @@ use NotificationChannels\WebPush\WebPushMessage;
 
 /**
  * Sent to the kid a sibling offer is pointed at. Only lands if that kid has a
- * push subscription; the badge on their Deals tab is the reliable signal.
+ * push subscription; the badge on their Trades tab is the reliable signal.
  */
 class SiblingOfferReceived extends Notification implements ShouldQueue
 {

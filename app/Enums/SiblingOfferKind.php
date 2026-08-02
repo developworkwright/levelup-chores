@@ -3,7 +3,7 @@
 namespace App\Enums;
 
 /**
- * Which side of the deal the kid who *sent* the offer is on.
+ * Which side of the trade the kid who *sent* the offer is on.
  */
 enum SiblingOfferKind: string
 {

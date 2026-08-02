@@ -120,7 +120,7 @@ class Profile extends Model implements Authenticatable
 
     /**
      * The other kids in the household — who a sibling offer can be pointed at.
-     * Parents are excluded: these are kid-to-kid deals.
+     * Parents are excluded: these are kid-to-kid trades.
      *
      * @return Collection<int, self>
      */

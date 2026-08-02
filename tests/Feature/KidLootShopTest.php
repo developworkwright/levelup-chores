@@ -24,11 +24,11 @@ class KidLootShopTest extends TestCase
         return $kid;
     }
 
-    public function test_the_shop_stays_out_of_the_sibling_deal_business(): void
+    public function test_the_shop_stays_out_of_the_sibling_trade_business(): void
     {
-        // Deals live on their own tab: a catalogue of things to buy from a
+        // Trades live on their own tab: a catalogue of things to buy from a
         // parent and a negotiation with a sibling are unrelated errands, and
-        // the deal notification deep-links to /kid/offers, not here.
+        // the trade notification deep-links to /kid/offers, not here.
         $household = Household::factory()->create();
         $alex = Profile::factory()->for($household)->create(['name' => 'Alex', 'points' => 400]);
         $sam = $this->loginKid($household, ['name' => 'Sam', 'points' => 0]);
@@ -42,8 +42,8 @@ class KidLootShopTest extends TestCase
 
         Volt::test('kid.loot')
             ->assertOk()
-            ->assertDontSee('Deals for you')
-            ->assertDontSee('Make a deal with a sibling')
+            ->assertDontSee('Trades for you')
+            ->assertDontSee('Make a trade with a sibling')
             ->assertDontSee('Play a game for 30 minutes');
     }
 

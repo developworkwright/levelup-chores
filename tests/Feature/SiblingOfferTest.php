@@ -270,7 +270,7 @@ class SiblingOfferTest extends TestCase
         $this->assertSame(0, SiblingOffer::count());
     }
 
-    public function test_a_parent_is_not_a_valid_side_of_a_sibling_deal(): void
+    public function test_a_parent_is_not_a_valid_side_of_a_sibling_trade(): void
     {
         $household = Household::factory()->create();
         $alex = Profile::factory()->for($household)->create(['points' => 500]);
@@ -280,7 +280,7 @@ class SiblingOfferTest extends TestCase
         $this->service()->offer($alex, $parent, SiblingOfferKind::Paying, 'Play a game', 100);
     }
 
-    public function test_an_empty_or_oversized_deal_is_rejected(): void
+    public function test_an_empty_or_oversized_trade_is_rejected(): void
     {
         [, $alex, $sam] = $this->twoKids();
 

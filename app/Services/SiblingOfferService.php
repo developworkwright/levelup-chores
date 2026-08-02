@@ -17,7 +17,7 @@ use InvalidArgumentException;
 use Throwable;
 
 /**
- * Kid-to-kid deals for one-off favours. Two shapes, one table:
+ * Kid-to-kid trades for one-off favours. Two shapes, one table:
  *
  * - `Paying`  — the sender pays. Points come out of their balance the moment
  *   they make the offer, exactly as {@see StoreService::redeem()} deducts up
@@ -51,7 +51,7 @@ class SiblingOfferService
         $description = trim($description);
 
         if ($description === '') {
-            throw new InvalidArgumentException('Say what the deal is first.');
+            throw new InvalidArgumentException('Say what the trade is first.');
         }
 
         if (mb_strlen($description) > self::MAX_DESCRIPTION) {
@@ -63,7 +63,7 @@ class SiblingOfferService
         }
 
         if (! $from->isKid() || ! $to->isKid()) {
-            throw new InvalidArgumentException('Sibling deals are between kids.');
+            throw new InvalidArgumentException('Sibling trades are between kids.');
         }
 
         if ($from->household_id !== $to->household_id || $from->is($to)) {
@@ -198,7 +198,7 @@ class SiblingOfferService
     }
 
     /**
-     * The one place an offer ends without a deal. Every such path routes
+     * The one place an offer ends without a trade. Every such path routes
      * through here so an escrowed offer can never be closed without its refund.
      */
     private function settle(SiblingOffer $offer, SiblingOfferStatus $status, string $reason): void
@@ -226,18 +226,18 @@ class SiblingOfferService
     }
 
     /**
-     * @param  'to_profile_id'|'from_profile_id'  $column  which side of the deal may take this action
+     * @param  'to_profile_id'|'from_profile_id'  $column  which side of the trade may take this action
      *
      * @throws OfferUnavailableException
      */
     private function assertAnswerableBy(SiblingOffer $offer, Profile $actor, string $column): void
     {
         if ($offer->{$column} !== $actor->id) {
-            throw new OfferUnavailableException('That deal is not yours to answer.');
+            throw new OfferUnavailableException('That trade is not yours to answer.');
         }
 
         if (! $offer->isLive()) {
-            throw new OfferUnavailableException('That deal is no longer up for grabs.');
+            throw new OfferUnavailableException('That trade is no longer up for grabs.');
         }
     }
 
@@ -252,7 +252,7 @@ class SiblingOfferService
             : "{$from->name} will {$offer->description} for {$offer->points}.";
 
         try {
-            $to->notify(new SiblingOfferReceived('New deal offered', $body));
+            $to->notify(new SiblingOfferReceived('New trade offered', $body));
         } catch (Throwable $e) {
             Log::error('Sibling offer notification failed.', [
                 'sibling_offer_id' => $offer->id,

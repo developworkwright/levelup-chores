@@ -16,7 +16,7 @@ new class extends Component
 
     public ?string $flashMessage = null;
 
-    /** Transient — the deal form is open for this visit only. */
+    /** Transient — the trade form is open for this visit only. */
     public bool $composingOffer = false;
 
     public string $offerKind = 'paying';
@@ -44,7 +44,7 @@ new class extends Component
 
     /**
      * The sibling buttons double as the submit: a kid picks who it goes to and
-     * the deal is sent, rather than choosing and then confirming.
+     * the trade is sent, rather than choosing and then confirming.
      */
     public function sendOffer(int $siblingId): void
     {
@@ -94,8 +94,8 @@ new class extends Component
 
         $gained = $offer->kind === SiblingOfferKind::Paying;
         $this->flashMessage = $gained
-            ? "Deal! Now go {$offer->description}."
-            : "Deal! {$offer->fromProfile->name} owes you: {$offer->description}.";
+            ? "Traded! Now go {$offer->description}."
+            : "Traded! {$offer->fromProfile->name} owes you: {$offer->description}.";
 
         if ($gained) {
             $this->dispatch('celebrate', message: "+{$offer->points} from {$offer->fromProfile->name}!");
@@ -133,7 +133,7 @@ new class extends Component
 
     public function with(): array
     {
-        // No scheduler in this app, so lapsed deals are settled lazily off the
+        // No scheduler in this app, so lapsed trades are settled lazily off the
         // page that owns them. Household-wide, so whoever opens this tab first
         // releases everybody's held points.
         app(SiblingOfferService::class)->expireStale($this->profile->household);
@@ -151,7 +151,7 @@ new class extends Component
                 ->with('toProfile')
                 ->oldest('expires_at')
                 ->get(),
-            // A short tail of settled deals so an answer doesn't just make the
+            // A short tail of settled trades so an answer doesn't just make the
             // offer vanish with no explanation.
             'settledOffers' => SiblingOffer::where(fn ($q) => $q
                 ->where('from_profile_id', $this->profile->id)
@@ -168,8 +168,8 @@ new class extends Component
 <x-kid.shell :profile="$profile" active="offers">
     <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
-            <h2 class="font-baloo text-[26px] font-extrabold">Deals</h2>
-            <p class="text-sm text-fq-text-3">Trade points with a sibling for a one-off favour. Deals run out after a day.</p>
+            <h2 class="font-baloo text-[26px] font-extrabold">Trades</h2>
+            <p class="text-sm text-fq-text-3">Swap points with a sibling for a one-off favour. Trades run out after a day.</p>
         </div>
         <span class="rounded-[10px] border border-fq-line-2 bg-fq-sunk px-3 py-2 font-mono-fq text-xs text-fq-lime">
             BALANCE {{ $profile->points }} PTS
@@ -182,15 +182,15 @@ new class extends Component
 
     @if ($siblings->isEmpty())
         <p class="mt-6 rounded-[20px] border border-dashed border-fq-line-4 bg-fq-panel p-6 text-center text-sm text-fq-text-4">
-            Deals need a sibling to make them with.
+            Trades need a sibling to make them with.
         </p>
     @else
-        {{-- Deals a sibling has sent this kid, first: this is the tab's whole
+        {{-- Trades a sibling has sent this kid, first: this is the tab's whole
              reason to exist, and the one thing someone else is waiting on. --}}
         @if ($incomingOffers->isNotEmpty())
             <div class="mt-4 rounded-[24px] border p-5" style="border-color: var(--fq-magenta); background: var(--fq-panel)">
                 <div class="flex items-baseline gap-[10px]">
-                    <h3 class="font-baloo text-[19px] font-extrabold">Deals for you</h3>
+                    <h3 class="font-baloo text-[19px] font-extrabold">Trades for you</h3>
                     <span class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
                         {{ $incomingOffers->count() }} waiting
                     </span>
@@ -236,7 +236,7 @@ new class extends Component
                                         wire:click="acceptOffer({{ $offer->id }})"
                                         class="ml-auto rounded-[13px] px-4 py-[10px] text-[13px] font-semibold text-fq-bg transition hover:brightness-110"
                                         style="background: var(--fq-lime)"
-                                    >Deal!</button>
+                                    >Trade!</button>
                                 @endif
 
                                 <button
@@ -256,7 +256,7 @@ new class extends Component
         <div class="mt-4 rounded-[24px] border border-dashed border-fq-line-4 bg-fq-panel p-5">
             <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <h3 class="font-baloo text-[19px] font-extrabold">Make a deal with a sibling</h3>
+                    <h3 class="font-baloo text-[19px] font-extrabold">Make a trade with a sibling</h3>
                     <p class="mt-1 text-[13px] text-fq-text-4">Pay them to do something, or get paid to do it yourself.</p>
                 </div>
 
@@ -264,7 +264,7 @@ new class extends Component
                     type="button"
                     wire:click="toggleCompose"
                     class="rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[14px] py-[9px] text-[13px] text-fq-text-2-b transition hover:text-fq-text"
-                >{{ $composingOffer ? 'Never mind' : 'New deal' }}</button>
+                >{{ $composingOffer ? 'Never mind' : 'New trade' }}</button>
             </div>
 
             @if ($composingOffer)
@@ -340,7 +340,7 @@ new class extends Component
 
             @if ($settledOffers->isNotEmpty())
                 <div class="mt-4 border-t border-fq-line pt-[14px]">
-                    <p class="mb-[10px] font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Recent deals</p>
+                    <p class="mb-[10px] font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Recent trades</p>
 
                     <div class="flex flex-col gap-[6px]">
                         @foreach ($settledOffers as $offer)

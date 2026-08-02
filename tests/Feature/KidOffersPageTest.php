@@ -24,7 +24,7 @@ class KidOffersPageTest extends TestCase
         return $kid;
     }
 
-    public function test_the_deal_form_lists_siblings_but_not_the_viewer_or_a_parent(): void
+    public function test_the_trade_form_lists_siblings_but_not_the_viewer_or_a_parent(): void
     {
         $household = Household::factory()->create();
         Profile::factory()->for($household)->create(['name' => 'Sam']);
@@ -38,15 +38,15 @@ class KidOffersPageTest extends TestCase
             ->assertDontSee('Mum');
     }
 
-    public function test_an_only_child_is_not_offered_the_deal_card_at_all(): void
+    public function test_an_only_child_is_told_why_the_tab_is_empty(): void
     {
         $household = Household::factory()->create();
         $this->loginKid($household, ['points' => 500]);
 
-        Volt::test('kid.offers')->assertDontSee('Make a deal with a sibling');
+        Volt::test('kid.offers')->assertDontSee('Make a trade with a sibling');
     }
 
-    public function test_sending_a_deal_holds_the_points_and_closes_the_form(): void
+    public function test_sending_a_trade_holds_the_points_and_closes_the_form(): void
     {
         $household = Household::factory()->create();
         $sam = Profile::factory()->for($household)->create(['name' => 'Sam']);
@@ -64,7 +64,7 @@ class KidOffersPageTest extends TestCase
         $this->assertSame(400, $alex->refresh()->points);
     }
 
-    public function test_a_deal_you_cannot_afford_is_refused_with_the_shortfall(): void
+    public function test_a_trade_you_cannot_afford_is_refused_with_the_shortfall(): void
     {
         $household = Household::factory()->create();
         $sam = Profile::factory()->for($household)->create(['name' => 'Sam']);
@@ -81,7 +81,7 @@ class KidOffersPageTest extends TestCase
         $this->assertSame(0, SiblingOffer::count());
     }
 
-    public function test_a_deal_with_nothing_typed_in_it_is_refused(): void
+    public function test_a_trade_with_nothing_typed_in_it_is_refused(): void
     {
         $household = Household::factory()->create();
         $sam = Profile::factory()->for($household)->create(['name' => 'Sam']);
@@ -92,22 +92,22 @@ class KidOffersPageTest extends TestCase
             ->set('offerDescription', '   ')
             ->set('offerPoints', '100')
             ->call('sendOffer', $sam->id)
-            ->assertSee('Say what the deal is first');
+            ->assertSee('Say what the trade is first');
 
         $this->assertSame(0, SiblingOffer::count());
     }
 
-    public function test_nothing_incoming_means_no_deals_section(): void
+    public function test_nothing_incoming_means_no_trades_section(): void
     {
         $household = Household::factory()->create();
         Profile::factory()->for($household)->create();
         $this->loginKid($household, ['points' => 100]);
 
         // An empty shelf reads as a loading bug, same as the price bands.
-        Volt::test('kid.offers')->assertDontSee('Deals for you');
+        Volt::test('kid.offers')->assertDontSee('Trades for you');
     }
 
-    public function test_an_incoming_deal_renders_and_accepting_it_moves_the_points(): void
+    public function test_an_incoming_trade_renders_and_accepting_it_moves_the_points(): void
     {
         $household = Household::factory()->create();
         $alex = Profile::factory()->for($household)->create(['name' => 'Alex', 'points' => 400]);
@@ -122,17 +122,17 @@ class KidOffersPageTest extends TestCase
         ]);
 
         Volt::test('kid.offers')
-            ->assertSee('Deals for you')
+            ->assertSee('Trades for you')
             ->assertSee('Play a game for 30 minutes')
             ->assertSee('100 pts')
             ->call('acceptOffer', $offer->id)
-            ->assertDontSee('Deals for you');
+            ->assertDontSee('Trades for you');
 
         $this->assertSame(100, $sam->refresh()->points);
         $this->assertSame(SiblingOfferStatus::Accepted, $offer->refresh()->status);
     }
 
-    public function test_an_incoming_deal_counts_down_rather_than_describing_a_moment(): void
+    public function test_an_incoming_trade_counts_down_rather_than_describing_a_moment(): void
     {
         $household = Household::factory()->create();
         $alex = Profile::factory()->for($household)->create(['name' => 'Alex', 'points' => 400]);
@@ -152,7 +152,7 @@ class KidOffersPageTest extends TestCase
             ->assertDontSee('23 hours from now');
     }
 
-    public function test_declining_an_incoming_deal_refunds_the_sender(): void
+    public function test_declining_an_incoming_trade_refunds_the_sender(): void
     {
         $household = Household::factory()->create();
         $alex = Profile::factory()->for($household)->create(['name' => 'Alex', 'points' => 400]);
@@ -171,7 +171,7 @@ class KidOffersPageTest extends TestCase
         $this->assertSame(0, $sam->refresh()->points);
     }
 
-    public function test_a_deal_you_would_have_to_pay_for_but_cannot_afford_offers_no_accept_button(): void
+    public function test_a_trade_you_would_have_to_pay_for_but_cannot_afford_offers_no_accept_button(): void
     {
         $household = Household::factory()->create();
         $alex = Profile::factory()->for($household)->create(['name' => 'Alex']);
@@ -187,10 +187,10 @@ class KidOffersPageTest extends TestCase
 
         Volt::test('kid.offers')
             ->assertSee('Need 40')
-            ->assertDontSee('Deal!');
+            ->assertDontSee('Trade!');
     }
 
-    public function test_taking_back_your_own_deal_refunds_you(): void
+    public function test_taking_back_your_own_trade_refunds_you(): void
     {
         $household = Household::factory()->create();
         $sam = Profile::factory()->for($household)->create(['name' => 'Sam']);
@@ -209,7 +209,7 @@ class KidOffersPageTest extends TestCase
         $this->assertSame(500, $alex->refresh()->points);
     }
 
-    public function test_opening_the_tab_sweeps_and_refunds_a_lapsed_deal(): void
+    public function test_opening_the_tab_sweeps_and_refunds_a_lapsed_trade(): void
     {
         $household = Household::factory()->create();
         $sam = Profile::factory()->for($household)->create(['name' => 'Sam']);
@@ -229,7 +229,7 @@ class KidOffersPageTest extends TestCase
         $this->assertSame(SiblingOfferStatus::Expired, $offer->refresh()->status);
     }
 
-    public function test_the_deals_tab_carries_a_count_of_deals_waiting_on_you(): void
+    public function test_the_trades_tab_carries_a_count_of_trades_waiting_on_you(): void
     {
         $household = Household::factory()->create();
         $alex = Profile::factory()->for($household)->create(['name' => 'Alex', 'points' => 400]);
@@ -241,10 +241,10 @@ class KidOffersPageTest extends TestCase
             'to_profile_id' => $sam->id,
         ]);
 
-        Volt::test('kid.offers')->assertSee('2 sibling deals waiting on you');
+        Volt::test('kid.offers')->assertSee('2 sibling trades waiting on you');
     }
 
-    public function test_a_deal_you_sent_does_not_badge_your_own_tab(): void
+    public function test_a_trade_you_sent_does_not_badge_your_own_tab(): void
     {
         $household = Household::factory()->create();
         $sam = Profile::factory()->for($household)->create(['name' => 'Sam']);

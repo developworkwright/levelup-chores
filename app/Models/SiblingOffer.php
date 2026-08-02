@@ -13,7 +13,7 @@ class SiblingOffer extends Model
 {
     use HasFactory;
 
-    /** How long a kid has to answer before the deal lapses. */
+    /** How long a kid has to answer before the trade lapses. */
     public const LIFETIME_HOURS = 24;
 
     protected $fillable = [

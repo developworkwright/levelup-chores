@@ -14,7 +14,7 @@ enum SiblingOfferStatus: string
     {
         return match ($this) {
             self::Pending => 'Waiting',
-            self::Accepted => 'Deal!',
+            self::Accepted => 'Traded',
             self::Declined => 'Turned down',
             self::Cancelled => 'Taken back',
             self::Expired => 'Ran out of time',

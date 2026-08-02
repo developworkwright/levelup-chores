@@ -8,14 +8,14 @@
         'quests' => ['label' => 'Quests', 'route' => 'kid.quests'],
         'wheel' => ['label' => 'Bonus Wheel', 'route' => 'kid.wheel'],
         'loot' => ['label' => 'Loot Shop', 'route' => 'kid.loot'],
-        'offers' => ['label' => 'Deals', 'route' => 'kid.offers'],
+        'offers' => ['label' => 'Trades', 'route' => 'kid.offers'],
         'bonus' => ['label' => 'Bonus Shop', 'route' => 'kid.bonus'],
         'badges' => ['label' => 'Badges', 'route' => 'kid.badges'],
     ];
     $dollars = number_format($profile->points / $profile->household->points_per_dollar, 2);
 
-    // The count lives in the shell rather than on the Deals page itself, so a
-    // kid sees a deal waiting from Quests or the Wheel — not only once they
+    // The count lives in the shell rather than on the Trades page itself, so a
+    // kid sees a trade waiting from Quests or the Wheel — not only once they
     // have already gone looking for it.
     $offersWaiting = App\Models\SiblingOffer::where('to_profile_id', $profile->id)->live()->count();
 @endphp
@@ -121,7 +121,7 @@
                                  to a bare superscript numeral when the CSS is a
                                  build behind is worse than no badge at all. --}}
                             style="background: var(--fq-magenta); color: var(--fq-bg); min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; font-size: 11px; line-height: 1"
-                            title="{{ $offersWaiting }} sibling {{ Str::plural('deal', $offersWaiting) }} waiting on you"
+                            title="{{ $offersWaiting }} sibling {{ Str::plural('trade', $offersWaiting) }} waiting on you"
                         >{{ $offersWaiting }}</span>
                     @endif
                 </a>

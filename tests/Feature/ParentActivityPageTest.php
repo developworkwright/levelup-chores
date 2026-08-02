@@ -41,7 +41,7 @@ class ParentActivityPageTest extends TestCase
             ->assertSee('Nova — Feed animals', false);
     }
 
-    public function test_it_shows_both_legs_of_a_sibling_deal(): void
+    public function test_it_shows_both_legs_of_a_sibling_trade(): void
     {
         $household = Household::factory()->create();
         // Alex does the dishes, Sam pays for it — so Sam is the one who needs a balance.
