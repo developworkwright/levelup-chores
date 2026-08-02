@@ -273,6 +273,8 @@ new class extends Component
 
         $nextMilestone = $service->nextStreakMilestone($this->profile);
 
+        $earnedToday = $service->pointsEarnedToday($this->profile);
+
         $pointsPerDollar = $this->profile->household->points_per_dollar;
 
         $streakBonuses = collect(ChoreService::STREAK_BONUSES)
@@ -323,6 +325,15 @@ new class extends Component
             'household' => $household,
             'goalPercent' => $household->goal_target > 0
                 ? min(100, round($household->goal_now / $household->goal_target * 100))
+                : 0,
+            'goalContributors' => $service->goalContributors($household),
+            // The plan made on the Goal Planner, reported back where the work
+            // actually happens — a target you only see on the page you set it
+            // on is a wish rather than something to play against.
+            'dailyGoal' => $this->profile->daily_points_goal,
+            'earnedToday' => $earnedToday,
+            'dailyGoalPercent' => $this->profile->daily_points_goal > 0
+                ? min(100, (int) round($earnedToday / $this->profile->daily_points_goal * 100))
                 : 0,
             'badges' => Badge::all(),
             'earnedBadgeKeys' => $this->profile->badges->pluck('key'),
@@ -771,6 +782,47 @@ new class extends Component
 
         {{-- Right column --}}
         <div class="flex flex-col gap-[14px]">
+            {{-- Above the family goal on purpose: this is the one number on the
+                 page a kid controls entirely on their own today. --}}
+            <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
+                <div class="flex items-center justify-between">
+                    <h3 class="font-baloo text-lg font-bold">Today's Target</h3>
+                    @if ($dailyGoal)
+                        <span class="font-mono-fq text-[10px] {{ $earnedToday >= $dailyGoal ? 'text-fq-gold' : 'text-fq-lime' }}">
+                            {{ $dailyGoalPercent }}%
+                        </span>
+                    @endif
+                </div>
+
+                @if ($dailyGoal)
+                    <div class="mt-3 h-4 overflow-hidden rounded-full border border-fq-line bg-fq-track">
+                        <div
+                            class="h-full rounded-full transition-[width] duration-500"
+                            style="width:{{ $dailyGoalPercent }}%;background:linear-gradient(90deg, var(--fq-cyan), var(--fq-lime))"
+                        ></div>
+                    </div>
+                    <p class="mt-2 font-mono-fq text-[11px] text-fq-text-4">
+                        {{ number_format($earnedToday) }} / {{ number_format($dailyGoal) }} PTS
+                    </p>
+                    <p class="mt-[6px] text-[13px] {{ $earnedToday >= $dailyGoal ? 'font-semibold text-fq-lime' : 'text-fq-text-5' }}">
+                        @if ($earnedToday >= $dailyGoal)
+                            Target smashed. Anything else today is bonus.
+                        @else
+                            {{ number_format($dailyGoal - $earnedToday) }} more points to hit today's target.
+                        @endif
+                    </p>
+                @else
+                    <p class="mt-2 text-[13px] text-fq-text-5">
+                        Pick a points-a-day target and see when you'll get what you're saving for.
+                    </p>
+                    <a
+                        href="{{ route('kid.goal') }}"
+                        wire:navigate
+                        class="mt-3 inline-block rounded-[12px] border border-fq-line-3 bg-fq-sunk px-[14px] py-[9px] text-[13px] text-fq-text-2-b transition hover:border-fq-lime hover:text-fq-text"
+                    >Make a plan</a>
+                @endif
+            </div>
+
             <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
                 <div class="flex items-center justify-between">
                     <h3 class="font-baloo text-lg font-bold">Family Goal</h3>
@@ -786,6 +838,16 @@ new class extends Component
                 <p class="mt-2 font-mono-fq text-[11px] text-fq-text-4">
                     {{ $household->goal_now }} / {{ $household->goal_target }} PTS · EVERYONE'S POINTS COUNT
                 </p>
+
+                <div class="mt-4 border-t border-fq-divider pt-[14px]">
+                    <x-goal-mvp :contributors="$goalContributors" />
+                </div>
+
+                <a
+                    href="{{ route('kid.goal') }}"
+                    wire:navigate
+                    class="mt-3 inline-block font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase transition hover:text-fq-lime"
+                >Plan it out &rarr;</a>
             </div>
 
             <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">

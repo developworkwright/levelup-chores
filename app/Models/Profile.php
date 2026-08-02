@@ -47,6 +47,8 @@ class Profile extends Model implements Authenticatable
         'streak',
         'pending_streak_chest',
         'saving_for_store_item_id',
+        'daily_points_goal',
+        'goal_contribution',
     ];
 
     protected $hidden = [

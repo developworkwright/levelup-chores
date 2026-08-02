@@ -52,6 +52,9 @@ class ChoreService
     /** Safety bound on the streak walk-back so odd data can't loop forever. */
     private const MAX_STREAK_DAYS = 366;
 
+    /** How many finished household days a pace figure averages over. */
+    public const PACE_DAYS = 7;
+
     public function __construct(
         private LedgerService $ledger,
         private SpinService $spin,
@@ -834,6 +837,101 @@ class ChoreService
         return null;
     }
 
+    /**
+     * Points this kid has banked so far today — what the daily target on the
+     * Quests page is measured against.
+     *
+     * Pending completions count. The work is done as far as the kid is
+     * concerned, and a bar that slid backwards while a parent hadn't got round
+     * to approving would punish them for someone else's inbox. A rejected one
+     * drops back out, which is what sending something back means everywhere.
+     */
+    public function pointsEarnedToday(Profile $profile): int
+    {
+        $clock = HouseholdClock::for($profile->household);
+
+        return (int) ChoreCompletion::where('profile_id', $profile->id)
+            ->where('status', '!=', CompletionStatus::Rejected)
+            ->where('submitted_at', '>=', $clock->startOf($clock->today()))
+            ->sum('points_awarded');
+    }
+
+    /** Average points a day this kid has actually been banking lately. */
+    public function dailyPace(Profile $profile, int $days = self::PACE_DAYS): float
+    {
+        return $this->paceFor([$profile->id], $profile->household, $days);
+    }
+
+    /** The same figure for every kid in the household added together. */
+    public function householdDailyPace(Household $household, int $days = self::PACE_DAYS): float
+    {
+        $kidIds = $household->profiles()
+            ->where('role', ProfileRole::Kid)
+            ->pluck('id')
+            ->all();
+
+        return $this->paceFor($kidIds, $household, $days);
+    }
+
+    /**
+     * Approved points per day over the last $days *finished* household days.
+     *
+     * Today is deliberately outside the window: it is a partial day, and a
+     * planner that told a kid at breakfast they were averaging nothing would
+     * be wrong in the discouraging direction. Approved only — a pace is what
+     * has really landed, not what has been asked for.
+     *
+     * @param  array<int, int>  $profileIds
+     */
+    private function paceFor(array $profileIds, Household $household, int $days): float
+    {
+        if ($profileIds === [] || $days < 1) {
+            return 0.0;
+        }
+
+        $clock = HouseholdClock::for($household);
+        $today = $clock->today();
+
+        $points = (int) ChoreCompletion::whereIn('profile_id', $profileIds)
+            ->where('status', CompletionStatus::Approved)
+            ->where('submitted_at', '>=', $clock->startOf($today->copy()->subDays($days)))
+            ->where('submitted_at', '<', $clock->startOf($today))
+            ->sum('points_awarded');
+
+        return $points / $days;
+    }
+
+    /**
+     * Who has put what into the current family goal, biggest first.
+     *
+     * Shares are of what the kids have banked between them rather than of
+     * goal_target, so a parent nudging goal_now by hand can't hand everyone a
+     * smaller slice than they earned. Kids who haven't contributed yet stay on
+     * the board at zero — the point of showing this is that it's a race.
+     *
+     * @return Collection<int, array{profile: Profile, points: int, percent: int, isLeader: bool}>
+     */
+    public function goalContributors(Household $household): Collection
+    {
+        $kids = $household->profiles()
+            ->where('role', ProfileRole::Kid)
+            ->orderByDesc('goal_contribution')
+            ->orderBy('name')
+            ->get();
+
+        $total = (int) $kids->sum('goal_contribution');
+        $best = (int) $kids->max('goal_contribution');
+
+        return $kids->map(fn (Profile $kid) => [
+            'profile' => $kid,
+            'points' => (int) $kid->goal_contribution,
+            'percent' => $total > 0 ? (int) round($kid->goal_contribution / $total * 100) : 0,
+            // Ties share the crown rather than letting the sort order pick a
+            // winner out of two identical numbers.
+            'isLeader' => $best > 0 && $kid->goal_contribution === $best,
+        ]);
+    }
+
     public function approve(ChoreCompletion $completion, Profile $approver): void
     {
         // The approvals screen only ever lists pending items, so this is a
@@ -860,10 +958,19 @@ class ChoreService
             $completion,
         );
 
+        // Only what actually lands on the family goal is credited to the kid,
+        // so the contributions always add back up to goal_now — a leaderboard
+        // totalling more than the bar it sits under reads as a bug.
+        $credited = max(0, min(
+            $completion->points_awarded,
+            $household->goal_target - $household->goal_now,
+        ));
+
         $profile->xp += self::XP_PER_CHORE;
+        $profile->goal_contribution += $credited;
         $profile->save();
 
-        $household->goal_now = min($household->goal_target, $household->goal_now + $completion->points_awarded);
+        $household->goal_now = min($household->goal_target, $household->goal_now + $credited);
         $household->save();
 
         // Before badges, not after — the streak_3/7/14 badges read the

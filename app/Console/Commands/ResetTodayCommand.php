@@ -81,6 +81,9 @@ class ResetTodayCommand extends Command
                     $pointsDelta -= $completion->points_awarded;
                     $xpDelta -= ChoreService::XP_PER_CHORE;
                     $household->goal_now = max(0, $household->goal_now - $completion->points_awarded);
+                    // Rolled back with goal_now, or the kid keeps credit on the
+                    // family goal for a day that no longer happened.
+                    $kid->goal_contribution = max(0, $kid->goal_contribution - $completion->points_awarded);
                 }
             }
 

@@ -193,6 +193,11 @@ new class extends Component
         $household = $this->profile->household;
         $household->goal_now = 0;
         $household->save();
+
+        // The MVP board on the kids' Quests page is scored out of these, so a
+        // new goal starts everyone level rather than handing whoever won the
+        // last one an unbeatable head start.
+        $household->profiles()->update(['goal_contribution' => 0]);
     }
 
     public function changePin(int $profileId): void

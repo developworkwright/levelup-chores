@@ -8,9 +8,11 @@
         'quests' => ['label' => 'Quests', 'route' => 'kid.quests'],
         'wheel' => ['label' => 'Bonus Wheel', 'route' => 'kid.wheel'],
         'loot' => ['label' => 'Loot Shop', 'route' => 'kid.loot'],
+        'goal' => ['label' => 'Goal Plan', 'route' => 'kid.goal'],
         'offers' => ['label' => 'Trades', 'route' => 'kid.offers'],
         'bonus' => ['label' => 'Bonus Shop', 'route' => 'kid.bonus'],
         'badges' => ['label' => 'Badges', 'route' => 'kid.badges'],
+        'stats' => ['label' => 'Stats', 'route' => 'kid.stats'],
     ];
     $dollars = number_format($profile->points / $profile->household->points_per_dollar, 2);
 
