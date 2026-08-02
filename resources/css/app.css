@@ -40,6 +40,37 @@ body {
     min-height: 100vh;
 }
 
+/*
+ * Login avatar tiles fan out from the centre of the row. The angle rides in on
+ * a --fq-tilt custom property per tile, which keeps the transform in CSS —
+ * an inline `transform` would outrank any hover utility trying to undo it.
+ */
+.fq-avatar-tile {
+    transform: rotate(var(--fq-tilt, 0deg));
+    transition: transform .16s ease, box-shadow .16s ease;
+}
+
+.fq-avatar:hover .fq-avatar-tile {
+    transform: rotate(0deg) translateY(-2px);
+}
+
+/* Counter-rotated so the streak always reads level, tilted or straightened. */
+.fq-avatar-chip {
+    transform: rotate(calc(var(--fq-tilt, 0deg) * -1));
+    transition: transform .16s ease;
+}
+
+.fq-avatar:hover .fq-avatar-chip {
+    transform: rotate(0deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fq-avatar-tile,
+    .fq-avatar-chip {
+        transition: none;
+    }
+}
+
 .fq-wordmark {
     background: linear-gradient(96deg, var(--fq-lime), var(--fq-cyan) 45%, var(--fq-gold));
     background-size: 200% 100%;

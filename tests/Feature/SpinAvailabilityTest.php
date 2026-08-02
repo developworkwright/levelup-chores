@@ -7,6 +7,7 @@ use App\Models\Household;
 use App\Models\Profile;
 use App\Models\Spin;
 use App\Services\ChoreService;
+use App\Services\HouseholdClock;
 use App\Services\SpinService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -145,9 +146,13 @@ class SpinAvailabilityTest extends TestCase
         $kid = Profile::factory()->for($household)->create();
 
         $chore = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
+        // Dated off the household clock, not now()->toDateString(): the app
+        // timezone is UTC but the household's day rolls at 4am Chicago, so a
+        // plain UTC date puts this row on a different day than the service
+        // looks up — and the test fails for a few hours every evening.
         Spin::create([
             'profile_id' => $kid->id,
-            'spin_date' => now()->toDateString(),
+            'spin_date' => HouseholdClock::for($household)->today()->toDateString(),
             'chore_id' => $chore->id,
             'multiplier' => 3,
         ]);

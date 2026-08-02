@@ -34,6 +34,35 @@ class DatabaseSeeder extends Seeder
         $this->seedChores($household);
         $this->seedStoreItems($household);
         $this->seedBonusPerks($household);
+        $this->seedSavingGoals($household);
+    }
+
+    /**
+     * Give each kid something to save toward so the Loot Shop's goal card has
+     * something to show on a fresh install. Kids can repoint it themselves from
+     * any reward card, so these are only opening suggestions — each gets a
+     * different big-ticket item rather than all three chasing the same thing.
+     */
+    private function seedSavingGoals(Household $household): void
+    {
+        $aspirational = StoreItem::where('household_id', $household->id)
+            ->where('cost', '>=', 500)
+            ->orderByDesc('cost')
+            ->get();
+
+        if ($aspirational->isEmpty()) {
+            return;
+        }
+
+        $kids = Profile::where('household_id', $household->id)
+            ->where('role', 'kid')
+            ->orderByDesc('age')
+            ->get();
+
+        foreach ($kids as $index => $kid) {
+            $kid->saving_for_store_item_id = $aspirational[$index % $aspirational->count()]->id;
+            $kid->save();
+        }
     }
 
     /**
@@ -102,6 +131,10 @@ class DatabaseSeeder extends Seeder
             ['name' => 'Dessert pick', 'description' => 'You choose dessert for the whole family tonight.', 'cost' => 150, 'color_tag' => 'magenta'],
             ['name' => 'Extra family game time', 'description' => '30 extra minutes of family game night.', 'cost' => 200, 'color_tag' => 'gold'],
             ['name' => 'Trip of your choice', 'description' => 'Pick an outing for the family to take together.', 'cost' => 500, 'color_tag' => 'violet'],
+            // Priced out of reach on purpose — the saving-up goal and the "Big
+            // ticket" shelf both need something to aim at.
+            ['name' => 'Movie night out', 'description' => 'A trip to the cinema, your pick of film.', 'cost' => 800, 'color_tag' => 'cyan'],
+            ['name' => 'Lego set', 'description' => 'A Lego set of your choice.', 'cost' => 2000, 'color_tag' => 'violet'],
         ];
 
         foreach ($items as $item) {

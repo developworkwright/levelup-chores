@@ -29,7 +29,10 @@
     --fq-text-3: #b0a3cc;
     --fq-text-4: #8c7bab;
     --fq-text-5: #6f6288;
+    --fq-text-5-b: #5f5280;
     --fq-text-6: #4e4368;
+    /* Label on an interactive chip — brighter than body copy, short of white. */
+    --fq-chip-text: #e8def8;
 
     /*
      * Accents. "lime" is the electric yellow this palette earns points in and
@@ -44,6 +47,16 @@
     --fq-violet: #a06bff;
     --fq-sky: #ffe14d;
     --fq-parent: #9d8ac0;
+
+    /*
+     * The streak has its own ruby, deliberately outside the six-accent cycle —
+     * coral stays an accent, so a kid whose colour is coral never looks like a
+     * streak readout.
+     */
+    --fq-streak: #e0365b;
+    --fq-streak-fill: #8f1734;
+    --fq-streak-ink: #fff0f3;
+    --fq-wash-streak: linear-gradient(135deg, #3b0c1d, #0e0719);
 
     --fq-danger: #ff6b6b;
     --fq-danger-2: #ff8080;
@@ -72,6 +85,8 @@
     --fq-wash-gold: linear-gradient(135deg, #2a2405, #0e0719);
     --fq-wash-blue: linear-gradient(135deg, #2a2050, #0e0719);
     --fq-wash-cleared: linear-gradient(135deg, #221046, #0e0719);
+    /* The pinned saving-up goal card at the top of the Loot Shop. */
+    --fq-wash-goal: linear-gradient(140deg, #1a0f2e, #0e0719 62%);
     --fq-line-cool: #45407f;
     /* Copy inside a gold-rimmed notice, where plain white would glare. */
     --fq-notice-text: #e9dfc0;
@@ -180,7 +195,9 @@
     --color-fq-text-3: var(--fq-text-3);
     --color-fq-text-4: var(--fq-text-4);
     --color-fq-text-5: var(--fq-text-5);
+    --color-fq-text-5-b: var(--fq-text-5-b);
     --color-fq-text-6: var(--fq-text-6);
+    --color-fq-chip-text: var(--fq-chip-text);
 
     --color-fq-lime: var(--fq-lime);
     --color-fq-cyan: var(--fq-cyan);
@@ -190,6 +207,9 @@
     --color-fq-violet: var(--fq-violet);
     --color-fq-sky: var(--fq-sky);
     --color-fq-parent: var(--fq-parent);
+    --color-fq-streak: var(--fq-streak);
+    --color-fq-streak-fill: var(--fq-streak-fill);
+    --color-fq-streak-ink: var(--fq-streak-ink);
 
     --color-fq-ink: var(--fq-ink);
     --color-fq-track: var(--fq-track);

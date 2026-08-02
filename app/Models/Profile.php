@@ -45,6 +45,7 @@ class Profile extends Model implements Authenticatable
         'tickets_granted_through_level',
         'streak',
         'pending_streak_chest',
+        'saving_for_store_item_id',
     ];
 
     protected $hidden = [
@@ -63,6 +64,12 @@ class Profile extends Model implements Authenticatable
     public function household(): BelongsTo
     {
         return $this->belongsTo(Household::class);
+    }
+
+    /** The reward this kid is saving toward, pinned atop their Loot Shop. */
+    public function savingFor(): BelongsTo
+    {
+        return $this->belongsTo(StoreItem::class, 'saving_for_store_item_id');
     }
 
     public function choreCompletions(): HasMany

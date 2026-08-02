@@ -218,6 +218,23 @@ new class extends Component
         $quest = $service->questFor($this->profile);
         $questRevealed = $quest->revealed_at !== null;
         $questDone = $quest->completed_at !== null;
+
+        // Claiming the quest sets completed_at immediately, but the points
+        // don't land until a parent approves — so "done" and "waiting" are
+        // different things and the CTA has to say which one it is. Scoped to
+        // at-or-after the claim so a weekly chore's older completion, or one
+        // that was sent back, can't be mistaken for this one.
+        $questCompletion = $questDone
+            ? ChoreCompletion::where('profile_id', $this->profile->id)
+                ->where('chore_id', $quest->chore_id)
+                ->where('submitted_at', '>=', $quest->completed_at)
+                ->latest('submitted_at')
+                ->first()
+            : null;
+
+        $questApproved = $questCompletion?->status === CompletionStatus::Approved;
+        $questPending = $questCompletion?->status === CompletionStatus::Pending;
+
         $boost = $spin->today($this->profile);
         $questBoosted = $boost && $boost->chore_id === $quest->chore_id;
 
@@ -242,6 +259,8 @@ new class extends Component
             'quest' => $quest,
             'questRevealed' => $questRevealed,
             'questDone' => $questDone,
+            'questApproved' => $questApproved,
+            'questPending' => $questPending,
             'boost' => $boost,
             'questBoosted' => $questBoosted,
             'questPoints' => $quest->chore->points * ($questBoosted ? $boost->multiplier : 1),
@@ -322,8 +341,8 @@ new class extends Component
                     wire-key="streak-chest"
                     :revealed="false"
                     open-action="openStreakChest"
-                    accent="var(--fq-coral)"
-                    wash="var(--fq-wash-violet)"
+                    accent="var(--fq-streak)"
+                    wash="var(--fq-wash-streak)"
                     closed-title="Streak Chest"
                     closed-text="Your streak paid off — tap to open your reward!"
                     opening-text="Something's rattling inside..."
@@ -333,9 +352,9 @@ new class extends Component
                     <div
                         wire:key="streak-chest-opened"
                         class="flex flex-col items-center rounded-[24px] border p-8 text-center"
-                        style="animation: fq-pop .3s ease both; background: var(--fq-wash-blue); border-color: color-mix(in srgb, var(--fq-coral) 55%, transparent)"
+                        style="animation: fq-pop .3s ease both; background: var(--fq-wash-streak); border-color: color-mix(in srgb, var(--fq-streak) 55%, transparent)"
                     >
-                        <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-coral uppercase">Streak Chest</p>
+                        <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-streak uppercase">Streak Chest</p>
                         <h2 class="mt-2 font-baloo text-xl font-bold">+{{ $pendingChestPoints }} pts banked!</h2>
                         <p class="mt-1 max-w-[320px] text-sm text-fq-text-2">
                             {{ $pendingChestDay }}-day streak bonus.
@@ -349,11 +368,11 @@ new class extends Component
                 <div
                     wire:key="streak-progress"
                     class="rounded-[24px] border bg-fq-panel p-6"
-                    style="border-color: color-mix(in srgb, var(--fq-coral) 35%, transparent)"
+                    style="border-color: color-mix(in srgb, var(--fq-streak) 35%, transparent)"
                 >
                     <div class="flex items-center justify-between gap-[10px]">
                         <h3 class="font-baloo text-lg font-bold">Streak Chest</h3>
-                        <span class="font-mono-fq text-[11px] text-fq-coral">{{ $profile->streak }}-day streak</span>
+                        <span class="font-mono-fq text-[11px] text-fq-streak">{{ $profile->streak }}-day streak</span>
                     </div>
                     <p class="mt-1 text-sm text-fq-text-2">
                         @if ($nextMilestone && $profile->streak + 1 === $nextMilestone && ! $questDone)
@@ -373,15 +392,15 @@ new class extends Component
                             <div class="flex flex-shrink-0 flex-col items-center gap-1">
                                 <div
                                     class="flex h-9 w-9 items-center justify-center rounded-full border-2 font-baloo text-[11px] font-extrabold"
-                                    style="background: {{ $milestone['reached'] ? 'var(--fq-coral)' : 'var(--fq-steel-dim)' }}; border-color: {{ $milestone['reached'] ? 'var(--fq-coral)' : 'var(--fq-steel-dim-line)' }}; color: {{ $milestone['reached'] ? 'var(--fq-bg)' : 'var(--fq-steel-text)' }}"
+                                    style="background: {{ $milestone['reached'] ? 'var(--fq-streak-fill)' : 'var(--fq-steel-dim)' }}; border-color: {{ $milestone['reached'] ? 'var(--fq-streak)' : 'var(--fq-steel-dim-line)' }}; color: {{ $milestone['reached'] ? 'var(--fq-streak-ink)' : 'var(--fq-steel-text)' }}"
                                 >{{ $milestone['reached'] ? '✓' : $milestone['day'] }}</div>
                                 <span
                                     class="font-mono-fq text-[9px] whitespace-nowrap"
-                                    style="color: {{ $milestone['reached'] ? 'var(--fq-coral)' : 'var(--fq-steel-dim-label)' }}"
+                                    style="color: {{ $milestone['reached'] ? 'var(--fq-streak)' : 'var(--fq-steel-dim-label)' }}"
                                 >D{{ $milestone['day'] }} · {{ $milestone['points'] }}</span>
                             </div>
                             @unless ($loop->last)
-                                <div class="mt-[-14px] h-[2px] w-5 flex-shrink-0" style="background: {{ $milestone['reached'] ? 'var(--fq-coral)' : 'var(--fq-steel-dim-link)' }}"></div>
+                                <div class="mt-[-14px] h-[2px] w-5 flex-shrink-0" style="background: {{ $milestone['reached'] ? 'var(--fq-streak-fill)' : 'var(--fq-steel-dim-link)' }}"></div>
                             @endunless
                         @endforeach
                     </div>
@@ -395,17 +414,30 @@ new class extends Component
                 <div
                     wire:key="quest-cleared"
                     class="flex items-center gap-3 rounded-[18px] border p-[14px]"
-                    style="background: var(--fq-wash-cleared); border-color: color-mix(in srgb, var(--fq-lime) 40%, transparent)"
+                    style="background: var(--fq-wash-cleared); border-color: color-mix(in srgb, {{ $questPending ? 'var(--fq-gold)' : ($questApproved ? 'var(--fq-lime)' : 'var(--fq-danger)') }} 40%, transparent)"
                 >
+                    @php
+                        // The strip has to draw the same distinctions the hero's
+                        // CTA does, or hopping tabs turns "waiting" into "done".
+                        [$stripLabel, $stripGlyph, $stripColor] = match (true) {
+                            $questPending => ['Waiting on parent', '⋯', 'var(--fq-gold)'],
+                            $questApproved => ['Cleared', '✓', 'var(--fq-lime)'],
+                            default => ['Sent back', '↺', 'var(--fq-danger)'],
+                        };
+                    @endphp
+
                     <div
                         class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[12px] font-baloo text-lg font-extrabold text-fq-bg"
-                        style="background:var(--fq-lime)"
-                    >&#10003;</div>
+                        style="background: {{ $stripColor }}"
+                    >{{ $stripGlyph }}</div>
                     <div class="min-w-0 flex-1">
                         <p class="font-mono-fq text-[10px] tracking-[0.2em] text-fq-text-4 uppercase">Today's Main Quest</p>
                         <p class="truncate text-[15px] font-semibold">{{ $quest->chore->name }}</p>
                     </div>
-                    <span class="font-mono-fq text-[11px] whitespace-nowrap text-fq-lime">Cleared</span>
+                    <span
+                        class="font-mono-fq text-[11px] whitespace-nowrap"
+                        style="color: {{ $stripColor }}"
+                    >{{ $stripLabel }}</span>
                 </div>
             @else
             <x-chest
@@ -435,9 +467,20 @@ new class extends Component
                     </p>
 
                     <div class="mt-4 flex w-full flex-wrap items-center gap-3">
-                        @if ($questDone)
+                        @if ($questPending)
+                            <button type="button" disabled class="cursor-default rounded-[16px] bg-fq-line-2 px-[22px] py-[14px] font-baloo text-[17px] font-bold text-fq-text-3">
+                                Waiting on parent
+                            </button>
+                        @elseif ($questApproved)
                             <button type="button" disabled class="cursor-default rounded-[16px] bg-fq-line-2 px-[22px] py-[14px] font-baloo text-[17px] font-bold text-fq-text-3">
                                 Cleared &#10003;
+                            </button>
+                        @elseif ($questDone)
+                            {{-- Sent back: completed_at is still stamped, so
+                                 without this the screen would credit a quest a
+                                 parent explicitly rejected. --}}
+                            <button type="button" disabled class="cursor-default rounded-[16px] bg-fq-line-2 px-[22px] py-[14px] font-baloo text-[17px] font-bold" style="color: var(--fq-danger)">
+                                Sent back
                             </button>
                         @else
                             <button

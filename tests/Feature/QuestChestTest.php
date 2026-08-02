@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Chore;
+use App\Models\ChoreCompletion;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Services\ChoreService;
@@ -108,12 +109,35 @@ class QuestChestTest extends TestCase
         app(ChoreService::class)->claimQuest($kid);
 
         // Landing on the tab afterwards should show a one-line summary, not
-        // the full hero card pushing the chore board down the page.
+        // the full hero card pushing the chore board down the page. The claim
+        // is still awaiting a parent, so the line says so rather than claiming
+        // the quest is finished.
         Volt::test('kid.quests')
             ->assertSee($chore->name)
-            ->assertSee('Cleared')
+            ->assertSee('Waiting on parent')
             ->assertDontSee('Clear this one first', false)
             ->assertDontSee('Tap the chest to reveal', false);
+    }
+
+    public function test_an_approved_quest_reads_as_cleared_rather_than_waiting(): void
+    {
+        $household = Household::factory()->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create(['name' => 'Water the plants']);
+
+        $chores = app(ChoreService::class);
+        $chores->revealQuest($kid);
+        $chores->claimQuest($kid);
+
+        $completion = ChoreCompletion::where('profile_id', $kid->id)->firstOrFail();
+        $chores->approve($completion, $parent);
+
+        Auth::guard('profile')->login($kid);
+
+        Volt::test('kid.quests')
+            ->assertSee('Cleared')
+            ->assertDontSee('Waiting on parent');
     }
 
     public function test_clearing_the_quest_during_the_visit_keeps_the_hero_expanded(): void
@@ -130,5 +154,46 @@ class QuestChestTest extends TestCase
             ->call('revealQuest')
             ->call('claimQuest')
             ->assertSee('Quest cleared. Every side quest below is unlocked', false);
+    }
+
+    public function test_a_sent_back_quest_is_not_credited_as_cleared(): void
+    {
+        $household = Household::factory()->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
+
+        $chores = app(ChoreService::class);
+        $chores->revealQuest($kid);
+        $chores->claimQuest($kid);
+
+        // sendBack() rejects the completion but leaves the quest's completed_at
+        // stamped, so "done" alone is not enough to earn a tick.
+        $chores->sendBack(ChoreCompletion::where('profile_id', $kid->id)->firstOrFail(), $parent);
+
+        Auth::guard('profile')->login($kid);
+
+        Volt::test('kid.quests')
+            ->assertSee('Sent back')
+            ->assertDontSee('Waiting on parent')
+            ->assertDontSee('Cleared &#10003;', false);
+    }
+
+    public function test_a_claimed_quest_says_it_is_waiting_rather_than_done(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
+
+        Auth::guard('profile')->login($kid);
+
+        // claimQuest() stamps completed_at straight away, but the points only
+        // land on a parent's approval — so the CTA must not say "Cleared" and
+        // imply the kid has already been paid.
+        Volt::test('kid.quests')
+            ->call('revealQuest')
+            ->call('claimQuest')
+            ->assertSee('Waiting on parent')
+            ->assertDontSee('Cleared &#10003;', false);
     }
 }

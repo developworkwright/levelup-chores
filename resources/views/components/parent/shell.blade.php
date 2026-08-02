@@ -35,14 +35,14 @@
 
                 <x-sound-toggle />
 
-                <form method="POST" action="{{ route('logout') }}">
+                <form method="POST" action="{{ route('logout') }}" class="shrink-0">
                     @csrf
                     <button
                         type="submit"
                         title="Exit"
                         aria-label="Exit"
-                        class="flex h-[52px] w-[52px] items-center justify-center rounded-[15px] border border-fq-line-2 bg-fq-sunk text-[16px] text-fq-text-4 transition hover:text-fq-text"
-                    >&#9211;</button>
+                        class="flex h-[52px] w-[52px] items-center justify-center rounded-[15px] border border-fq-line-2 bg-fq-sunk text-fq-text-4 transition hover:text-fq-text"
+                    ><x-power-icon /></button>
                 </form>
             </div>
         </div>
