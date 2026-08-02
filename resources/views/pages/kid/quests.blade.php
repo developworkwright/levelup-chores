@@ -649,11 +649,6 @@ new class extends Component
                         $boosted = $questBoosted === false && $boost && $boost->chore_id === $chore->id;
                         $payout = $chore->points * ($boosted ? $boost->multiplier : 1);
                         $boostColor = $boosted && $boost->multiplier === 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)';
-                        $cadenceLabels = [
-                            'weekly' => 'Once a week',
-                            'unlimited' => 'Anytime · No limit',
-                            'daily' => 'Once a day',
-                        ];
                         $labels = [
                             'ready' => 'Mark it done',
                             'locked' => 'Locked',
@@ -663,19 +658,31 @@ new class extends Component
                             // send a kid off to redo it. Name them instead.
                             'done' => $takenBy
                                 ? $takenBy->name.' got this one'
-                                : ($chore->cadence->value === 'weekly' ? 'Back in 7 days' : 'Back tomorrow'),
+                                : match ($chore->cadence) {
+                                    \App\Enums\ChoreCadence::Weekly => 'Back in 7 days',
+                                    \App\Enums\ChoreCadence::Once => 'Gone for now',
+                                    default => 'Back tomorrow',
+                                },
                         ];
                     @endphp
                     <div
                         wire:key="chore-{{ $chore->id }}"
-                        class="rounded-[20px] border border-fq-line bg-fq-panel p-4 {{ $state === 'locked' ? 'opacity-50' : '' }} {{ $takenBy ? 'opacity-70' : '' }}"
-                        style="{{ $state === 'pending' ? 'border-color: var(--fq-success-border)' : '' }}"
+                        class="rounded-[20px] border bg-fq-panel p-4 {{ $state === 'locked' ? 'opacity-50' : '' }} {{ $takenBy ? 'opacity-70' : '' }} {{ $chore->isOneTime() ? 'border-2' : 'border border-fq-line' }}"
+                        style="{{ $state === 'pending' ? 'border-color: var(--fq-success-border)' : ($chore->isOneTime() ? 'border-color: color-mix(in srgb, var(--fq-gold) 55%, transparent); background: var(--fq-wash-gold)' : '') }}"
                     >
                         <div class="flex items-start justify-between gap-2">
                             <div>
+                                {{-- Flagged, not just sorted: a card sitting at
+                                     the top of the list only reads as urgent if
+                                     you can see why it's there. --}}
+                                @if ($chore->isOneTime())
+                                    <span class="mb-1 inline-block rounded-[8px] px-[10px] py-1 font-mono-fq text-[10px] tracking-[0.14em] uppercase" style="background: color-mix(in srgb, var(--fq-gold) 22%, transparent); color: var(--fq-gold)">
+                                        &#9889; One-time
+                                    </span>
+                                @endif
                                 <p class="text-[16px] font-semibold {{ $takenBy ? 'line-through decoration-2' : '' }}">{{ $chore->name }}</p>
                                 <p class="font-mono-fq text-[10px] text-fq-text-4 uppercase">
-                                    {{ $cadenceLabels[$chore->cadence->value] ?? 'Once a day' }}
+                                    {{ $chore->cadence->kidLabel() }}
                                 </p>
                             </div>
                             <span class="font-baloo text-[19px] font-extrabold" style="color: {{ $takenBy ? 'var(--fq-text-5)' : ($boosted ? $boostColor : 'var(--fq-lime)') }}">

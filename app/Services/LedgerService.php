@@ -35,8 +35,17 @@ class LedgerService
             ]);
 
             if ($profile) {
-                $profile->points = max(0, $profile->points + $amount);
-                $profile->save();
+                // Incremented in the database, not in memory: a single request
+                // can hold two instances of the same profile, and `$profile->points + $amount`
+                // on a stale one silently overwrites whatever the other just
+                // wrote. Balances predate the ledger in places, so this has to
+                // stay a delta rather than a recount from entries.
+                $profile->increment('points', $amount);
+
+                if ($profile->points < 0) {
+                    $profile->points = 0;
+                    $profile->save();
+                }
             }
 
             return $entry;

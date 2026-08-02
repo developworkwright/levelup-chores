@@ -10,6 +10,7 @@ use App\Models\LedgerEntry;
 use App\Models\Profile;
 use App\Models\Redemption;
 use App\Models\Spin;
+use App\Services\ChoreService;
 use App\Services\HouseholdClock;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -78,7 +79,7 @@ class ResetTodayCommand extends Command
             foreach ($completions as $completion) {
                 if ($completion->status === CompletionStatus::Approved) {
                     $pointsDelta -= $completion->points_awarded;
-                    $xpDelta -= 25;
+                    $xpDelta -= ChoreService::XP_PER_CHORE;
                     $household->goal_now = max(0, $household->goal_now - $completion->points_awarded);
                 }
             }

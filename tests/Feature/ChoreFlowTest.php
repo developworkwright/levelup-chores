@@ -87,7 +87,7 @@ class ChoreFlowTest extends TestCase
         $household->refresh();
 
         $this->assertSame(100, $kid->points);
-        $this->assertSame(25, $kid->xp);
+        $this->assertSame(ChoreService::XP_PER_CHORE, $kid->xp);
         $this->assertSame(100, $household->goal_now);
         $this->assertSame(CompletionStatus::Approved, $completion->refresh()->status);
     }

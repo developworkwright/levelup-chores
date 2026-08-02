@@ -3,6 +3,7 @@
 use App\Enums\ChoreCadence;
 use App\Models\Chore;
 use App\Models\Profile;
+use App\Services\ChoreService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
@@ -60,7 +61,23 @@ new class extends Component
 
         if ($chore && $case) {
             $chore->cadence = $case;
+            // Moving off one-time drops the spent stamp with it, so a chore
+            // parked on Daily for a while doesn't come back as already-used
+            // the moment someone sets it to One-time again.
+            if ($case !== ChoreCadence::Once) {
+                $chore->used_at = null;
+            }
             $chore->save();
+        }
+    }
+
+    /** Puts a spent one-time chore back up for grabs. */
+    public function reactivate(int $choreId): void
+    {
+        $chore = $this->ownedChore($choreId);
+
+        if ($chore?->isUsedUp()) {
+            app(ChoreService::class)->reactivate($chore);
         }
     }
 
@@ -175,20 +192,21 @@ new class extends Component
             @foreach ($chores as $chore)
                 <div wire:key="chore-{{ $chore->id }}" class="flex flex-wrap items-center gap-3 rounded-[18px] border border-fq-line bg-fq-panel p-[14px]">
                     <div class="min-w-[140px] flex-1">
-                        <p class="text-[15px] font-semibold">{{ $chore->name }}</p>
+                        <p class="text-[15px] font-semibold {{ $chore->isUsedUp() ? 'text-fq-text-4 line-through decoration-2' : '' }}">{{ $chore->name }}</p>
                         <p class="font-mono-fq text-[10px] text-fq-text-4 uppercase">
-                            @if ($chore->cadence->value === 'weekly')
-                                Weekly · Cooldown 7d
-                            @elseif ($chore->cadence->value === 'unlimited')
-                                Unlimited · No cooldown
-                            @else
-                                Daily · Cooldown 24h
-                            @endif
+                            {{ $chore->cadence->summary() }}
                             · {{ $chore->min_age ? "Age {$chore->min_age}+" : 'Any age' }}
                             @unless ($chore->quest_eligible)
                                 · <span class="text-fq-coral">Excluded from quest</span>
                             @endunless
                         </p>
+                        @if ($chore->isUsedUp())
+                            {{-- The one state a parent has to act on: nothing
+                                 puts a spent one-time chore back but them. --}}
+                            <p class="mt-1 font-mono-fq text-[10px] uppercase" style="color: var(--fq-gold)">
+                                Taken {{ $chore->used_at->diffForHumans() }} · off the board until reactivated
+                            </p>
+                        @endif
                     </div>
 
                     <div class="flex items-center gap-2">
@@ -203,15 +221,24 @@ new class extends Component
                         <button type="button" wire:click="adjustMinAge({{ $chore->id }}, 1)" class="h-8 w-8 rounded-[10px] border border-fq-line-3 bg-fq-sunk text-lg">+</button>
                     </div>
 
-                    <div class="flex items-center gap-1 rounded-[12px] border border-fq-line-3 bg-fq-sunk p-1">
-                        @foreach (['daily' => 'Daily', 'weekly' => 'Weekly', 'unlimited' => 'Unlimited'] as $value => $label)
+                    <div class="flex flex-wrap items-center gap-1 rounded-[12px] border border-fq-line-3 bg-fq-sunk p-1">
+                        @foreach (\App\Enums\ChoreCadence::cases() as $case)
                             <button
                                 type="button"
-                                wire:click="setCadence({{ $chore->id }}, '{{ $value }}')"
-                                class="rounded-[9px] px-[10px] py-1 text-xs font-semibold {{ $chore->cadence->value === $value ? 'bg-fq-lime text-fq-bg' : 'text-fq-text-4' }}"
-                            >{{ $label }}</button>
+                                wire:click="setCadence({{ $chore->id }}, '{{ $case->value }}')"
+                                class="rounded-[9px] px-[10px] py-1 text-xs font-semibold {{ $chore->cadence === $case ? 'bg-fq-lime text-fq-bg' : 'text-fq-text-4' }}"
+                            >{{ $case->label() }}</button>
                         @endforeach
                     </div>
+
+                    @if ($chore->isUsedUp())
+                        <button
+                            type="button"
+                            wire:click="reactivate({{ $chore->id }})"
+                            class="rounded-[12px] border px-3 py-2 text-xs font-semibold text-fq-bg"
+                            style="background: var(--fq-gold); border-color: var(--fq-gold)"
+                        >Put back on the board</button>
+                    @endif
 
                     <button
                         type="button"
@@ -256,14 +283,13 @@ new class extends Component
             >
 
             @php
-                $cadenceLabels = ['daily' => 'Daily', 'weekly' => 'Weekly', 'unlimited' => 'Unlimited'];
-                $nextCadence = ['daily' => 'weekly', 'weekly' => 'unlimited', 'unlimited' => 'daily'][$newChoreCadence] ?? 'daily';
+                $cadence = \App\Enums\ChoreCadence::tryFrom($newChoreCadence) ?? \App\Enums\ChoreCadence::Daily;
             @endphp
             <button
                 type="button"
-                wire:click="$set('newChoreCadence', '{{ $nextCadence }}')"
+                wire:click="$set('newChoreCadence', '{{ $cadence->next()->value }}')"
                 class="rounded-[14px] border border-fq-line-2 bg-fq-sunk px-[14px] py-[13px] text-left text-[15px] text-fq-text-3"
-            >{{ $cadenceLabels[$newChoreCadence] ?? 'Daily' }}</button>
+            >{{ $cadence->label() }}</button>
 
             <button
                 type="button"
@@ -274,6 +300,9 @@ new class extends Component
 
             <p class="text-xs text-fq-text-5">
                 100 points = $1. Daily chores unlock again the next morning; weekly ones after 7 days; unlimited ones never lock — good for stuff like laundry that can happen more than once a day.
+            </p>
+            <p class="text-xs text-fq-text-5">
+                One-time chores are up for grabs once — first kid to claim it takes it, and it comes off everyone's board for good until you put it back. They sit at the top of the kids' side quests. Good for one-offs like "rake the leaves". Sending a claim back reopens it automatically.
             </p>
             <p class="text-xs text-fq-text-5">
                 Each day, one any-age chore is automatically picked as a hidden bonus — first kid to finish it wins extra points. No setup needed here.

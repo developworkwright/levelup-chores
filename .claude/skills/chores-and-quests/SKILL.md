@@ -56,6 +56,21 @@ Four conditions guard it, each protecting something real:
 - `'done'` — someone in the household holds it: another kid's pending claim, or anyone's approved claim inside the cadence boundary (`ChoreCadence::Weekly` → last 7 household-days; otherwise last 1).
 - `'ready'` — claimable now. Always `'ready'` for `ChoreCadence::Unlimited` chores — no cooldown, ever.
 
+### One-time chores
+
+`ChoreCadence::Once` is the cadence with no clock. It's up for grabs until someone claims it, then it leaves the board for the whole household until a parent puts it back — `chores.used_at` is that switch, stamped by `claim()` and cleared by `sendBack()` or `reactivate()`.
+
+Everything else falls out of that one column:
+
+- **`claimantFor()` uses `used_at` as its boundary** instead of a cadence window, which is why a spent one-time chore doesn't reopen overnight. An unstamped chore returns null immediately — clearing the stamp is how a rejection or a reactivation releases the chore without reaching back to rewrite old completions.
+- **`boardFor()` drops spent ones entirely**, rather than showing them `'done'` like a daily chore on cooldown. The one exception is the kid whose claim is still pending: their card stays so the tap visibly registered.
+- **They sort to the top of the board.** They're the only chores with a real deadline, and the card carries a ⚡ One-time flag so the position reads as urgency rather than arbitrary ordering.
+- **`Chore::scopeAvailable()`** is the SQL form, used by `questCandidates()` and `BadgeService::clearedWholeBoardToday()`. A spent one-time chore must never be handed out as a quest — including as `questFor()`'s fallback pick, since unlike a blocked daily quest it would never unblock. Nor may it count toward a perfect board, or a sibling taking one would make the badge unwinnable.
+- **`claim()` calls `unsetRelation('chores')`** on the household. This is the only place a chore is edited mid-request, so anything already holding `$household->chores` holds the pre-claim copy — without it the re-render straight after a claim reads the chore as still up for grabs.
+- **`setCadence()` clears `used_at` when moving off Once**, so a chore parked on Daily doesn't arrive already-used when someone flips it back.
+
+`ChoreCadence` carries its own display strings (`label()`, `summary()`, `kidLabel()`, `next()`) — a fourth case made the hardcoded label maps in both views a place for the cadences to silently drift.
+
 `'pending'` vs `'done'` is the *only* place the viewing profile matters; both come off the same `claimantFor()` lookup, resolved through the shared private `stateFrom()` so `stateFor()` and `boardFor()` can't drift. `boardFor()` calls `claimantFor()` itself rather than `stateFor()`, so naming the claimant costs no extra queries — `claimantFor()` already eager-loads `profile`. There is no separate mystery-chore branch — mystery exclusivity and ordinary cooldown are now the same mechanism.
 
 ## Keeping an open board honest
@@ -88,7 +103,8 @@ Cooldown/pending boundaries always use `HouseholdClock`, never raw `now()` — t
 
 1. `min_age === null` only — age-gated chores are never eligible, so the youngest kid always has a fair shot.
 2. `cadence !== ChoreCadence::Unlimited` — an unlimited chore is freely repeatable by everyone, which is incompatible with "first to find it wins." This was a real bug caught by a test, not a spec item — keep it if adding new cadences.
-3. No existing `claimantFor()` — a chore someone has already claimed today (pending or approved-within-cooldown) can't retroactively become the mystery pick.
+3. Not a spent one-time chore — it isn't on anyone's board to find. (A *live* one is a perfectly good pick.)
+4. No existing `claimantFor()` — a chore someone has already claimed today (pending or approved-within-cooldown) can't retroactively become the mystery pick.
 
 Among the survivors, chores with a parent-written `hint` win the draw outright; the full pool is only used when none of them has one. That keeps the Bonus Shop's mystery-hint perk sellable — it should never charge tickets for a chore nobody wrote a clue for. Practical consequence: **if only one or two chores have hints, the mystery becomes guessable**, so hints want to be written broadly rather than on a favourite few.
 
@@ -116,6 +132,10 @@ Three things exist for a reason and shouldn't be simplified away:
 ### Gotcha: board tests and the daily quest
 
 `boardFor()` excludes whichever chore became today's quest, so a test that creates three chores and asserts on all three will flake — one of them is randomly the quest and won't appear. Give the fixtures one `quest_eligible => true` chore to absorb the assignment and mark the rest `quest_eligible => false`.
+
+### Gotcha: `assertDontSee` on a chore name
+
+Once the mystery chore is found, the kid page names it ("Completed by Nova — Rake the leaves!"). So a render test asserting a chore has left the *board* can fail at random when that chore happens to win the day's mystery draw. Give the fixture a decoy chore with a `hint` — hinted chores win the draw outright — to pin the pick somewhere harmless.
 
 ### Gotcha: setting up "already completed" test fixtures
 

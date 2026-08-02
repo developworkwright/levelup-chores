@@ -97,6 +97,7 @@ Picked automatically each day, with no parent setup. The candidate pool is filte
 - **Any-age chores only** — an age-gated chore would lock the youngest kid out before the race began.
 - **No unlimited-cadence chores** — those are freely repeatable by everyone, which is incompatible with "first one to find it wins."
 - **Nothing already claimed today** — picking a chore someone already finished would make the reveal meaningless.
+- **No spent one-time chores** — a one-time chore that's already been taken isn't on anyone's board to find.
 
 Chores with a parent-written hint win the draw outright, so the Bonus Shop's hint perk always has something to sell — which means hints want writing broadly, or the mystery becomes guessable.
 

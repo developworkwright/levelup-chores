@@ -37,6 +37,17 @@ class ChoreService
     /** Bonus paid on top of whatever chore gets picked as the day's mystery. */
     public const MYSTERY_BONUS_POINTS = 500;
 
+    /**
+     * XP for one approved chore, flat regardless of what the chore pays — a
+     * level measures showing up, not payout size.
+     *
+     * Weighed against badge rewards (50–400 each): at 25 a kid's level was
+     * ~75% badge luck, so sixteen chores and nine chores landed on the same
+     * rung. ResetTodayCommand subtracts this same constant when it undoes a
+     * day, so the two must never drift apart.
+     */
+    public const XP_PER_CHORE = 50;
+
     /** Safety bound on the streak walk-back so odd data can't loop forever. */
     private const MAX_STREAK_DAYS = 366;
 
@@ -155,6 +166,10 @@ class ChoreService
         return $profile->household->chores()
             ->appropriateFor($profile)
             ->questEligible()
+            // A spent one-time chore never reopens on its own, so handing one
+            // out as a quest — even as the fallback pick below — would dead-end
+            // the kid's whole day rather than just their morning.
+            ->available()
             ->when($excludeChoreId !== null, fn ($query) => $query->where('id', '!=', $excludeChoreId))
             ->get();
     }
@@ -210,6 +225,11 @@ class ChoreService
         return $profile->household->chores
             ->filter(fn (Chore $chore) => $chore->isAppropriateFor($profile))
             ->reject(fn (Chore $chore) => $chore->id === $quest->chore_id)
+            // One-time chores ride at the top of the board. They're the only
+            // thing on it with a real deadline — first kid to tap one takes it
+            // for good — so burying them under the daily regulars would hide
+            // the very chores worth hurrying for.
+            ->sortBy(fn (Chore $chore) => $chore->isOneTime() ? 0 : 1)
             ->map(function (Chore $chore) use ($profile, $gated) {
                 $claimant = $chore->cadence === ChoreCadence::Unlimited
                     ? null
@@ -227,6 +247,11 @@ class ChoreService
                         : null,
                 ];
             })
+            // A taken one-time chore leaves the board outright — that's the
+            // whole cadence. The exception is the kid whose claim is still
+            // pending: they'd otherwise watch the card vanish the instant they
+            // tapped it, with nothing to say it went through.
+            ->reject(fn (array $entry) => $entry['chore']->isUsedUp() && $entry['state'] !== 'pending')
             ->values();
     }
 
@@ -323,6 +348,8 @@ class ChoreService
             // everyone — that's fundamentally at odds with "first one to
             // find it wins," so they're never in the running.
             ->reject(fn (Chore $chore) => $chore->cadence === ChoreCadence::Unlimited)
+            // A spent one-time chore isn't on anyone's board to find.
+            ->reject(fn (Chore $chore) => $chore->isUsedUp())
             ->reject(fn (Chore $chore) => $this->claimantFor($chore) !== null)
             ->reject(fn (Chore $chore) => $excludeChoreId !== null && $chore->id === $excludeChoreId);
 
@@ -379,13 +406,26 @@ class ChoreService
      * cadence resets. Pending and approved both count, since claiming — not
      * approval — is what wins the race. A rejected claim doesn't, so the chore
      * reopens on its own.
+     *
+     * A one-time chore is the exception to the clock: its boundary is the
+     * used_at stamp rather than a cadence window, so it stays held for as long
+     * as it takes a parent to put it back rather than reopening overnight.
      */
     public function claimantFor(Chore $chore): ?ChoreCompletion
     {
         $clock = HouseholdClock::for($chore->household);
-        $boundary = $chore->cadence === ChoreCadence::Weekly
-            ? $clock->startOf($clock->today()->subDays(6))
-            : $clock->startOf($clock->today());
+        $boundary = match ($chore->cadence) {
+            ChoreCadence::Weekly => $clock->startOf($clock->today()->subDays(6)),
+            ChoreCadence::Once => $chore->used_at,
+            default => $clock->startOf($clock->today()),
+        };
+
+        // An unused one-time chore is free by definition — and clearing the
+        // stamp is exactly how a rejection or a reactivation releases it,
+        // without having to reach back and rewrite old completions.
+        if ($boundary === null) {
+            return null;
+        }
 
         return ChoreCompletion::where('chore_id', $chore->id)
             ->where(function ($query) use ($boundary) {
@@ -449,6 +489,22 @@ class ChoreService
             'points_awarded' => ($chore->points * $multiplier) + $mysteryBonus,
             'submitted_at' => now(),
         ]);
+
+        // First come, first served: the chore is spoken for the moment it's
+        // tapped. Stamped with the completion's own timestamp rather than a
+        // second now(), so claimantFor() can't miss the claim it's marking by
+        // a microsecond and read the chore as used-up-by-nobody.
+        if ($chore->isOneTime()) {
+            $chore->used_at = $completion->submitted_at;
+            $chore->save();
+
+            // Claiming is the only thing that edits a chore mid-request, and
+            // anything already holding the household's chores is holding the
+            // pre-claim copy of this one. Dropping the cached relation is what
+            // makes the re-render straight after a claim read the chore as
+            // taken rather than still up for grabs.
+            $profile->household->unsetRelation('chores');
+        }
 
         $parents = Profile::where('household_id', $profile->household_id)
             ->where('role', ProfileRole::Parent)
@@ -704,7 +760,7 @@ class ChoreService
             $completion,
         );
 
-        $profile->xp += 25;
+        $profile->xp += self::XP_PER_CHORE;
         $profile->save();
 
         $household->goal_now = min($household->goal_target, $household->goal_now + $completion->points_awarded);
@@ -730,5 +786,20 @@ class ChoreService
         $completion->decided_at = now();
         $completion->decided_by_profile_id = $approver->id;
         $completion->save();
+
+        // Rejecting reopens any other chore on its own; a one-time chore has
+        // no cadence to reopen it, so release it here. A parent shouldn't have
+        // to go reactivate a chore they just sent back.
+        if ($completion->chore->isOneTime()) {
+            $completion->chore->used_at = null;
+            $completion->chore->save();
+        }
+    }
+
+    /** Puts a spent one-time chore back up for grabs. */
+    public function reactivate(Chore $chore): void
+    {
+        $chore->used_at = null;
+        $chore->save();
     }
 }

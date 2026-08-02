@@ -132,7 +132,9 @@ class BadgeService
             return false;
         }
 
-        $totalChores = $household->chores()->appropriateFor($profile)->count();
+        // A one-time chore a sibling already took isn't on this kid's board to
+        // clear, so counting it would make a perfect board unwinnable.
+        $totalChores = $household->chores()->appropriateFor($profile)->available()->count();
 
         if ($totalChores <= 1) {
             return false;

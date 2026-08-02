@@ -21,6 +21,7 @@ class Chore extends Model
         'cadence',
         'min_age',
         'quest_eligible',
+        'used_at',
     ];
 
     protected function casts(): array
@@ -28,6 +29,7 @@ class Chore extends Model
         return [
             'cadence' => ChoreCadence::class,
             'quest_eligible' => 'boolean',
+            'used_at' => 'datetime',
         ];
     }
 
@@ -44,6 +46,30 @@ class Chore extends Model
     public function cooldownDays(): int
     {
         return $this->cadence === ChoreCadence::Weekly ? 7 : 1;
+    }
+
+    public function isOneTime(): bool
+    {
+        return $this->cadence === ChoreCadence::Once;
+    }
+
+    /**
+     * A one-time chore that's already been taken. Unlike every other cadence
+     * this doesn't expire on its own — only a parent reactivating it (or the
+     * claim being sent back) puts it back on the board.
+     */
+    public function isUsedUp(): bool
+    {
+        return $this->isOneTime() && $this->used_at !== null;
+    }
+
+    /** Chores that can still be earned — a spent one-time chore drops out entirely. */
+    public function scopeAvailable(Builder $query): Builder
+    {
+        return $query->where(function (Builder $q) {
+            $q->where('cadence', '!=', ChoreCadence::Once->value)
+                ->orWhereNull('used_at');
+        });
     }
 
     public function isAppropriateFor(Profile $profile): bool

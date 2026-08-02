@@ -44,8 +44,17 @@ class TicketService
                 'related_id' => $related?->getKey(),
             ]);
 
-            $profile->bonus_tickets = max(0, $profile->bonus_tickets + $amount);
-            $profile->save();
+            // Incremented in the database, not in memory. A single request can
+            // hold two instances of the same profile — evaluateHouseholdGoal()
+            // loads its own while approve() still holds the caller's — and
+            // `$profile->bonus_tickets + $amount` on a stale one silently
+            // overwrites whatever the other just banked.
+            $profile->increment('bonus_tickets', $amount);
+
+            if ($profile->bonus_tickets < 0) {
+                $profile->bonus_tickets = 0;
+                $profile->save();
+            }
 
             return $entry;
         });
