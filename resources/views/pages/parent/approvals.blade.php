@@ -211,7 +211,7 @@ new class extends Component
             :disabled="busy || ['unsupported', 'unconfigured', 'blocked'].includes(state)"
             class="rounded-[13px] border px-4 py-[10px] text-sm font-semibold disabled:opacity-60"
             :style="state === 'on'
-                ? 'border-color: var(--fq-success-border); background: oklch(0.7 0.16 140 / 0.15); color: var(--fq-lime)'
+                ? 'border-color: var(--fq-success-border); background: color-mix(in srgb, var(--fq-lime) 15%, transparent); color: var(--fq-lime)'
                 : (['blocked', 'error'].includes(state)
                     ? 'border-color: var(--fq-line-2); background: var(--fq-sunk); color: var(--fq-gold)'
                     : 'border-color: var(--fq-line-2); background: var(--fq-sunk); color: var(--fq-text-3)')"
@@ -224,7 +224,7 @@ new class extends Component
     <h2 class="font-baloo text-xl font-bold">Chore Approvals</h2>
 
     @if ($completions->isEmpty())
-        <div class="mt-3 rounded-[20px] border border-dashed border-[#2f3960] bg-fq-panel p-[34px] text-center text-sm text-fq-text-5">
+        <div class="mt-3 rounded-[20px] border border-dashed border-fq-line bg-fq-panel p-[34px] text-center text-sm text-fq-text-5">
             Queue's clear. Nothing to approve.
         </div>
     @else
@@ -254,7 +254,7 @@ new class extends Component
     <h2 class="mt-6 font-baloo text-xl font-bold">Redemption Requests</h2>
 
     @if ($redemptions->isEmpty())
-        <div class="mt-3 rounded-[20px] border border-dashed border-[#2f3960] bg-fq-panel p-[34px] text-center text-sm text-fq-text-5">
+        <div class="mt-3 rounded-[20px] border border-dashed border-fq-line bg-fq-panel p-[34px] text-center text-sm text-fq-text-5">
             No redemptions waiting.
         </div>
     @else

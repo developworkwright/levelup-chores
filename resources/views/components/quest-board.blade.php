@@ -1,10 +1,13 @@
 @props(['class' => ''])
 
+{{-- The gold rail both consoles hang their tabs from — a solid bar of the
+     points colour, so the navigation reads as part of the cabinet rather than
+     another dark panel. --}}
 <div
-    {{ $attributes->merge(['class' => 'mt-2 rounded-[16px] p-3 '.$class]) }}
-    style="background: var(--fq-lime); box-shadow: 0 10px 22px -14px #000"
+    {{ $attributes->merge(['class' => 'mt-2 rounded-[18px] p-2 '.$class]) }}
+    style="background: var(--fq-rail); box-shadow: var(--fq-shadow-rail)"
 >
-    <div class="flex flex-wrap gap-2">
+    <div class="flex flex-wrap gap-[7px]">
         {{ $slot }}
     </div>
 </div>

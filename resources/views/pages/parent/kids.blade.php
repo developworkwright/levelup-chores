@@ -281,7 +281,7 @@ new class extends Component
             class="mt-3 w-full border-0 border-b border-fq-line-2 bg-transparent py-[3px] text-[15px] font-semibold outline-none focus:border-fq-cyan"
         >
 
-        <div class="mt-3 h-4 overflow-hidden rounded-full border" style="background:#242c4d; border-color:#2f3960">
+        <div class="mt-3 h-4 overflow-hidden rounded-full border border-fq-line bg-fq-track">
             <div
                 class="h-full rounded-full transition-[width] duration-500"
                 style="width:{{ $goalPercent }}%;background:linear-gradient(90deg, var(--fq-cyan), var(--fq-lime), var(--fq-gold))"
@@ -318,7 +318,7 @@ new class extends Component
 
     <div
         class="mb-[14px] rounded-[22px] border p-[18px]"
-        style="background:linear-gradient(135deg, #3a1f4d, var(--fq-panel)); border-color: oklch(0.65 0.19 320 / .5)"
+        style="background: var(--fq-wash-violet); border-color: color-mix(in srgb, var(--fq-magenta) 50%, transparent)"
     >
         <div class="flex flex-wrap items-center justify-between gap-3">
             <div class="min-w-0">
@@ -405,18 +405,20 @@ new class extends Component
                     <span class="font-mono-fq text-[10px] text-fq-text-4">PTS · ${{ $dollars }}</span>
                 </div>
 
-                <div class="rounded-[14px] border p-[14px]" style="border-color: oklch(0.65 0.19 320 / .4); background: var(--fq-sunk)">
-                    <div class="flex items-baseline justify-between">
-                        <span class="font-baloo text-[22px] font-extrabold" style="color: var(--fq-magenta)">{{ $kid->bonus_tickets }}</span>
-                        <span class="font-mono-fq text-[10px] text-fq-text-4">TICKETS · LVL {{ $kid->level() }}</span>
+                {{-- Gold on olive, matching the kid header's ticket tile — a
+                     parent handing out tickets should see the same currency the
+                     kid does, not a purple lookalike. --}}
+                <div class="rounded-[14px] border border-fq-ticket-line p-[14px]" style="background: var(--fq-ticket-bg)">
+                    <div class="flex items-baseline justify-between gap-2">
+                        <span class="font-baloo text-[22px] font-extrabold text-fq-lime">{{ $kid->bonus_tickets }}</span>
+                        <span class="font-mono-fq text-[10px] text-fq-ticket-label">TICKETS · LVL {{ $kid->level() }}</span>
                     </div>
-                    <div class="mt-2 flex gap-2">
+                    <div class="mt-[10px] flex gap-2">
                         @foreach ([-1, 1, 5] as $delta)
                             <button
                                 type="button"
                                 wire:click="adjustTickets({{ $kid->id }}, {{ $delta }})"
-                                class="flex-1 rounded-[10px] border px-2 py-[6px] font-mono-fq text-xs font-semibold"
-                                style="border-color: oklch(0.65 0.19 320 / .4); color: var(--fq-magenta)"
+                                class="flex-1 rounded-[10px] border border-fq-ticket-line bg-fq-sunk px-2 py-[7px] font-mono-fq text-xs font-semibold text-fq-lime transition hover:brightness-120"
                             >{{ $delta > 0 ? '+' : '' }}{{ $delta }}</button>
                         @endforeach
                     </div>
@@ -432,9 +434,9 @@ new class extends Component
                                 wire:click="adjustPoints({{ $kid->id }}, {{ $delta }})"
                                 class="min-w-[48px] flex-1 rounded-[12px] px-[6px] py-[10px] font-mono-fq text-xs font-semibold"
                                 style="
-                                    background: {{ $positive ? 'oklch(0.7 0.14 140 / 0.22)' : 'oklch(0.6 0.14 20 / 0.18)' }};
-                                    border: 1px solid {{ $positive ? 'oklch(0.7 0.16 140 / 0.5)' : 'oklch(0.65 0.16 20 / 0.45)' }};
-                                    color: {{ $positive ? 'var(--fq-lime)' : 'oklch(0.78 0.14 25)' }};
+                                    background: {{ $positive ? 'rgba(255,225,77,0.22)' : 'rgba(255,107,107,0.18)' }};
+                                    border: 1px solid {{ $positive ? 'rgba(255,225,77,0.5)' : 'rgba(255,107,107,0.45)' }};
+                                    color: {{ $positive ? 'var(--fq-lime)' : 'var(--fq-negative-3)' }};
                                 "
                             >{{ $delta > 0 ? '+' : '' }}{{ $delta }}</button>
                         @endforeach

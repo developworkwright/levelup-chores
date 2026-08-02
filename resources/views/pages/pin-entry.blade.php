@@ -145,7 +145,7 @@ new class extends Component
                 type="button"
                 wire:click="press('{{ $key }}')"
                 @disabled($lockedMessage)
-                class="rounded-[16px] border border-fq-line-2 bg-fq-sunk py-4 font-baloo text-[22px] font-bold transition hover:bg-[#26305a] disabled:opacity-40"
+                class="rounded-[16px] border border-fq-line-2 bg-fq-sunk py-4 font-baloo text-[22px] font-bold transition hover:bg-fq-line disabled:opacity-40"
             >{{ $key }}</button>
         @endforeach
 
@@ -155,14 +155,14 @@ new class extends Component
             type="button"
             wire:click="press('0')"
             @disabled($lockedMessage)
-            class="rounded-[16px] border border-fq-line-2 bg-fq-sunk py-4 font-baloo text-[22px] font-bold transition hover:bg-[#26305a] disabled:opacity-40"
+            class="rounded-[16px] border border-fq-line-2 bg-fq-sunk py-4 font-baloo text-[22px] font-bold transition hover:bg-fq-line disabled:opacity-40"
         >0</button>
 
         <button
             type="button"
             wire:click="backspace"
             @disabled($lockedMessage)
-            class="rounded-[16px] border border-fq-line-2 bg-fq-sunk py-4 font-baloo text-[22px] font-bold transition hover:bg-[#26305a] disabled:opacity-40"
+            class="rounded-[16px] border border-fq-line-2 bg-fq-sunk py-4 font-baloo text-[22px] font-bold transition hover:bg-fq-line disabled:opacity-40"
         >&larr;</button>
     </div>
 

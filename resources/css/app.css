@@ -12,8 +12,28 @@
         'Segoe UI Symbol', 'Noto Color Emoji';
 }
 
+/*
+ * Ten one-pixel dots tiled at 780×620 give the near-black a sparse starfield,
+ * with a single purple glow bleeding down from the top-left. Fixed attachment
+ * keeps the sky still while the page scrolls under it.
+ */
 body {
-    background: var(--fq-bg-glow);
+    background:
+        radial-gradient(1.6px 1.6px at 8% 12%, #ffffff, transparent),
+        radial-gradient(1.3px 1.3px at 23% 61%, #d7dde5, transparent),
+        radial-gradient(1.1px 1.1px at 41% 27%, #ffffff, transparent),
+        radial-gradient(1.7px 1.7px at 57% 74%, #c3cbd4, transparent),
+        radial-gradient(1.2px 1.2px at 69% 18%, #ffffff, transparent),
+        radial-gradient(1.5px 1.5px at 84% 47%, #d7dde5, transparent),
+        radial-gradient(1.1px 1.1px at 93% 82%, #ffffff, transparent),
+        radial-gradient(1.4px 1.4px at 15% 88%, #c3cbd4, transparent),
+        radial-gradient(1.2px 1.2px at 34% 94%, #ffffff, transparent),
+        radial-gradient(1.5px 1.5px at 76% 8%, #d7dde5, transparent),
+        var(--fq-bg-glow);
+    background-size:
+        780px 620px, 780px 620px, 780px 620px, 780px 620px, 780px 620px,
+        780px 620px, 780px 620px, 780px 620px, 780px 620px, 780px 620px, auto;
+    background-attachment: fixed;
     background-color: var(--fq-bg);
     color: var(--fq-text);
     font-family: var(--font-outfit);

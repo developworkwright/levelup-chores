@@ -73,17 +73,17 @@ new class extends Component
                     <p class="text-[16px] font-semibold">{{ $item->name }}</p>
                     <p class="mt-1 text-[13px] leading-[1.35] text-fq-text-4">{{ $item->description }}</p>
                 </div>
-                <div class="flex items-center justify-between">
+                <div class="flex items-center justify-between gap-2">
                     <span class="font-baloo text-[19px] font-extrabold text-fq-gold">{{ $item->cost }} pts</span>
                     @if ($affordable)
                         <button
                             type="button"
                             wire:click="redeem({{ $item->id }})"
-                            class="rounded-[13px] px-4 py-[10px] text-[13px] font-semibold text-fq-bg"
+                            class="rounded-[13px] px-4 py-[10px] text-[13px] font-semibold text-fq-bg transition hover:brightness-110"
                             style="background:var(--fq-cyan)"
                         >Cash out</button>
                     @else
-                        <button type="button" disabled class="cursor-default rounded-[13px] bg-fq-panel-alt-2 px-4 py-[10px] text-[13px] font-semibold text-fq-text-4">
+                        <button type="button" disabled class="cursor-default rounded-[13px] bg-fq-panel-alt px-4 py-[10px] text-[13px] font-semibold text-fq-text-4">
                             Need {{ $item->cost - $profile->points }}
                         </button>
                     @endif

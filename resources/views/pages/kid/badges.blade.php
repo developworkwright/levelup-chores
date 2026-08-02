@@ -57,22 +57,21 @@ new class extends Component
             @foreach ($badges as $entry)
                 @php
                     $badge = $entry['badge'];
-                    $accent = $entry['secret'] ? 'var(--fq-line-3)' : $badge->color->cssVar();
+                    // Same XP thresholds x-badge-star strikes the metal from,
+                    // so the label under a name always names what's on screen.
+                    $tier = match (true) {
+                        $badge->xp_reward >= 250 => 'gold',
+                        $badge->xp_reward >= 150 => 'silver',
+                        default => 'amethyst',
+                    };
                 @endphp
 
                 <div
                     wire:key="badge-{{ $badge->id }}"
                     class="flex gap-3 rounded-[20px] border p-4 {{ $entry['earned'] ? '' : 'opacity-60' }}"
-                    style="background: var(--fq-panel); border-color: {{ $entry['earned'] ? $accent : 'var(--fq-line)' }}"
+                    style="background: var(--fq-panel); border-color: {{ $entry['earned'] ? "var(--fq-tier-{$tier}-ring)" : 'var(--fq-line)' }}"
                 >
-                    <div
-                        class="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[14px] font-baloo text-lg font-extrabold"
-                        style="
-                            background: {{ $entry['earned'] ? $accent : 'var(--fq-sunk)' }};
-                            color: {{ $entry['earned'] ? 'var(--fq-bg)' : 'var(--fq-text-4)' }};
-                            border: 1px solid {{ $entry['earned'] ? $accent : 'var(--fq-line-3)' }};
-                        "
-                    >{{ $entry['secret'] ? '?' : $badge->glyph }}</div>
+                    <x-badge-star :badge="$badge" :earned="$entry['earned']" :secret="$entry['secret']" size="lg" />
 
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-2">
@@ -83,6 +82,11 @@ new class extends Component
                                 <span class="font-mono-fq text-[9px] tracking-[0.14em] text-fq-lime uppercase">Earned</span>
                             @endif
                         </div>
+
+                        <p
+                            class="mt-[2px] font-mono-fq text-[9px] tracking-[0.14em]"
+                            style="color: {{ $entry['earned'] ? "var(--fq-tier-{$tier}-ring)" : 'var(--fq-text-5)' }}"
+                        >{{ strtoupper($tier) }} · {{ $badge->xp_reward }} XP</p>
 
                         <p class="mt-1 text-sm text-fq-text-3">
                             @if ($entry['secret'])

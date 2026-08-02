@@ -272,7 +272,7 @@ new class extends Component
                 </button>
             </div>
 
-            <div class="rounded-[22px] p-5" style="background:linear-gradient(135deg, #2a2050, #171c38)">
+            <div class="rounded-[22px] p-5" style="background: var(--fq-wash-blue)">
                 <h3 class="font-baloo text-lg font-bold">Quick ideas</h3>
                 <p class="mt-1 text-[13px] text-fq-text-2">Tap one to fill the form, then tweak the price.</p>
                 <div class="mt-3 flex flex-wrap gap-2">
@@ -301,18 +301,18 @@ new class extends Component
                 <div
                     wire:key="perk-{{ $perk->id }}"
                     class="flex flex-col gap-3 rounded-[18px] border p-[14px] {{ $perk->enabled ? '' : 'opacity-60' }}"
-                    style="background: var(--fq-panel); border-color: {{ $perk->enabled ? 'oklch(0.65 0.19 320 / .4)' : 'var(--fq-line)' }}"
+                    style="background: var(--fq-panel); border-color: {{ $perk->enabled ? 'var(--fq-ticket-line)' : 'var(--fq-line)' }}"
                 >
                     <div class="flex items-center gap-3">
                         <div
-                            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] font-baloo text-lg font-extrabold"
-                            style="background: var(--fq-sunk); color: var(--fq-magenta)"
+                            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] font-baloo text-lg font-extrabold text-fq-lime"
+                            style="background: var(--fq-ticket-bg)"
                         >{{ $perk->glyph }}</div>
                         <input
                             type="text"
                             value="{{ $perk->name }}"
                             wire:blur="updatePerkName({{ $perk->id }}, $event.target.value)"
-                            class="min-w-0 flex-1 border-0 border-b border-fq-line-2 bg-transparent py-[3px] text-[15px] font-semibold outline-none focus:border-fq-magenta"
+                            class="min-w-0 flex-1 border-0 border-b border-fq-line-2 bg-transparent py-[3px] text-[15px] font-semibold outline-none focus:border-fq-lime"
                         >
                     </div>
 
@@ -320,15 +320,15 @@ new class extends Component
                         type="text"
                         value="{{ $perk->description }}"
                         wire:blur="updatePerkDescription({{ $perk->id }}, $event.target.value)"
-                        class="w-full border-0 border-b border-fq-line-2 bg-transparent py-[3px] text-[13px] text-fq-text-2 outline-none focus:border-fq-magenta"
+                        class="w-full border-0 border-b border-fq-line-2 bg-transparent py-[3px] text-[13px] text-fq-text-2 outline-none focus:border-fq-lime"
                     >
 
                     <div class="flex flex-wrap items-center gap-2">
                         <div class="flex items-center gap-2">
                             <button type="button" wire:click="adjustPerkCost({{ $perk->id }}, -1)" class="h-8 w-8 rounded-[10px] border border-fq-line-3 bg-fq-sunk text-lg">&minus;</button>
-                            <span class="w-14 text-center font-baloo text-[17px] font-extrabold" style="color: var(--fq-magenta)">{{ $perk->cost }}</span>
+                            <span class="w-14 text-center font-baloo text-[17px] font-extrabold text-fq-lime">{{ $perk->cost }}</span>
                             <button type="button" wire:click="adjustPerkCost({{ $perk->id }}, 1)" class="h-8 w-8 rounded-[10px] border border-fq-line-3 bg-fq-sunk text-lg">+</button>
-                            <span class="font-mono-fq text-[10px] text-fq-text-4">TICKETS</span>
+                            <span class="font-mono-fq text-[10px] text-fq-ticket-label">TICKETS</span>
                         </div>
 
                         <button

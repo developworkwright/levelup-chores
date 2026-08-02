@@ -23,7 +23,7 @@ class LoginProfilePickerTest extends TestCase
 
         Volt::test('login')
             ->assertSee('Nova')
-            ->assertSee('Level 4')
+            ->assertSee('LVL 4')
             ->assertDontSee('Age 12');
     }
 
@@ -32,7 +32,7 @@ class LoginProfilePickerTest extends TestCase
         $household = Household::factory()->create();
         Profile::factory()->for($household)->create(['name' => 'Scout', 'xp' => 0]);
 
-        Volt::test('login')->assertSee('Level 1');
+        Volt::test('login')->assertSee('LVL 1');
     }
 
     public function test_the_parent_still_shows_console(): void
@@ -42,7 +42,7 @@ class LoginProfilePickerTest extends TestCase
 
         Volt::test('login')
             ->assertSee('Console')
-            ->assertDontSee('Level');
+            ->assertDontSee('LVL');
     }
 
     public function test_age_is_still_stored_because_chore_gating_needs_it(): void

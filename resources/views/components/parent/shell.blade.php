@@ -18,20 +18,31 @@
 @endphp
 
 <div class="mx-auto max-w-[1080px] px-[14px] pb-10">
-    <div class="sticky top-0 z-20 pt-[14px] pb-[10px]">
-        <div class="flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-fq-line bg-fq-panel p-[14px_16px]">
+    <div class="pt-[14px] pb-[10px]">
+        <div class="flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-fq-line bg-fq-panel p-[12px_14px]">
             <div>
                 <p class="font-mono-fq text-[10px] tracking-[0.22em] text-fq-cyan uppercase">Parent Console</p>
                 <h1 class="font-baloo text-2xl font-extrabold">{{ config('app.name') }} HQ</h1>
             </div>
-            <div class="flex items-center gap-2">
-                <span class="rounded-[10px] border border-fq-line-2 bg-fq-sunk px-3 py-2 font-mono-fq text-[11px] text-fq-gold">
-                    {{ $pendingCount }} PENDING
-                </span>
+
+            {{-- Same 52px bank as the kid header, minus the two tiles a parent
+                 has no use for. --}}
+            <div class="flex flex-wrap items-center gap-2">
+                <div class="flex h-[52px] w-[92px] flex-col items-end justify-center rounded-[15px] border border-fq-line-2 bg-fq-sunk px-3">
+                    <span class="font-baloo text-[19px] leading-none font-extrabold text-fq-gold">{{ $pendingCount }}</span>
+                    <span class="font-mono-fq text-[9px] text-fq-text-4">PENDING</span>
+                </div>
+
                 <x-sound-toggle />
+
                 <form method="POST" action="{{ route('logout') }}">
                     @csrf
-                    <button type="submit" class="rounded-[14px] border border-fq-line-2 bg-fq-sunk px-3 py-[7px] text-xs text-fq-text-4 transition hover:text-fq-text">Exit</button>
+                    <button
+                        type="submit"
+                        title="Exit"
+                        aria-label="Exit"
+                        class="flex h-[52px] w-[52px] items-center justify-center rounded-[15px] border border-fq-line-2 bg-fq-sunk text-[16px] text-fq-text-4 transition hover:text-fq-text"
+                    >&#9211;</button>
                 </form>
             </div>
         </div>
@@ -41,7 +52,8 @@
                 <a
                     href="{{ route($tab['route']) }}"
                     wire:navigate
-                    class="flex-1 rounded-[14px] border px-4 py-[10px] text-center text-sm font-semibold whitespace-nowrap {{ $active === $key ? 'border-2 border-fq-bg bg-fq-sky text-fq-bg' : 'border-fq-line bg-fq-sunk text-fq-text-3' }}"
+                    class="flex-1 rounded-[14px] border border-transparent px-4 py-[10px] text-center text-sm font-semibold whitespace-nowrap"
+                    style="{{ $active === $key ? 'background: var(--fq-tab-active); color: var(--fq-lime)' : 'background:transparent; color: var(--fq-ink)' }}"
                 >{{ $tab['label'] }}</a>
             @endforeach
         </x-quest-board>

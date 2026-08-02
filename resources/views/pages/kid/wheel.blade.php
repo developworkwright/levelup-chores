@@ -151,9 +151,9 @@ new class extends Component
     <div
         x-data
         x-init="$watch('$wire.spinning', (value) => { if (value) setTimeout(() => $wire.finishSpin(), 6100) })"
-        class="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-4"
+        class="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] items-stretch gap-4"
     >
-        <div class="flex flex-col items-center gap-[18px] rounded-[24px] border border-fq-line bg-fq-panel p-[22px] text-center">
+        <div class="flex flex-col items-center justify-center gap-[18px] rounded-[24px] border border-fq-line bg-fq-panel p-[22px] text-center">
             <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-magenta uppercase">One Spin Per Day</p>
             <h2 class="font-baloo text-[28px] font-extrabold">Bonus Wheel</h2>
 
@@ -165,11 +165,11 @@ new class extends Component
 
                 {{-- Shadow lives on this static wrapper — box-shadow rotates along with
                      its element, so it has to stay off the div that spins. --}}
-                <div class="absolute inset-0 rounded-full" style="box-shadow:0 0 0 3px #3a2a18, 0 26px 50px -24px #000;">
+                <div class="absolute inset-0 rounded-full" style="box-shadow:0 0 0 3px var(--fq-wheel-ring), var(--fq-shadow-wheel);">
                     <div
                         class="absolute inset-0 rounded-full"
                         style="
-                            background: repeating-conic-gradient(#2b1c10 0deg 3deg, #1c120a 3deg 6deg);
+                            background: var(--fq-wheel-rim);
                             transform: rotate({{ $wheelDeg }}deg);
                             transition: transform 6s cubic-bezier(.11,.85,.1,1);
                         "
@@ -195,7 +195,7 @@ new class extends Component
                                 class="absolute"
                                 style="
                                     left:145px; top:145px; width:2px; height:132px;
-                                    background: rgba(226,204,163,.4);
+                                    background: color-mix(in srgb, var(--fq-wheel-label) 40%, transparent);
                                     transform-origin: top center;
                                     transform: translateX(-1px) rotate({{ $boundaryDeg - 90 }}deg);
                                 "
@@ -213,7 +213,7 @@ new class extends Component
                                     left:145px; top:145px; margin-top:-6px; width:98px; height:12px;
                                     transform-origin: left center;
                                     transform: rotate({{ $midDeg }}deg) translateX(30px);
-                                    font-size:9px; letter-spacing:.01em; color:#e2cca3;
+                                    font-size:9px; letter-spacing:.01em; color: var(--fq-wheel-label);
                                     text-shadow: 0 1px 1px rgba(0,0,0,.5);
                                 "
                             >{{ $wheelChore->name }}</div>
@@ -223,52 +223,79 @@ new class extends Component
                              click target (the real spin action is the button below). --}}
                         <div
                             class="absolute top-1/2 left-1/2 z-[2] rounded-full"
-                            style="width:22px; height:22px; transform: translate(-50%, -50%); background:#3a2716; border: 2px solid #4a3420; box-shadow: inset 0 1px 3px rgba(0,0,0,.5)"
+                            style="width:22px; height:22px; transform: translate(-50%, -50%); background: var(--fq-wheel-hub); border: 2px solid var(--fq-wheel-hub-line); box-shadow: inset 0 1px 3px rgba(0,0,0,.5)"
                         ></div>
                     </div>
                 </div>
             </div>
 
+            @php
+                // The landed panel and the Active Boost card are the same
+                // result stated twice, so they're tinted from one place.
+                $boostIsBig = $boost && $boost->multiplier === 3;
+                $boostTint = $boostIsBig
+                    ? 'background: color-mix(in srgb, var(--fq-gold) 20%, transparent); border-color: color-mix(in srgb, var(--fq-gold) 55%, transparent)'
+                    : 'background: color-mix(in srgb, var(--fq-magenta) 20%, transparent); border-color: color-mix(in srgb, var(--fq-magenta) 50%, transparent)';
+                $boostColor = $boostIsBig ? 'var(--fq-gold)' : 'var(--fq-magenta)';
+            @endphp
+
             @if ($revealed && $boost && ! $spinning)
-                @php $boostIsBig = $boost->multiplier === 3; @endphp
                 <div
                     wire:key="landed-{{ $boost->id }}"
                     class="w-full max-w-[300px] rounded-[16px] border px-4 py-3 text-center"
-                    style="animation: fq-pop .3s ease both; background: {{ $boostIsBig ? 'oklch(0.84 0.16 85 / .2)' : 'oklch(0.55 0.19 320 / 0.2)' }}; border-color: {{ $boostIsBig ? 'oklch(0.84 0.16 85 / .55)' : 'oklch(0.65 0.19 320 / 0.5)' }}"
+                    style="animation: fq-pop .3s ease both; {{ $boostTint }}"
                 >
-                    <p class="font-mono-fq text-[10px] tracking-[0.2em] uppercase" style="color: {{ $boostIsBig ? 'var(--fq-gold)' : 'var(--fq-magenta)' }}">You landed on</p>
+                    <p class="font-mono-fq text-[10px] tracking-[0.2em] uppercase" style="color: {{ $boostColor }}">You landed on</p>
                     <p class="mt-1 font-baloo text-lg font-extrabold">{{ $boost->chore->name }} &mdash; {{ $boost->multiplier }}x</p>
                 </div>
             @endif
-
-            @if ($spinning)
-                <button type="button" disabled class="w-full max-w-[300px] cursor-default rounded-[18px] bg-fq-line-2 py-4 font-baloo text-[19px] font-extrabold text-fq-text-3">
-                    Spinning&hellip;
-                </button>
-            @elseif ($revealed)
-                <button type="button" disabled class="w-full max-w-[300px] cursor-default rounded-[18px] bg-fq-line-2 py-4 font-baloo text-[19px] font-extrabold text-fq-text-3">
-                    Used today &mdash; back tomorrow
-                </button>
-            @else
-                <button
-                    type="button"
-                    wire:click="spin"
-                    class="w-full max-w-[300px] rounded-[18px] py-4 font-baloo text-[19px] font-extrabold text-fq-bg shadow-[0_14px_30px_-16px_var(--fq-magenta)]"
-                    style="background:var(--fq-magenta)"
-                >SPIN</button>
-            @endif
-
-            <p class="max-w-[300px] text-[13px] text-fq-text-4">
-                @if ($revealed)
-                    One spin a day. Your boost is locked in below.
-                @else
-                    Land on a chore, get 2x or 3x its points — plus a sweet treat when you finish it. Do it today.
-                @endif
-            </p>
         </div>
 
         <div class="flex flex-col gap-4">
-            <div class="rounded-[24px] border p-5" style="background:linear-gradient(135deg, #2a2050, #171c38); border-color:#45407f">
+            {{-- The spin lives here rather than under the wheel: on a phone the
+                 wheel fills the screen, and the button a kid came for shouldn't
+                 be the thing they have to scroll past it to find. --}}
+            <div class="flex flex-col gap-3 rounded-[24px] border border-fq-line bg-fq-panel p-5">
+                @if ($spinning)
+                    <button type="button" disabled class="w-full cursor-default rounded-[18px] bg-fq-line-2 py-4 font-baloo text-[19px] font-extrabold text-fq-text-3">
+                        Spinning&hellip;
+                    </button>
+                @elseif ($revealed)
+                    <button type="button" disabled class="w-full cursor-default rounded-[18px] bg-fq-line-2 py-4 font-baloo text-[19px] font-extrabold text-fq-text-3">
+                        Used today &mdash; back tomorrow
+                    </button>
+                @else
+                    <button
+                        type="button"
+                        wire:click="spin"
+                        class="w-full rounded-[18px] py-4 font-baloo text-[19px] font-extrabold text-fq-bg transition hover:brightness-110"
+                        style="background:var(--fq-magenta); box-shadow: var(--fq-shadow-glow-lg) var(--fq-magenta)"
+                    >SPIN</button>
+                @endif
+
+                <p class="text-[13px] text-fq-text-4">
+                    @if ($revealed)
+                        One spin a day. Your boost is locked in below.
+                    @else
+                        Land on a chore, get 2x or 3x its points — plus a sweet treat when you finish it. Do it today.
+                    @endif
+                </p>
+
+                @if ($respin)
+                    <div class="flex flex-col items-start gap-1">
+                        <x-perk-button :entry="$respin" />
+                        @if ($respin['blocked'])
+                            <span class="font-mono-fq text-[10px] text-fq-text-5">{{ $respin['blocked'] }}</span>
+                        @endif
+                    </div>
+                @endif
+
+                @if ($perkMessage)
+                    <p class="text-[13px] text-fq-text-4">{{ $perkMessage }}</p>
+                @endif
+            </div>
+
+            <div class="rounded-[24px] border p-5" style="background: var(--fq-wash-blue); border-color: var(--fq-line-cool)">
                 <h3 class="font-baloo text-lg font-bold">How it works</h3>
                 <div class="mt-3 flex flex-col gap-2 text-sm text-fq-text-2-b">
                     <p>1 &mdash; Spin once a day, any time.</p>
@@ -277,26 +304,15 @@ new class extends Component
                 </div>
             </div>
 
-            <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
+            <div class="flex flex-1 flex-col rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
                 <h3 class="font-baloo text-lg font-bold">Active Boost</h3>
                 @if ($revealed && $boost)
-                    @php $boostIsBig = $boost->multiplier === 3; @endphp
-                    <div class="mt-3 flex items-center justify-between rounded-[16px] border p-[14px]" style="background: {{ $boostIsBig ? 'oklch(0.84 0.16 85 / .2)' : 'oklch(0.55 0.19 320 / 0.2)' }}; border-color: {{ $boostIsBig ? 'oklch(0.84 0.16 85 / .55)' : 'oklch(0.65 0.19 320 / 0.5)' }}">
+                    <div class="mt-3 flex items-center justify-between rounded-[16px] border p-[14px]" style="{{ $boostTint }}">
                         <span class="text-sm font-semibold">{{ $boost->chore->name }}</span>
-                        <span class="font-baloo text-[22px] font-extrabold" style="color: {{ $boostIsBig ? 'var(--fq-gold)' : 'var(--fq-magenta)' }}">{{ $boost->multiplier }}x</span>
+                        <span class="font-baloo text-[22px] font-extrabold" style="color: {{ $boostColor }}">{{ $boost->multiplier }}x</span>
                     </div>
                 @else
                     <p class="mt-3 text-[13px] text-fq-text-5">No boost yet today.</p>
-                @endif
-
-                @if ($respin)
-                    <div class="mt-3">
-                        <x-perk-button :entry="$respin" />
-                    </div>
-                @endif
-
-                @if ($perkMessage)
-                    <p class="mt-2 text-[13px] text-fq-text-4">{{ $perkMessage }}</p>
                 @endif
             </div>
         </div>

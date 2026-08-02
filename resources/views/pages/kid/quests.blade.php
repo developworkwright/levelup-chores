@@ -295,6 +295,7 @@ new class extends Component
                     :revealed="$dailyChestPrize !== null"
                     open-action="openDailyChest"
                     accent="var(--fq-magenta)"
+                    wash="var(--fq-wash-violet)"
                     closed-title="Daily Chest"
                     closed-text="A prize is waiting — clear today's quest first for better odds!"
                     opening-text="Something's rattling inside..."
@@ -305,7 +306,7 @@ new class extends Component
                     <div
                         wire:key="daily-chest-opened"
                         class="flex flex-col items-center rounded-[24px] border p-8 text-center"
-                        style="animation: fq-pop .3s ease both; background:linear-gradient(135deg, #3a1f4d, #171c38); border-color: oklch(0.65 0.19 320 / .5)"
+                        style="animation: fq-pop .3s ease both; background: var(--fq-wash-violet); border-color: color-mix(in srgb, var(--fq-magenta) 55%, transparent)"
                     >
                         <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: var(--fq-magenta)">Daily Chest</p>
                         <h2 class="mt-2 font-baloo text-xl font-bold">{{ $dailyChestPrize }}</h2>
@@ -321,7 +322,8 @@ new class extends Component
                     wire-key="streak-chest"
                     :revealed="false"
                     open-action="openStreakChest"
-                    accent="var(--fq-violet)"
+                    accent="var(--fq-coral)"
+                    wash="var(--fq-wash-violet)"
                     closed-title="Streak Chest"
                     closed-text="Your streak paid off — tap to open your reward!"
                     opening-text="Something's rattling inside..."
@@ -331,9 +333,9 @@ new class extends Component
                     <div
                         wire:key="streak-chest-opened"
                         class="flex flex-col items-center rounded-[24px] border p-8 text-center"
-                        style="animation: fq-pop .3s ease both; background:linear-gradient(135deg, #2a2050, #171c38); border-color: oklch(0.65 0.19 320 / .5)"
+                        style="animation: fq-pop .3s ease both; background: var(--fq-wash-blue); border-color: color-mix(in srgb, var(--fq-coral) 55%, transparent)"
                     >
-                        <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-violet uppercase">Streak Chest</p>
+                        <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-coral uppercase">Streak Chest</p>
                         <h2 class="mt-2 font-baloo text-xl font-bold">+{{ $pendingChestPoints }} pts banked!</h2>
                         <p class="mt-1 max-w-[320px] text-sm text-fq-text-2">
                             {{ $pendingChestDay }}-day streak bonus.
@@ -344,10 +346,14 @@ new class extends Component
                     </div>
                 </x-chest>
             @else
-                <div wire:key="streak-progress" class="rounded-[24px] border border-fq-line bg-fq-panel p-6">
-                    <div class="flex items-center justify-between">
+                <div
+                    wire:key="streak-progress"
+                    class="rounded-[24px] border bg-fq-panel p-6"
+                    style="border-color: color-mix(in srgb, var(--fq-coral) 35%, transparent)"
+                >
+                    <div class="flex items-center justify-between gap-[10px]">
                         <h3 class="font-baloo text-lg font-bold">Streak Chest</h3>
-                        <span class="font-mono-fq text-[11px] text-fq-violet">{{ $profile->streak }}-day streak</span>
+                        <span class="font-mono-fq text-[11px] text-fq-coral">{{ $profile->streak }}-day streak</span>
                     </div>
                     <p class="mt-1 text-sm text-fq-text-2">
                         @if ($nextMilestone && $profile->streak + 1 === $nextMilestone && ! $questDone)
@@ -359,17 +365,23 @@ new class extends Component
                         @endif
                     </p>
 
+                    {{-- Struck-metal markers rather than purple ones: the chest
+                         at the end pays out in cash, so the track reads like a
+                         coin run. --}}
                     <div class="mt-4 flex items-center gap-1 overflow-x-auto pb-1">
                         @foreach ($streakBonuses as $milestone)
                             <div class="flex flex-shrink-0 flex-col items-center gap-1">
                                 <div
                                     class="flex h-9 w-9 items-center justify-center rounded-full border-2 font-baloo text-[11px] font-extrabold"
-                                    style="background: {{ $milestone['reached'] ? 'var(--fq-violet)' : 'var(--fq-sunk)' }}; border-color: {{ $milestone['reached'] ? 'var(--fq-violet)' : 'var(--fq-line-3)' }}; color: {{ $milestone['reached'] ? 'var(--fq-bg)' : 'var(--fq-text-4)' }}"
+                                    style="background: {{ $milestone['reached'] ? 'var(--fq-coral)' : 'var(--fq-steel-dim)' }}; border-color: {{ $milestone['reached'] ? 'var(--fq-coral)' : 'var(--fq-steel-dim-line)' }}; color: {{ $milestone['reached'] ? 'var(--fq-bg)' : 'var(--fq-steel-text)' }}"
                                 >{{ $milestone['reached'] ? '✓' : $milestone['day'] }}</div>
-                                <span class="font-mono-fq text-[9px] whitespace-nowrap text-fq-text-5">D{{ $milestone['day'] }} · {{ $milestone['points'] }}</span>
+                                <span
+                                    class="font-mono-fq text-[9px] whitespace-nowrap"
+                                    style="color: {{ $milestone['reached'] ? 'var(--fq-coral)' : 'var(--fq-steel-dim-label)' }}"
+                                >D{{ $milestone['day'] }} · {{ $milestone['points'] }}</span>
                             </div>
                             @unless ($loop->last)
-                                <div class="mt-[-14px] h-[2px] w-5 flex-shrink-0" style="background: {{ $milestone['reached'] ? 'var(--fq-violet)' : 'var(--fq-line-3)' }}"></div>
+                                <div class="mt-[-14px] h-[2px] w-5 flex-shrink-0" style="background: {{ $milestone['reached'] ? 'var(--fq-coral)' : 'var(--fq-steel-dim-link)' }}"></div>
                             @endunless
                         @endforeach
                     </div>
@@ -383,7 +395,7 @@ new class extends Component
                 <div
                     wire:key="quest-cleared"
                     class="flex items-center gap-3 rounded-[18px] border p-[14px]"
-                    style="background:linear-gradient(135deg, #1c2a4d, var(--fq-panel)); border-color: oklch(0.7 0.16 140 / 0.4)"
+                    style="background: var(--fq-wash-cleared); border-color: color-mix(in srgb, var(--fq-lime) 40%, transparent)"
                 >
                     <div
                         class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[12px] font-baloo text-lg font-extrabold text-fq-bg"
@@ -400,7 +412,7 @@ new class extends Component
                 wire-key="quest-chest"
                 :revealed="$questRevealed"
                 open-action="revealQuest"
-                accent="var(--fq-gold)"
+                accent="var(--fq-lime)"
                 closed-title="Today's Main Quest"
                 closed-text="Tap the chest to reveal today's main quest — every side quest below stays locked until you do."
                 opening-text="The chest is rattling..."
@@ -410,9 +422,9 @@ new class extends Component
                 <div
                     wire:key="hero"
                     class="rounded-[24px] border p-5"
-                    style="animation: fq-pop .3s ease both; background:linear-gradient(135deg, #23306b, #171c38); border-color: {{ $questDone ? 'oklch(0.7 0.16 140 / 0.6)' : 'oklch(0.8 0.15 85 / 0.55)' }}"
+                    style="animation: fq-pop .3s ease both; background: var(--fq-wash-gold); border-color: rgba(255,225,77,{{ $questDone ? '0.4' : '0.65' }})"
                 >
-                    <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-gold uppercase">Today's Main Quest</p>
+                    <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-lime uppercase">Today's Main Quest</p>
                     <h2 class="mt-2 font-baloo text-[30px] leading-[1.1] font-extrabold">{{ $quest->chore->name }}</h2>
                     <p class="mt-2 max-w-[420px] text-sm text-fq-text-2">
                         @if ($questDone)
@@ -422,7 +434,7 @@ new class extends Component
                         @endif
                     </p>
 
-                    <div class="mt-4 flex items-center gap-3">
+                    <div class="mt-4 flex w-full flex-wrap items-center gap-3">
                         @if ($questDone)
                             <button type="button" disabled class="cursor-default rounded-[16px] bg-fq-line-2 px-[22px] py-[14px] font-baloo text-[17px] font-bold text-fq-text-3">
                                 Cleared &#10003;
@@ -431,20 +443,22 @@ new class extends Component
                             <button
                                 type="button"
                                 wire:click="claimQuest"
-                                class="rounded-[16px] px-[22px] py-[14px] font-baloo text-[17px] font-bold text-fq-bg shadow-[0_10px_24px_-12px_var(--fq-gold)]"
-                                style="background:var(--fq-gold)"
+                                class="rounded-[16px] px-[22px] py-[14px] font-baloo text-[17px] font-bold transition hover:brightness-110"
+                                style="background: var(--fq-fill-gold); color: var(--fq-ink); box-shadow: var(--fq-shadow-glow-sm) var(--fq-lime)"
                             >Mark it done</button>
                         @endif
                         <span class="font-mono-fq text-xs" style="color: {{ $questBoosted ? ($boost->multiplier === 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)') : 'var(--fq-lime)' }}">
                             +{{ $questPoints }} PTS
                         </span>
-                    </div>
 
-                    @if (isset($heldPerks['quest_reroll']))
-                        <div class="mt-3">
-                            <x-perk-button :entry="$heldPerks['quest_reroll']" />
-                        </div>
-                    @endif
+                        {{-- Pushed to the far edge — it's an escape hatch, not
+                             the thing to reach for first. --}}
+                        @if (isset($heldPerks['quest_reroll']))
+                            <span class="ml-auto">
+                                <x-perk-button :entry="$heldPerks['quest_reroll']" />
+                            </span>
+                        @endif
+                    </div>
                 </div>
             </x-chest>
             @endif
@@ -456,7 +470,7 @@ new class extends Component
             @endif
 
             @if (isset($heldPerks['streak_restore']))
-                <div class="flex flex-wrap items-center gap-3 rounded-[18px] border p-[14px]" style="border-color: oklch(0.65 0.19 320 / .4); background: var(--fq-panel)">
+                <div class="flex flex-wrap items-center gap-3 rounded-[18px] border border-fq-steel-line p-[14px]" style="background: var(--fq-panel)">
                     <p class="min-w-0 flex-1 text-sm text-fq-text-2">
                         You're holding a Streak Restore — it can buy back a day you missed.
                     </p>
@@ -468,7 +482,7 @@ new class extends Component
                 <div
                     wire:key="mystery-status"
                     class="rounded-[24px] border p-5"
-                    style="background:linear-gradient(135deg, #3a1f4d, #171c38); border-color: oklch(0.65 0.19 320 / .5)"
+                    style="background: var(--fq-wash-violet); border-color: color-mix(in srgb, var(--fq-magenta) 50%, transparent)"
                 >
                     <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: var(--fq-magenta)">Mystery Chore</p>
                     @if ($mysteryClaimant === null)
@@ -478,13 +492,16 @@ new class extends Component
                         </p>
 
                         @if ($mysteryHint)
-                            <div class="mt-3 rounded-[14px] border px-4 py-3" style="border-color: oklch(0.65 0.19 320 / .5); background: var(--fq-sunk)">
+                            <div class="mt-3 rounded-[14px] border px-4 py-3" style="border-color: color-mix(in srgb, var(--fq-magenta) 50%, transparent); background: var(--fq-sunk)">
                                 <p class="font-mono-fq text-[10px] tracking-[0.2em] uppercase" style="color: var(--fq-magenta)">Your Hint</p>
                                 <p class="mt-1 text-sm text-fq-text-2">{{ $mysteryHint }}</p>
                             </div>
                         @elseif (isset($heldPerks['mystery_hint']))
-                            <div class="mt-3">
+                            <div class="mt-[14px] flex flex-col items-start gap-1">
                                 <x-perk-button :entry="$heldPerks['mystery_hint']" />
+                                @if ($heldPerks['mystery_hint']['blocked'])
+                                    <span class="font-mono-fq text-[10px] text-fq-text-5">{{ $heldPerks['mystery_hint']['blocked'] }}</span>
+                                @endif
                             </div>
                         @endif
                     @elseif ($mysteryClaimant->profile_id === $profile->id)
@@ -543,8 +560,18 @@ new class extends Component
                  that window but can't close it, so the tap still has to
                  explain itself rather than silently doing nothing. --}}
             @if ($boardMessage)
-                <div class="rounded-[18px] border p-4 text-sm" style="border-color: var(--fq-gold); background: color-mix(in oklch, var(--fq-gold) 12%, transparent); color: var(--fq-gold)">
-                    {{ $boardMessage }}
+                <div
+                    class="flex items-center gap-[10px] rounded-[16px] border px-[14px] py-3"
+                    style="border-color: var(--fq-ticket-line); background: var(--fq-ticket-bg)"
+                >
+                    <span class="text-[15px] text-fq-lime">&#8635;</span>
+                    <span class="flex-1 text-sm" style="color: var(--fq-notice-text)">{{ $boardMessage }}</span>
+                    <button
+                        type="button"
+                        wire:click="refreshBoard"
+                        class="rounded-[11px] border bg-fq-sunk px-[13px] py-[7px] text-xs font-semibold text-fq-lime transition hover:brightness-115"
+                        style="border-color: var(--fq-ticket-line)"
+                    >Refresh</button>
                 </div>
             @endif
 
@@ -616,11 +643,11 @@ new class extends Component
                         {{-- Loud on purpose: this has to be readable at a glance,
                              from across the room, before any work starts. --}}
                         @if ($takenBy)
-                            <span class="mt-2 inline-block rounded-[8px] px-[10px] py-1 font-mono-fq text-[10px]" style="background: color-mix(in oklch, var(--fq-gold) 22%, transparent); color: var(--fq-gold)">
+                            <span class="mt-2 inline-block rounded-[8px] px-[10px] py-1 font-mono-fq text-[10px]" style="background: color-mix(in srgb, var(--fq-gold) 22%, transparent); color: var(--fq-gold)">
                                 Taken by {{ $takenBy->name }}
                             </span>
                         @elseif ($boosted)
-                            <span class="mt-2 inline-block rounded-[8px] px-[10px] py-1 font-mono-fq text-[10px]" style="background: color-mix(in oklch, {{ $boostColor }} 28%, transparent); color: {{ $boostColor }}">
+                            <span class="mt-2 inline-block rounded-[8px] px-[10px] py-1 font-mono-fq text-[10px]" style="background: color-mix(in srgb, {{ $boostColor }} 28%, transparent); color: {{ $boostColor }}">
                                 {{ $boost->multiplier }}x wheel boost
                             </span>
                         @endif
@@ -628,8 +655,8 @@ new class extends Component
                         <button
                             type="button"
                             @if ($state === 'ready') wire:click="claimChore({{ $chore->id }})" @else disabled @endif
-                            class="mt-3 w-full rounded-[14px] py-[11px] text-sm font-semibold {{ $state === 'ready' ? 'text-fq-bg' : 'cursor-default text-fq-text-4' }}"
-                            style="background: {{ $state === 'ready' ? 'var(--fq-lime)' : 'var(--fq-panel-alt-2)' }}"
+                            class="mt-3 w-full rounded-[14px] py-[11px] text-sm font-semibold {{ $state === 'ready' ? 'text-fq-bg transition hover:brightness-110' : 'cursor-default text-fq-text-4' }}"
+                            style="background: {{ $state === 'ready' ? 'var(--fq-lime)' : 'var(--fq-panel-alt)' }}"
                         >{{ $labels[$state] }}</button>
                     </div>
                 @endforeach
@@ -644,7 +671,7 @@ new class extends Component
                     <span class="font-mono-fq text-[10px] text-fq-lime">{{ $goalPercent }}%</span>
                 </div>
                 <p class="mt-1 text-sm text-fq-text-2">{{ $household->goal_name }}</p>
-                <div class="mt-3 h-4 overflow-hidden rounded-full border" style="background:#242c4d; border-color:#2f3960">
+                <div class="mt-3 h-4 overflow-hidden rounded-full border border-fq-line bg-fq-track">
                     <div
                         class="h-full rounded-full transition-[width] duration-500"
                         style="width:{{ $goalPercent }}%;background:linear-gradient(90deg, var(--fq-cyan), var(--fq-lime), var(--fq-gold))"
@@ -663,11 +690,8 @@ new class extends Component
                             $earned = $earnedBadgeKeys->contains($badge->key);
                             $mystery = $badge->hidden && ! $earned;
                         @endphp
-                        <div class="flex flex-col items-center gap-1 rounded-[16px] bg-fq-sunk px-[6px] py-3 text-center {{ $earned ? '' : 'opacity-45' }}">
-                            <div
-                                class="flex h-[34px] w-[34px] items-center justify-center rounded-[11px] font-baloo text-[15px] font-extrabold"
-                                style="background: {{ $earned ? $badge->color->cssVar() : '#39426d' }}; color: {{ $earned ? 'var(--fq-bg)' : '#39426d' }}"
-                            >{{ $mystery ? '?' : $badge->glyph }}</div>
+                        <div class="flex flex-col items-center gap-[6px] rounded-[16px] bg-fq-sunk px-[6px] py-3 text-center {{ $earned ? '' : 'opacity-50' }}">
+                            <x-badge-star :badge="$badge" :earned="$earned" :secret="$mystery" />
                             <span class="text-[11px] font-semibold">{{ $mystery ? '???' : $badge->name }}</span>
                         </div>
                     @endforeach

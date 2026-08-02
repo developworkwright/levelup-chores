@@ -3,6 +3,7 @@
     'revealed',
     'openAction' => null,
     'accent' => 'var(--fq-gold)',
+    'wash' => 'var(--fq-wash-gold)',
     'closedTitle',
     'closedText',
     'openingText' => 'The chest is rattling...',
@@ -46,7 +47,7 @@
         x-show="phase === 'closed'"
         x-transition
         class="flex flex-col items-center rounded-[24px] border p-8 text-center"
-        style="animation: fq-pop .3s ease both; background:linear-gradient(135deg, #23306b, #171c38); border-color: {{ $accent }}"
+        style="animation: fq-pop .3s ease both; background: {{ $wash }}; border-color: {{ $accent }}"
     >
         <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: {{ $accent }}">{{ $closedTitle }}</p>
 
@@ -61,7 +62,7 @@
         x-show="phase === 'opening'"
         x-transition
         class="flex flex-col items-center rounded-[24px] border p-8 text-center"
-        style="background:linear-gradient(135deg, #23306b, #171c38); border-color: {{ $accent }}"
+        style="background: {{ $wash }}; border-color: {{ $accent }}"
     >
         <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: {{ $accent }}; animation: fq-pulse 1s ease-in-out infinite">Opening&hellip;</p>
 
@@ -101,7 +102,7 @@
 
                 <div
                     class="relative rounded-[22px] border px-10 py-8 text-center"
-                    style="animation: fq-pop .4s ease both; background:#1d2440; border-color: {{ $accent }}; box-shadow: 0 26px 60px -20px #000"
+                    style="animation: fq-pop .4s ease both; background: var(--fq-sunk); border-color: {{ $accent }}; box-shadow: 0 26px 60px -20px #000"
                 >
                     <p class="font-mono-fq text-[11px] tracking-[0.2em] uppercase" style="color: {{ $accent }}">{{ $prizeSub }}</p>
                     <p class="mt-2 max-w-[70vw] font-baloo text-[28px] leading-tight font-extrabold" x-text="label"></p>

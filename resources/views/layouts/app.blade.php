@@ -10,7 +10,7 @@
     Edge; Android: "Add to Home Screen" in Chrome) — see docs/design-handoff.md
     for why this matters: it's a distinct app, not "the browser". --}}
     <link rel="manifest" href="/manifest.webmanifest">
-    <meta name="theme-color" content="#0d1020">
+    <meta name="theme-color" content="#0a0512">
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">

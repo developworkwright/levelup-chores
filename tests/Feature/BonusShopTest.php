@@ -220,7 +220,7 @@ class BonusShopTest extends TestCase
 
         Volt::test('kid.bonus')
             ->assertSee('Bonus Shop')
-            ->assertSee('Your Perks')
+            ->assertSee('In hand')
             ->assertSee('Quest Reroll');
     }
 

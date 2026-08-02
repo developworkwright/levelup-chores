@@ -236,7 +236,7 @@ new class extends Component
                             placeholder="Mystery hint — a clue, not the answer"
                             maxlength="255"
                             class="w-full rounded-[12px] border border-dashed px-3 py-2 text-sm outline-none focus:border-fq-magenta"
-                            style="border-color: {{ $chore->hint ? 'oklch(0.65 0.19 320 / .5)' : 'var(--fq-line-2)' }}; background: var(--fq-sunk)"
+                            style="border-color: {{ $chore->hint ? 'color-mix(in srgb, var(--fq-magenta) 50%, transparent)' : 'var(--fq-line-2)' }}; background: var(--fq-sunk)"
                         >
                     </div>
                 </div>

@@ -126,8 +126,8 @@
         x-show="toast"
         x-transition
         :style="big
-            ? 'animation: fq-pop .26s ease both; box-shadow: 0 20px 50px -14px var(--fq-gold); background:#1d2440; border-color: var(--fq-gold)'
-            : 'animation: fq-pop .26s ease both; box-shadow: 0 20px 40px -18px #000; background:#1d2440; border-color: oklch(0.7 0.16 140 / 0.6)'"
+            ? 'animation: fq-pop .26s ease both; box-shadow: 0 20px 50px -14px var(--fq-gold); background: var(--fq-sunk); border-color: var(--fq-gold)'
+            : 'animation: fq-pop .26s ease both; box-shadow: var(--fq-shadow-toast); background: var(--fq-sunk); border-color: var(--fq-success-border)'"
         class="fixed bottom-6 left-1/2 z-[60] flex max-w-[92vw] -translate-x-1/2 items-center gap-2 rounded-[18px] border px-5 py-[14px]"
     >
         <div
@@ -153,7 +153,7 @@
         <div
             style="
                 position:absolute; top:50%; left:50%; width:440px; height:440px; border-radius:50%;
-                background: radial-gradient(circle, oklch(0.86 0.18 130 / .55) 0%, oklch(0.84 0.16 85 / .35) 35%, transparent 70%);
+                background: radial-gradient(circle, rgba(255,225,77,.55) 0%, rgba(255,201,61,.35) 35%, transparent 70%);
                 filter: blur(6px);
                 animation: fq-glow-pulse 1.6s ease-in-out infinite;
             "

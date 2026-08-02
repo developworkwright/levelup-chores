@@ -1,54 +1,140 @@
 /*
- * Design tokens transcribed from docs/design-handoff.md.
- * Single source of truth — Tailwind's @theme in app.css maps these into
- * utility classes instead of redefining the values.
+ * Design tokens transcribed from the "Arcade Royale" handoff
+ * (design_handoff_family_quest/README.md + the bundled prototype).
+ * Single source of truth — Tailwind's @theme below maps these into utility
+ * classes instead of redefining the values.
  */
 
 :root {
-    /* Color */
-    --fq-bg: #0d1020;
-    --fq-bg-glow: radial-gradient(1100px 700px at 12% -8%, #1d2450 0%, #0d1020 60%);
-    --fq-panel: #161b33;
-    --fq-sunk: #1d2440;
-    --fq-panel-alt: #1b2136;
-    --fq-panel-alt-2: #232b4a;
-    --fq-line: #2a3255;
-    --fq-line-2: #2c3558;
-    --fq-line-3: #3c4674;
-    --fq-line-4: #45507f;
-    --fq-line-focus: #33406e;
-    --fq-divider: #222a49;
+    /* Surfaces */
+    --fq-bg: #0a0512;
+    --fq-panel: #0e0719;
+    --fq-sunk: #150c26;
+    --fq-panel-alt: #1b0f30;
+    --fq-panel-alt-2: #1b1130;
 
-    --fq-text: #e8ecff;
-    --fq-text-2: #a7b0d8;
-    --fq-text-2-b: #b3bbdd;
-    --fq-text-2-c: #c3cbe8;
-    --fq-text-3: #9aa4cc;
-    --fq-text-4: #8590bb;
-    --fq-text-5: #6f7aa6;
-    --fq-text-6: #4d567f;
+    /* Borders */
+    --fq-line: #2e1b4d;
+    --fq-line-2: #3a2360;
+    --fq-line-3: #4a2f7a;
+    --fq-line-4: #5c3c96;
+    --fq-line-focus: #6a3fb0;
+    --fq-divider: #251b38;
 
-    --fq-lime: oklch(0.86 0.18 130);
-    --fq-cyan: oklch(0.85 0.15 200);
-    --fq-gold: oklch(0.84 0.16 85);
-    --fq-magenta: oklch(0.78 0.18 320);
-    --fq-coral: oklch(0.78 0.16 30);
-    --fq-violet: oklch(0.8 0.14 260);
-    --fq-sky: oklch(0.82 0.1 230);
+    /* Type */
+    --fq-text: #f7f0ff;
+    --fq-text-2: #b9aed4;
+    --fq-text-2-b: #c3b8dd;
+    --fq-text-2-c: #c3b8dd;
+    --fq-text-3: #b0a3cc;
+    --fq-text-4: #8c7bab;
+    --fq-text-5: #6f6288;
+    --fq-text-6: #4e4368;
 
-    --fq-danger: oklch(0.68 0.16 20);
-    --fq-danger-2: oklch(0.72 0.18 25);
+    /*
+     * Accents. "lime" is the electric yellow this palette earns points in and
+     * "cyan" is its lilac — the names carry over from the first pass so the
+     * six-accent cycle keeps its order everywhere it's used.
+     */
+    --fq-lime: #ffe14d;
+    --fq-cyan: #d8b4ff;
+    --fq-gold: #ffc93d;
+    --fq-magenta: #c9a0ff;
+    --fq-coral: #ff8ac7;
+    --fq-violet: #a06bff;
+    --fq-sky: #ffe14d;
+    --fq-parent: #9d8ac0;
+
+    --fq-danger: #ff6b6b;
+    --fq-danger-2: #ff8080;
+    /* Three reds by weight: a ledger dot, a signed amount, a step-down button. */
+    --fq-negative: #e35f5f;
+    --fq-negative-2: #f56d6d;
+    --fq-negative-3: #ff7a7a;
     --fq-danger-bg: #2a1725;
     --fq-danger-border: #4a2a3e;
-    --fq-success-border: oklch(0.7 0.16 140 / 0.6);
+    --fq-success-border: rgba(255, 225, 77, 0.6);
 
-    --fq-parent: oklch(0.72 0.06 250);
+    /* Backgrounds glued to a specific role */
+    --fq-bg-glow: radial-gradient(1100px 700px at 12% -8%, #2a1150 0%, #0a0512 60%);
+    /* Progress tracks: XP bar, family-goal bar. */
+    --fq-track: #20143a;
+    /* Text that sits on top of a gold fill. */
+    --fq-ink: #231702;
+    /* The gold rail behind both tab strips, and the buttons that echo it. */
+    --fq-rail: linear-gradient(180deg, #ffe14d, #e0b312);
+    /* The tab that's currently open — a cut-out in the rail. */
+    --fq-tab-active: #1a0f2e;
+    --fq-fill-gold: linear-gradient(180deg, #fff6b0, #ffe14d 55%, #d9b41a);
+    --fq-fill-gold-soft: linear-gradient(150deg, #fff6b0, #ffe14d);
+    /* Tinted card washes — an accent bled into the panel colour. */
+    --fq-wash-violet: linear-gradient(135deg, #2a1150, #0e0719);
+    --fq-wash-gold: linear-gradient(135deg, #2a2405, #0e0719);
+    --fq-wash-blue: linear-gradient(135deg, #2a2050, #0e0719);
+    --fq-wash-cleared: linear-gradient(135deg, #221046, #0e0719);
+    --fq-line-cool: #45407f;
+    /* Copy inside a gold-rimmed notice, where plain white would glare. */
+    --fq-notice-text: #e9dfc0;
+
+    /*
+     * Tickets are a second currency, so they get their own gold-on-olive
+     * treatment rather than borrowing the points palette.
+     */
+    --fq-ticket-line: #7a6a12;
+    --fq-ticket-bg: linear-gradient(180deg, #2a2405, #150c26);
+    --fq-ticket-label: #a3934f;
+
+    /*
+     * Perks and the streak track read as pressed metal — deliberately outside
+     * the purple so a ticket never looks like a point.
+     */
+    --fq-steel-line: #2b3038;
+    --fq-steel-panel: #181a20;
+    --fq-steel-tray: linear-gradient(180deg, #151820, #0d0e13);
+    --fq-steel-text: #cfd6de;
+    --fq-steel-label: #9aa1ab;
+    --fq-steel-edge: rgba(195, 203, 212, 0.5);
+    --fq-steel-dim: #252b33;
+    --fq-steel-dim-line: #7d858f;
+    --fq-steel-dim-link: #6b737d;
+    --fq-steel-dim-label: #aeb5be;
+    --fq-steel-card: #151820;
+    --fq-steel-card-dim: #101318;
+    --fq-steel-name: #e7e3ee;
+    /* A perk that can't be used right now falls back out of the metal. */
+    --fq-steel-blocked: #120a1f;
+    /* Text that sits on chrome or brushed steel. */
+    --fq-ink-steel: #141220;
+    --fq-fill-steel: linear-gradient(150deg, #ffffff, #bfc7d1);
+    --fq-chrome: conic-gradient(from 200deg, #8b939c, #ffffff 30%, #c3cbd4 65%, #8b939c);
+    /* Only affordable perks get the foil edge — it's the price tag, lit up. */
+    --fq-foil: linear-gradient(160deg, #ffffff, #8b939c);
+
+    /* Badge tiers — the metal a star is struck from, keyed off its XP reward. */
+    --fq-tier-gold: linear-gradient(150deg, #fff6b0, #ffe14d 55%, #d9b41a);
+    --fq-tier-gold-ring: #ffe14d;
+    --fq-tier-gold-glow: rgba(255, 225, 77, 0.5);
+    --fq-tier-silver: linear-gradient(150deg, #ffffff, #dfe4ea 50%, #a9b0ba);
+    --fq-tier-silver-ring: #dfe4ea;
+    --fq-tier-silver-glow: rgba(223, 228, 234, 0.45);
+    --fq-tier-amethyst: linear-gradient(150deg, #e7dcff, #b98bff 55%, #7c4fd0);
+    --fq-tier-amethyst-ring: #c9a0ff;
+    --fq-tier-amethyst-glow: rgba(201, 160, 255, 0.5);
+    --fq-badge-empty: #241a33;
+    --fq-badge-empty-fg: #5b5074;
+
+    /* The wheel is a wooden carnival prop, not a UI surface. */
+    --fq-wheel-rim: repeating-conic-gradient(#2b1c10 0deg 3deg, #1c120a 3deg 6deg);
+    --fq-wheel-ring: #3a2a18;
+    --fq-wheel-hub: #3a2716;
+    --fq-wheel-hub-line: #4a3420;
+    --fq-wheel-label: #e2cca3;
 
     /* Radius */
     --fq-radius-chip: 8px;
     --fq-radius-btn-sm: 11px;
     --fq-radius-btn: 14px;
-    --fq-radius-tile: 14px;
+    --fq-radius-tile: 15px;
     --fq-radius-btn-primary: 16px;
     --fq-radius-row: 16px;
     --fq-radius-toast: 18px;
@@ -61,8 +147,13 @@
     --fq-shadow-login: 0 24px 60px -30px #000;
     --fq-shadow-wheel: 0 26px 50px -24px #000;
     --fq-shadow-toast: 0 20px 40px -18px #000;
+    --fq-shadow-rail: 0 0 26px -12px #ffe14d;
+    --fq-shadow-ticket: 0 0 16px -8px #ffe14d;
     --fq-shadow-glow-sm: 0 10px 24px -12px;
     --fq-shadow-glow-lg: 0 14px 30px -16px;
+
+    /* The ten-pointed star every badge is clipped to. */
+    --fq-star: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
 }
 
 @theme {
@@ -99,6 +190,16 @@
     --color-fq-violet: var(--fq-violet);
     --color-fq-sky: var(--fq-sky);
     --color-fq-parent: var(--fq-parent);
+
+    --color-fq-ink: var(--fq-ink);
+    --color-fq-track: var(--fq-track);
+    --color-fq-ticket-line: var(--fq-ticket-line);
+    --color-fq-ticket-label: var(--fq-ticket-label);
+    --color-fq-steel-line: var(--fq-steel-line);
+    --color-fq-steel-panel: var(--fq-steel-panel);
+    --color-fq-steel-text: var(--fq-steel-text);
+    --color-fq-steel-label: var(--fq-steel-label);
+    --color-fq-steel-edge: var(--fq-steel-edge);
 
     --color-fq-danger: var(--fq-danger);
     --color-fq-danger-2: var(--fq-danger-2);
@@ -143,6 +244,10 @@
 @keyframes fq-shimmer {
     0% { background-position: 0% 0%; }
     100% { background-position: 200% 0%; }
+}
+
+@keyframes fq-rotate {
+    to { transform: rotate(360deg); }
 }
 
 @keyframes fq-coin-spin {

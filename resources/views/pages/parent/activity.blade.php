@@ -22,7 +22,7 @@ new class extends Component
     {
         return match ($kind) {
             LedgerKind::Earn => 'var(--fq-lime)',
-            LedgerKind::Spend => 'oklch(0.7 0.14 25)',
+            LedgerKind::Spend => 'var(--fq-negative)',
             LedgerKind::CashIn, LedgerKind::CashOut => 'var(--fq-cyan)',
             LedgerKind::Adjustment => 'var(--fq-violet)',
         };
@@ -61,7 +61,10 @@ new class extends Component
                     <span class="h-2 w-2 shrink-0 rounded-full" style="background:{{ $this->dotColor($entry->kind) }}"></span>
                     <span class="flex-1 text-sm">{{ $entry->description }}</span>
                     @if ($entry->amount !== 0)
-                        <span class="font-mono-fq text-[11px] whitespace-nowrap">{{ $entry->amount > 0 ? '+' : '' }}{{ $entry->amount }}</span>
+                        <span
+                            class="font-mono-fq text-[11px] whitespace-nowrap"
+                            style="color: {{ $entry->amount < 0 ? 'var(--fq-negative-2)' : 'var(--fq-text)' }}"
+                        >{{ $entry->amount > 0 ? '+' : '' }}{{ $entry->amount }}</span>
                     @endif
                 </div>
             @empty
@@ -70,7 +73,7 @@ new class extends Component
         </div>
     </div>
 
-    <div class="mt-[14px] rounded-[22px] border p-[18px]" style="border-color: oklch(0.65 0.19 320 / .4); background: var(--fq-panel)">
+    <div class="mt-[14px] rounded-[22px] border border-fq-ticket-line p-[18px]" style="background: var(--fq-panel)">
         <div class="flex items-center justify-between">
             <h2 class="font-baloo text-xl font-bold">Ticket Activity</h2>
             <span class="font-mono-fq text-[10px] text-fq-text-4">NEWEST FIRST</span>
@@ -79,14 +82,17 @@ new class extends Component
         <div class="mt-2">
             @forelse ($ticketEntries as $entry)
                 <div wire:key="ticket-{{ $entry->id }}" class="flex items-center gap-3 border-b border-fq-divider py-[12px_2px]">
-                    <span class="h-2 w-2 shrink-0 rounded-full" style="background: {{ $entry->amount > 0 ? 'var(--fq-magenta)' : 'oklch(0.7 0.14 25)' }}"></span>
+                    <span class="h-2 w-2 shrink-0 rounded-full" style="background: {{ $entry->amount > 0 ? 'var(--fq-lime)' : 'var(--fq-negative-2)' }}"></span>
                     <div class="min-w-0 flex-1">
                         <p class="truncate text-sm">{{ $entry->description }}</p>
                         <p class="font-mono-fq text-[10px] text-fq-text-5">
                             {{ $entry->profile->name }} · {{ $entry->kind->label() }} · {{ $entry->created_at->diffForHumans() }}
                         </p>
                     </div>
-                    <span class="font-mono-fq text-[11px] whitespace-nowrap">{{ $entry->amount > 0 ? '+' : '' }}{{ $entry->amount }}</span>
+                    <span
+                        class="font-mono-fq text-[11px] whitespace-nowrap"
+                        style="color: {{ $entry->amount < 0 ? 'var(--fq-negative-2)' : 'var(--fq-text)' }}"
+                    >{{ $entry->amount > 0 ? '+' : '' }}{{ $entry->amount }}</span>
                 </div>
             @empty
                 <p class="py-4 text-sm text-fq-text-5">No tickets yet. They arrive on level-ups, badges and daily chests.</p>

@@ -15,7 +15,7 @@
 @endphp
 
 <div class="mx-auto max-w-[1080px] px-[14px] pb-10">
-    <div class="top-0 z-20 pt-[14px] pb-[10px]">
+    <div class="pt-[14px] pb-[10px]">
         <div class="flex flex-wrap items-center gap-3 rounded-[22px] border border-fq-line bg-fq-panel p-[12px_14px]">
             <div
                 class="flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-[15px] font-baloo text-xl font-extrabold text-fq-bg"
@@ -31,7 +31,7 @@
                         LVL {{ $profile->level() }}
                     </span>
                 </div>
-                <div class="h-[6px] w-full max-w-[220px] overflow-hidden rounded-full" style="background:#262e4f">
+                <div class="h-[6px] w-full max-w-[220px] overflow-hidden rounded-full bg-fq-track">
                     <div
                         class="h-full rounded-full"
                         style="width:{{ $profile->xpBarPercent() }}%;background:linear-gradient(90deg, var(--fq-cyan), var(--fq-lime))"
@@ -39,24 +39,31 @@
                 </div>
             </div>
 
-            <div class="flex items-center gap-2">
-                <div class="rounded-[14px] border border-fq-line-2 bg-fq-sunk px-3 py-[7px] text-right">
-                    <div class="font-baloo text-xl font-extrabold text-fq-lime">{{ $profile->points }}</div>
-                    <div class="font-mono-fq text-[9px] text-fq-text-4">PTS · ${{ $dollars }}</div>
+            {{-- Every control from here right is 52px tall, so the row reads as
+                 one bank of buttons rather than a ragged mix of sizes. --}}
+            <div class="flex flex-wrap items-center gap-2">
+                <div class="flex h-[52px] w-[92px] flex-col items-end justify-center rounded-[15px] border border-fq-line-2 bg-fq-sunk px-3">
+                    <span class="font-baloo text-[19px] leading-none font-extrabold text-fq-lime">{{ $profile->points }}</span>
+                    <span class="font-mono-fq text-[9px] text-fq-text-4">PTS · ${{ $dollars }}</span>
                 </div>
-                <div class="rounded-[14px] border border-fq-line-2 bg-fq-sunk px-3 py-[7px] text-right">
-                    <div class="font-baloo text-xl font-extrabold text-fq-coral">{{ $profile->streak }}d</div>
-                    <div class="font-mono-fq text-[9px] text-fq-text-4">STREAK</div>
+
+                <div class="flex h-[52px] w-[86px] flex-col items-end justify-center rounded-[15px] border border-fq-line-2 bg-fq-sunk px-3">
+                    <span class="font-baloo text-[19px] leading-none font-extrabold text-fq-coral">{{ $profile->streak }}d</span>
+                    <span class="font-mono-fq text-[9px] text-fq-text-4">STREAK</span>
                 </div>
+
+                {{-- Same tile shape as the two above, but gold-rimmed and lit,
+                     because unlike them it's a door to somewhere. --}}
                 <a
                     href="{{ route('kid.bonus') }}"
                     wire:navigate
-                    class="rounded-[14px] border px-3 py-[7px] text-right transition hover:border-fq-line-focus"
-                    style="border-color: oklch(0.65 0.19 320 / .4); background: var(--fq-sunk)"
+                    class="flex h-[52px] w-[86px] flex-col items-end justify-center rounded-[15px] border border-fq-ticket-line px-3 transition hover:border-fq-lime"
+                    style="background: var(--fq-ticket-bg); box-shadow: var(--fq-shadow-ticket)"
                 >
-                    <div class="font-baloo text-xl font-extrabold" style="color: var(--fq-magenta)">{{ $profile->bonus_tickets }}</div>
-                    <div class="font-mono-fq text-[9px] text-fq-text-4">TICKETS</div>
+                    <span class="font-baloo text-[19px] leading-none font-extrabold text-fq-lime">{{ $profile->bonus_tickets }}</span>
+                    <span class="font-mono-fq text-[9px] text-fq-ticket-label">TICKETS</span>
                 </a>
+
                 {{-- Pulls down points, streak, tickets and — on the Quests tab —
                      the chore board. The page already refreshes itself when it
                      regains focus, but that's invisible; this is the version a
@@ -67,19 +74,26 @@
                     wire:loading.attr="disabled"
                     wire:target="{{ $refreshAction }}"
                     title="Check for the latest points and chores"
-                    class="flex items-center gap-[6px] rounded-[14px] border border-fq-line-2 bg-fq-sunk px-3 py-[7px] text-xs whitespace-nowrap text-fq-text-4 transition hover:text-fq-text disabled:opacity-60"
+                    aria-label="Refresh"
+                    class="flex h-[52px] w-[52px] items-center justify-center rounded-[15px] border border-fq-line-2 bg-fq-sunk text-[17px] text-fq-text-4 transition hover:text-fq-text disabled:opacity-60"
                 >
-                    <span wire:loading.class="animate-spin" wire:target="{{ $refreshAction }}" class="inline-block">↻</span>
-                    <span wire:loading.remove wire:target="{{ $refreshAction }}">Refresh</span>
-                    <span wire:loading wire:target="{{ $refreshAction }}">Checking…</span>
+                    <span
+                        wire:loading.class="animate-spin"
+                        wire:target="{{ $refreshAction }}"
+                        class="block"
+                    >&#8635;</span>
                 </button>
+
                 <x-sound-toggle />
+
                 <form method="POST" action="{{ route('logout') }}">
                     @csrf
                     <button
                         type="submit"
-                        class="rounded-[14px] border border-fq-line-2 bg-fq-sunk px-3 py-[7px] text-xs text-fq-text-4 transition hover:text-fq-text"
-                    >Exit</button>
+                        title="Exit"
+                        aria-label="Exit"
+                        class="flex h-[52px] w-[52px] items-center justify-center rounded-[15px] border border-fq-line-2 bg-fq-sunk text-[16px] text-fq-text-4 transition hover:text-fq-text"
+                    >&#9211;</button>
                 </form>
             </div>
         </div>
@@ -89,7 +103,8 @@
                 <a
                     href="{{ route($tab['route']) }}"
                     wire:navigate
-                    class="flex-1 rounded-[14px] border px-4 py-[10px] text-center text-sm font-semibold whitespace-nowrap {{ $active === $key ? 'border-2 border-fq-bg bg-fq-sky text-fq-bg' : 'border-fq-line bg-fq-sunk text-fq-text-3' }}"
+                    class="flex-1 rounded-[14px] border border-transparent px-4 py-[10px] text-center text-sm font-semibold whitespace-nowrap"
+                    style="{{ $active === $key ? 'background: var(--fq-tab-active); color: var(--fq-lime)' : 'background:transparent; color: var(--fq-ink)' }}"
                 >{{ $tab['label'] }}</a>
             @endforeach
         </x-quest-board>

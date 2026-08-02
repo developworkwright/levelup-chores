@@ -35,7 +35,7 @@ new class extends Component
         </p>
     </div>
 
-    <div class="flex flex-col gap-[18px] rounded-[22px] border border-fq-line bg-fq-panel p-[22px] shadow-[0_24px_60px_-30px_#000]">
+    <div class="flex flex-col gap-[18px] rounded-[22px] border border-fq-line bg-fq-panel p-[22px]" style="box-shadow: var(--fq-shadow-login)">
         <h2 class="font-baloo text-[19px] font-bold">Who's playing?</h2>
 
         <div class="grid grid-cols-[repeat(auto-fit,minmax(96px,1fr))] gap-3">
@@ -53,7 +53,7 @@ new class extends Component
                     </div>
                     <span class="text-sm font-semibold">{{ $profile->name }}</span>
                     <span class="font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-4 uppercase">
-                        {{ $profile->isParent() ? 'Console' : 'Level '.$profile->level() }}
+                        {{ $profile->isParent() ? 'Console' : 'LVL '.$profile->level() }}
                     </span>
                 </a>
             @endforeach
