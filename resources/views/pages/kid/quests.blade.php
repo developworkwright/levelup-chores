@@ -9,6 +9,7 @@ use App\Models\ChoreCompletion;
 use App\Models\Profile;
 use App\Services\ChestService;
 use App\Services\ChoreService;
+use App\Services\HouseholdClock;
 use App\Services\PerkInventoryService;
 use App\Services\SpinService;
 use Illuminate\Support\Facades\Auth;
@@ -222,18 +223,21 @@ new class extends Component
         // Claiming the quest sets completed_at immediately, but the points
         // don't land until a parent approves — so "done" and "waiting" are
         // different things and the CTA has to say which one it is. Scoped to
-        // at-or-after the claim so a weekly chore's older completion, or one
-        // that was sent back, can't be mistaken for this one.
-        $questCompletion = $questDone
-            ? ChoreCompletion::where('profile_id', $this->profile->id)
-                ->where('chore_id', $quest->chore_id)
-                ->where('submitted_at', '>=', $quest->completed_at)
-                ->latest('submitted_at')
-                ->first()
-            : null;
+        // today's household day rather than to completed_at, because a sent-back
+        // quest clears that stamp and the attempt still has to be findable —
+        // that's what turns the CTA into "have another go" instead of a bare
+        // "Mark it done" with no hint anything happened.
+        $clock = HouseholdClock::for($this->profile->household);
+
+        $questCompletion = ChoreCompletion::where('profile_id', $this->profile->id)
+            ->where('chore_id', $quest->chore_id)
+            ->where('submitted_at', '>=', $clock->startOf($clock->today()))
+            ->latest('submitted_at')
+            ->first();
 
         $questApproved = $questCompletion?->status === CompletionStatus::Approved;
         $questPending = $questCompletion?->status === CompletionStatus::Pending;
+        $questSentBack = $questCompletion?->status === CompletionStatus::Rejected;
 
         $boost = $spin->today($this->profile);
         $questBoosted = $boost && $boost->chore_id === $quest->chore_id;
@@ -261,6 +265,7 @@ new class extends Component
             'questDone' => $questDone,
             'questApproved' => $questApproved,
             'questPending' => $questPending,
+            'questSentBack' => $questSentBack,
             'boost' => $boost,
             'questBoosted' => $questBoosted,
             'questPoints' => $quest->chore->points * ($questBoosted ? $boost->multiplier : 1),
@@ -461,6 +466,8 @@ new class extends Component
                     <p class="mt-2 max-w-[420px] text-sm text-fq-text-2">
                         @if ($questDone)
                             Quest cleared. Every side quest below is unlocked for today.
+                        @elseif ($questSentBack)
+                            A parent sent this one back — finish it off and mark it done again.
                         @else
                             Clear this one first — the side quests stay locked until it's done.
                         @endif
@@ -475,20 +482,21 @@ new class extends Component
                             <button type="button" disabled class="cursor-default rounded-[16px] bg-fq-line-2 px-[22px] py-[14px] font-baloo text-[17px] font-bold text-fq-text-3">
                                 Cleared &#10003;
                             </button>
-                        @elseif ($questDone)
-                            {{-- Sent back: completed_at is still stamped, so
-                                 without this the screen would credit a quest a
-                                 parent explicitly rejected. --}}
-                            <button type="button" disabled class="cursor-default rounded-[16px] bg-fq-line-2 px-[22px] py-[14px] font-baloo text-[17px] font-bold" style="color: var(--fq-danger)">
-                                Sent back
-                            </button>
                         @else
+                            {{-- Live even after a rejection: "do it again" is
+                                 the entire point of sending something back, so
+                                 the button has to work. The label carries the
+                                 bad news instead of a dead control. --}}
                             <button
                                 type="button"
                                 wire:click="claimQuest"
                                 class="rounded-[16px] px-[22px] py-[14px] font-baloo text-[17px] font-bold transition hover:brightness-110"
                                 style="background: var(--fq-fill-gold); color: var(--fq-ink); box-shadow: var(--fq-shadow-glow-sm) var(--fq-lime)"
-                            >Mark it done</button>
+                            >{{ $questSentBack ? 'Mark it done again' : 'Mark it done' }}</button>
+
+                            @if ($questSentBack)
+                                <span class="font-mono-fq text-xs" style="color: var(--fq-danger)">Sent back</span>
+                            @endif
                         @endif
                         <span class="font-mono-fq text-xs" style="color: {{ $questBoosted ? ($boost->multiplier === 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)') : 'var(--fq-lime)' }}">
                             +{{ $questPoints }} PTS

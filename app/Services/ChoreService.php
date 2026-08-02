@@ -692,13 +692,19 @@ class ChoreService
     /** Whether this completion is the one that clears its day's main quest. */
     private function isQuestCompletion(ChoreCompletion $completion, Profile $profile): bool
     {
+        return $this->questForCompletion($completion, $profile) !== null;
+    }
+
+    /** The quest this completion clears, if it clears one. */
+    private function questForCompletion(ChoreCompletion $completion, Profile $profile): ?DailyQuest
+    {
         $questDate = HouseholdClock::for($profile->household)->dayFor($completion->submitted_at);
 
         $quest = DailyQuest::where('profile_id', $profile->id)
             ->whereDate('quest_date', $questDate)
             ->first();
 
-        return $quest !== null && $quest->chore_id === $completion->chore_id;
+        return $quest?->chore_id === $completion->chore_id ? $quest : null;
     }
 
     /**
@@ -793,6 +799,21 @@ class ChoreService
         if ($completion->chore->isOneTime()) {
             $completion->chore->used_at = null;
             $completion->chore->save();
+        }
+
+        // "Do it again" is the whole point of sending something back, so the
+        // quest has to become claimable again too. Leaving completed_at stamped
+        // left the kid staring at a dead "Sent back" button with no way to
+        // resubmit — a side quest reopened on rejection but the main one, the
+        // only one that feeds the streak, was the one that couldn't.
+        $quest = $this->questForCompletion($completion, $completion->profile);
+
+        if ($quest) {
+            // revealed_at is deliberately left alone — they've already seen
+            // which chore it is, and replaying the chest to redo work they
+            // just got told off for would read as mockery.
+            $quest->completed_at = null;
+            $quest->save();
         }
     }
 

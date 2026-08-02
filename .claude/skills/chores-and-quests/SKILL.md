@@ -32,6 +32,17 @@ Quests are assigned per kid and independently, so two kids can draw the same cho
 
 If `household.require_quest_first` is true, every other chore on the board is `'locked'` until `quest.completed_at` is set (`claimQuest()`). Claiming the quest also calls `claim()` for the quest's chore, so it flows through the same points/mystery path as any other chore. The streak moves at parent approval, not here (see [[streaks]]).
 
+### A sent-back quest reopens
+
+`sendBack()` clears `completed_at` when the rejected completion is the one that cleared that day's quest. Redoing the work is the entire point of sending it back, and previously the stamp survived rejection — a side quest reopened but the main one, the only one that feeds the streak, dead-ended on a disabled "Sent back" button.
+
+Two things this deliberately does *not* touch:
+
+- **`revealed_at` stays set.** They already know which chore it is; replaying the chest to redo work they were just told off for reads as mockery.
+- **Gating comes back**, since the quest genuinely isn't done. Side-quest claims already submitted stay pending; only new ones re-lock.
+
+The hero's CTA stays live and reads "Mark it done again", with a separate `Sent back` marker carrying the bad news — a dead button explains nothing. `questSentBack` comes off the same `$questCompletion` lookup as pending/approved, which is now scoped to **today's household day** rather than to `completed_at` (that stamp is gone by then).
+
 ### Auto-reroll of a blocked quest
 
 Because cooldowns are household-wide, a sibling can finish the chore that was handed to you as today's quest. That would dead-end the kid's day: no quest completion, no streak day, and with `require_quest_first` on, a board that never unlocks.

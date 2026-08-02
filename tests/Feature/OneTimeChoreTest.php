@@ -137,6 +137,34 @@ class OneTimeChoreTest extends TestCase
         $this->assertNotNull($this->service()->boardFor($sibling)->firstWhere('chore.id', $chore->id));
     }
 
+    public function test_sending_back_a_one_time_quest_lets_the_kid_redo_it(): void
+    {
+        $household = Household::factory()->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $kid = Profile::factory()->for($household)->create();
+
+        $chore = Chore::factory()->for($household)->create([
+            'name' => 'Rake the leaves',
+            'cadence' => ChoreCadence::Once,
+            'quest_eligible' => true,
+        ]);
+
+        $this->service()->revealQuest($kid);
+        $this->service()->claimQuest($kid);
+
+        $completion = $chore->completions()->firstOrFail();
+        $this->service()->sendBack($completion, $parent);
+
+        // Both stamps have to lift together: the chore is spent *and* the quest
+        // reads as done, so clearing either one alone still dead-ends the kid.
+        $this->assertNull($chore->refresh()->used_at);
+        $this->assertNull($this->service()->questFor($kid->fresh())->completed_at);
+
+        $this->service()->claimQuest($kid->fresh());
+
+        $this->assertSame(2, $chore->completions()->count());
+    }
+
     public function test_reactivating_puts_it_back_the_same_day_it_was_approved(): void
     {
         $household = $this->household();

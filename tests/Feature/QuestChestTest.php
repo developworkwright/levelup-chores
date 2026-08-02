@@ -167,16 +167,58 @@ class QuestChestTest extends TestCase
         $chores->revealQuest($kid);
         $chores->claimQuest($kid);
 
-        // sendBack() rejects the completion but leaves the quest's completed_at
-        // stamped, so "done" alone is not enough to earn a tick.
         $chores->sendBack(ChoreCompletion::where('profile_id', $kid->id)->firstOrFail(), $parent);
 
         Auth::guard('profile')->login($kid);
 
+        // Rejected work is neither cleared nor waiting — and the CTA has to
+        // stay live, since redoing it is the whole point of sending it back.
         Volt::test('kid.quests')
             ->assertSee('Sent back')
+            ->assertSee('Mark it done again')
             ->assertDontSee('Waiting on parent')
             ->assertDontSee('Cleared &#10003;', false);
+    }
+
+    public function test_a_kid_can_redo_a_quest_that_was_sent_back(): void
+    {
+        $household = Household::factory()->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
+
+        $chores = app(ChoreService::class);
+        $chores->revealQuest($kid);
+        $chores->claimQuest($kid);
+        $chores->sendBack(ChoreCompletion::where('profile_id', $kid->id)->firstOrFail(), $parent);
+
+        // Cleared, so the quest reads as open again rather than dead-ending on
+        // a stamp from an attempt a parent explicitly rejected.
+        $this->assertNull($chores->questFor($kid->fresh())->completed_at);
+
+        Auth::guard('profile')->login($kid->fresh());
+
+        Volt::test('kid.quests')->call('claimQuest');
+
+        $this->assertTrue($chores->isQuestDoneToday($kid->fresh()));
+        $this->assertSame(2, ChoreCompletion::where('profile_id', $kid->id)->count());
+    }
+
+    public function test_redoing_a_sent_back_quest_does_not_replay_the_chest(): void
+    {
+        $household = Household::factory()->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
+
+        $chores = app(ChoreService::class);
+        $chores->revealQuest($kid);
+        $chores->claimQuest($kid);
+        $chores->sendBack(ChoreCompletion::where('profile_id', $kid->id)->firstOrFail(), $parent);
+
+        // They already know which chore it is; making them re-open the chest to
+        // redo work they were just told off for would read as mockery.
+        $this->assertTrue($chores->isQuestRevealedToday($kid->fresh()));
     }
 
     public function test_a_claimed_quest_says_it_is_waiting_rather_than_done(): void
