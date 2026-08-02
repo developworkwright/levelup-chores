@@ -4,6 +4,7 @@ use App\Enums\ChoreCadence;
 use App\Models\Chore;
 use App\Models\Profile;
 use App\Services\ChoreService;
+use App\Services\HouseholdClock;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
@@ -81,6 +82,41 @@ new class extends Component
         }
     }
 
+    /**
+     * Starts the clock on a chore: the kids get until this time to beat the
+     * parent to it, after which it closes for the rest of the day.
+     *
+     * A blank or unparseable time lifts the deadline instead, so clearing the
+     * field is the same gesture as pressing Clear.
+     */
+    public function setDeadline(int $choreId, string $time): void
+    {
+        $chore = $this->ownedChore($choreId);
+
+        if (! $chore) {
+            return;
+        }
+
+        $at = HouseholdClock::for($this->profile->household)->atTime($time);
+
+        if (! $at) {
+            app(ChoreService::class)->clearDeadline($chore);
+
+            return;
+        }
+
+        app(ChoreService::class)->setDeadline($chore, $at);
+    }
+
+    public function clearDeadline(int $choreId): void
+    {
+        $chore = $this->ownedChore($choreId);
+
+        if ($chore) {
+            app(ChoreService::class)->clearDeadline($chore);
+        }
+    }
+
     public function toggleQuestEligible(int $choreId): void
     {
         $chore = $this->ownedChore($choreId);
@@ -144,10 +180,23 @@ new class extends Component
     public function with(): array
     {
         $scoped = Chore::where('household_id', $this->profile->household_id);
+        $chores = (clone $scoped)->matching($this->search)->orderBy('id')->get();
+
+        $service = app(ChoreService::class);
+        $timezone = $this->profile->household->timezone;
 
         return [
-            'chores' => (clone $scoped)->matching($this->search)->orderBy('id')->get(),
+            'chores' => $chores,
             'totalChores' => $scoped->count(),
+            // Keyed by chore so a row can show its deadline without each one
+            // working out where the household day starts for itself. The time
+            // is pre-localised because the input below is a wall clock and the
+            // stamp is stored in UTC.
+            'deadlines' => $chores->mapWithKeys(fn (Chore $chore) => [$chore->id => [
+                'closesAt' => $service->deadlineFor($chore),
+                'expired' => $service->isExpired($chore),
+                'time' => $chore->expires_at?->copy()->setTimezone($timezone),
+            ]]),
         ];
     }
 }; ?>
@@ -190,6 +239,7 @@ new class extends Component
             @endif
 
             @foreach ($chores as $chore)
+                @php $deadline = $deadlines[$chore->id]; @endphp
                 <div wire:key="chore-{{ $chore->id }}" class="flex flex-wrap items-center gap-3 rounded-[18px] border border-fq-line bg-fq-panel p-[14px]">
                     <div class="min-w-[140px] flex-1">
                         <p class="text-[15px] font-semibold {{ $chore->isUsedUp() ? 'text-fq-text-4 line-through decoration-2' : '' }}">{{ $chore->name }}</p>
@@ -205,6 +255,16 @@ new class extends Component
                                  puts a spent one-time chore back but them. --}}
                             <p class="mt-1 font-mono-fq text-[10px] uppercase" style="color: var(--fq-gold)">
                                 Taken {{ $chore->used_at->diffForHumans() }} · off the board until reactivated
+                            </p>
+                        @endif
+
+                        @if ($deadline['expired'])
+                            <p class="mt-1 font-mono-fq text-[10px] uppercase" style="color: var(--fq-danger)">
+                                Closed {{ $deadline['time']->format('g:i A') }} · all yours until tomorrow
+                            </p>
+                        @elseif ($deadline['closesAt'])
+                            <p class="mt-1 font-mono-fq text-[10px] uppercase" style="color: var(--fq-cyan)">
+                                Closes {{ $deadline['time']->format('g:i A') }} · {{ $deadline['closesAt']->diffForHumans() }}
                             </p>
                         @endif
                     </div>
@@ -229,6 +289,34 @@ new class extends Component
                                 class="rounded-[9px] px-[10px] py-1 text-xs font-semibold {{ $chore->cadence === $case ? 'bg-fq-lime text-fq-bg' : 'text-fq-text-4' }}"
                             >{{ $case->label() }}</button>
                         @endforeach
+                    </div>
+
+                    {{-- The "beat me to it" clock. Set a time and the kids get
+                         until then to claim it; after that it closes and the
+                         job is the parent's, which is the point. --}}
+                    {{-- Same shell as the cadence pills beside it — p-1 outer,
+                         px-[10px] py-1 on each child — so the two read as one
+                         bank of controls rather than two near-misses. --}}
+                    <div class="flex items-center gap-1 rounded-[12px] border border-fq-line-3 bg-fq-sunk p-1">
+                        <span class="px-[10px] font-mono-fq text-[10px] whitespace-nowrap uppercase" style="color: {{ $chore->expires_at ? 'var(--fq-cyan)' : 'var(--fq-text-4)' }}">Closes</span>
+                        {{-- color-scheme is what makes the browser draw the
+                             clock icon and the picker popup for a dark surface.
+                             Without it the indicator is a near-black glyph on a
+                             near-black field — the control looks broken. --}}
+                        <input
+                            type="time"
+                            value="{{ $deadline['time']?->format('H:i') }}"
+                            wire:change="setDeadline({{ $chore->id }}, $event.target.value)"
+                            class="w-[116px] rounded-[9px] border border-fq-line-2 px-[10px] py-1 text-xs font-semibold outline-none focus:border-fq-cyan"
+                            style="color-scheme: dark; background: var(--fq-panel); color: {{ $chore->expires_at ? 'var(--fq-cyan)' : 'var(--fq-text-3)' }}"
+                        >
+                        @if ($chore->expires_at)
+                            <button
+                                type="button"
+                                wire:click="clearDeadline({{ $chore->id }})"
+                                class="rounded-[9px] px-[10px] py-1 text-xs font-semibold text-fq-text-4"
+                            >Clear</button>
+                        @endif
                     </div>
 
                     @if ($chore->isUsedUp())
@@ -303,6 +391,9 @@ new class extends Component
             </p>
             <p class="text-xs text-fq-text-5">
                 One-time chores are up for grabs once — first kid to claim it takes it, and it comes off everyone's board for good until you put it back. They sit at the top of the kids' side quests. Good for one-offs like "rake the leaves". Sending a claim back reopens it automatically.
+            </p>
+            <p class="text-xs text-fq-text-5">
+                "Closes" puts a deadline on a chore — the kids get a countdown on their board and one last shot at it, and once the time passes it's off their board for the rest of the day and the job is yours. Set it when you're going to do something this evening anyway. It lifts on its own overnight.
             </p>
             <p class="text-xs text-fq-text-5">
                 Each day, one any-age chore is automatically picked as a hidden bonus — first kid to finish it wins extra points. No setup needed here.

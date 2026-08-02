@@ -133,8 +133,13 @@ class BadgeService
         }
 
         // A one-time chore a sibling already took isn't on this kid's board to
-        // clear, so counting it would make a perfect board unwinnable.
-        $totalChores = $household->chores()->appropriateFor($profile)->available()->count();
+        // clear, so counting it would make a perfect board unwinnable. Same for
+        // a chore a parent's deadline has closed for the day.
+        $totalChores = $household->chores()
+            ->appropriateFor($profile)
+            ->available()
+            ->notExpiredAt(now(), $startOfToday)
+            ->count();
 
         if ($totalChores <= 1) {
             return false;

@@ -14,6 +14,7 @@ use App\Models\Household;
 use App\Models\MysteryHintPurchase;
 use App\Models\Profile;
 use App\Models\StreakRepair;
+use App\Notifications\ChoreClosingSoon;
 use App\Notifications\ParentApprovalNeeded;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
@@ -67,7 +68,7 @@ class ChoreService
             ->first();
 
         if ($quest) {
-            return $this->rerollIfTaken($profile, $quest);
+            return $this->rerollIfUnavailable($profile, $quest);
         }
 
         $candidates = $this->questCandidates($profile);
@@ -111,17 +112,25 @@ class ChoreService
     }
 
     /**
-     * Swaps a quest a sibling has taken out from under the kid.
+     * Swaps a quest that's been taken out from under the kid — by a sibling
+     * claiming it, or by a parent's deadline closing it.
      *
      * Cooldowns are household-wide, so another kid finishing your quest chore
      * would otherwise leave you unable to clear your quest at all — no streak,
      * and a board that stays gated. Rerolling keeps the day recoverable
      * without anyone having to intervene.
      */
-    private function rerollIfTaken(Profile $profile, DailyQuest $quest): DailyQuest
+    private function rerollIfUnavailable(Profile $profile, DailyQuest $quest): DailyQuest
     {
         if ($quest->completed_at !== null) {
             return $quest;
+        }
+
+        // Checked ahead of the cadence shortcut below: a deadline closes an
+        // unlimited chore just as firmly as any other, so an expired one still
+        // has to move off the kid's quest.
+        if ($this->isExpired($quest->chore)) {
+            return $this->assignDifferentChore($profile, $quest) ?? $quest;
         }
 
         // Unlimited chores never lock, so a claim on one blocks nobody.
@@ -163,6 +172,8 @@ class ChoreService
     /** @return Collection<int, Chore> */
     private function questCandidates(Profile $profile, ?int $excludeChoreId = null): Collection
     {
+        $clock = HouseholdClock::for($profile->household);
+
         return $profile->household->chores()
             ->appropriateFor($profile)
             ->questEligible()
@@ -170,6 +181,10 @@ class ChoreService
             // out as a quest — even as the fallback pick below — would dead-end
             // the kid's whole day rather than just their morning.
             ->available()
+            // Same reasoning for a chore whose deadline has already passed: it
+            // won't reopen today, and a quest that can't be cleared costs a
+            // streak day and leaves a gated board gated.
+            ->notExpiredAt(now(), $clock->startOf($clock->today()))
             ->when($excludeChoreId !== null, fn ($query) => $query->where('id', '!=', $excludeChoreId))
             ->get();
     }
@@ -235,9 +250,15 @@ class ChoreService
                     ? null
                     : $this->claimantFor($chore);
 
+                $state = $this->stateFrom($profile, $claimant, $this->isExpired($chore));
+
                 return [
                     'chore' => $chore,
-                    'state' => $gated ? 'locked' : $this->stateFrom($profile, $claimant),
+                    // Gating hides the ordinary states behind the main quest,
+                    // but never a closed one: "Locked" promises the chore is
+                    // yours once the quest is done, which is precisely the
+                    // wrong thing to say about one that has already run out.
+                    'state' => $gated && $state !== 'expired' ? 'locked' : $state,
                     // Who took it, when that someone isn't this kid. The board
                     // names them so nobody starts scrubbing a bathtub a sibling
                     // already claimed — finding that out at submit time means
@@ -245,6 +266,9 @@ class ChoreService
                     'takenBy' => $claimant && $claimant->profile_id !== $profile->id
                         ? $claimant->profile
                         : null,
+                    // Resolved here so the card can render a countdown without
+                    // each one working out the household day for itself.
+                    'closesAt' => $this->deadlineFor($chore),
                 ];
             })
             // A taken one-time chore leaves the board outright — that's the
@@ -350,6 +374,9 @@ class ChoreService
             ->reject(fn (Chore $chore) => $chore->cadence === ChoreCadence::Unlimited)
             // A spent one-time chore isn't on anyone's board to find.
             ->reject(fn (Chore $chore) => $chore->isUsedUp())
+            // Nor is a closed one — hiding the bonus behind a chore nobody can
+            // claim any more means nobody wins it today.
+            ->reject(fn (Chore $chore) => $this->isExpired($chore))
             ->reject(fn (Chore $chore) => $this->claimantFor($chore) !== null)
             ->reject(fn (Chore $chore) => $excludeChoreId !== null && $chore->id === $excludeChoreId);
 
@@ -441,6 +468,68 @@ class ChoreService
     }
 
     /**
+     * Whether a parent's deadline has closed this chore for the rest of the
+     * household day. The clock lives here rather than on the model for the
+     * same reason claimantFor() does — the model shouldn't have to know how a
+     * household's day is drawn.
+     */
+    public function isExpired(Chore $chore): bool
+    {
+        $clock = HouseholdClock::for($chore->household);
+
+        return $chore->hasExpiredAt(now(), $clock->startOf($clock->today()));
+    }
+
+    /** The live deadline to count down to, or null when the chore has none. */
+    public function deadlineFor(Chore $chore): ?Carbon
+    {
+        $clock = HouseholdClock::for($chore->household);
+
+        return $chore->closesAt(now(), $clock->startOf($clock->today()));
+    }
+
+    /**
+     * Puts a deadline on a chore and tells the kids it's running.
+     *
+     * The point of a deadline is the race — a parent who needs a job done
+     * tonight offering it up for one last shot first — so setting one is
+     * pointless if nobody hears about it until they next happen to open the
+     * board.
+     */
+    public function setDeadline(Chore $chore, Carbon $at): void
+    {
+        $chore->expires_at = $at;
+        $chore->save();
+
+        $local = $at->copy()->setTimezone($chore->household->timezone)->format('g:i A');
+
+        $kids = Profile::where('household_id', $chore->household_id)
+            ->where('role', ProfileRole::Kid)
+            ->get();
+
+        // Best-effort, exactly as in claim(): a parent setting a deadline must
+        // never fail because a push couldn't be queued or delivered.
+        try {
+            Notification::send($kids, new ChoreClosingSoon(
+                'Beat the clock!',
+                "{$chore->name} closes at {$local} — grab it before it's gone.",
+            ));
+        } catch (Throwable $e) {
+            Log::error('Closing-soon notification failed for chore deadline.', [
+                'chore_id' => $chore->id,
+                'exception' => $e,
+            ]);
+        }
+    }
+
+    /** Lifts a deadline, putting the chore back on its ordinary cadence. */
+    public function clearDeadline(Chore $chore): void
+    {
+        $chore->expires_at = null;
+        $chore->save();
+    }
+
+    /**
      * How a chore reads on a kid's board.
      *
      * Cooldowns are household-wide: a once-a-day chore is done once by the
@@ -451,22 +540,27 @@ class ChoreService
     public function stateFor(Profile $profile, Chore $chore): string
     {
         // No cooldown and no waiting on a prior claim — several kids can do
-        // an unlimited chore, repeatedly, on the same day.
-        if ($chore->cadence === ChoreCadence::Unlimited) {
-            return 'ready';
-        }
+        // an unlimited chore, repeatedly, on the same day. A deadline still
+        // applies, which is why this no longer short-circuits to 'ready'.
+        $claimant = $chore->cadence === ChoreCadence::Unlimited
+            ? null
+            : $this->claimantFor($chore);
 
-        return $this->stateFrom($profile, $this->claimantFor($chore));
+        return $this->stateFrom($profile, $claimant, $this->isExpired($chore));
     }
 
     /**
      * Shared by stateFor() and boardFor() so the board can name the claimant
      * without looking it up a second time — and so the two can't drift.
+     *
+     * A claim outranks a deadline: someone who got there before it landed has
+     * earned the chore, and telling them "time's up" over their own pending
+     * claim would read as the work being thrown away.
      */
-    private function stateFrom(Profile $profile, ?ChoreCompletion $claimant): string
+    private function stateFrom(Profile $profile, ?ChoreCompletion $claimant, bool $expired): string
     {
         if ($claimant === null) {
-            return 'ready';
+            return $expired ? 'expired' : 'ready';
         }
 
         // 'pending' is the kid's own claim awaiting approval; anyone else

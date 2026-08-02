@@ -60,4 +60,37 @@ class HouseholdClock
             ->setTime($this->household->day_boundary_hour, 0)
             ->utc();
     }
+
+    /**
+     * The instant a wall-clock time like "17:00" lands on during the household
+     * day currently in progress, in UTC — for the same reason startOf() returns
+     * UTC, since this is compared against timestamp columns too.
+     *
+     * A time earlier than the day boundary belongs to the small hours at the
+     * *end* of the day rather than the start: on a 4am boundary, "2:00" means
+     * tonight, not this morning, which is already behind us.
+     *
+     * Returns null for anything that isn't an H:i time, so a hand-typed or
+     * cleared field falls through to the caller rather than becoming midnight.
+     */
+    public function atTime(string $time): ?Carbon
+    {
+        if (! preg_match('/^(\d{1,2}):(\d{2})$/', trim($time), $parts)) {
+            return null;
+        }
+
+        [, $hour, $minute] = $parts;
+
+        if ($hour > 23 || $minute > 59) {
+            return null;
+        }
+
+        $moment = $this->today()->setTime((int) $hour, (int) $minute);
+
+        if ((int) $hour < $this->household->day_boundary_hour) {
+            $moment = $moment->addDay();
+        }
+
+        return $moment->utc();
+    }
 }

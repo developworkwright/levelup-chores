@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 
 class Chore extends Model
 {
@@ -22,6 +23,7 @@ class Chore extends Model
         'min_age',
         'quest_eligible',
         'used_at',
+        'expires_at',
     ];
 
     protected function casts(): array
@@ -30,6 +32,7 @@ class Chore extends Model
             'cadence' => ChoreCadence::class,
             'quest_eligible' => 'boolean',
             'used_at' => 'datetime',
+            'expires_at' => 'datetime',
         ];
     }
 
@@ -69,6 +72,54 @@ class Chore extends Model
         return $query->where(function (Builder $q) {
             $q->where('cadence', '!=', ChoreCadence::Once->value)
                 ->orWhereNull('used_at');
+        });
+    }
+
+    /**
+     * Whether a parent's deadline has already passed on this chore.
+     *
+     * A deadline binds only for the household day it lands in. It exists so a
+     * parent can say "beat me to it before dinner" and then do the job
+     * themselves — not to impose a standing curfew — so a stamp left over from
+     * an earlier day is inert and the chore is back on its ordinary cadence.
+     *
+     * $dayStart is the instant today's household day began; $now is compared
+     * against it, so both must be in the app timezone (see HouseholdClock).
+     */
+    public function hasExpiredAt(Carbon $now, Carbon $dayStart): bool
+    {
+        if ($this->expires_at === null || $this->expires_at->lt($dayStart)) {
+            return false;
+        }
+
+        return $this->expires_at->lte($now);
+    }
+
+    /**
+     * The live deadline a kid's countdown ticks down to, or null when there
+     * isn't one — either none was set, it has already passed, or it's a stale
+     * stamp from an earlier day.
+     */
+    public function closesAt(Carbon $now, Carbon $dayStart): ?Carbon
+    {
+        if ($this->expires_at === null || $this->expires_at->lt($dayStart)) {
+            return null;
+        }
+
+        return $this->expires_at->gt($now) ? $this->expires_at : null;
+    }
+
+    /**
+     * The SQL twin of hasExpiredAt(), inverted — chores whose deadline hasn't
+     * bitten. Kept alongside its in-memory counterpart the same way
+     * scopeMatching() and matches() are, so the two can't drift.
+     */
+    public function scopeNotExpiredAt(Builder $query, Carbon $now, Carbon $dayStart): Builder
+    {
+        return $query->where(function (Builder $q) use ($now, $dayStart) {
+            $q->whereNull('expires_at')
+                ->orWhere('expires_at', '>', $now)
+                ->orWhere('expires_at', '<', $dayStart);
         });
     }
 

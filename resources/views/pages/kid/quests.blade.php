@@ -206,9 +206,14 @@ new class extends Component
         if ($service->stateFor($this->profile, $chore) !== 'ready') {
             $claimant = $service->claimantFor($chore);
 
-            $this->boardMessage = $claimant && $claimant->profile_id !== $this->profile->id
-                ? "{$claimant->profile->name} got to {$chore->name} first!"
-                : "{$chore->name} isn't available right now.";
+            $this->boardMessage = match (true) {
+                $claimant && $claimant->profile_id !== $this->profile->id => "{$claimant->profile->name} got to {$chore->name} first!",
+                // Worth its own wording: nobody beat them to it, the clock did,
+                // and "isn't available" would leave them refreshing for a chore
+                // that isn't coming back until tomorrow.
+                $service->isExpired($chore) => "Time's up on {$chore->name} — a parent is taking that one. Back tomorrow!",
+                default => "{$chore->name} isn't available right now.",
+            };
 
             return;
         }
@@ -280,6 +285,9 @@ new class extends Component
 
         return [
             'quest' => $quest,
+            // A quest chore that expires is rerolled by questFor() rather than
+            // left to dead-end the day, so this is only ever a live deadline.
+            'questClosesAt' => $service->deadlineFor($quest->chore),
             'questRevealed' => $questRevealed,
             'questDone' => $questDone,
             'questApproved' => $questApproved,
@@ -481,6 +489,14 @@ new class extends Component
                 >
                     <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-lime uppercase">Today's Main Quest</p>
                     <h2 class="mt-2 font-baloo text-[30px] leading-[1.1] font-extrabold">{{ $quest->chore->name }}</h2>
+
+                    {{-- A deadline on the main quest is the sharpest version of
+                         this: miss it and the quest rerolls, so the countdown
+                         belongs right under the name where it can't be missed. --}}
+                    @if ($questClosesAt && ! $questDone)
+                        <x-chore-countdown wire:key="quest-closes" :closes-at="$questClosesAt" class="mt-2" />
+                    @endif
+
                     <p class="mt-2 max-w-[420px] text-sm text-fq-text-2">
                         @if ($questDone)
                             Quest cleared. Every side quest below is unlocked for today.
@@ -672,6 +688,7 @@ new class extends Component
                         $chore = $entry['chore'];
                         $state = $entry['state'];
                         $takenBy = $entry['takenBy'];
+                        $closesAt = $entry['closesAt'];
                         $boosted = $questBoosted === false && $boost && $boost->chore_id === $chore->id;
                         $payout = $chore->points * ($boosted ? $boost->multiplier : 1);
                         $boostColor = $boosted && $boost->multiplier === 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)';
@@ -689,12 +706,16 @@ new class extends Component
                                     \App\Enums\ChoreCadence::Once => 'Gone for now',
                                     default => 'Back tomorrow',
                                 },
+                            // Not "Locked" and not "Back tomorrow" — the clock
+                            // ran out and a parent has it now. Saying so is what
+                            // makes the countdown mean anything next time.
+                            'expired' => "Time's up",
                         ];
                     @endphp
                     <div
                         wire:key="chore-{{ $chore->id }}"
-                        class="rounded-[20px] border bg-fq-panel p-4 {{ $state === 'locked' ? 'opacity-50' : '' }} {{ $takenBy ? 'opacity-70' : '' }} {{ $chore->isOneTime() ? 'border-2' : 'border border-fq-line' }}"
-                        style="{{ $state === 'pending' ? 'border-color: var(--fq-success-border)' : ($chore->isOneTime() ? 'border-color: color-mix(in srgb, var(--fq-gold) 55%, transparent); background: var(--fq-wash-gold)' : '') }}"
+                        class="rounded-[20px] border bg-fq-panel p-4 {{ $state === 'locked' ? 'opacity-50' : '' }} {{ $takenBy || $state === 'expired' ? 'opacity-70' : '' }} {{ $chore->isOneTime() || $closesAt ? 'border-2' : 'border border-fq-line' }}"
+                        style="{{ $state === 'pending' ? 'border-color: var(--fq-success-border)' : ($closesAt ? 'border-color: color-mix(in srgb, var(--fq-cyan) 55%, transparent)' : ($chore->isOneTime() ? 'border-color: color-mix(in srgb, var(--fq-gold) 55%, transparent); background: var(--fq-wash-gold)' : '')) }}"
                     >
                         <div class="flex items-start justify-between gap-2">
                             <div>
@@ -706,7 +727,7 @@ new class extends Component
                                         &#9889; One-time
                                     </span>
                                 @endif
-                                <p class="text-[16px] font-semibold {{ $takenBy ? 'line-through decoration-2' : '' }}">{{ $chore->name }}</p>
+                                <p class="text-[16px] font-semibold {{ $takenBy || $state === 'expired' ? 'line-through decoration-2' : '' }}">{{ $chore->name }}</p>
                                 <p class="font-mono-fq text-[10px] text-fq-text-4 uppercase">
                                     {{ $chore->cadence->kidLabel() }}
                                 </p>
@@ -721,6 +742,15 @@ new class extends Component
                         @if ($takenBy)
                             <span class="mt-2 inline-block rounded-[8px] px-[10px] py-1 font-mono-fq text-[10px]" style="background: color-mix(in srgb, var(--fq-gold) 22%, transparent); color: var(--fq-gold)">
                                 Taken by {{ $takenBy->name }}
+                            </span>
+                        @elseif ($closesAt)
+                            {{-- The race, spelled out. It has to be the first
+                                 thing read on the card, because the whole point
+                                 is deciding to go and do it right now. --}}
+                            <x-chore-countdown wire:key="closes-{{ $chore->id }}" :closes-at="$closesAt" class="mt-2" />
+                        @elseif ($state === 'expired')
+                            <span class="mt-2 inline-block rounded-[8px] px-[10px] py-1 font-mono-fq text-[10px]" style="background: color-mix(in srgb, var(--fq-danger) 20%, transparent); color: var(--fq-danger)">
+                                A parent took this one
                             </span>
                         @elseif ($boosted)
                             <span class="mt-2 inline-block rounded-[8px] px-[10px] py-1 font-mono-fq text-[10px]" style="background: color-mix(in srgb, {{ $boostColor }} 28%, transparent); color: {{ $boostColor }}">

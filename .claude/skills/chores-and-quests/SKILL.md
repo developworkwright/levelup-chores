@@ -14,7 +14,7 @@ Covers the chore board, the daily quest, and the automatic mystery chore — all
 - `app/Enums/{ChoreCadence,CompletionStatus}.php`
 - `resources/views/pages/kid/quests.blade.php` — kid-facing board, quest reveal, mystery reveal.
 - `resources/views/pages/parent/chores.blade.php` — chore CRUD (points, cadence, min age, quest eligibility). No mystery controls here — mystery is fully automatic.
-- Tests: `tests/Feature/ChoreFlowTest.php`, `tests/Feature/MysteryChoreTest.php`, `tests/Feature/HouseholdCooldownTest.php`, `tests/Feature/BlockedQuestTest.php`.
+- Tests: `tests/Feature/ChoreFlowTest.php`, `tests/Feature/MysteryChoreTest.php`, `tests/Feature/HouseholdCooldownTest.php`, `tests/Feature/BlockedQuestTest.php`, `tests/Feature/OneTimeChoreTest.php`, `tests/Feature/ChoreDeadlineTest.php`.
 
 ## Cooldowns are household-wide
 
@@ -47,7 +47,7 @@ The hero's CTA stays live and reads "Mark it done again", with a separate `Sent 
 
 Because cooldowns are household-wide, a sibling can finish the chore that was handed to you as today's quest. That would dead-end the kid's day: no quest completion, no streak day, and with `require_quest_first` on, a board that never unlocks.
 
-`questFor()` therefore runs `rerollIfTaken()` on every read. If the quest is uncompleted and `claimantFor()` returns a completion belonging to **someone else**, the quest silently moves to a different unclaimed chore. It's invisible to the kid beyond the chore changing — no prompt, no cost.
+`questFor()` therefore runs `rerollIfUnavailable()` on every read. If the quest is uncompleted and `claimantFor()` returns a completion belonging to **someone else**, the quest silently moves to a different unclaimed chore. It's invisible to the kid beyond the chore changing — no prompt, no cost. An expired quest chore (below) rerolls the same way, and that check runs **before** the Unlimited shortcut — a deadline closes an unlimited chore just as firmly as any other.
 
 Four conditions guard it, each protecting something real:
 
@@ -60,12 +60,13 @@ Four conditions guard it, each protecting something real:
 
 ## Chore board state machine
 
-`boardFor(Profile)` returns each appropriate chore as `['chore' => Chore, 'state' => string, 'takenBy' => ?Profile]`, where `takenBy` is the claimant when it isn't this kid. States:
+`boardFor(Profile)` returns each appropriate chore as `['chore' => Chore, 'state' => string, 'takenBy' => ?Profile, 'closesAt' => ?Carbon]`, where `takenBy` is the claimant when it isn't this kid and `closesAt` is a live deadline. States:
 
 - `'locked'` — quest not done yet and `require_quest_first` is on.
 - `'pending'` — **this** profile holds the in-flight claim.
 - `'done'` — someone in the household holds it: another kid's pending claim, or anyone's approved claim inside the cadence boundary (`ChoreCadence::Weekly` → last 7 household-days; otherwise last 1).
-- `'ready'` — claimable now. Always `'ready'` for `ChoreCadence::Unlimited` chores — no cooldown, ever.
+- `'expired'` — a parent's deadline has passed (below). Unclaimable for the rest of the household day.
+- `'ready'` — claimable now. `ChoreCadence::Unlimited` chores are always `'ready'` short of a deadline — no cooldown, ever.
 
 ### One-time chores
 
@@ -81,6 +82,21 @@ Everything else falls out of that one column:
 - **`setCadence()` clears `used_at` when moving off Once**, so a chore parked on Daily doesn't arrive already-used when someone flips it back.
 
 `ChoreCadence` carries its own display strings (`label()`, `summary()`, `kidLabel()`, `next()`) — a fourth case made the hardcoded label maps in both views a place for the cadences to silently drift.
+
+### Deadlines ("closes soon")
+
+A parent can put any chore on a clock from the Chores admin — "beat me to it before dinner" — via `chores.expires_at`. Kids get a live countdown on the board; once it passes the chore is `'expired'` and the job is the parent's. The point is to *offer* work the parent is about to do anyway, so the mechanic is a race, not a punishment.
+
+- **A deadline binds only for the household day it lands in.** `Chore::hasExpiredAt($now, $dayStart)` returns false for a stamp older than `$dayStart`, so it lifts on its own overnight and nobody has to clear it — that's why there is no scheduled job and no `used_at`-style release path. `ChoreService::isExpired()` / `deadlineFor()` wrap it with the clock, exactly as `claimantFor()` does.
+- **`Chore::scopeNotExpiredAt()` is the SQL twin** of `hasExpiredAt()`, kept beside it the way `scopeMatching()` and `matches()` are. Used by `questCandidates()` and `BadgeService::clearedWholeBoardToday()` — a closed chore must never be handed out as a quest (it would never reopen today, costing a streak day) nor counted toward a perfect board (which would make the badge unwinnable).
+- **A claim outranks a deadline.** `stateFrom()` checks the claimant first: someone who got there before the clock ran out keeps their pending claim rather than watching it flip to "time's up".
+- **`'expired'` outranks `'locked'`.** Gating hides the ordinary states behind the main quest, but "Locked" promises the chore is yours once the quest is done — the wrong thing to say about one that has already closed.
+- **Closed chores stay on the board** reading "Time's up", rather than vanishing like a spent one-time chore. The countdown only teaches anything if losing it is visible.
+- **`drawMysteryChore()` rejects expired chores** — hiding the bonus behind a chore nobody can claim means nobody wins it. `SpinService::eligibleChoresFor()` needs no change; it already filters on `stateFor() === 'ready'`.
+- **`HouseholdClock::atTime('17:00')`** maps a wall-clock time onto the household day in progress and returns UTC (same reason `startOf()` does). A time earlier than `day_boundary_hour` belongs to the small hours at the *end* of the day — on a 4am boundary, "2:00" means tonight. It returns null for anything unparseable, so a blank input lifts the deadline rather than resolving to midnight.
+- **`setDeadline()` notifies the kids** (`ChoreClosingSoon`, web push, best-effort in a try/catch like `claim()`). A countdown nobody hears about is just a chore quietly vanishing. This is the kid-facing notification hook — anything else aimed at kids should follow it and `SiblingOfferReceived`.
+
+The countdown is `<x-chore-countdown>`, an Alpine block ticking client-side that fires **one** `$wire.$refresh()` when it reaches zero. That's deliberate and must stay: the same no-`wire:poll` reasoning below applies, and zero is the single moment the card's state actually changes.
 
 `'pending'` vs `'done'` is the *only* place the viewing profile matters; both come off the same `claimantFor()` lookup, resolved through the shared private `stateFrom()` so `stateFor()` and `boardFor()` can't drift. `boardFor()` calls `claimantFor()` itself rather than `stateFor()`, so naming the claimant costs no extra queries — `claimantFor()` already eager-loads `profile`. There is no separate mystery-chore branch — mystery exclusivity and ordinary cooldown are now the same mechanism.
 
