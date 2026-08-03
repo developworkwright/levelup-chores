@@ -24,6 +24,7 @@ class Chore extends Model
         'quest_eligible',
         'wheel_eligible',
         'used_at',
+        'reopened_at',
         'expires_at',
     ];
 
@@ -34,6 +35,7 @@ class Chore extends Model
             'quest_eligible' => 'boolean',
             'wheel_eligible' => 'boolean',
             'used_at' => 'datetime',
+            'reopened_at' => 'datetime',
             'expires_at' => 'datetime',
         ];
     }

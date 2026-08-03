@@ -20,6 +20,9 @@ new class extends Component
 
     public string $search = '';
 
+    /** Narrows the list to the chores nobody can claim right now. */
+    public bool $onlyUnavailable = false;
+
     public function mount(): void
     {
         $this->profile = Auth::guard('profile')->user();
@@ -72,13 +75,16 @@ new class extends Component
         }
     }
 
-    /** Puts a spent one-time chore back up for grabs. */
-    public function reactivate(int $choreId): void
+    /**
+     * Puts a chore back up for grabs ahead of its cadence — the vacuuming is
+     * weekly right up until someone tips over a bag of chips.
+     */
+    public function reopen(int $choreId): void
     {
         $chore = $this->ownedChore($choreId);
 
-        if ($chore?->isUsedUp()) {
-            app(ChoreService::class)->reactivate($chore);
+        if ($chore) {
+            app(ChoreService::class)->reopen($chore);
         }
     }
 
@@ -192,6 +198,11 @@ new class extends Component
         $this->search = '';
     }
 
+    public function toggleOnlyUnavailable(): void
+    {
+        $this->onlyUnavailable = ! $this->onlyUnavailable;
+    }
+
     public function with(): array
     {
         $scoped = Chore::where('household_id', $this->profile->household_id);
@@ -200,13 +211,30 @@ new class extends Component
         $service = app(ChoreService::class);
         $timezone = $this->profile->household->timezone;
 
+        $availability = $chores->mapWithKeys(fn (Chore $chore) => [
+            $chore->id => $service->availabilityFor($chore),
+        ]);
+
+        $lockedCount = $availability->reject(fn (array $row) => $row['available'])->count();
+
+        if ($this->onlyUnavailable) {
+            $chores = $chores->reject(fn (Chore $chore) => $availability[$chore->id]['available'])->values();
+        }
+
         return [
             'chores' => $chores,
             'totalChores' => $scoped->count(),
-            // Keyed by chore so a row can show its deadline without each one
-            // working out where the household day starts for itself. The time
-            // is pre-localised because the input below is a wall clock and the
-            // stamp is stored in UTC.
+            // Counted before the filter narrows the list, so the toggle can say
+            // how many chores it would show without having to run twice.
+            'lockedCount' => $lockedCount,
+            // Keyed by chore so a row can show who's holding it, and until
+            // when, without each one working the household clock out for
+            // itself. Times are pre-localised because the stamps are UTC.
+            'availability' => $availability->map(fn (array $row) => [
+                ...$row,
+                'freesAt' => $row['freesAt']?->copy()->setTimezone($timezone),
+                'lastDoneAt' => $row['lastDone']?->submitted_at?->copy()->setTimezone($timezone),
+            ]),
             'deadlines' => $chores->mapWithKeys(fn (Chore $chore) => [$chore->id => [
                 'closesAt' => $service->deadlineFor($chore),
                 'expired' => $service->isExpired($chore),
@@ -241,11 +269,26 @@ new class extends Component
                         {{ $totalChores }} {{ Str::plural('CHORE', $totalChores) }}
                     </span>
                 @endif
+
+                {{-- The quickest way to answer "why can't anyone do anything
+                     tonight" — and to spot a cooldown that's holding a chore
+                     longer than the household actually wants it held. --}}
+                <button
+                    type="button"
+                    wire:click="toggleOnlyUnavailable"
+                    class="w-full rounded-[12px] border px-3 py-2 text-xs font-semibold {{ $onlyUnavailable ? 'text-fq-bg' : 'border-fq-line-3 bg-fq-sunk text-fq-text-3' }}"
+                    style="{{ $onlyUnavailable ? 'background: var(--fq-gold); border-color: var(--fq-gold)' : '' }}"
+                >
+                    {{ $onlyUnavailable ? 'Showing unavailable only' : 'Show unavailable only' }}
+                    · {{ $lockedCount }} locked
+                </button>
             </div>
 
             @if ($chores->isEmpty())
                 <div class="rounded-[18px] border border-dashed border-fq-line-3 bg-fq-panel p-6 text-center text-sm text-fq-text-5">
-                    @if (trim($search) !== '')
+                    @if ($onlyUnavailable && $lockedCount === 0)
+                        Every chore is up for grabs right now.
+                    @elseif (trim($search) !== '')
                         No chores match "{{ $search }}".
                     @else
                         No chores yet — add one on the right to get started.
@@ -254,7 +297,34 @@ new class extends Component
             @endif
 
             @foreach ($chores as $chore)
-                @php $deadline = $deadlines[$chore->id]; @endphp
+                @php
+                    $deadline = $deadlines[$chore->id];
+                    $status = $availability[$chore->id];
+                    $holder = $status['claimant']?->profile->name;
+                    $freesAt = $status['freesAt'];
+
+                    // Relative to now, so the stored UTC stamp reads correctly
+                    // without needing the household's timezone.
+                    $claimedAgo = $status['claimant']?->submitted_at->diffForHumans();
+
+                    // 'expired' is deliberately absent: the deadline block
+                    // below already says which time closed it, to the minute,
+                    // which this line can't.
+                    $statusLine = match ($status['reason']) {
+                        'ready' => 'Up for grabs',
+                        'pending' => "Claimed by {$holder} {$claimedAgo} · waiting on your approval",
+                        'used_up' => "Taken by {$holder} {$claimedAgo} · off the board until you put it back",
+                        'claimed' => "Done by {$holder} {$claimedAgo} · back "
+                            .($freesAt ? $freesAt->calendar() : 'once you reopen it'),
+                        default => null,
+                    };
+
+                    $statusColor = match ($status['reason']) {
+                        'ready' => 'var(--fq-lime)',
+                        'pending' => 'var(--fq-gold)',
+                        default => 'var(--fq-coral)',
+                    };
+                @endphp
                 <div wire:key="chore-{{ $chore->id }}" class="flex flex-wrap items-center gap-3 rounded-[18px] border border-fq-line bg-fq-panel p-[14px]">
                     <div class="min-w-[140px] flex-1">
                         <p class="text-[15px] font-semibold {{ $chore->isUsedUp() ? 'text-fq-text-4 line-through decoration-2' : '' }}">{{ $chore->name }}</p>
@@ -268,11 +338,24 @@ new class extends Component
                                 · <span class="text-fq-coral">Excluded from wheel</span>
                             @endunless
                         </p>
-                        @if ($chore->isUsedUp())
-                            {{-- The one state a parent has to act on: nothing
-                                 puts a spent one-time chore back but them. --}}
-                            <p class="mt-1 font-mono-fq text-[10px] uppercase" style="color: var(--fq-gold)">
-                                Taken {{ $chore->used_at->diffForHumans() }} · off the board until reactivated
+                        {{-- Whether the family can actually do this job right
+                             now, and who's holding it if not. The one line on
+                             the row that answers "why is nothing available?"
+                             and "is this cooldown too long?" --}}
+                        @if ($statusLine)
+                            <p class="mt-1 font-mono-fq text-[10px] uppercase" style="color: {{ $statusColor }}">
+                                {{ $statusLine }}
+                            </p>
+                        @endif
+
+                        {{-- Kept for the states where the holding claim isn't
+                             the last thing that happened — a chore closed by
+                             deadline, or one done and then reopened. --}}
+                        @if ($status['lastDone'] && in_array($status['reason'], ['ready', 'expired'], true))
+                            <p class="mt-1 font-mono-fq text-[10px] text-fq-text-5 uppercase">
+                                Last done by {{ $status['lastDone']->profile->name }}
+                                {{ $status['lastDoneAt']->diffForHumans() }}
+                                · {{ $status['lastDoneAt']->format('D j M, g:i A') }}
                             </p>
                         @endif
 
@@ -337,14 +420,14 @@ new class extends Component
                         @endif
                     </div>
 
-                    @if ($chore->isUsedUp())
+                    @unless ($status['available'])
                         <button
                             type="button"
-                            wire:click="reactivate({{ $chore->id }})"
+                            wire:click="reopen({{ $chore->id }})"
                             class="rounded-[12px] border px-3 py-2 text-xs font-semibold text-fq-bg"
                             style="background: var(--fq-gold); border-color: var(--fq-gold)"
-                        >Put back on the board</button>
-                    @endif
+                        >{{ $chore->isOneTime() ? 'Put back on the board' : 'Make available now' }}</button>
+                    @endunless
 
                     <button
                         type="button"
@@ -417,6 +500,11 @@ new class extends Component
             </p>
             <p class="text-xs text-fq-text-5">
                 One-time chores are up for grabs once — first kid to claim it takes it, and it comes off everyone's board for good until you put it back. They sit at the top of the kids' side quests. Good for one-offs like "rake the leaves". Sending a claim back reopens it automatically.
+            </p>
+            <p class="text-xs text-fq-text-5">
+                Every chore says whether it's up for grabs, who's holding it, and when it comes
+                back. "Make available now" overrides that — the vacuuming is weekly right up
+                until someone tips over a bag of chips. Whoever already did it keeps their points.
             </p>
             <p class="text-xs text-fq-text-5">
                 "Closes" puts a deadline on a chore — the kids get a countdown on their board and one last shot at it, and once the time passes it's off their board for the rest of the day and the job is yours. Set it when you're going to do something this evening anyway. It lifts on its own overnight.

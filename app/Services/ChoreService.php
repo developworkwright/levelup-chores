@@ -440,6 +440,9 @@ class ChoreService
      * A one-time chore is the exception to the clock: its boundary is the
      * used_at stamp rather than a cadence window, so it stays held for as long
      * as it takes a parent to put it back rather than reopening overnight.
+     *
+     * A parent reopening the chore releases everything claimed before they did
+     * it — see reopen().
      */
     public function claimantFor(Chore $chore): ?ChoreCompletion
     {
@@ -465,8 +468,33 @@ class ChoreService
                             ->where('decided_at', '>=', $boundary);
                     });
             })
+            // Putting a chore back on the board means exactly this: whoever
+            // did it last no longer holds it. Applied to pending claims too —
+            // a claim still waiting on approval keeps its points either way,
+            // it just stops being the reason nobody else can vacuum.
+            //
+            // Strictly after, because these stamps only carry to the second: a
+            // parent approving a chore and reopening it in the same breath is
+            // ordinary, and the reopen has to win that tie or it does nothing.
+            ->when(
+                $chore->reopened_at !== null,
+                fn ($query) => $query->where('submitted_at', '>', $chore->reopened_at),
+            )
             ->with('profile')
             ->oldest('submitted_at')
+            ->first();
+    }
+
+    /**
+     * The last time anyone actually did this chore, whatever its cadence says
+     * about availability now. Rejected claims don't count — nothing was done.
+     */
+    public function lastCompletionFor(Chore $chore): ?ChoreCompletion
+    {
+        return ChoreCompletion::where('chore_id', $chore->id)
+            ->where('status', '!=', CompletionStatus::Rejected)
+            ->with('profile')
+            ->latest('submitted_at')
             ->first();
     }
 
@@ -489,6 +517,103 @@ class ChoreService
         $clock = HouseholdClock::for($chore->household);
 
         return $chore->closesAt(now(), $clock->startOf($clock->today()));
+    }
+
+    /**
+     * Why a chore is or isn't claimable right now, for the parent's board.
+     *
+     * The kids' side answers this per-kid — see stateFor() — because a chore
+     * someone else is holding reads differently to one you're holding
+     * yourself. A parent is asking about the household: is this job up for
+     * grabs, who took it, and when does it come back.
+     *
+     * @return array{
+     *     available: bool,
+     *     reason: 'ready'|'claimed'|'pending'|'expired'|'used_up',
+     *     claimant: ?ChoreCompletion,
+     *     freesAt: ?Carbon,
+     *     lastDone: ?ChoreCompletion,
+     * }
+     */
+    public function availabilityFor(Chore $chore): array
+    {
+        $lastDone = $this->lastCompletionFor($chore);
+
+        $claimant = $chore->cadence === ChoreCadence::Unlimited
+            ? null
+            : $this->claimantFor($chore);
+
+        if ($claimant !== null) {
+            return [
+                'available' => false,
+                // A one-time chore reads as spent rather than as on cooldown:
+                // nothing but a parent brings it back, and saying "claimed"
+                // would imply a clock that isn't running.
+                'reason' => match (true) {
+                    $chore->isOneTime() => 'used_up',
+                    $claimant->status === CompletionStatus::Pending => 'pending',
+                    default => 'claimed',
+                },
+                'claimant' => $claimant,
+                'freesAt' => $this->cooldownEndsAt($chore, $claimant),
+                'lastDone' => $lastDone,
+            ];
+        }
+
+        // Same precedence as stateFrom(): a claim outranks a deadline, so this
+        // only reports a closed chore once nobody is holding it.
+        if ($this->isExpired($chore)) {
+            $clock = HouseholdClock::for($chore->household);
+
+            return [
+                'available' => false,
+                'reason' => 'expired',
+                'claimant' => null,
+                // Deadlines bind for the household day they land in, so an
+                // expired one lifts on its own at the next rollover.
+                'freesAt' => $clock->startOf($clock->today()->copy()->addDay()),
+                'lastDone' => $lastDone,
+            ];
+        }
+
+        return [
+            'available' => true,
+            'reason' => 'ready',
+            'claimant' => null,
+            'freesAt' => null,
+            'lastDone' => $lastDone,
+        ];
+    }
+
+    /**
+     * When a held chore comes back on its own, or null when nothing but a
+     * parent will bring it back.
+     *
+     * Measured from the claim that's holding it rather than from today, so a
+     * weekly chore approved on Tuesday says Tuesday-plus-seven however long
+     * anyone stares at the screen.
+     */
+    private function cooldownEndsAt(Chore $chore, ChoreCompletion $claimant): ?Carbon
+    {
+        // One-time chores have no cadence to reopen them; unlimited ones never
+        // hold in the first place, so neither has a cooldown to end.
+        if ($chore->cadence === ChoreCadence::Once || $chore->cadence === ChoreCadence::Unlimited) {
+            return null;
+        }
+
+        // A pending claim is held by the claim, not by the clock — it lifts
+        // when a parent decides on it, whenever that turns out to be.
+        if ($claimant->status === CompletionStatus::Pending) {
+            return null;
+        }
+
+        $clock = HouseholdClock::for($chore->household);
+
+        // decided_at, because that's the stamp claimantFor() measures the
+        // cadence window against.
+        $day = $clock->dayFor($claimant->decided_at ?? $claimant->submitted_at);
+
+        return $clock->startOf($day->copy()->addDays($chore->cooldownDays()));
     }
 
     /**
@@ -1018,10 +1143,28 @@ class ChoreService
         }
     }
 
-    /** Puts a spent one-time chore back up for grabs. */
-    public function reactivate(Chore $chore): void
+    /**
+     * Puts a chore back up for grabs whatever is currently holding it —
+     * a spent one-time claim, a cadence cooldown, or a deadline that has
+     * already passed.
+     *
+     * The completion that took it is deliberately left alone: it was real
+     * work, it has already paid out, and it still belongs in the history. All
+     * that changes is that it stops being the reason nobody else can claim —
+     * we only need vacuuming once a week until someone tips over the chips.
+     */
+    public function reopen(Chore $chore): void
     {
         $chore->used_at = null;
+        $chore->reopened_at = now();
+
+        // A deadline that has already bitten would otherwise close the chore
+        // straight back up, making the button look broken. One still ahead of
+        // us is left running — the race a parent set up is still worth having.
+        if ($this->isExpired($chore)) {
+            $chore->expires_at = null;
+        }
+
         $chore->save();
     }
 }

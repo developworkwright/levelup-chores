@@ -173,7 +173,7 @@ class OneTimeChoreTest extends TestCase
         $chore = $this->oneTimeChore($household);
 
         $this->service()->approve($this->service()->claim($doer, $chore), $parent);
-        $this->service()->reactivate($chore->refresh());
+        $this->service()->reopen($chore->refresh());
 
         // An approved-today completion still exists — reactivation has to clear
         // the chore outright, not leave it on a phantom daily cooldown.
@@ -285,7 +285,7 @@ class OneTimeChoreTest extends TestCase
 
         Auth::guard('profile')->login($parent);
 
-        Volt::test('parent.chores')->call('reactivate', $chore->id);
+        Volt::test('parent.chores')->call('reopen', $chore->id);
 
         $this->assertNull($chore->refresh()->used_at);
     }
@@ -301,7 +301,7 @@ class OneTimeChoreTest extends TestCase
 
         Auth::guard('profile')->login($parent);
 
-        Volt::test('parent.chores')->call('reactivate', $foreign->id);
+        Volt::test('parent.chores')->call('reopen', $foreign->id);
 
         $this->assertNotNull($foreign->refresh()->used_at);
     }
