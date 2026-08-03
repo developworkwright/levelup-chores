@@ -2,8 +2,8 @@
 
 namespace App\Models;
 
-use App\Enums\SiblingOfferKind;
 use App\Enums\SiblingOfferStatus;
+use App\Enums\TradeAsset;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -20,9 +20,11 @@ class SiblingOffer extends Model
         'household_id',
         'from_profile_id',
         'to_profile_id',
-        'kind',
+        'give_asset',
+        'give_amount',
+        'get_asset',
+        'get_amount',
         'description',
-        'points',
         'status',
         'expires_at',
         'responded_at',
@@ -31,9 +33,11 @@ class SiblingOffer extends Model
     protected function casts(): array
     {
         return [
-            'kind' => SiblingOfferKind::class,
+            'give_asset' => TradeAsset::class,
+            'give_amount' => 'integer',
+            'get_asset' => TradeAsset::class,
+            'get_amount' => 'integer',
             'status' => SiblingOfferStatus::class,
-            'points' => 'integer',
             'expires_at' => 'datetime',
             'responded_at' => 'datetime',
         ];
@@ -70,21 +74,58 @@ class SiblingOffer extends Model
         return $this->status === SiblingOfferStatus::Pending && $this->expires_at->isFuture();
     }
 
-    /** Only a `Paying` offer takes points out of a balance up front. */
+    /**
+     * Whether the sender's side is already out of their balance. Only a
+     * currency can be held, so this follows from the give side rather than
+     * being a flag that could disagree with it.
+     */
     public function isEscrowed(): bool
     {
-        return $this->kind === SiblingOfferKind::Paying;
+        return $this->give_asset->isCurrency();
     }
 
-    /** The kid whose balance the points come out of. */
-    public function payer(): Profile
+    /** Both sides are currencies — a straight swap with no favour attached. */
+    public function isSwap(): bool
     {
-        return $this->isEscrowed() ? $this->fromProfile : $this->toProfile;
+        return $this->give_asset->isCurrency() && $this->get_asset->isCurrency();
     }
 
-    /** The kid who does the favour and gets paid for it. */
-    public function worker(): Profile
+    /** What the sender puts up, as it reads on a card. */
+    public function giveText(): string
     {
-        return $this->isEscrowed() ? $this->toProfile : $this->fromProfile;
+        return $this->give_asset === TradeAsset::Favour
+            ? (string) $this->description
+            : $this->give_asset->format($this->give_amount);
+    }
+
+    /** What the sender wants back, as it reads on a card. */
+    public function getText(): string
+    {
+        return $this->get_asset === TradeAsset::Favour
+            ? (string) $this->description
+            : $this->get_asset->format($this->get_amount);
+    }
+
+    /**
+     * The whole trade in one line from the sender's side — "100 pts for the
+     * dishes". Ledger and ticket entries are labelled with this, so a parent
+     * reading the activity feed sees both halves of what was agreed.
+     */
+    public function summary(): string
+    {
+        return "{$this->giveText()} for {$this->getText()}";
+    }
+
+    /**
+     * How much short the recipient is of the side they would have to hand over.
+     * Zero when they are asked for a favour rather than a balance.
+     */
+    public function shortfallFor(Profile $profile): int
+    {
+        if (! $this->get_asset->isCurrency()) {
+            return 0;
+        }
+
+        return max(0, $this->get_amount - $profile->balanceOf($this->get_asset));
     }
 }

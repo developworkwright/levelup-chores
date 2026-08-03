@@ -3,9 +3,10 @@
 namespace Tests\Feature;
 
 use App\Enums\LedgerKind;
-use App\Enums\SiblingOfferKind;
 use App\Enums\TicketKind;
+use App\Enums\TradeAsset;
 use App\Models\Household;
+use App\Models\LedgerEntry;
 use App\Models\Profile;
 use App\Models\SiblingOffer;
 use App\Services\LedgerService;
@@ -49,24 +50,51 @@ class ParentActivityPageTest extends TestCase
         $sam = Profile::factory()->for($household)->create(['name' => 'Sam', 'points' => 400]);
         $this->actingAsParent($household);
 
-        $offer = SiblingOffer::factory()->create([
+        $offer = SiblingOffer::factory()->earning(100)->create([
             'household_id' => $household->id,
             'from_profile_id' => $alex->id,
             'to_profile_id' => $sam->id,
-            'kind' => SiblingOfferKind::Earning,
             'description' => 'do your dishes',
-            'points' => 100,
         ]);
 
         app(SiblingOfferService::class)->accept($offer, $sam);
 
         // Transfer is a newer LedgerKind than the feed's colour map — an
         // unhandled case would blow the whole page up rather than one row.
+        // Labelled sender → recipient with both halves of the deal, so a parent
+        // can tell which way it ran without opening anything.
         Volt::test('parent.activity')
             ->assertOk()
-            ->assertSee('Sam → Alex: do your dishes', false)
+            ->assertSee('Alex → Sam: do your dishes for 100 pts', false)
             ->assertSee('-100')
             ->assertSee('+100');
+    }
+
+    public function test_a_trade_paid_in_tickets_lands_in_the_ticket_feed_not_the_ledger(): void
+    {
+        $household = Household::factory()->create();
+        $alex = Profile::factory()->for($household)->create(['name' => 'Alex', 'bonus_tickets' => 5]);
+        $sam = Profile::factory()->for($household)->create(['name' => 'Sam']);
+        $this->actingAsParent($household);
+
+        $offer = SiblingOffer::factory()->create([
+            'household_id' => $household->id,
+            'from_profile_id' => $alex->id,
+            'to_profile_id' => $sam->id,
+            'give_asset' => TradeAsset::Tickets,
+            'give_amount' => 3,
+            'description' => 'walk the dog',
+        ]);
+
+        app(SiblingOfferService::class)->accept($offer, $sam);
+
+        // The two currencies never sum, so a ticket trade must not turn up in
+        // the points column pretending to be one.
+        Volt::test('parent.activity')
+            ->assertOk()
+            ->assertSee('Alex → Sam: 3 tickets for walk the dog', false);
+
+        $this->assertSame(0, LedgerEntry::count());
     }
 
     public function test_it_shows_ticket_activity_in_its_own_card(): void

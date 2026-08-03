@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\AccentColor;
 use App\Enums\ProfileRole;
+use App\Enums\TradeAsset;
 use Illuminate\Auth\Authenticatable as AuthenticatableTrait;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Collection;
@@ -108,6 +109,20 @@ class Profile extends Model implements Authenticatable
     public function badges(): BelongsToMany
     {
         return $this->belongsToMany(Badge::class, 'profile_badges')->withPivot('earned_at');
+    }
+
+    /**
+     * The balance a trade side is priced against. Only ever asked about a
+     * currency — {@see TradeAsset::isCurrency()} gates every caller — so a
+     * favour answering zero is a formality, not a balance of nothing.
+     */
+    public function balanceOf(TradeAsset $asset): int
+    {
+        return match ($asset) {
+            TradeAsset::Points => $this->points,
+            TradeAsset::Tickets => $this->bonus_tickets,
+            TradeAsset::Favour => 0,
+        };
     }
 
     public function siblingOffersSent(): HasMany

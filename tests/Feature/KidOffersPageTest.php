@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Enums\SiblingOfferKind;
 use App\Enums\SiblingOfferStatus;
+use App\Enums\TradeAsset;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Models\SiblingOffer;
@@ -55,7 +55,7 @@ class KidOffersPageTest extends TestCase
         Volt::test('kid.offers')
             ->call('toggleCompose')
             ->set('offerDescription', 'Play a game for 30 minutes')
-            ->set('offerPoints', '100')
+            ->set('giveAmount', '100')
             ->call('sendOffer', $sam->id)
             ->assertSee('Sent to Sam')
             ->assertDontSee('Send it to')
@@ -73,7 +73,7 @@ class KidOffersPageTest extends TestCase
         Volt::test('kid.offers')
             ->call('toggleCompose')
             ->set('offerDescription', 'Play a game')
-            ->set('offerPoints', '100')
+            ->set('giveAmount', '100')
             ->call('sendOffer', $sam->id)
             ->assertSee('need 40 more');
 
@@ -90,7 +90,7 @@ class KidOffersPageTest extends TestCase
         Volt::test('kid.offers')
             ->call('toggleCompose')
             ->set('offerDescription', '   ')
-            ->set('offerPoints', '100')
+            ->set('giveAmount', '100')
             ->call('sendOffer', $sam->id)
             ->assertSee('Say what the trade is first');
 
@@ -118,7 +118,7 @@ class KidOffersPageTest extends TestCase
             'from_profile_id' => $alex->id,
             'to_profile_id' => $sam->id,
             'description' => 'Play a game for 30 minutes',
-            'points' => 100,
+            'give_amount' => 100,
         ]);
 
         Volt::test('kid.offers')
@@ -162,7 +162,7 @@ class KidOffersPageTest extends TestCase
             'household_id' => $household->id,
             'from_profile_id' => $alex->id,
             'to_profile_id' => $sam->id,
-            'points' => 100,
+            'give_amount' => 100,
         ]);
 
         Volt::test('kid.offers')->call('declineOffer', $offer->id)->assertSee('Turned it down');
@@ -178,11 +178,10 @@ class KidOffersPageTest extends TestCase
         $this->loginKid($household, ['name' => 'Sam', 'points' => 60]);
 
         // "They pay me" — Sam is the payer here, so the button is priced.
-        SiblingOffer::factory()->earning()->create([
+        SiblingOffer::factory()->earning(100)->create([
             'household_id' => $household->id,
             'from_profile_id' => $alex->id,
             'to_profile_id' => Profile::where('name', 'Sam')->value('id'),
-            'points' => 100,
         ]);
 
         Volt::test('kid.offers')
@@ -200,7 +199,7 @@ class KidOffersPageTest extends TestCase
             'household_id' => $household->id,
             'from_profile_id' => $alex->id,
             'to_profile_id' => $sam->id,
-            'points' => 100,
+            'give_amount' => 100,
         ]);
         $alex->decrement('points', 100);
 
@@ -220,7 +219,7 @@ class KidOffersPageTest extends TestCase
             'household_id' => $household->id,
             'from_profile_id' => $alex->id,
             'to_profile_id' => $sam->id,
-            'points' => 100,
+            'give_amount' => 100,
         ]);
 
         Volt::test('kid.offers')->assertOk()->assertDontSee('Waiting on an answer');
@@ -254,9 +253,61 @@ class KidOffersPageTest extends TestCase
             'household_id' => $household->id,
             'from_profile_id' => $alex->id,
             'to_profile_id' => $sam->id,
-            'kind' => SiblingOfferKind::Paying,
         ]);
 
         Volt::test('kid.offers')->assertDontSee('waiting on you');
+    }
+
+    public function test_a_kid_can_compose_a_straight_points_for_tickets_swap(): void
+    {
+        $household = Household::factory()->create();
+        $sam = Profile::factory()->for($household)->create(['name' => 'Sam']);
+        $alex = $this->loginKid($household, ['name' => 'Alex', 'points' => 500]);
+
+        Volt::test('kid.offers')
+            ->call('toggleCompose')
+            ->call('setGetAsset', TradeAsset::Tickets->value)
+            ->set('giveAmount', '100')
+            ->set('getAmount', '2')
+            // No favour on either side, so there is nothing to type.
+            ->assertDontSee('Play a game with me for 30 minutes')
+            ->call('sendOffer', $sam->id)
+            ->assertSee('Sent to Sam')
+            ->assertSee('100 pts for 2 tickets');
+
+        $this->assertSame(400, $alex->refresh()->points);
+    }
+
+    public function test_picking_the_same_currency_on_both_sides_moves_the_other_one(): void
+    {
+        $household = Household::factory()->create();
+        Profile::factory()->for($household)->create(['name' => 'Sam']);
+        $this->loginKid($household, ['name' => 'Alex', 'points' => 500]);
+
+        // Points for points is never what a kid meant, and letting the form
+        // reach a state the service only rejects is worse than moving a picker.
+        Volt::test('kid.offers')
+            ->call('toggleCompose')
+            ->call('setGetAsset', TradeAsset::Tickets->value)
+            ->call('setGiveAsset', TradeAsset::Tickets->value)
+            ->assertSet('giveAsset', TradeAsset::Tickets->value)
+            ->assertSet('getAsset', TradeAsset::Favour->value);
+    }
+
+    public function test_a_trade_asking_for_tickets_the_viewer_does_not_have_offers_no_accept_button(): void
+    {
+        $household = Household::factory()->create();
+        $alex = Profile::factory()->for($household)->create(['name' => 'Alex', 'points' => 500]);
+        $this->loginKid($household, ['name' => 'Sam', 'bonus_tickets' => 1]);
+
+        SiblingOffer::factory()->swap(points: 100, tickets: 3)->create([
+            'household_id' => $household->id,
+            'from_profile_id' => $alex->id,
+            'to_profile_id' => Profile::where('name', 'Sam')->value('id'),
+        ]);
+
+        Volt::test('kid.offers')
+            ->assertSee('Need 2 tickets')
+            ->assertDontSee('Trade!');
     }
 }

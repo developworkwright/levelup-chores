@@ -3,9 +3,11 @@
 namespace App\Services;
 
 use App\Enums\LedgerKind;
-use App\Enums\SiblingOfferKind;
 use App\Enums\SiblingOfferStatus;
+use App\Enums\TicketKind;
+use App\Enums\TradeAsset;
 use App\Exceptions\InsufficientPointsException;
+use App\Exceptions\InsufficientTicketsException;
 use App\Exceptions\OfferUnavailableException;
 use App\Models\Household;
 use App\Models\Profile;
@@ -14,53 +16,44 @@ use App\Notifications\SiblingOfferReceived;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
+use LogicException;
 use Throwable;
 
 /**
- * Kid-to-kid trades for one-off favours. Two shapes, one table:
+ * Kid-to-kid trades. A trade has two sides — what the sender gives and what
+ * they want back — and each side is points, tickets or a favour. That covers
+ * three shapes with one set of rules:
  *
- * - `Paying`  — the sender pays. Points come out of their balance the moment
- *   they make the offer, exactly as {@see StoreService::redeem()} deducts up
- *   front, so three 100-point offers can't be fired off on a 100-point
- *   balance. Accepting releases the held points to the recipient.
- * - `Earning` — the sender does the favour and the recipient pays. There is no
- *   escrow window at all: the payer *is* the accepter, so affordability is
- *   checked and both legs move in the same instant.
+ * - "100 points for the dishes" — sender gives a currency, wants a favour.
+ * - "I'll do the dishes for 100 points" — sender gives a favour, wants a currency.
+ * - "100 points for 2 tickets" — a straight swap, no favour either way.
+ *
+ * The sender's side is escrowed at offer time whenever it is a currency,
+ * exactly as {@see StoreService::redeem()} deducts up front, so three 100-point
+ * offers can't be fired off on a 100-point balance. The recipient's side is
+ * checked when they answer instead: they never agreed to hold anything, and
+ * their balance can move between the offer landing and them reading it.
  */
 class SiblingOfferService
 {
-    public const MIN_POINTS = 1;
-
-    /** A ceiling low enough that a mistyped extra zero can't empty a balance. */
-    public const MAX_POINTS = 1000;
-
     public const MAX_DESCRIPTION = 120;
 
     public function __construct(
         private LedgerService $ledger,
+        private TicketService $tickets,
         private BadgeService $badges,
     ) {}
 
     public function offer(
         Profile $from,
         Profile $to,
-        SiblingOfferKind $kind,
-        string $description,
-        int $points,
+        TradeAsset $giveAsset,
+        int $giveAmount,
+        TradeAsset $getAsset,
+        int $getAmount,
+        string $description = '',
     ): SiblingOffer {
         $description = trim($description);
-
-        if ($description === '') {
-            throw new InvalidArgumentException('Say what the trade is first.');
-        }
-
-        if (mb_strlen($description) > self::MAX_DESCRIPTION) {
-            throw new InvalidArgumentException('That is too long — keep it to one line.');
-        }
-
-        if ($points < self::MIN_POINTS || $points > self::MAX_POINTS) {
-            throw new InvalidArgumentException('Offer between '.self::MIN_POINTS.' and '.self::MAX_POINTS.' points.');
-        }
 
         if (! $from->isKid() || ! $to->isKid()) {
             throw new InvalidArgumentException('Sibling trades are between kids.');
@@ -70,34 +63,49 @@ class SiblingOfferService
             throw new InvalidArgumentException('Pick a sibling to send this to.');
         }
 
-        if ($kind === SiblingOfferKind::Paying && $from->points < $points) {
-            throw new InsufficientPointsException($points - $from->points);
+        // Nothing on either side moves a balance, so there would be nothing for
+        // the app to do when it was accepted.
+        if (! $giveAsset->isCurrency() && ! $getAsset->isCurrency()) {
+            throw new InvalidArgumentException('A trade needs points or tickets on one side.');
         }
 
-        $offer = DB::transaction(function () use ($from, $to, $kind, $description, $points) {
+        if ($giveAsset === $getAsset) {
+            throw new InvalidArgumentException('Trade for something different from what you are putting up.');
+        }
+
+        $this->assertAmountInRange($giveAsset, $giveAmount);
+        $this->assertAmountInRange($getAsset, $getAmount);
+
+        $description = $this->normaliseDescription($giveAsset, $getAsset, $description);
+
+        // Only the sender's side is held now — see the class docblock.
+        if ($giveAsset->isCurrency()) {
+            $this->assertCanAfford($from, $giveAsset, $giveAmount);
+        }
+
+        $offer = DB::transaction(function () use ($from, $to, $giveAsset, $giveAmount, $getAsset, $getAmount, $description) {
             $offer = SiblingOffer::create([
                 'household_id' => $from->household_id,
                 'from_profile_id' => $from->id,
                 'to_profile_id' => $to->id,
-                'kind' => $kind,
+                'give_asset' => $giveAsset,
+                'give_amount' => $giveAsset->isCurrency() ? $giveAmount : 0,
+                'get_asset' => $getAsset,
+                'get_amount' => $getAsset->isCurrency() ? $getAmount : 0,
                 'description' => $description,
-                'points' => $points,
                 'status' => SiblingOfferStatus::Pending,
                 'expires_at' => now()->addHours(SiblingOffer::LIFETIME_HOURS),
             ]);
 
             // Held, not spent: the recipient hasn't agreed to anything yet, so
             // this comes straight back on a decline, a withdrawal or a lapse.
-            if ($kind === SiblingOfferKind::Paying) {
-                $this->ledger->record(
-                    $from->household,
-                    $from,
-                    LedgerKind::Transfer,
-                    -$points,
-                    "{$from->name} → {$to->name}: {$description} (offered)",
-                    $offer,
-                );
-            }
+            $this->move(
+                $offer,
+                $from,
+                $offer->give_asset,
+                -$offer->give_amount,
+                "{$from->name} → {$to->name}: {$offer->summary()} (offered)",
+            );
 
             return $offer;
         });
@@ -109,7 +117,8 @@ class SiblingOfferService
 
     /**
      * @throws OfferUnavailableException the offer was answered or lapsed first
-     * @throws InsufficientPointsException the accepter is the payer and is short
+     * @throws InsufficientPointsException|InsufficientTicketsException the
+     *                                                                  recipient is short of the side they were asked for
      */
     public function accept(SiblingOffer $offer, Profile $responder): void
     {
@@ -117,38 +126,25 @@ class SiblingOfferService
 
         $offer->loadMissing('fromProfile', 'toProfile', 'household');
 
-        $payer = $offer->payer();
-        $worker = $offer->worker();
+        $sender = $offer->fromProfile;
+        $recipient = $offer->toProfile;
 
-        // On an `Earning` offer the accepter pays, and their balance can have
-        // moved since the offer landed — so this is checked now, not at offer
-        // time. On a `Paying` offer the money is already held.
-        if (! $offer->isEscrowed() && $payer->points < $offer->points) {
-            throw new InsufficientPointsException($offer->points - $payer->points);
+        // Checked now rather than at offer time: the recipient's balance can
+        // have moved since the offer landed, and unlike the sender they were
+        // never asked to put anything aside.
+        if ($offer->get_asset->isCurrency()) {
+            $this->assertCanAfford($recipient, $offer->get_asset, $offer->get_amount);
         }
 
-        DB::transaction(function () use ($offer, $payer, $worker) {
-            $label = "{$payer->name} → {$worker->name}: {$offer->description}";
+        DB::transaction(function () use ($offer, $sender, $recipient) {
+            $label = "{$sender->name} → {$recipient->name}: {$offer->summary()}";
 
-            if (! $offer->isEscrowed()) {
-                $this->ledger->record(
-                    $offer->household,
-                    $payer,
-                    LedgerKind::Transfer,
-                    -$offer->points,
-                    $label,
-                    $offer,
-                );
-            }
+            // The sender's side is already out of their balance, so this is the
+            // release half of the escrow rather than a second charge.
+            $this->move($offer, $recipient, $offer->give_asset, $offer->give_amount, $label);
 
-            $this->ledger->record(
-                $offer->household,
-                $worker,
-                LedgerKind::Transfer,
-                $offer->points,
-                $label,
-                $offer,
-            );
+            $this->move($offer, $recipient, $offer->get_asset, -$offer->get_amount, $label);
+            $this->move($offer, $sender, $offer->get_asset, $offer->get_amount, $label);
 
             $offer->status = SiblingOfferStatus::Accepted;
             $offer->responded_at = now();
@@ -156,8 +152,8 @@ class SiblingOfferService
         });
 
         // Both balances just moved, and `big_saver` is balance-based.
-        $this->badges->evaluate($payer->refresh());
-        $this->badges->evaluate($worker->refresh());
+        $this->badges->evaluate($sender->refresh());
+        $this->badges->evaluate($recipient->refresh());
     }
 
     public function decline(SiblingOffer $offer, Profile $responder): void
@@ -176,13 +172,13 @@ class SiblingOfferService
     }
 
     /**
-     * Lapse every offer in the household that ran out of time, refunding any
-     * points it was holding.
+     * Lapse every offer in the household that ran out of time, refunding
+     * whatever it was holding.
      *
      * The app has no scheduler, so this runs lazily off the Loot Shop. It
      * sweeps the whole household rather than one kid's offers, so whichever
      * sibling opens the shop first settles everybody's — and the kid with
-     * points tied up is the one most motivated to look.
+     * something tied up is the one most motivated to look.
      */
     public function expireStale(Household $household): void
     {
@@ -206,23 +202,107 @@ class SiblingOfferService
         $offer->loadMissing('fromProfile', 'toProfile', 'household');
 
         DB::transaction(function () use ($offer, $status, $reason) {
-            if ($offer->isEscrowed()) {
-                $sender = $offer->fromProfile;
+            $sender = $offer->fromProfile;
 
-                $this->ledger->record(
-                    $offer->household,
-                    $sender,
-                    LedgerKind::Transfer,
-                    $offer->points,
-                    "{$sender->name} → {$offer->toProfile->name}: {$offer->description} ({$reason})",
-                    $offer,
-                );
-            }
+            $this->move(
+                $offer,
+                $sender,
+                $offer->give_asset,
+                $offer->give_amount,
+                "{$sender->name} → {$offer->toProfile->name}: {$offer->summary()} ({$reason})",
+            );
 
             $offer->status = $status;
             $offer->responded_at = now();
             $offer->save();
         });
+    }
+
+    /**
+     * Move one side of a trade in or out of a kid's balance. The single place
+     * that knows which service owns which currency, so adding a third would not
+     * mean auditing escrow, accept and refund separately.
+     *
+     * A favour side, or a zero amount, moves nothing — callers can hand every
+     * side to this without first asking whether there is anything to do.
+     */
+    private function move(SiblingOffer $offer, Profile $profile, TradeAsset $asset, int $amount, string $label): void
+    {
+        if (! $asset->isCurrency() || $amount === 0) {
+            return;
+        }
+
+        match ($asset) {
+            TradeAsset::Points => $this->ledger->record(
+                $offer->household,
+                $profile,
+                LedgerKind::Transfer,
+                $amount,
+                $label,
+                $offer,
+            ),
+            TradeAsset::Tickets => $this->tickets->record(
+                $profile,
+                TicketKind::Trade,
+                $amount,
+                $label,
+                $offer,
+            ),
+            // Unreachable: guarded above. Here so a new asset can't slip
+            // through as a silent no-op.
+            TradeAsset::Favour => throw new LogicException('A favour has no balance to move.'),
+        };
+    }
+
+    /**
+     * @throws InsufficientPointsException|InsufficientTicketsException
+     */
+    private function assertCanAfford(Profile $profile, TradeAsset $asset, int $amount): void
+    {
+        $shortfall = $amount - $profile->balanceOf($asset);
+
+        if ($shortfall <= 0) {
+            return;
+        }
+
+        throw $asset === TradeAsset::Tickets
+            ? new InsufficientTicketsException($shortfall)
+            : new InsufficientPointsException($shortfall);
+    }
+
+    private function assertAmountInRange(TradeAsset $asset, int $amount): void
+    {
+        if (! $asset->isCurrency()) {
+            return;
+        }
+
+        if ($amount < $asset->minAmount() || $amount > $asset->maxAmount()) {
+            throw new InvalidArgumentException(
+                'Offer between '.$asset->minAmount().' and '.$asset->maxAmount().' '.strtolower($asset->label()).'.'
+            );
+        }
+    }
+
+    /**
+     * The typed line is the favour, so it is required exactly when one side is
+     * one — and dropped when neither is, rather than being kept as a note the
+     * cards would have nowhere to show.
+     */
+    private function normaliseDescription(TradeAsset $giveAsset, TradeAsset $getAsset, string $description): ?string
+    {
+        if ($giveAsset->isCurrency() && $getAsset->isCurrency()) {
+            return null;
+        }
+
+        if ($description === '') {
+            throw new InvalidArgumentException('Say what the trade is first.');
+        }
+
+        if (mb_strlen($description) > self::MAX_DESCRIPTION) {
+            throw new InvalidArgumentException('That is too long — keep it to one line.');
+        }
+
+        return $description;
     }
 
     /**
@@ -242,14 +322,12 @@ class SiblingOfferService
     }
 
     /**
-     * Best-effort: the offer is already recorded and any points already held,
-     * so a failed push must not fail the request.
+     * Best-effort: the offer is already recorded and anything it holds already
+     * held, so a failed push must not fail the request.
      */
     private function notifyRecipient(SiblingOffer $offer, Profile $from, Profile $to): void
     {
-        $body = $offer->kind === SiblingOfferKind::Paying
-            ? "{$from->name} will pay you {$offer->points} to {$offer->description}."
-            : "{$from->name} will {$offer->description} for {$offer->points}.";
+        $body = "{$from->name} offers {$offer->giveText()} for {$offer->getText()}.";
 
         try {
             $to->notify(new SiblingOfferReceived('New trade offered', $body));

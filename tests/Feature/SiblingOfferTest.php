@@ -3,10 +3,13 @@
 namespace Tests\Feature;
 
 use App\Enums\LedgerKind;
-use App\Enums\SiblingOfferKind;
 use App\Enums\SiblingOfferStatus;
+use App\Enums\TicketKind;
+use App\Enums\TradeAsset;
 use App\Exceptions\InsufficientPointsException;
+use App\Exceptions\InsufficientTicketsException;
 use App\Exceptions\OfferUnavailableException;
+use App\Models\BonusTicketEntry;
 use App\Models\Household;
 use App\Models\LedgerEntry;
 use App\Models\Profile;
@@ -28,22 +31,46 @@ class SiblingOfferTest extends TestCase
     }
 
     /** @return array{0: Household, 1: Profile, 2: Profile} */
-    private function twoKids(int $senderPoints = 500, int $recipientPoints = 500): array
-    {
+    private function twoKids(
+        int $senderPoints = 500,
+        int $recipientPoints = 500,
+        int $senderTickets = 0,
+        int $recipientTickets = 0,
+    ): array {
         $household = Household::factory()->create();
 
         return [
             $household,
-            Profile::factory()->for($household)->create(['name' => 'Alex', 'points' => $senderPoints]),
-            Profile::factory()->for($household)->create(['name' => 'Sam', 'points' => $recipientPoints]),
+            Profile::factory()->for($household)->create([
+                'name' => 'Alex',
+                'points' => $senderPoints,
+                'bonus_tickets' => $senderTickets,
+            ]),
+            Profile::factory()->for($household)->create([
+                'name' => 'Sam',
+                'points' => $recipientPoints,
+                'bonus_tickets' => $recipientTickets,
+            ]),
         ];
+    }
+
+    /** The classic shape: the sender pays points for a favour. */
+    private function offerPointsForFavour(Profile $from, Profile $to, int $points = 100, string $description = 'Play a game for 30 min'): SiblingOffer
+    {
+        return $this->service()->offer($from, $to, TradeAsset::Points, $points, TradeAsset::Favour, 0, $description);
+    }
+
+    /** The mirror: the sender does the favour and the recipient pays points. */
+    private function offerFavourForPoints(Profile $from, Profile $to, int $points = 100, string $description = 'I will do your dishes'): SiblingOffer
+    {
+        return $this->service()->offer($from, $to, TradeAsset::Favour, 0, TradeAsset::Points, $points, $description);
     }
 
     public function test_a_paying_offer_holds_the_points_the_moment_it_is_made(): void
     {
         [, $alex, $sam] = $this->twoKids(senderPoints: 500);
 
-        $offer = $this->service()->offer($alex, $sam, SiblingOfferKind::Paying, 'Play a game for 30 min', 100);
+        $offer = $this->offerPointsForFavour($alex, $sam);
 
         // Held up front for the same reason a redemption deducts up front: it
         // stops three 100-point offers going out on a 100-point balance.
@@ -63,7 +90,7 @@ class SiblingOfferTest extends TestCase
         [, $alex, $sam] = $this->twoKids(senderPoints: 0, recipientPoints: 500);
 
         // Alex has nothing, but Alex is the one doing the work here.
-        $this->service()->offer($alex, $sam, SiblingOfferKind::Earning, 'I will do your dishes', 100);
+        $this->offerFavourForPoints($alex, $sam);
 
         $this->assertSame(0, $alex->refresh()->points);
         $this->assertSame(500, $sam->refresh()->points);
@@ -74,7 +101,7 @@ class SiblingOfferTest extends TestCase
     {
         [, $alex, $sam] = $this->twoKids(senderPoints: 500, recipientPoints: 20);
 
-        $offer = $this->service()->offer($alex, $sam, SiblingOfferKind::Paying, 'Play a game for 30 min', 100);
+        $offer = $this->offerPointsForFavour($alex, $sam);
         $this->service()->accept($offer, $sam);
 
         $this->assertSame(400, $alex->refresh()->points);
@@ -87,7 +114,7 @@ class SiblingOfferTest extends TestCase
     {
         [, $alex, $sam] = $this->twoKids(senderPoints: 0, recipientPoints: 500);
 
-        $offer = $this->service()->offer($alex, $sam, SiblingOfferKind::Earning, 'I will do your dishes', 100);
+        $offer = $this->offerFavourForPoints($alex, $sam);
         $this->service()->accept($offer, $sam);
 
         $this->assertSame(100, $alex->refresh()->points);
@@ -100,7 +127,7 @@ class SiblingOfferTest extends TestCase
         [, $alex, $sam] = $this->twoKids(senderPoints: 60);
 
         try {
-            $this->service()->offer($alex, $sam, SiblingOfferKind::Paying, 'Play a game', 100);
+            $this->offerPointsForFavour($alex, $sam);
             $this->fail('Expected InsufficientPointsException.');
         } catch (InsufficientPointsException $e) {
             $this->assertSame(40, $e->shortfall);
@@ -114,7 +141,7 @@ class SiblingOfferTest extends TestCase
     {
         [, $alex, $sam] = $this->twoKids(senderPoints: 0, recipientPoints: 500);
 
-        $offer = $this->service()->offer($alex, $sam, SiblingOfferKind::Earning, 'I will do your dishes', 100);
+        $offer = $this->offerFavourForPoints($alex, $sam);
 
         // The balance is checked at accept time, not offer time — Sam's points
         // can move between the offer landing and them answering it.
@@ -136,7 +163,7 @@ class SiblingOfferTest extends TestCase
     {
         [, $alex, $sam] = $this->twoKids(senderPoints: 500);
 
-        $offer = $this->service()->offer($alex, $sam, SiblingOfferKind::Paying, 'Play a game', 100);
+        $offer = $this->offerPointsForFavour($alex, $sam);
         $this->service()->decline($offer, $sam);
 
         $this->assertSame(500, $alex->refresh()->points);
@@ -148,7 +175,7 @@ class SiblingOfferTest extends TestCase
     {
         [, $alex, $sam] = $this->twoKids(senderPoints: 500);
 
-        $offer = $this->service()->offer($alex, $sam, SiblingOfferKind::Paying, 'Play a game', 100);
+        $offer = $this->offerPointsForFavour($alex, $sam);
         $this->service()->cancel($offer, $alex);
 
         $this->assertSame(500, $alex->refresh()->points);
@@ -159,7 +186,7 @@ class SiblingOfferTest extends TestCase
     {
         [$household, $alex, $sam] = $this->twoKids(senderPoints: 500);
 
-        $offer = $this->service()->offer($alex, $sam, SiblingOfferKind::Paying, 'Play a game', 100);
+        $offer = $this->offerPointsForFavour($alex, $sam);
         $this->assertSame(400, $alex->refresh()->points);
 
         $offer->update(['expires_at' => now()->subMinute()]);
@@ -173,7 +200,7 @@ class SiblingOfferTest extends TestCase
     {
         [$household, $alex, $sam] = $this->twoKids(senderPoints: 500);
 
-        $offer = $this->service()->offer($alex, $sam, SiblingOfferKind::Paying, 'Play a game', 100);
+        $offer = $this->offerPointsForFavour($alex, $sam);
         $this->service()->expireStale($household);
 
         $this->assertSame(400, $alex->refresh()->points);
@@ -184,7 +211,7 @@ class SiblingOfferTest extends TestCase
     {
         [$household, $alex, $sam] = $this->twoKids(senderPoints: 500);
 
-        $offer = $this->service()->offer($alex, $sam, SiblingOfferKind::Paying, 'Play a game', 100);
+        $offer = $this->offerPointsForFavour($alex, $sam);
         $offer->update(['expires_at' => now()->subMinute()]);
 
         $this->service()->expireStale($household);
@@ -197,7 +224,7 @@ class SiblingOfferTest extends TestCase
     {
         [, $alex, $sam] = $this->twoKids(senderPoints: 0, recipientPoints: 500);
 
-        $offer = $this->service()->offer($alex, $sam, SiblingOfferKind::Earning, 'I will do your dishes', 100);
+        $offer = $this->offerFavourForPoints($alex, $sam);
         $this->service()->decline($offer, $sam);
 
         $this->assertSame(0, $alex->refresh()->points);
@@ -210,7 +237,7 @@ class SiblingOfferTest extends TestCase
         [$household, $alex, $sam] = $this->twoKids(senderPoints: 500);
         $riley = Profile::factory()->for($household)->create(['points' => 0]);
 
-        $offer = $this->service()->offer($alex, $sam, SiblingOfferKind::Paying, 'Play a game', 100);
+        $offer = $this->offerPointsForFavour($alex, $sam);
 
         $this->expectException(OfferUnavailableException::class);
         $this->service()->accept($offer, $riley);
@@ -220,7 +247,7 @@ class SiblingOfferTest extends TestCase
     {
         [, $alex, $sam] = $this->twoKids(senderPoints: 500, recipientPoints: 0);
 
-        $offer = $this->service()->offer($alex, $sam, SiblingOfferKind::Paying, 'Play a game', 100);
+        $offer = $this->offerPointsForFavour($alex, $sam);
         $this->service()->accept($offer, $sam);
 
         try {
@@ -237,7 +264,7 @@ class SiblingOfferTest extends TestCase
     {
         [, $alex, $sam] = $this->twoKids(senderPoints: 500);
 
-        $offer = $this->service()->offer($alex, $sam, SiblingOfferKind::Paying, 'Play a game', 100);
+        $offer = $this->offerPointsForFavour($alex, $sam);
         $offer->update(['expires_at' => now()->subMinute()]);
 
         $this->expectException(OfferUnavailableException::class);
@@ -248,7 +275,7 @@ class SiblingOfferTest extends TestCase
     {
         [, $alex, $sam] = $this->twoKids();
 
-        $offer = $this->service()->offer($alex, $sam, SiblingOfferKind::Paying, 'Play a game', 100);
+        $offer = $this->offerPointsForFavour($alex, $sam);
 
         $this->assertSame(24, (int) round(now()->diffInHours($offer->expires_at)));
     }
@@ -260,7 +287,7 @@ class SiblingOfferTest extends TestCase
 
         foreach ([$stranger, $alex] as $target) {
             try {
-                $this->service()->offer($alex, $target, SiblingOfferKind::Paying, 'Play a game', 10);
+                $this->offerPointsForFavour($alex, $target, points: 10);
                 $this->fail('Expected InvalidArgumentException.');
             } catch (InvalidArgumentException) {
                 // Expected.
@@ -277,7 +304,7 @@ class SiblingOfferTest extends TestCase
         $parent = Profile::factory()->parent()->for($household)->create();
 
         $this->expectException(InvalidArgumentException::class);
-        $this->service()->offer($alex, $parent, SiblingOfferKind::Paying, 'Play a game', 100);
+        $this->offerPointsForFavour($alex, $parent);
     }
 
     public function test_an_empty_or_oversized_trade_is_rejected(): void
@@ -286,7 +313,7 @@ class SiblingOfferTest extends TestCase
 
         foreach (['', '   ', str_repeat('a', 121)] as $description) {
             try {
-                $this->service()->offer($alex, $sam, SiblingOfferKind::Paying, $description, 100);
+                $this->offerPointsForFavour($alex, $sam, description: $description);
                 $this->fail('Expected InvalidArgumentException.');
             } catch (InvalidArgumentException) {
                 // Expected.
@@ -302,7 +329,7 @@ class SiblingOfferTest extends TestCase
 
         foreach ([0, -50, 1001] as $points) {
             try {
-                $this->service()->offer($alex, $sam, SiblingOfferKind::Paying, 'Play a game', $points);
+                $this->offerPointsForFavour($alex, $sam, points: $points);
                 $this->fail("Expected InvalidArgumentException for {$points}.");
             } catch (InvalidArgumentException) {
                 // Expected.
@@ -318,7 +345,7 @@ class SiblingOfferTest extends TestCase
 
         // `big_spender` sums LedgerKind::Spend and is about the Loot Shop.
         // Transfers use their own kind so a kid can't farm it by paying a sibling.
-        $offer = $this->service()->offer($alex, $sam, SiblingOfferKind::Paying, 'Play a game', 1000);
+        $offer = $this->offerPointsForFavour($alex, $sam, points: 1000);
         $this->service()->accept($offer, $sam);
 
         $this->assertFalse($alex->refresh()->badges()->where('key', 'big_spender')->exists());
@@ -332,10 +359,141 @@ class SiblingOfferTest extends TestCase
         [$household, $alex, $sam] = $this->twoKids(senderPoints: 500);
         $riley = Profile::factory()->for($household)->create();
 
-        $this->service()->offer($alex, $sam, SiblingOfferKind::Paying, 'Play a game', 100);
+        $this->offerPointsForFavour($alex, $sam);
 
         Notification::assertSentTo($sam, SiblingOfferReceived::class);
         Notification::assertNotSentTo($alex, SiblingOfferReceived::class);
         Notification::assertNotSentTo($riley, SiblingOfferReceived::class);
+    }
+
+    public function test_tickets_are_held_the_same_way_points_are(): void
+    {
+        [, $alex, $sam] = $this->twoKids(senderTickets: 5);
+
+        $offer = $this->service()->offer($alex, $sam, TradeAsset::Tickets, 3, TradeAsset::Favour, 0, 'Play a game');
+
+        $this->assertSame(2, $alex->refresh()->bonus_tickets);
+
+        $entry = BonusTicketEntry::latest('id')->first();
+        $this->assertSame(TicketKind::Trade, $entry->kind);
+        $this->assertSame(-3, $entry->amount);
+        $this->assertSame(SiblingOffer::class, $entry->related_type);
+        $this->assertSame($offer->id, $entry->related_id);
+
+        // Tickets and points are separate currencies; one must not touch the other.
+        $this->assertSame(0, LedgerEntry::count());
+    }
+
+    public function test_points_can_be_swapped_for_tickets(): void
+    {
+        [, $alex, $sam] = $this->twoKids(senderPoints: 500, recipientPoints: 0, recipientTickets: 4);
+
+        $offer = $this->service()->offer($alex, $sam, TradeAsset::Points, 100, TradeAsset::Tickets, 2);
+
+        // Only Alex's side is held up front — Sam has not agreed to anything.
+        $this->assertSame(400, $alex->refresh()->points);
+        $this->assertSame(4, $sam->refresh()->bonus_tickets);
+        $this->assertNull($offer->description);
+
+        $this->service()->accept($offer, $sam);
+
+        $this->assertSame(400, $alex->refresh()->points);
+        $this->assertSame(2, $alex->bonus_tickets);
+        $this->assertSame(100, $sam->refresh()->points);
+        $this->assertSame(2, $sam->bonus_tickets);
+    }
+
+    public function test_a_swap_the_recipient_cannot_cover_throws_in_the_currency_they_were_asked_for(): void
+    {
+        [, $alex, $sam] = $this->twoKids(senderPoints: 500, recipientTickets: 1);
+
+        $offer = $this->service()->offer($alex, $sam, TradeAsset::Points, 100, TradeAsset::Tickets, 3);
+
+        try {
+            $this->service()->accept($offer, $sam);
+            $this->fail('Expected InsufficientTicketsException.');
+        } catch (InsufficientTicketsException $e) {
+            $this->assertSame(2, $e->shortfall);
+        }
+
+        $this->assertSame(400, $alex->refresh()->points);
+        $this->assertSame(1, $sam->refresh()->bonus_tickets);
+        $this->assertSame(SiblingOfferStatus::Pending, $offer->refresh()->status);
+    }
+
+    public function test_offering_more_tickets_than_you_have_throws_with_the_shortfall(): void
+    {
+        [, $alex, $sam] = $this->twoKids(senderTickets: 1);
+
+        try {
+            $this->service()->offer($alex, $sam, TradeAsset::Tickets, 4, TradeAsset::Points, 50);
+            $this->fail('Expected InsufficientTicketsException.');
+        } catch (InsufficientTicketsException $e) {
+            $this->assertSame(3, $e->shortfall);
+        }
+
+        $this->assertSame(1, $alex->refresh()->bonus_tickets);
+        $this->assertSame(0, SiblingOffer::count());
+    }
+
+    public function test_declining_a_swap_gives_the_held_tickets_back(): void
+    {
+        [, $alex, $sam] = $this->twoKids(senderTickets: 5);
+
+        $offer = $this->service()->offer($alex, $sam, TradeAsset::Tickets, 3, TradeAsset::Points, 200);
+        $this->assertSame(2, $alex->refresh()->bonus_tickets);
+
+        $this->service()->decline($offer, $sam);
+
+        $this->assertSame(5, $alex->refresh()->bonus_tickets);
+        $this->assertSame(SiblingOfferStatus::Declined, $offer->refresh()->status);
+    }
+
+    public function test_the_tickets_must_be_within_their_own_smaller_range(): void
+    {
+        [, $alex, $sam] = $this->twoKids(senderTickets: 200);
+
+        // Tickets are minted one per level, so the points ceiling would be
+        // absurd here — 26 is over the line even though 26 points is not.
+        foreach ([0, -2, 26] as $tickets) {
+            try {
+                $this->service()->offer($alex, $sam, TradeAsset::Tickets, $tickets, TradeAsset::Points, 50);
+                $this->fail("Expected InvalidArgumentException for {$tickets}.");
+            } catch (InvalidArgumentException) {
+                // Expected.
+            }
+        }
+
+        $this->assertSame(200, $alex->refresh()->bonus_tickets);
+        $this->assertSame(0, SiblingOffer::count());
+    }
+
+    public function test_a_trade_with_a_favour_on_both_sides_is_rejected(): void
+    {
+        [, $alex, $sam] = $this->twoKids();
+
+        // Nothing the app holds would move, so there would be nothing to accept.
+        $this->expectException(InvalidArgumentException::class);
+        $this->service()->offer($alex, $sam, TradeAsset::Favour, 0, TradeAsset::Favour, 0, 'Swap chores');
+    }
+
+    public function test_a_trade_cannot_ask_for_the_same_currency_it_puts_up(): void
+    {
+        [, $alex, $sam] = $this->twoKids(senderPoints: 500);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->service()->offer($alex, $sam, TradeAsset::Points, 100, TradeAsset::Points, 50);
+    }
+
+    public function test_a_swap_needs_no_description_and_keeps_none(): void
+    {
+        [, $alex, $sam] = $this->twoKids(senderPoints: 500);
+
+        // The typed line is the favour. With no favour on either side there is
+        // nowhere on a card to show a note, so it is dropped rather than stored.
+        $offer = $this->service()->offer($alex, $sam, TradeAsset::Points, 100, TradeAsset::Tickets, 2, 'ignored');
+
+        $this->assertNull($offer->refresh()->description);
+        $this->assertSame('100 pts for 2 tickets', $offer->summary());
     }
 }

@@ -1,8 +1,9 @@
 <?php
 
-use App\Enums\SiblingOfferKind;
 use App\Enums\SiblingOfferStatus;
+use App\Enums\TradeAsset;
 use App\Exceptions\InsufficientPointsException;
+use App\Exceptions\InsufficientTicketsException;
 use App\Exceptions\OfferUnavailableException;
 use App\Models\Profile;
 use App\Models\SiblingOffer;
@@ -19,11 +20,15 @@ new class extends Component
     /** Transient — the trade form is open for this visit only. */
     public bool $composingOffer = false;
 
-    public string $offerKind = 'paying';
+    public string $giveAsset = 'points';
+
+    public string $giveAmount = '';
+
+    public string $getAsset = 'favour';
+
+    public string $getAmount = '';
 
     public string $offerDescription = '';
-
-    public string $offerPoints = '';
 
     public function mount(): void
     {
@@ -37,9 +42,32 @@ new class extends Component
         $this->flashMessage = null;
     }
 
-    public function setOfferKind(string $kind): void
+    /**
+     * Picking an asset on one side pushes the other side off it if they now
+     * match: trading points for points is never what a kid meant, and letting
+     * the form reach a state the service will only reject is worse than moving
+     * the picker they aren't looking at.
+     */
+    public function setGiveAsset(string $asset): void
     {
-        $this->offerKind = SiblingOfferKind::tryFrom($kind)?->value ?? SiblingOfferKind::Paying->value;
+        $this->giveAsset = TradeAsset::tryFrom($asset)?->value ?? TradeAsset::Points->value;
+
+        if ($this->getAsset === $this->giveAsset) {
+            $this->getAsset = $this->giveAsset === TradeAsset::Favour->value
+                ? TradeAsset::Points->value
+                : TradeAsset::Favour->value;
+        }
+    }
+
+    public function setGetAsset(string $asset): void
+    {
+        $this->getAsset = TradeAsset::tryFrom($asset)?->value ?? TradeAsset::Favour->value;
+
+        if ($this->giveAsset === $this->getAsset) {
+            $this->giveAsset = $this->getAsset === TradeAsset::Favour->value
+                ? TradeAsset::Points->value
+                : TradeAsset::Favour->value;
+        }
     }
 
     /**
@@ -58,17 +86,19 @@ new class extends Component
             app(SiblingOfferService::class)->offer(
                 $this->profile,
                 $sibling,
-                SiblingOfferKind::from($this->offerKind),
+                TradeAsset::from($this->giveAsset),
+                (int) $this->giveAmount,
+                TradeAsset::from($this->getAsset),
+                (int) $this->getAmount,
                 $this->offerDescription,
-                (int) $this->offerPoints,
             );
-        } catch (InsufficientPointsException|InvalidArgumentException $e) {
+        } catch (InsufficientPointsException|InsufficientTicketsException|InvalidArgumentException $e) {
             $this->flashMessage = $e->getMessage();
 
             return;
         }
 
-        $this->reset('offerDescription', 'offerPoints');
+        $this->reset('offerDescription', 'giveAmount', 'getAmount');
         $this->composingOffer = false;
         $this->flashMessage = "Sent to {$sibling->name}. They have a day to answer.";
         $this->profile->refresh();
@@ -84,7 +114,7 @@ new class extends Component
 
         try {
             app(SiblingOfferService::class)->accept($offer, $this->profile);
-        } catch (InsufficientPointsException|OfferUnavailableException $e) {
+        } catch (InsufficientPointsException|InsufficientTicketsException|OfferUnavailableException $e) {
             $this->flashMessage = $e->getMessage();
 
             return;
@@ -92,13 +122,18 @@ new class extends Component
 
         $this->profile->refresh();
 
-        $gained = $offer->kind === SiblingOfferKind::Paying;
-        $this->flashMessage = $gained
-            ? "Traded! Now go {$offer->description}."
-            : "Traded! {$offer->fromProfile->name} owes you: {$offer->description}.";
+        $sender = $offer->fromProfile->name;
 
-        if ($gained) {
-            $this->dispatch('celebrate', message: "+{$offer->points} from {$offer->fromProfile->name}!");
+        // Written from the accepter's side, and only one of the three shapes
+        // leaves them owing anything.
+        $this->flashMessage = match (true) {
+            $offer->get_asset === TradeAsset::Favour => "Traded! You got {$offer->giveText()}. Now go {$offer->description}.",
+            $offer->give_asset === TradeAsset::Favour => "Traded! {$sender} owes you: {$offer->description}.",
+            default => "Traded! You swapped {$offer->getText()} for {$offer->giveText()}.",
+        };
+
+        if ($offer->isEscrowed()) {
+            $this->dispatch('celebrate', message: "+{$offer->giveText()} from {$sender}!");
         }
     }
 
@@ -129,6 +164,13 @@ new class extends Component
             ->live()
             ->with('fromProfile')
             ->find($offerId);
+    }
+
+    /** True while either side of the compose form is a favour to be typed. */
+    public function needsDescription(): bool
+    {
+        return $this->giveAsset === TradeAsset::Favour->value
+            || $this->getAsset === TradeAsset::Favour->value;
     }
 
     public function with(): array
@@ -169,11 +211,18 @@ new class extends Component
     <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
             <h2 class="font-baloo text-[26px] font-extrabold">Trades</h2>
-            <p class="text-sm text-fq-text-3">Swap points with a sibling for a one-off favour. Trades run out after a day.</p>
+            <p class="text-sm text-fq-text-3">Swap points, tickets or a one-off favour with a sibling. Trades run out after a day.</p>
         </div>
-        <span class="rounded-[10px] border border-fq-line-2 bg-fq-sunk px-3 py-2 font-mono-fq text-xs text-fq-lime">
-            BALANCE {{ $profile->points }} PTS
-        </span>
+        {{-- Both currencies, because either one can now be on either side of a
+             trade and a kid needs to price an offer against both. --}}
+        <div class="flex gap-2">
+            <span class="rounded-[10px] border border-fq-line-2 bg-fq-sunk px-3 py-2 font-mono-fq text-xs text-fq-gold">
+                {{ $profile->points }} PTS
+            </span>
+            <span class="rounded-[10px] border border-fq-line-2 bg-fq-sunk px-3 py-2 font-mono-fq text-xs text-fq-lime">
+                {{ $profile->bonus_tickets }} TICKETS
+            </span>
+        </div>
     </div>
 
     @if ($flashMessage)
@@ -199,10 +248,9 @@ new class extends Component
                 <div class="mt-3 flex flex-col gap-3">
                     @foreach ($incomingOffers as $offer)
                         @php
-                            // On a "they pay me" offer this kid is the one paying,
-                            // so Accept has to be priced against their balance.
-                            $viewerPays = ! $offer->isEscrowed();
-                            $shortfall = $viewerPays ? $offer->points - $profile->points : 0;
+                            // Whatever the sender asked for is what this kid
+                            // hands over, so Accept is priced against it.
+                            $shortfall = $offer->shortfallFor($profile);
                         @endphp
 
                         <div wire:key="incoming-{{ $offer->id }}" class="rounded-[18px] border border-fq-line bg-fq-sunk p-4">
@@ -210,7 +258,7 @@ new class extends Component
                                 <span class="h-[10px] w-[10px] shrink-0 rounded-full" style="background: {{ $offer->fromProfile->color->cssVar() }}"></span>
                                 <span class="font-baloo text-[17px] font-bold">{{ $offer->fromProfile->name }}</span>
                                 <span class="rounded-full border border-fq-line-2 px-[11px] py-[5px] font-mono-fq text-[10px] tracking-[0.1em] text-fq-text-4 uppercase">
-                                    {{ $offer->kind->incomingLabel() }}
+                                    {{ $offer->isSwap() ? 'Swap' : 'Favour' }}
                                 </span>
                                 {{-- A countdown, not a description of a moment:
                                      "23 hours from now" is what diffForHumans says
@@ -221,29 +269,54 @@ new class extends Component
                                 </span>
                             </div>
 
-                            <p class="mt-2 text-[15px] leading-[1.35]">{{ $offer->description }}</p>
+                            @if ($offer->description)
+                                <p class="mt-2 text-[15px] leading-[1.35]">{{ $offer->description }}</p>
+                            @endif
 
-                            <div class="mt-3 flex flex-wrap items-center gap-2">
-                                <span class="font-baloo text-[21px] font-extrabold text-fq-gold">{{ $offer->points }} pts</span>
+                            {{-- Both halves side by side: with two currencies in
+                                 play, "100 pts" alone no longer says who owes
+                                 what to whom. Boxed and ruled down the middle
+                                 because points gold and ticket lime are close
+                                 enough that colour alone can't separate them —
+                                 and `shrink-0` so a long amount can't collapse
+                                 onto its neighbour on a narrow screen. --}}
+                            <div class="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-3 sm:justify-start">
+                                <div class="flex items-stretch gap-4 rounded-[14px] border border-fq-line-2 bg-fq-panel px-4 py-[10px]">
+                                    <div class="shrink-0">
+                                        <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-5 uppercase">You get</p>
+                                        <p class="mt-[2px] font-baloo text-[21px] leading-none font-extrabold" style="color: {{ $offer->give_asset->cssVar() }}">{{ $offer->giveText() }}</p>
+                                    </div>
+                                    <span class="w-px shrink-0 self-stretch bg-fq-line-2"></span>
+                                    <div class="shrink-0">
+                                        <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-5 uppercase">You give</p>
+                                        <p class="mt-[2px] font-baloo text-[21px] leading-none font-extrabold" style="color: {{ $offer->get_asset->cssVar() }}">{{ $offer->getText() }}</p>
+                                    </div>
+                                </div>
 
-                                @if ($shortfall > 0)
-                                    <button type="button" disabled class="ml-auto cursor-default rounded-[13px] bg-fq-panel-alt px-4 py-[10px] text-[13px] font-semibold text-fq-text-4">
-                                        Need {{ $shortfall }}
-                                    </button>
-                                @else
+                                {{-- On a phone the buttons take a row of their
+                                     own under a centred price, rather than
+                                     being shoved to the right edge by `ml-auto`
+                                     with the box stranded on the left. --}}
+                                <div class="flex w-full flex-wrap items-center justify-center gap-2 pt-1 sm:ml-auto sm:w-auto sm:justify-end sm:pt-0">
+                                    @if ($shortfall > 0)
+                                        <button type="button" disabled class="cursor-default rounded-[13px] bg-fq-panel-alt px-4 py-[10px] text-[13px] font-semibold text-fq-text-4">
+                                            Need {{ $offer->get_asset->format($shortfall) }}
+                                        </button>
+                                    @else
+                                        <button
+                                            type="button"
+                                            wire:click="acceptOffer({{ $offer->id }})"
+                                            class="rounded-[13px] px-4 py-[10px] text-[13px] font-semibold text-fq-bg transition hover:brightness-110"
+                                            style="background: var(--fq-lime)"
+                                        >Trade!</button>
+                                    @endif
+
                                     <button
                                         type="button"
-                                        wire:click="acceptOffer({{ $offer->id }})"
-                                        class="ml-auto rounded-[13px] px-4 py-[10px] text-[13px] font-semibold text-fq-bg transition hover:brightness-110"
-                                        style="background: var(--fq-lime)"
-                                    >Trade!</button>
-                                @endif
-
-                                <button
-                                    type="button"
-                                    wire:click="declineOffer({{ $offer->id }})"
-                                    class="rounded-[13px] border border-fq-line-2 px-4 py-[10px] text-[13px] font-semibold text-fq-text-2-b transition hover:text-fq-text"
-                                >No thanks</button>
+                                        wire:click="declineOffer({{ $offer->id }})"
+                                        class="rounded-[13px] border border-fq-line-2 px-4 py-[10px] text-[13px] font-semibold text-fq-text-2-b transition hover:text-fq-text"
+                                    >No thanks</button>
+                                </div>
                             </div>
                         </div>
                     @endforeach
@@ -257,7 +330,7 @@ new class extends Component
             <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
                     <h3 class="font-baloo text-[19px] font-extrabold">Make a trade with a sibling</h3>
-                    <p class="mt-1 text-[13px] text-fq-text-4">Pay them to do something, or get paid to do it yourself.</p>
+                    <p class="mt-1 text-[13px] text-fq-text-4">Put up points, tickets or a favour — and say what you want back.</p>
                 </div>
 
                 <button
@@ -269,35 +342,46 @@ new class extends Component
 
             @if ($composingOffer)
                 <div class="mt-4 border-t border-fq-line pt-[14px]">
-                    <div class="flex flex-wrap gap-2">
-                        @foreach (App\Enums\SiblingOfferKind::cases() as $kind)
-                            @php $picked = $offerKind === $kind->value; @endphp
-                            <button
-                                type="button"
-                                wire:click="setOfferKind('{{ $kind->value }}')"
-                                class="rounded-[13px] border bg-fq-sunk px-4 py-[10px] text-[13px] font-semibold transition"
-                                style="border-color: {{ $picked ? 'var(--fq-lime)' : 'var(--fq-line-2)' }}; color: {{ $picked ? 'var(--fq-lime)' : 'var(--fq-text-4)' }}"
-                            >{{ $kind->label() }}</button>
-                        @endforeach
-                    </div>
+                    {{-- One row per side, same controls on both, so "points for
+                         tickets" is built the same way as "points for a favour". --}}
+                    @foreach ([['You give', 'giveAsset', $giveAsset, 'giveAmount'], ['You want back', 'getAsset', $getAsset, 'getAmount']] as [$heading, $assetProperty, $pickedAsset, $amountProperty])
+                        <p class="mb-[10px] font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">{{ $heading }}</p>
+                        <div class="mb-3 flex flex-wrap items-center gap-2">
+                            @foreach (App\Enums\TradeAsset::cases() as $asset)
+                                @php $picked = $pickedAsset === $asset->value; @endphp
+                                <button
+                                    type="button"
+                                    wire:click="set{{ ucfirst($assetProperty) }}('{{ $asset->value }}')"
+                                    class="rounded-[13px] border bg-fq-sunk px-4 py-[10px] text-[13px] font-semibold transition"
+                                    style="border-color: {{ $picked ? $asset->cssVar() : 'var(--fq-line-2)' }}; color: {{ $picked ? $asset->cssVar() : 'var(--fq-text-4)' }}"
+                                >{{ $asset->label() }}</button>
+                            @endforeach
 
-                    <div class="mt-3 flex flex-wrap gap-2">
+                            @if ($pickedAsset !== App\Enums\TradeAsset::Favour->value)
+                                @php $range = App\Enums\TradeAsset::from($pickedAsset); @endphp
+                                <input
+                                    type="number"
+                                    wire:model="{{ $amountProperty }}"
+                                    min="{{ $range->minAmount() }}"
+                                    max="{{ $range->maxAmount() }}"
+                                    placeholder="{{ $range->maxAmount() >= 100 ? 100 : 2 }}"
+                                    aria-label="How many {{ strtolower($range->label()) }}"
+                                    class="w-[110px] rounded-[13px] border border-fq-line-2 bg-fq-sunk px-[14px] py-[11px] text-center font-baloo text-[16px] font-bold placeholder:font-normal placeholder:text-fq-text-5"
+                                    style="color: {{ $range->cssVar() }}"
+                                />
+                            @endif
+                        </div>
+                    @endforeach
+
+                    @if ($this->needsDescription())
                         <input
                             type="text"
                             wire:model="offerDescription"
                             maxlength="{{ App\Services\SiblingOfferService::MAX_DESCRIPTION }}"
-                            placeholder="{{ $offerKind === 'paying' ? 'Play a game with me for 30 minutes' : 'I will take out the bins for you' }}"
-                            class="min-w-[220px] flex-1 rounded-[13px] border border-fq-line-2 bg-fq-sunk px-[14px] py-[11px] text-[14px] text-fq-text placeholder:text-fq-text-5"
+                            placeholder="{{ $giveAsset === 'favour' ? 'I will take out the bins for you' : 'Play a game with me for 30 minutes' }}"
+                            class="mb-1 w-full rounded-[13px] border border-fq-line-2 bg-fq-sunk px-[14px] py-[11px] text-[14px] text-fq-text placeholder:text-fq-text-5"
                         />
-                        <input
-                            type="number"
-                            wire:model="offerPoints"
-                            min="{{ App\Services\SiblingOfferService::MIN_POINTS }}"
-                            max="{{ App\Services\SiblingOfferService::MAX_POINTS }}"
-                            placeholder="100"
-                            class="w-[110px] rounded-[13px] border border-fq-line-2 bg-fq-sunk px-[14px] py-[11px] text-center font-baloo text-[16px] font-bold text-fq-gold placeholder:font-normal placeholder:text-fq-text-5"
-                        />
-                    </div>
+                    @endif
 
                     <p class="mt-3 mb-[10px] font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
                         Send it to
@@ -325,8 +409,7 @@ new class extends Component
                         @foreach ($outgoingOffers as $offer)
                             <div wire:key="outgoing-{{ $offer->id }}" class="flex flex-wrap items-center gap-2 rounded-[14px] border border-fq-line bg-fq-sunk px-[13px] py-[10px]">
                                 <span class="h-2 w-2 shrink-0 rounded-full" style="background: {{ $offer->toProfile->color->cssVar() }}"></span>
-                                <span class="text-[13px]">{{ $offer->toProfile->name }} — {{ $offer->description }}</span>
-                                <span class="font-mono-fq text-[11px] text-fq-gold">{{ $offer->points }} pts</span>
+                                <span class="text-[13px]">{{ $offer->toProfile->name }} — {{ $offer->summary() }}</span>
                                 <button
                                     type="button"
                                     wire:click="cancelOffer({{ $offer->id }})"
@@ -345,7 +428,7 @@ new class extends Component
                     <div class="flex flex-col gap-[6px]">
                         @foreach ($settledOffers as $offer)
                             <div wire:key="settled-{{ $offer->id }}" class="flex flex-wrap items-center gap-2 text-[13px] text-fq-text-4">
-                                <span>{{ $offer->fromProfile->name }} → {{ $offer->toProfile->name }}: {{ $offer->description }}</span>
+                                <span>{{ $offer->fromProfile->name }} → {{ $offer->toProfile->name }}: {{ $offer->summary() }}</span>
                                 <span class="font-mono-fq text-[10px] tracking-[0.1em] uppercase" style="color: {{ $offer->status === App\Enums\SiblingOfferStatus::Accepted ? 'var(--fq-lime)' : 'var(--fq-text-5)' }}">
                                     {{ $offer->status->label() }}
                                 </span>
