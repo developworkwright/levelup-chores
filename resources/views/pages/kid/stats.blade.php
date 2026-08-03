@@ -5,8 +5,8 @@ use App\Enums\LedgerKind;
 use App\Models\Badge;
 use App\Models\ChoreCompletion;
 use App\Models\DailyQuest;
+use App\Models\LedgerEntry;
 use App\Models\Profile;
-use App\Models\Redemption;
 use App\Models\Spin;
 use App\Models\StreakRepair;
 use App\Services\HouseholdClock;
@@ -135,6 +135,34 @@ new class extends Component
             ->values();
     }
 
+    /** Points in the household's own currency — the same conversion the header uses. */
+    private function dollars(int $points): string
+    {
+        return '$'.number_format($points / $this->profile->household->points_per_dollar, 2);
+    }
+
+    /**
+     * Points in and points out per ledger kind. Both directions are needed per
+     * kind rather than a net sum, because adjustments and sibling trades run
+     * both ways and netting them would hide half of each.
+     *
+     * @return Collection<string, array{in: int, out: int, entries: int}>
+     */
+    private function ledgerFlows(): Collection
+    {
+        return $this->profile->ledgerEntries()
+            ->selectRaw('kind, count(*) as entries')
+            ->selectRaw('sum(case when amount > 0 then amount else 0 end) as points_in')
+            ->selectRaw('sum(case when amount < 0 then -amount else 0 end) as points_out')
+            ->groupBy('kind')
+            ->get()
+            ->mapWithKeys(fn (LedgerEntry $row) => [$row->kind->value => [
+                'in' => (int) $row->points_in,
+                'out' => (int) $row->points_out,
+                'entries' => (int) $row->entries,
+            ]]);
+    }
+
     public function with(): array
     {
         $completions = ChoreCompletion::where('profile_id', $this->profile->id)
@@ -151,14 +179,29 @@ new class extends Component
             ->whereNotNull('completed_at')
             ->count();
 
-        $earned = (int) $this->profile->ledgerEntries()->where('kind', LedgerKind::Earn)->sum('amount');
-        // Spends are stored negative, so this is flipped to read as a total.
-        $spent = abs((int) $this->profile->ledgerEntries()->where('kind', LedgerKind::Spend)->sum('amount'));
+        $flows = $this->ledgerFlows();
+        $earned = (int) $flows->sum('in');
+
+        /*
+         * Derived from the balance rather than summed out of the ledger, which
+         * is the only definition that can't drift from the number in the
+         * header: points only ever leave a kid by being cashed out, so
+         * whatever they've earned and no longer hold has been paid out. It
+         * also survives LedgerService clamping a balance at zero, where the
+         * negative side of the ledger would overstate what actually left.
+         */
+        $cashedOut = max(0, $earned - $this->profile->points);
+
+        // Both a Loot Shop redemption and a parent payout land here — the
+        // ledger is the only place that sees both.
+        $cashOutAmounts = $this->profile->ledgerEntries()
+            ->whereIn('kind', [LedgerKind::Spend, LedgerKind::CashOut])
+            ->pluck('amount')
+            ->map(fn (int $amount) => abs($amount));
 
         $spins = Spin::where('profile_id', $this->profile->id)->count();
         $tripleSpins = Spin::where('profile_id', $this->profile->id)->where('multiplier', 3)->count();
 
-        $cashOutCosts = Redemption::where('profile_id', $this->profile->id)->pluck('cost_snapshot');
         $badgesEarned = $this->profile->badges()->count();
 
         $recent = $this->recentDays($byDay);
@@ -188,13 +231,13 @@ new class extends Component
                 [
                     'label' => 'Points earned',
                     'value' => number_format($earned),
-                    'sub' => '≈ $'.number_format($earned / $this->profile->household->points_per_dollar, 2).' all time',
+                    'sub' => '≈ '.$this->dollars($earned).' all time',
                     'color' => 'var(--fq-gold)',
                 ],
                 [
-                    'label' => 'Points spent',
-                    'value' => number_format($spent),
-                    'sub' => $cashOutCosts->count().' '.Str::plural('cash-out', $cashOutCosts->count()),
+                    'label' => 'Cashed out',
+                    'value' => number_format($cashedOut),
+                    'sub' => '≈ '.$this->dollars($cashedOut).' collected',
                     'color' => 'var(--fq-coral)',
                 ],
                 [
@@ -254,12 +297,29 @@ new class extends Component
                 ],
                 [
                     'label' => 'Cash-outs',
-                    'value' => (string) $cashOutCosts->count(),
-                    'sub' => $cashOutCosts->isNotEmpty()
-                        ? 'biggest: '.number_format($cashOutCosts->max()).' pts'
+                    'value' => (string) $cashOutAmounts->count(),
+                    'sub' => $cashOutAmounts->isNotEmpty()
+                        ? 'biggest: '.number_format($cashOutAmounts->max()).' pts'
                         : 'nothing cashed out yet',
                 ],
             ],
+            'balance' => $this->profile->points,
+            'balanceDollars' => $this->dollars($this->profile->points),
+            'earned' => $earned,
+            'cashedOut' => $cashedOut,
+            // Only the lines that actually happened: a kid who has never
+            // traded shouldn't have to wonder what an empty "traded away" row
+            // is telling them.
+            'flowRows' => collect([
+                ['label' => 'Chores, bonuses & chests', 'points' => $flows->get('earn')['in'] ?? 0, 'direction' => 'in'],
+                ['label' => 'Cash turned in', 'points' => $flows->get('cash_in')['in'] ?? 0, 'direction' => 'in'],
+                ['label' => 'Parent top-ups', 'points' => $flows->get('adjustment')['in'] ?? 0, 'direction' => 'in'],
+                ['label' => 'Traded from a sibling', 'points' => $flows->get('transfer')['in'] ?? 0, 'direction' => 'in'],
+                ['label' => 'Loot Shop rewards', 'points' => $flows->get('spend')['out'] ?? 0, 'direction' => 'out'],
+                ['label' => 'Paid out by a parent', 'points' => $flows->get('cash_out')['out'] ?? 0, 'direction' => 'out'],
+                ['label' => 'Traded to a sibling', 'points' => $flows->get('transfer')['out'] ?? 0, 'direction' => 'out'],
+                ['label' => 'Parent take-backs', 'points' => $flows->get('adjustment')['out'] ?? 0, 'direction' => 'out'],
+            ])->reject(fn (array $row) => $row['points'] === 0)->values(),
         ];
     }
 }; ?>
@@ -382,6 +442,44 @@ new class extends Component
                             >{{ mb_substr($day['date']->format('D'), 0, 1) }}</span>
                         </div>
                     @endforeach
+                </div>
+            </div>
+        </div>
+
+        {{-- Every point in and out, so the two tiles above can be checked
+             against each other: earned − cashed out is the balance in the
+             header, and nothing moves without showing up on a line here. --}}
+        <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
+            <div class="flex items-baseline justify-between gap-3">
+                <h3 class="font-baloo text-xl font-bold">Every point</h3>
+                <span class="font-mono-fq text-[10px] text-fq-text-4">IN AND OUT</span>
+            </div>
+
+            <div class="mt-2">
+                @forelse ($flowRows as $row)
+                    @php $isIn = $row['direction'] === 'in'; @endphp
+
+                    <div wire:key="flow-{{ $row['label'] }}" class="flex items-center gap-3 border-b border-fq-divider py-[11px]">
+                        <span
+                            class="h-2 w-2 shrink-0 rounded-full"
+                            style="background: {{ $isIn ? 'var(--fq-lime)' : 'var(--fq-coral)' }}"
+                        ></span>
+                        <span class="flex-1 text-sm">{{ $row['label'] }}</span>
+                        <span
+                            class="font-mono-fq text-[11px] whitespace-nowrap"
+                            style="color: {{ $isIn ? 'var(--fq-text)' : 'var(--fq-negative-2)' }}"
+                        >{{ $isIn ? '+' : '−' }}{{ number_format($row['points']) }}</span>
+                    </div>
+                @empty
+                    <p class="py-4 text-sm text-fq-text-5">No points have moved yet.</p>
+                @endforelse
+
+                <div class="flex items-center gap-3 pt-[13px]">
+                    <span class="flex-1 font-baloo text-[15px] font-bold">In the bank right now</span>
+                    <span class="font-baloo text-[19px] font-extrabold whitespace-nowrap text-fq-lime">
+                        {{ number_format($balance) }}
+                    </span>
+                    <span class="font-mono-fq text-[11px] text-fq-text-4">{{ $balanceDollars }}</span>
                 </div>
             </div>
         </div>

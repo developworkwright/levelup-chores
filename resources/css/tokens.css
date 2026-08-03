@@ -132,9 +132,26 @@
     --fq-tier-silver: linear-gradient(150deg, #ffffff, #dfe4ea 50%, #a9b0ba);
     --fq-tier-silver-ring: #dfe4ea;
     --fq-tier-silver-glow: rgba(223, 228, 234, 0.45);
-    --fq-tier-amethyst: linear-gradient(150deg, #e7dcff, #b98bff 55%, #7c4fd0);
-    --fq-tier-amethyst-ring: #c9a0ff;
-    --fq-tier-amethyst-glow: rgba(201, 160, 255, 0.5);
+    /*
+     * The top tier is the one that isn't struck from anything: a full hue
+     * sweep, three times wider than the star, drifting under the clip-path so
+     * the colours crawl across it. Both ends are the same pink so the loop
+     * closes without a seam.
+     */
+    --fq-tier-rainbow: linear-gradient(
+        100deg,
+        #ff6b8a,
+        #ffc93d 14%,
+        #ffe14d 28%,
+        #7dffb0 43%,
+        #6bd5ff 57%,
+        #a06bff 72%,
+        #ff8ac7 86%,
+        #ff6b8a
+    );
+    /* Where the sweep starts, for anything that needs one flat colour from it. */
+    --fq-tier-rainbow-ring: #ff8ac7;
+    --fq-tier-rainbow-glow: rgba(255, 138, 199, 0.55);
     --fq-badge-empty: #241a33;
     --fq-badge-empty-fg: #5b5074;
 
@@ -264,6 +281,32 @@
 @keyframes fq-shimmer {
     0% { background-position: 0% 0%; }
     100% { background-position: 200% 0%; }
+}
+
+/*
+ * The rainbow tier, in the three places it shows up. Same hue order and the
+ * same 8s loop in all of them, so a star, its card edge and its label read as
+ * one moving thing rather than three that happen to be colourful.
+ */
+@keyframes fq-rainbow-drift {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 300% 50%; }
+}
+
+@keyframes fq-rainbow-border {
+    0%, 100% { border-color: #ff6b8a; }
+    20% { border-color: #ffe14d; }
+    40% { border-color: #7dffb0; }
+    60% { border-color: #6bd5ff; }
+    80% { border-color: #a06bff; }
+}
+
+@keyframes fq-rainbow-ink {
+    0%, 100% { color: #ff6b8a; }
+    20% { color: #ffe14d; }
+    40% { color: #7dffb0; }
+    60% { color: #6bd5ff; }
+    80% { color: #a06bff; }
 }
 
 @keyframes fq-rotate {

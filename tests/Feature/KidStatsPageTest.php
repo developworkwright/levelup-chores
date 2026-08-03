@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
-use App\Enums\RedemptionStatus;
 use App\Models\Badge;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
@@ -12,10 +11,11 @@ use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\LedgerEntry;
 use App\Models\Profile;
-use App\Models\Redemption;
 use App\Models\Spin;
 use App\Models\StoreItem;
 use App\Models\StreakRepair;
+use App\Services\LedgerService;
+use App\Services\StoreService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -49,7 +49,7 @@ class KidStatsPageTest extends TestCase
     public function test_it_totals_chores_points_and_active_days(): void
     {
         $household = Household::factory()->create();
-        $kid = $this->loginKid($household);
+        $kid = $this->loginKid($household, ['xp' => 450]);
         $chore = Chore::factory()->for($household)->create(['name' => 'Dishes']);
 
         $this->approve($kid, $chore, now()->subDays(2), 120);
@@ -71,14 +71,116 @@ class KidStatsPageTest extends TestCase
             'description' => 'Movie night',
         ]);
 
+        $kid->update(['points' => 50]);
+
         Volt::test('kid.stats')
             ->assertOk()
             ->assertSee('Chores done')
             ->assertSee('300')
             ->assertSee('≈ $3.00 all time')
-            ->assertSee('250')
+            ->assertSee('Cashed out')
+            ->assertSee('≈ $2.50 collected')
+            ->assertSee('LVL 3')
+            ->assertSee('450 XP total')
             // Two of the three chores landed on the same day.
             ->assertSee('days with a chore done');
+    }
+
+    public function test_a_parent_payout_counts_as_a_cash_out(): void
+    {
+        // The "Record payout — zero balance" button on the parent Kids page
+        // writes a cash_out ledger entry and no redemption row, so a stats
+        // page reading the redemptions table alone would miss it entirely.
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household, ['points' => 0]);
+
+        LedgerEntry::create([
+            'household_id' => $household->id,
+            'profile_id' => $kid->id,
+            'kind' => LedgerKind::Earn,
+            'amount' => 800,
+            'description' => 'Chores',
+        ]);
+        LedgerEntry::create([
+            'household_id' => $household->id,
+            'profile_id' => $kid->id,
+            'kind' => LedgerKind::CashOut,
+            'amount' => -800,
+            'description' => 'Paid out $8.00 to '.$kid->name,
+        ]);
+
+        Volt::test('kid.stats')
+            ->assertOk()
+            ->assertSee('Cashed out')
+            ->assertSee('≈ $8.00 collected')
+            ->assertSee('Paid out by a parent')
+            ->assertSee('biggest: 800 pts')
+            ->assertDontSee('nothing cashed out yet');
+    }
+
+    public function test_it_accounts_for_every_way_points_move(): void
+    {
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household);
+
+        $moves = [
+            [LedgerKind::Earn, 1000, 'Chores'],
+            [LedgerKind::CashIn, 500, 'Turned in $5 cash'],
+            [LedgerKind::Adjustment, 200, 'Parent adjustment'],
+            [LedgerKind::Transfer, 100, 'Trade from a sibling'],
+            [LedgerKind::Spend, -300, 'Loot Shop'],
+            [LedgerKind::CashOut, -400, 'Payout'],
+            [LedgerKind::Transfer, -50, 'Trade to a sibling'],
+            [LedgerKind::Adjustment, -50, 'Parent take-back'],
+        ];
+
+        // Recorded through the service the app uses, so the balance moves
+        // exactly as it would in the console.
+        foreach ($moves as [$kind, $amount, $description]) {
+            app(LedgerService::class)->record($household, $kid, $kind, $amount, $description);
+        }
+
+        $kid->refresh();
+
+        // Both directions of a kind are reported, not the net — a kid who was
+        // topped up 200 and docked 50 has to see both, not a single +150.
+        Volt::test('kid.stats')
+            ->assertOk()
+            ->assertSee('Chores, bonuses & chests')
+            ->assertSee('Cash turned in')
+            ->assertSee('Parent top-ups')
+            ->assertSee('Traded from a sibling')
+            ->assertSee('Loot Shop rewards')
+            ->assertSee('Paid out by a parent')
+            ->assertSee('Traded to a sibling')
+            ->assertSee('Parent take-backs')
+            ->assertSee('In the bank right now');
+
+        // Earned − cashed out has to land on the balance the header shows.
+        $earned = 1000 + 500 + 200 + 100;
+        $this->assertSame(1000, $kid->points);
+        $this->assertSame($kid->points, $earned - (300 + 400 + 50 + 50));
+    }
+
+    public function test_a_kid_who_has_never_traded_sees_no_trade_lines(): void
+    {
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household);
+
+        LedgerEntry::create([
+            'household_id' => $household->id,
+            'profile_id' => $kid->id,
+            'kind' => LedgerKind::Earn,
+            'amount' => 400,
+            'description' => 'Chores',
+        ]);
+
+        Volt::test('kid.stats')
+            ->assertOk()
+            ->assertSee('Chores, bonuses & chests')
+            ->assertDontSee('Traded to a sibling')
+            ->assertDontSee('Traded from a sibling')
+            ->assertDontSee('Cash turned in');
     }
 
     public function test_it_splits_chores_done_into_today_this_week_and_lifetime(): void
@@ -298,31 +400,34 @@ class KidStatsPageTest extends TestCase
     public function test_it_reports_wheel_spins_badges_and_cash_outs(): void
     {
         $household = Household::factory()->create();
-        $kid = $this->loginKid($household, ['streak' => 5, 'xp' => 450]);
+        $kid = $this->loginKid($household, ['streak' => 5, 'xp' => 450, 'points' => 500]);
         $chore = Chore::factory()->for($household)->create();
         $item = StoreItem::factory()->for($household)->create(['cost' => 500]);
 
         Spin::create(['profile_id' => $kid->id, 'spin_date' => now()->subDay()->toDateString(), 'chore_id' => $chore->id, 'multiplier' => 2]);
         Spin::create(['profile_id' => $kid->id, 'spin_date' => now()->toDateString(), 'chore_id' => $chore->id, 'multiplier' => 3]);
 
-        Redemption::create([
-            'store_item_id' => $item->id,
-            'profile_id' => $kid->id,
-            'cost_snapshot' => 500,
-            'status' => RedemptionStatus::Pending,
-            'requested_at' => now(),
-        ]);
-
-        $kid->badges()->attach(Badge::where('key', 'wheel_winner')->firstOrFail()->id, ['earned_at' => now()]);
+        app(StoreService::class)->redeem($kid, $item);
 
         Volt::test('kid.stats')
             ->assertOk()
             ->assertSee('1 landed 3×')
             ->assertSee('biggest: 500 pts')
-            ->assertSee('1 / '.Badge::count())
-            ->assertSee('LVL 3')
-            ->assertSee('450 XP total')
+            ->assertSee('Loot Shop rewards')
             ->assertSee('5d');
+    }
+
+    public function test_it_counts_badges_earned(): void
+    {
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household);
+
+        $kid->badges()->attach(Badge::where('key', 'wheel_winner')->firstOrFail()->id, ['earned_at' => now()]);
+
+        Volt::test('kid.stats')
+            ->assertOk()
+            ->assertSee('Badges')
+            ->assertSee('1 / '.Badge::count());
     }
 
     public function test_a_brand_new_kid_sees_an_empty_board_not_an_error(): void

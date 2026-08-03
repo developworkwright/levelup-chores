@@ -57,19 +57,22 @@ new class extends Component
             @foreach ($badges as $entry)
                 @php
                     $badge = $entry['badge'];
-                    // Same XP thresholds x-badge-star strikes the metal from,
-                    // so the label under a name always names what's on screen.
-                    $tier = match (true) {
-                        $badge->xp_reward >= 250 => 'gold',
-                        $badge->xp_reward >= 150 => 'silver',
-                        default => 'amethyst',
-                    };
+                    // The same tier x-badge-star strikes the metal from, so the
+                    // label under a name always names what's on screen.
+                    $tier = $badge->tier();
+                    // The animated tier can't take an inline colour anywhere:
+                    // it would outrank the keyframes and freeze on one hue.
+                    $drifting = $entry['earned'] && $tier->isAnimated();
                 @endphp
 
                 <div
                     wire:key="badge-{{ $badge->id }}"
-                    class="flex gap-3 rounded-[20px] border p-4 {{ $entry['earned'] ? '' : 'opacity-60' }}"
-                    style="background: var(--fq-panel); border-color: {{ $entry['earned'] ? "var(--fq-tier-{$tier}-ring)" : 'var(--fq-line)' }}"
+                    @class([
+                        'flex gap-3 rounded-[20px] border p-4',
+                        'opacity-60' => ! $entry['earned'],
+                        'fq-rainbow-ring' => $drifting,
+                    ])
+                    style="background: var(--fq-panel); @if (! $drifting) border-color: {{ $entry['earned'] ? $tier->ringVar() : 'var(--fq-line)' }}; @endif"
                 >
                     <x-badge-star :badge="$badge" :earned="$entry['earned']" :secret="$entry['secret']" size="lg" />
 
@@ -84,9 +87,14 @@ new class extends Component
                         </div>
 
                         <p
-                            class="mt-[2px] font-mono-fq text-[9px] tracking-[0.14em]"
-                            style="color: {{ $entry['earned'] ? "var(--fq-tier-{$tier}-ring)" : 'var(--fq-text-5)' }}"
-                        >{{ strtoupper($tier) }} · {{ $badge->xp_reward }} XP</p>
+                            @class([
+                                'mt-[2px] font-mono-fq text-[9px] tracking-[0.14em]',
+                                'fq-rainbow-ink' => $drifting,
+                            ])
+                            @if (! $drifting)
+                                style="color: {{ $entry['earned'] ? $tier->ringVar() : 'var(--fq-text-5)' }}"
+                            @endif
+                        >{{ $tier->label() }} · {{ $badge->xp_reward }} XP</p>
 
                         <p class="mt-1 text-sm text-fq-text-3">
                             @if ($entry['secret'])

@@ -71,6 +71,42 @@ body {
     }
 }
 
+/*
+ * Rainbow badge tier. The star's fill and background-size are set inline by
+ * x-badge-star — only the drift lives here, because an inline `background`
+ * shorthand would reset any size this rule tried to set.
+ */
+.fq-rainbow-star {
+    animation: fq-rainbow-drift 8s linear infinite;
+}
+
+/* Border and label, on the same loop. Neither may be given an inline colour:
+   it would outrank the keyframes and freeze them on one hue. */
+.fq-rainbow-ring {
+    animation: fq-rainbow-border 8s linear infinite;
+}
+
+.fq-rainbow-ink {
+    animation: fq-rainbow-ink 8s linear infinite;
+}
+
+/* Still rainbow-coloured, just no longer moving. */
+@media (prefers-reduced-motion: reduce) {
+    .fq-rainbow-star,
+    .fq-rainbow-ring,
+    .fq-rainbow-ink {
+        animation: none;
+    }
+
+    .fq-rainbow-ring {
+        border-color: var(--fq-tier-rainbow-ring);
+    }
+
+    .fq-rainbow-ink {
+        color: var(--fq-tier-rainbow-ring);
+    }
+}
+
 .fq-wordmark {
     background: linear-gradient(96deg, var(--fq-lime), var(--fq-cyan) 45%, var(--fq-gold));
     background-size: 200% 100%;
