@@ -33,10 +33,32 @@ new class extends Component
 
     public Profile $profile;
 
+    /**
+     * How far back the activity strip is scrolled, in days. Always a multiple
+     * of RECENT_DAYS, so paging moves a whole strip at a time and no day is
+     * ever shown twice or skipped between windows.
+     */
+    public int $daysBack = 0;
+
     public function mount(): void
     {
         $this->profile = Auth::guard('profile')->user();
         abort_unless($this->profile->isKid(), 403);
+    }
+
+    public function showEarlier(): void
+    {
+        $this->daysBack += self::RECENT_DAYS;
+    }
+
+    public function showLater(): void
+    {
+        $this->daysBack = max(0, $this->daysBack - self::RECENT_DAYS);
+    }
+
+    public function showToday(): void
+    {
+        $this->daysBack = 0;
     }
 
     /**
@@ -57,26 +79,27 @@ new class extends Component
     }
 
     /**
-     * One entry per day for the activity strip, oldest first, including the
-     * days nothing happened — a gap is as much of the picture as a tall bar.
+     * One entry per day for a window ending on $endDate, oldest first,
+     * including the days nothing happened — a gap is as much of the picture as
+     * a tall bar.
      *
      * @param  Collection<string, Collection<int, ChoreCompletion>>  $byDay
-     * @return Collection<int, array{date: \Illuminate\Support\Carbon, count: int, points: int, isToday: bool}>
+     * @return Collection<int, array{date: Carbon, count: int, points: int, isToday: bool}>
      */
-    private function recentDays(Collection $byDay): Collection
+    private function dayWindow(Collection $byDay, Carbon $endDate, int $length): Collection
     {
-        $today = HouseholdClock::for($this->profile->household)->today();
+        $today = HouseholdClock::for($this->profile->household)->today()->toDateString();
 
-        return collect(range(self::RECENT_DAYS - 1, 0))
-            ->map(function (int $daysAgo) use ($today, $byDay) {
-                $date = $today->copy()->subDays($daysAgo);
+        return collect(range($length - 1, 0))
+            ->map(function (int $daysAgo) use ($endDate, $byDay, $today) {
+                $date = $endDate->copy()->subDays($daysAgo);
                 $day = $byDay->get($date->toDateString(), collect());
 
                 return [
                     'date' => $date,
                     'count' => $day->count(),
                     'points' => (int) $day->sum('points_awarded'),
-                    'isToday' => $daysAgo === 0,
+                    'isToday' => $date->toDateString() === $today,
                 ];
             });
     }
@@ -204,20 +227,39 @@ new class extends Component
 
         $badgesEarned = $this->profile->badges()->count();
 
-        $recent = $this->recentDays($byDay);
+        $today = HouseholdClock::for($this->profile->household)->today();
+
+        /*
+         * The furthest back paging can go: the day of the first chore this kid
+         * ever got approved, rounded out to the end of the strip it sits in.
+         * Without the clamp a kid could page into an empty century.
+         */
+        $firstDay = $dayCounts->keys()->min();
+        $maxDaysBack = $firstDay === null
+            ? 0
+            : intdiv((int) Carbon::parse($firstDay)->diffInDays($today), self::RECENT_DAYS) * self::RECENT_DAYS;
+
+        // Clamped here rather than in the click handlers, which would have to
+        // load the whole history again to know where the wall is.
+        $this->daysBack = max(0, min($this->daysBack, $maxDaysBack));
+
+        // Anchored to today no matter where the strip is scrolled: "Today" and
+        // "Last 7 days" answer what a kid did today, not what the window shows.
+        $thisWeek = $this->dayWindow($byDay, $today, self::WEEK_DAYS);
+        $strip = $this->dayWindow($byDay, $today->copy()->subDays($this->daysBack), self::RECENT_DAYS);
 
         return [
             'choreSplit' => [
                 [
                     'label' => 'Today',
-                    'count' => $recent->last()['count'],
-                    'points' => $recent->last()['points'],
+                    'count' => $thisWeek->last()['count'],
+                    'points' => $thisWeek->last()['points'],
                     'color' => 'var(--fq-lime)',
                 ],
                 [
                     'label' => 'Last 7 days',
-                    'count' => (int) $recent->take(-self::WEEK_DAYS)->sum('count'),
-                    'points' => (int) $recent->take(-self::WEEK_DAYS)->sum('points'),
+                    'count' => (int) $thisWeek->sum('count'),
+                    'points' => (int) $thisWeek->sum('points'),
                     'color' => 'var(--fq-cyan)',
                 ],
                 [
@@ -262,11 +304,16 @@ new class extends Component
                 ],
             ],
             'topChores' => $this->topChores($completions),
-            'recent' => $recent,
+            'strip' => $strip,
             // Bars are scaled against the busiest day on the strip rather than
             // an all-time best, so a quiet fortnight still has shape.
-            'recentMax' => max(1, (int) $recent->max('count')),
-            'recentTotal' => (int) $recent->sum('count'),
+            'stripMax' => max(1, (int) $strip->max('count')),
+            'stripTotal' => (int) $strip->sum('count'),
+            'stripLabel' => $this->daysBack === 0
+                ? 'Last '.self::RECENT_DAYS.' days'
+                : $strip->first()['date']->toFormattedDateString().' – '.$strip->last()['date']->toFormattedDateString(),
+            'canGoEarlier' => $this->daysBack < $maxDaysBack,
+            'canGoLater' => $this->daysBack > 0,
             'records' => [
                 [
                     'label' => 'Best day',
@@ -413,16 +460,16 @@ new class extends Component
 
             <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
                 <div class="flex items-baseline justify-between gap-3">
-                    <h3 class="font-baloo text-xl font-bold">Last {{ $recent->count() }} days</h3>
-                    <span class="font-mono-fq text-[10px] text-fq-text-4">{{ $recentTotal }} CHORES</span>
+                    <h3 class="font-baloo text-xl font-bold">{{ $stripLabel }}</h3>
+                    <span class="font-mono-fq text-[10px] text-fq-text-4">{{ $stripTotal }} CHORES</span>
                 </div>
 
                 <div class="mt-4 flex h-[110px] items-end gap-[4px]">
-                    @foreach ($recent as $day)
+                    @foreach ($strip as $day)
                         @php
                             // A no-chore day keeps a 3px stub, so the strip
                             // still reads as a row of days rather than a hole.
-                            $height = max(3, round($day['count'] / $recentMax * 88));
+                            $height = max(3, round($day['count'] / $stripMax * 88));
                             $fill = match (true) {
                                 $day['count'] === 0 => 'var(--fq-line-2)',
                                 $day['isToday'] => 'var(--fq-fill-gold)',
@@ -443,6 +490,34 @@ new class extends Component
                         </div>
                     @endforeach
                 </div>
+
+                {{-- Only rendered once there's history to walk back into, so a
+                     kid on their first week isn't offered a dead button. --}}
+                @if ($canGoEarlier || $canGoLater)
+                    <div class="mt-4 flex items-center justify-between gap-2 border-t border-fq-divider pt-3">
+                        <button
+                            type="button"
+                            wire:click="showEarlier"
+                            @disabled(! $canGoEarlier)
+                            class="rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[13px] py-[8px] text-[13px] text-fq-text-2-b transition hover:border-fq-line-4 hover:text-fq-text disabled:cursor-default disabled:opacity-35 disabled:hover:border-fq-line-2"
+                        >&larr; Earlier</button>
+
+                        @if ($canGoLater)
+                            <button
+                                type="button"
+                                wire:click="showToday"
+                                class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase transition hover:text-fq-lime"
+                            >Back to today</button>
+                        @endif
+
+                        <button
+                            type="button"
+                            wire:click="showLater"
+                            @disabled(! $canGoLater)
+                            class="rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[13px] py-[8px] text-[13px] text-fq-text-2-b transition hover:border-fq-line-4 hover:text-fq-text disabled:cursor-default disabled:opacity-35 disabled:hover:border-fq-line-2"
+                        >Later &rarr;</button>
+                    </div>
+                @endif
             </div>
         </div>
 

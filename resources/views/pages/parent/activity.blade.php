@@ -7,9 +7,15 @@ use App\Models\Profile;
 use App\Services\HouseholdClock;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
+use Livewire\WithPagination;
 
 new class extends Component
 {
+    use WithPagination;
+
+    /** Entries per page, kept equal for both feeds so the columns stay level. */
+    private const PER_PAGE = 24;
+
     public Profile $profile;
 
     public function mount(): void
@@ -32,19 +38,22 @@ new class extends Component
     public function with(): array
     {
         return [
+            // Paged rather than capped: the ledger is the household's whole
+            // financial history, and the answer to "where did that go?" is
+            // usually older than the last screenful.
             'entries' => LedgerEntry::where('household_id', $this->profile->household_id)
                 ->latest('created_at')
-                ->limit(24)
-                ->get(),
+                ->latest('id')
+                ->paginate(self::PER_PAGE, pageName: 'ledger'),
             // Its own card rather than mixed into the ledger above — tickets
             // are a separate currency, and summing the two columns together
-            // would be meaningless.
+            // would be meaningless. Its own page cursor too, so paging one
+            // feed doesn't drag the other along with it.
             'ticketEntries' => BonusTicketEntry::where('household_id', $this->profile->household_id)
                 ->with('profile')
                 ->latest('created_at')
                 ->latest('id')
-                ->limit(16)
-                ->get(),
+                ->paginate(self::PER_PAGE, pageName: 'tickets'),
         ];
     }
 }; ?>
@@ -71,6 +80,8 @@ new class extends Component
             @empty
                 <p class="py-4 text-sm text-fq-text-5">Nothing logged yet.</p>
             @endforelse
+
+            <x-pager :paginator="$entries" page-name="ledger" />
         </div>
     </div>
 
@@ -98,6 +109,8 @@ new class extends Component
             @empty
                 <p class="py-4 text-sm text-fq-text-5">No tickets yet. They arrive on level-ups, badges and daily chests.</p>
             @endforelse
+
+            <x-pager :paginator="$ticketEntries" page-name="tickets" />
         </div>
     </div>
 </x-parent.shell>

@@ -220,6 +220,75 @@ class KidStatsPageTest extends TestCase
         $this->assertMatchesRegularExpression('/>\s*1\s*<.*?Last 7 days/s', $html);
     }
 
+    public function test_the_activity_strip_pages_back_through_older_days(): void
+    {
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household);
+        $chore = Chore::factory()->for($household)->create();
+
+        $this->travelTo(Carbon::parse('2026-06-30 12:00', $household->timezone));
+
+        // One chore inside the current fortnight, one in the fortnight before.
+        $this->approve($kid, $chore, Carbon::parse('2026-06-25 12:00', $household->timezone));
+        $this->approve($kid, $chore, Carbon::parse('2026-06-10 12:00', $household->timezone));
+
+        $page = Volt::test('kid.stats')->assertOk();
+
+        $page->assertSee('Last 14 days')
+            ->assertSee('1 CHORES')
+            ->assertDontSee('Back to today');
+
+        $page->call('showEarlier')
+            ->assertSet('daysBack', 14)
+            ->assertSee('Jun 3, 2026 – Jun 16, 2026')
+            ->assertSee('Back to today');
+
+        $page->call('showLater')
+            ->assertSet('daysBack', 0)
+            ->assertSee('Last 14 days');
+    }
+
+    public function test_paging_stops_at_the_first_chore_ever_done(): void
+    {
+        // Nothing to see past the very first chore, so the strip refuses to
+        // wander off into empty fortnights.
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household);
+        $chore = Chore::factory()->for($household)->create();
+
+        $this->travelTo(Carbon::parse('2026-06-30 12:00', $household->timezone));
+        $this->approve($kid, $chore, Carbon::parse('2026-06-20 12:00', $household->timezone));
+
+        Volt::test('kid.stats')
+            ->assertOk()
+            ->call('showEarlier')
+            ->assertSet('daysBack', 0)
+            // A strip that can't move either way hides its controls entirely.
+            ->assertDontSee('Earlier');
+    }
+
+    public function test_paging_the_strip_leaves_the_today_and_week_counts_alone(): void
+    {
+        // The split card answers "how am I doing today", which is not a
+        // question about whatever window the strip happens to be showing.
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household);
+        $chore = Chore::factory()->for($household)->create();
+
+        $this->travelTo(Carbon::parse('2026-06-30 12:00', $household->timezone));
+
+        $this->approve($kid, $chore, Carbon::parse('2026-06-30 09:00', $household->timezone));
+        $this->approve($kid, $chore, Carbon::parse('2026-06-05 09:00', $household->timezone));
+
+        $page = Volt::test('kid.stats')->assertOk()->call('showEarlier');
+
+        $html = $page->html();
+        $this->assertSame(14, $page->get('daysBack'));
+        $this->assertMatchesRegularExpression('/>\s*1\s*<.*?Today/s', $html);
+        $this->assertMatchesRegularExpression('/>\s*1\s*<.*?Last 7 days/s', $html);
+        $this->assertMatchesRegularExpression('/>\s*2\s*<.*?Lifetime/s', $html);
+    }
+
     public function test_it_ranks_the_most_done_chores(): void
     {
         $household = Household::factory()->create();

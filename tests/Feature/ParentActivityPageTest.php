@@ -120,6 +120,75 @@ class ParentActivityPageTest extends TestCase
         Volt::test('parent.activity')->assertDontSee('Someone else entirely');
     }
 
+    public function test_the_ledger_pages_back_through_everything_ever_recorded(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create(['name' => 'Nova']);
+        $this->actingAsParent($household);
+
+        // Three pages' worth, oldest first, so the newest sits on page one.
+        foreach (range(1, 50) as $index) {
+            app(LedgerService::class)->record($household, $kid, LedgerKind::Earn, 10, "Entry number {$index}");
+        }
+
+        $page = Volt::test('parent.activity')->assertOk();
+
+        // Matched with the closing tag so "Entry number 1" can't be satisfied
+        // by "Entry number 19", and unescaped so the `<` survives the compare.
+        $page->assertSee('Entry number 50')
+            ->assertDontSee('Entry number 1<', false)
+            ->assertSee('Page 1 of 3')
+            ->assertSee('50 total');
+
+        $page->call('nextPage', 'ledger')
+            ->assertSee('Page 2 of 3')
+            ->assertSee('Entry number 26')
+            ->assertDontSee('Entry number 50');
+
+        $page->call('nextPage', 'ledger')
+            ->assertSee('Page 3 of 3')
+            ->assertSee('Entry number 1<', false);
+
+        $page->call('previousPage', 'ledger')
+            ->assertSee('Page 2 of 3');
+    }
+
+    public function test_each_feed_pages_on_its_own_cursor(): void
+    {
+        // Two paginators on one screen: walking the ledger back must not drag
+        // the ticket feed along with it.
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create(['name' => 'Nova']);
+        $this->actingAsParent($household);
+
+        foreach (range(1, 30) as $index) {
+            app(LedgerService::class)->record($household, $kid, LedgerKind::Earn, 10, "Ledger line {$index}");
+            app(TicketService::class)->record($kid, TicketKind::Badge, 1, "Ticket line {$index}");
+        }
+
+        Volt::test('parent.activity')
+            ->assertOk()
+            ->call('nextPage', 'ledger')
+            // Ledger moved to its older page; tickets stayed on their newest.
+            ->assertSee('Ledger line 6')
+            ->assertDontSee('Ledger line 30')
+            ->assertSee('Ticket line 30');
+    }
+
+    public function test_a_single_page_of_activity_shows_no_pager(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create(['name' => 'Nova']);
+        $this->actingAsParent($household);
+
+        app(LedgerService::class)->record($household, $kid, LedgerKind::Earn, 100, 'The only entry');
+
+        Volt::test('parent.activity')
+            ->assertOk()
+            ->assertSee('The only entry')
+            ->assertDontSee('Page 1 of');
+    }
+
     public function test_a_kid_cannot_open_the_activity_page(): void
     {
         $household = Household::factory()->create();
