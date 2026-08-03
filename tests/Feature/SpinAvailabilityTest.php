@@ -191,4 +191,66 @@ class SpinAvailabilityTest extends TestCase
 
         $this->assertFalse($this->spins()->hasSpunToday($kid));
     }
+
+    public function test_a_chore_a_parent_barred_from_the_wheel_never_appears_on_it(): void
+    {
+        $household = $this->household();
+        $kid = Profile::factory()->for($household)->create();
+
+        $barred = Chore::factory()->for($household)->create([
+            'name' => 'Put the groceries away',
+            'quest_eligible' => false,
+            'wheel_eligible' => false,
+        ]);
+        $free = Chore::factory()->for($household)->create(['quest_eligible' => false]);
+
+        $ids = $this->spins()->eligibleChoresFor($kid)->pluck('id');
+
+        $this->assertContains($free->id, $ids);
+        $this->assertNotContains($barred->id, $ids);
+    }
+
+    public function test_barring_a_chore_from_the_wheel_still_leaves_it_claimable(): void
+    {
+        $household = $this->household();
+        $kid = Profile::factory()->for($household)->create();
+
+        // The two exclusions are about where a chore can be *offered*, not
+        // whether it can be done — it stays on the board at its usual points.
+        $barred = Chore::factory()->for($household)->create(['wheel_eligible' => false]);
+
+        $this->assertSame('ready', $this->chores()->stateFor($kid, $barred));
+        $this->chores()->claim($kid, $barred);
+
+        $this->assertSame('pending', $this->chores()->stateFor($kid, $barred));
+    }
+
+    public function test_a_chore_barred_after_the_spin_landed_on_it_stays_on_the_wheel(): void
+    {
+        $household = $this->household();
+        $kid = Profile::factory()->for($household)->create();
+
+        Chore::factory()->for($household)->create(['quest_eligible' => false]);
+        Chore::factory()->for($household)->create(['quest_eligible' => false]);
+
+        $spin = $this->spins()->spin($kid);
+
+        // mount() and spin() find the wheel's rotation by locating this chore's
+        // index in the collection — dropping it points the wheel at segment 0.
+        Chore::whereKey($spin->chore_id)->update(['wheel_eligible' => false]);
+
+        $this->assertContains($spin->chore_id, $this->spins()->eligibleChoresFor($kid)->pluck('id'));
+    }
+
+    public function test_spinning_with_every_chore_barred_throws(): void
+    {
+        $household = $this->household();
+        $kid = Profile::factory()->for($household)->create();
+
+        Chore::factory()->for($household)->create(['quest_eligible' => false, 'wheel_eligible' => false]);
+
+        $this->expectException(RuntimeException::class);
+
+        $this->spins()->spin($kid);
+    }
 }

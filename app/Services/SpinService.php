@@ -46,8 +46,9 @@ class SpinService
 
     /**
      * The chores eligible to appear on the bonus wheel today — age
-     * appropriate, not today's daily quest, and not already claimed by
-     * anyone in the household — capped to MAX_WHEEL_CHORES.
+     * appropriate, not today's daily quest, not barred from the wheel by a
+     * parent, and not already claimed by anyone in the household — capped to
+     * MAX_WHEEL_CHORES.
      *
      * Above the cap, a random subset is used instead of the full list, but
      * it's picked with a per-profile-per-day deterministic shuffle (not a
@@ -74,11 +75,18 @@ class SpinService
             ->reject(fn (Chore $chore) => $chore->id === $questChoreId)
             // Cooldowns are household-wide, so a chore a sibling already
             // claimed can no longer be earned — landing a 3x boost on it
-            // would be a prize that pays nothing. Whatever today's spin
-            // already landed on stays regardless: the wheel has to keep
-            // showing the result it gave, even once that chore is spent.
+            // would be a prize that pays nothing. A parent can bar a chore
+            // from the wheel outright for the same reason: an opportunistic
+            // job like "put the groceries away" is only real on the days
+            // there are groceries.
+            //
+            // Whatever today's spin already landed on stays regardless of
+            // either: the wheel has to keep showing the result it gave, even
+            // once that chore is spent or a parent has since excluded it —
+            // mount() and spin() both locate the wheel's rotation by finding
+            // that chore's index in this collection.
             ->filter(fn (Chore $chore) => ($spinToday && $chore->id === $spinToday->chore_id)
-                || $chores->stateFor($profile, $chore) === 'ready')
+                || ($chore->wheel_eligible && $chores->stateFor($profile, $chore) === 'ready'))
             ->sortBy('id')
             ->values();
 

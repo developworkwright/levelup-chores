@@ -127,6 +127,21 @@ new class extends Component
         }
     }
 
+    /**
+     * Independent of the quest toggle: a chore can be a perfectly good assigned
+     * quest and still be a bad bet on the wheel, which is the case for anything
+     * opportunistic — the groceries only need putting away on shopping day.
+     */
+    public function toggleWheelEligible(int $choreId): void
+    {
+        $chore = $this->ownedChore($choreId);
+
+        if ($chore) {
+            $chore->wheel_eligible = ! $chore->wheel_eligible;
+            $chore->save();
+        }
+    }
+
     public function adjustMinAge(int $choreId, int $delta): void
     {
         $chore = $this->ownedChore($choreId);
@@ -249,6 +264,9 @@ new class extends Component
                             @unless ($chore->quest_eligible)
                                 · <span class="text-fq-coral">Excluded from quest</span>
                             @endunless
+                            @unless ($chore->wheel_eligible)
+                                · <span class="text-fq-coral">Excluded from wheel</span>
+                            @endunless
                         </p>
                         @if ($chore->isUsedUp())
                             {{-- The one state a parent has to act on: nothing
@@ -334,6 +352,14 @@ new class extends Component
                         class="rounded-[12px] border px-3 py-2 text-xs {{ $chore->quest_eligible ? 'border-fq-line-3 bg-fq-sunk text-fq-text-3' : 'border-fq-coral bg-fq-sunk text-fq-coral' }}"
                     >
                         {{ $chore->quest_eligible ? 'Exclude from quest' : 'Allow as quest' }}
+                    </button>
+
+                    <button
+                        type="button"
+                        wire:click="toggleWheelEligible({{ $chore->id }})"
+                        class="rounded-[12px] border px-3 py-2 text-xs {{ $chore->wheel_eligible ? 'border-fq-line-3 bg-fq-sunk text-fq-text-3' : 'border-fq-coral bg-fq-sunk text-fq-coral' }}"
+                    >
+                        {{ $chore->wheel_eligible ? 'Exclude from wheel' : 'Allow on wheel' }}
                     </button>
 
                     <button

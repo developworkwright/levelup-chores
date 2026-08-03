@@ -22,6 +22,7 @@ class Chore extends Model
         'cadence',
         'min_age',
         'quest_eligible',
+        'wheel_eligible',
         'used_at',
         'expires_at',
     ];
@@ -31,6 +32,7 @@ class Chore extends Model
         return [
             'cadence' => ChoreCadence::class,
             'quest_eligible' => 'boolean',
+            'wheel_eligible' => 'boolean',
             'used_at' => 'datetime',
             'expires_at' => 'datetime',
         ];
@@ -138,6 +140,11 @@ class Chore extends Model
     public function scopeQuestEligible(Builder $query): Builder
     {
         return $query->where('quest_eligible', true);
+    }
+
+    public function scopeWheelEligible(Builder $query): Builder
+    {
+        return $query->where('wheel_eligible', true);
     }
 
     /**

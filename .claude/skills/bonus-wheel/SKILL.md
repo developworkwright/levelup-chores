@@ -9,11 +9,13 @@ Covers the daily spin-for-a-multiplier mechanic, owned by `app/Services/SpinServ
 
 ## The wheel only shows what can actually be won
 
-`eligibleChoresFor()` filters to age-appropriate chores, drops today's daily quest, and — since cooldowns are household-wide (see [[chores-and-quests]]) — drops anything `ChoreService::stateFor()` doesn't call `'ready'`. A sibling's claim, or the kid's own pending claim, takes a chore off the wheel; `ChoreCadence::Unlimited` chores never leave it, and a parent rejection puts one back.
+`eligibleChoresFor()` filters to age-appropriate chores, drops today's daily quest, drops anything a parent set `chores.wheel_eligible = false` on, and — since cooldowns are household-wide (see [[chores-and-quests]]) — drops anything `ChoreService::stateFor()` doesn't call `'ready'`. A sibling's claim, or the kid's own pending claim, takes a chore off the wheel; `ChoreCadence::Unlimited` chores never leave it, and a parent rejection puts one back.
 
 Without that filter the wheel happily lands a 3x boost on a chore nobody can claim any more — a prize that pays nothing.
 
-**The chore today's spin already landed on is force-kept**, claimed or not. The wheel has to keep rendering the segment it stopped on, and `mount()`/`spin()` both find their rotation angle by searching for that chore's index in this collection — drop it and the index search returns false, pointing the wheel at segment 0. `multiplierFor()` reads the `spins` row directly, so a boost stays valid regardless.
+`wheel_eligible` is **independent of `quest_eligible`** and exists for opportunistic jobs ("put the groceries away") that are only real on some days. Both are per-chore toggles on the parent Chores admin (`toggleWheelEligible` / `toggleQuestEligible`); barring a chore from the wheel does not take it off the board or change its points.
+
+**The chore today's spin already landed on is force-kept**, claimed or not — over the cooldown filter *and* over a parent barring it after the fact. The wheel has to keep rendering the segment it stopped on, and `mount()`/`spin()` both find their rotation angle by searching for that chore's index in this collection — drop it and the index search returns false, pointing the wheel at segment 0. `multiplierFor()` reads the `spins` row directly, so a boost stays valid regardless.
 
 An empty pool makes `spin()` throw. The wheel page guards *in front of* that call rather than catching it, because nothing else catches it either.
 
