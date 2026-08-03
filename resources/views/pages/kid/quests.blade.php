@@ -846,7 +846,7 @@ new class extends Component
                 <a
                     href="{{ route('kid.goal') }}"
                     wire:navigate
-                    class="mt-3 inline-block font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase transition hover:text-fq-lime"
+                    class="mt-3 inline-block font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase transition hover:text-fq-text"
                 >Plan it out &rarr;</a>
             </div>
 

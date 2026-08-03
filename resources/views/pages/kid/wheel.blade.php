@@ -2,8 +2,11 @@
 
 use App\Enums\PerkEffect;
 use App\Exceptions\PerkUnavailableException;
+use App\Models\DailyQuest;
 use App\Models\Profile;
+use App\Models\Spin;
 use App\Services\BadgeService;
+use App\Services\ChoreService;
 use App\Services\PerkInventoryService;
 use App\Services\SpinService;
 use Illuminate\Support\Facades\Auth;
@@ -20,6 +23,13 @@ new class extends Component
     public bool $revealed = false;
 
     public ?string $perkMessage = null;
+
+    /**
+     * Why a tap on the boosted chore didn't take. Same reasoning as the Quests
+     * board: cooldowns are household-wide, so a page left open can go stale,
+     * and a button that silently no-ops reads as broken.
+     */
+    public ?string $claimMessage = null;
 
     public function mount(): void
     {
@@ -127,13 +137,129 @@ new class extends Component
         }
     }
 
+    /**
+     * Today's quest, or null when the household has nothing eligible to draw
+     * one from. The Quests page treats that as fatal because it has nothing to
+     * render without one — the wheel has a whole page that works either way, so
+     * it degrades to "no quest" rather than taking the spin down with it.
+     */
+    private function questOrNull(): ?DailyQuest
+    {
+        try {
+            return app(ChoreService::class)->questFor($this->profile);
+        } catch (\RuntimeException) {
+            return null;
+        }
+    }
+
+    /**
+     * What the Active Boost card can offer for the chore the wheel landed on:
+     * the claim itself, or the reason it isn't available.
+     *
+     * The boosted chore is the one a kid came here to do, so making them go
+     * and find it again on the Quests board is a tab switch for no reason.
+     *
+     * @return ?array{claimable: bool, label: string, note: ?string, toQuests: bool}
+     */
+    private function boostClaim(?Spin $boost): ?array
+    {
+        if (! $boost) {
+            return null;
+        }
+
+        $service = app(ChoreService::class);
+        $chore = $boost->chore;
+        $quest = $this->questOrNull();
+
+        // The chest reveal is the whole ceremony of the main quest, so a boost
+        // that landed on it gets pointed back there rather than quietly
+        // claiming it from under the unopened chest.
+        if ($quest && $quest->chore_id === $chore->id) {
+            return [
+                'claimable' => false,
+                'label' => 'This is your main quest',
+                'note' => 'Open the chest on the Quests page to claim it.',
+                'toQuests' => true,
+            ];
+        }
+
+        if ($this->profile->household->require_quest_first && $quest && $quest->completed_at === null) {
+            return [
+                'claimable' => false,
+                'label' => 'Main quest first',
+                'note' => 'Clear today\'s main quest and this unlocks.',
+                'toQuests' => true,
+            ];
+        }
+
+        $state = $service->stateFor($this->profile, $chore);
+        $claimant = $service->claimantFor($chore);
+
+        return match (true) {
+            $state === 'ready' => ['claimable' => true, 'label' => 'Mark it done', 'note' => null, 'toQuests' => false],
+            $state === 'pending' => ['claimable' => false, 'label' => 'Waiting on a parent', 'note' => null, 'toQuests' => false],
+            $state === 'expired' => ['claimable' => false, 'label' => "Time's up", 'note' => 'A parent is taking that one.', 'toQuests' => false],
+            $claimant && $claimant->profile_id !== $this->profile->id => [
+                'claimable' => false,
+                'label' => $claimant->profile->name.' got this one',
+                'note' => null,
+                'toQuests' => false,
+            ],
+            default => ['claimable' => false, 'label' => 'Already done today', 'note' => null, 'toQuests' => false],
+        };
+    }
+
+    /**
+     * Claims the boosted chore without leaving the page. Every guard the Quests
+     * board applies is re-run here — a disabled button in a browser is never
+     * the thing standing between a kid and a double claim.
+     */
+    public function claimBoostedChore(): void
+    {
+        $this->claimMessage = null;
+
+        $boost = app(SpinService::class)->today($this->profile);
+        $claim = $this->boostClaim($boost);
+
+        if (! $claim) {
+            return;
+        }
+
+        if (! $claim['claimable']) {
+            $this->claimMessage = $claim['note'] ?? $claim['label'].'.';
+
+            return;
+        }
+
+        $service = app(ChoreService::class);
+        $chore = $boost->chore;
+
+        if (! $chore->isAppropriateFor($this->profile)) {
+            return;
+        }
+
+        $todaysMystery = $service->mysteryChoreFor($this->profile->household);
+
+        $this->dispatch(
+            'celebrate',
+            message: $todaysMystery && $todaysMystery->id === $chore->id
+                ? 'You found the Mystery Chore! +'.ChoreService::MYSTERY_BONUS_POINTS.' bonus!'
+                : "{$chore->name} claimed at {$boost->multiplier}x! Bonus wheel treat earned.",
+            treat: 'cookie',
+        );
+
+        $service->claim($this->profile, $chore);
+    }
+
     public function with(): array
     {
         $chores = app(SpinService::class)->eligibleChoresFor($this->profile);
         $inventory = app(PerkInventoryService::class);
+        $boost = app(SpinService::class)->today($this->profile);
 
         return [
-            'boost' => app(SpinService::class)->today($this->profile),
+            'boost' => $boost,
+            'boostClaim' => $this->boostClaim($boost),
             'wheelChores' => $chores,
             'wheelSlice' => 360 / max(1, $chores->count()),
             'respin' => $inventory->holds($this->profile, PerkEffect::WheelRespin)
@@ -311,6 +437,40 @@ new class extends Component
                         <span class="text-sm font-semibold">{{ $boost->chore->name }}</span>
                         <span class="font-baloo text-[22px] font-extrabold" style="color: {{ $boostColor }}">{{ $boost->multiplier }}x</span>
                     </div>
+
+                    {{-- The claim, right here. The boosted chore is the one a
+                         kid came to the wheel for; sending them off to find it
+                         again on the board is a tab switch for no reason. --}}
+                    @if ($boostClaim && $boostClaim['claimable'])
+                        <button
+                            type="button"
+                            wire:click="claimBoostedChore"
+                            class="mt-3 w-full rounded-[14px] py-[11px] text-sm font-semibold text-fq-bg transition hover:brightness-110"
+                            style="background: var(--fq-lime)"
+                        >{{ $boostClaim['label'] }}</button>
+                    @elseif ($boostClaim)
+                        <button
+                            type="button"
+                            disabled
+                            class="mt-3 w-full cursor-default rounded-[14px] bg-fq-panel-alt py-[11px] text-sm font-semibold text-fq-text-4"
+                        >{{ $boostClaim['label'] }}</button>
+                    @endif
+
+                    @if ($boostClaim && $boostClaim['note'])
+                        <p class="mt-2 text-[13px] text-fq-text-5">{{ $boostClaim['note'] }}</p>
+                    @endif
+
+                    @if ($boostClaim && $boostClaim['toQuests'])
+                        <a
+                            href="{{ route('kid.quests') }}"
+                            wire:navigate
+                            class="mt-2 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase transition hover:text-fq-text"
+                        >Go to Quests &rarr;</a>
+                    @endif
+
+                    @if ($claimMessage)
+                        <p class="mt-2 text-[13px] font-semibold text-fq-gold">{{ $claimMessage }}</p>
+                    @endif
                 @else
                     <p class="mt-3 text-[13px] text-fq-text-5">No boost yet today.</p>
                 @endif
