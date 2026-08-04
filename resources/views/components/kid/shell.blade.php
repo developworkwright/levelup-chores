@@ -169,7 +169,7 @@
              world, and a pill never changes it. --}}
         <nav
             aria-label="Pages in {{ $worlds[$activeWorld]['label'] }}"
-            class="mt-[10px] flex flex-wrap gap-2 px-[2px] {{ $worlds[$activeWorld]['justify'] }}"
+            class="mt-[10px] flex flex-wrap gap-[6px] px-[2px] sm:gap-2 {{ $worlds[$activeWorld]['justify'] }}"
         >
             @foreach ($worlds[$activeWorld]['pages'] as $key)
                 @php $open = $active === $key; @endphp
@@ -177,10 +177,14 @@
                 <a
                     href="{{ route($pages[$key]['route']) }}"
                     wire:navigate
-                    {{-- shrink-0 with the label unwrapped: the pill sizes to its
-                         own text plus the padding, so a long page name can never
-                         be squeezed narrower than the word it carries. --}}
-                    class="inline-flex shrink-0 items-center gap-2 rounded-full border px-[22px] py-[10px] text-sm whitespace-nowrap transition hover:border-fq-line-focus {{ $open ? 'border-fq-line-focus font-semibold text-fq-text' : 'border-fq-line text-fq-text-3' }}"
+                    {{-- On a phone the pills split the row evenly, so every page
+                         is a thumb-sized target rather than a word-sized one;
+                         the padding and type step down to keep all three on one
+                         line. From `sm` up they go back to sizing to their own
+                         label, which is what lets the row sit justified under
+                         the world button that opened it. The label is never
+                         wrapped or shrunk in either mode. --}}
+                    class="inline-flex flex-1 items-center justify-center gap-[6px] rounded-full border px-3 py-[11px] text-[13px] whitespace-nowrap transition hover:border-fq-line-focus sm:flex-none sm:gap-2 sm:px-[22px] sm:py-[10px] sm:text-sm {{ $open ? 'border-fq-line-focus font-semibold text-fq-text' : 'border-fq-line text-fq-text-3' }}"
                     style="background: {{ $open ? 'var(--fq-tab-active)' : 'var(--fq-panel)' }}"
                     @if ($open) aria-current="page" @endif
                 >
