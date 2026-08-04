@@ -153,6 +153,53 @@ class GoalPlannerTest extends TestCase
         $this->assertSame(3, substr_count($html, 'PTS/DAY'));
     }
 
+    public function test_the_countdown_banner_names_the_day_the_goal_lands(): void
+    {
+        $household = Household::factory()->create();
+        $this->freezeMay($household);
+
+        $item = StoreItem::factory()->for($household)->create(['name' => 'Skateboard', 'cost' => 1000]);
+        $this->loginKid($household, [
+            'points' => 100,
+            'saving_for_store_item_id' => $item->id,
+            'daily_points_goal' => 300,
+        ]);
+        Chore::factory()->for($household)->create(['points' => 100]);
+
+        Volt::test('kid.goal')
+            ->assertOk()
+            ->assertSee('days until Skateboard is yours')
+            ->assertSee('If you earn 300 points a day')
+            ->assertSee('May 4, 2026');
+    }
+
+    public function test_the_countdown_banner_stays_away_until_there_is_a_plan(): void
+    {
+        // A goal but no daily target: there's nothing to count down at, and a
+        // banner reading "— days until —" says less than no banner.
+        $household = Household::factory()->create();
+        $item = StoreItem::factory()->for($household)->create(['name' => 'Skateboard', 'cost' => 1000]);
+        $this->loginKid($household, ['points' => 100, 'saving_for_store_item_id' => $item->id]);
+        Chore::factory()->for($household)->create(['points' => 100]);
+
+        Volt::test('kid.goal')
+            ->assertOk()
+            ->assertDontSee('is yours');
+    }
+
+    public function test_the_family_goal_is_answered_with_the_kids_own_target(): void
+    {
+        $household = Household::factory()->create(['goal_target' => 1200, 'goal_now' => 0]);
+        Profile::factory()->for($household)->create();
+        $this->loginKid($household, ['daily_points_goal' => 200]);
+        Chore::factory()->for($household)->create(['points' => 100]);
+
+        // 200 each across two kids is 400 a day, so 1200 takes three days.
+        Volt::test('kid.goal')
+            ->assertOk()
+            ->assertSee('3 DAYS IF EVERYONE EARNS 200 EACH');
+    }
+
     public function test_a_kid_with_no_saving_goal_still_gets_the_family_plan(): void
     {
         $household = Household::factory()->create(['goal_target' => 1200, 'goal_now' => 0]);

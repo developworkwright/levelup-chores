@@ -2,11 +2,15 @@
 
 use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
+use App\Enums\PerkEffect;
+use App\Enums\SiblingOfferStatus;
 use App\Models\Badge;
 use App\Models\ChoreCompletion;
 use App\Models\DailyQuest;
 use App\Models\LedgerEntry;
+use App\Models\OwnedPerk;
 use App\Models\Profile;
+use App\Models\SiblingOffer;
 use App\Models\Spin;
 use App\Models\StreakRepair;
 use App\Services\HouseholdClock;
@@ -15,11 +19,20 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Livewire\Volt\Component;
+use Livewire\WithPagination;
 
 new class extends Component
 {
+    use WithPagination;
+
     /** How many household days the activity strip covers. */
     private const RECENT_DAYS = 14;
+
+    /** Entries in the "Recent activity" list above the full history. */
+    private const RECENT_ENTRIES = 5;
+
+    /** History rows per page — a short page, because it's a scroll not a table. */
+    private const HISTORY_PER_PAGE = 8;
 
     /**
      * The window the middle "chores done" figure covers. A rolling seven days
@@ -186,6 +199,70 @@ new class extends Component
             ]]);
     }
 
+    /**
+     * The chip a ledger row wears. Kinds share a trio by direction rather than
+     * each getting its own colour: what a kid wants off a wall of rows is which
+     * way the points went, and six palettes would say that six ways.
+     *
+     * @return array{label: string, tone: string}
+     */
+    private function tagFor(LedgerKind $kind): array
+    {
+        return match ($kind) {
+            LedgerKind::Earn => ['label' => 'EARNED', 'tone' => 'in'],
+            LedgerKind::CashIn => ['label' => 'CASH IN', 'tone' => 'in'],
+            LedgerKind::Spend => ['label' => 'SPENT', 'tone' => 'out'],
+            LedgerKind::CashOut => ['label' => 'CASH OUT', 'tone' => 'out'],
+            LedgerKind::Adjustment => ['label' => 'ADJUSTED', 'tone' => 'side'],
+            LedgerKind::Transfer => ['label' => 'TRADE', 'tone' => 'side'],
+        };
+    }
+
+    /**
+     * How long ago, in the shortest form that still says it: today and
+     * yesterday by name, this week by weekday, anything older by date.
+     */
+    private function whenLabel(Carbon $date, Carbon $today): string
+    {
+        $daysAgo = (int) $date->copy()->startOfDay()->diffInDays($today->copy()->startOfDay());
+
+        return match (true) {
+            $daysAgo <= 0 => 'TODAY',
+            $daysAgo === 1 => 'YEST',
+            $daysAgo < 7 => strtoupper($date->format('D')),
+            default => strtoupper($date->format('M j')),
+        };
+    }
+
+    /**
+     * One ledger entry flattened for display, so the activity list and the
+     * history grid below it can't drift apart.
+     *
+     * @return array{id: int, tag: string, tone: string, text: string, amount: string, amountColor: string, when: string}
+     */
+    private function ledgerRow(LedgerEntry $entry, Carbon $today): array
+    {
+        $tag = $this->tagFor($entry->kind);
+
+        return [
+            'id' => $entry->id,
+            'tag' => $tag['label'],
+            'tone' => $tag['tone'],
+            'text' => $entry->description,
+            'amount' => match (true) {
+                $entry->amount > 0 => '+'.number_format($entry->amount),
+                $entry->amount < 0 => '−'.number_format(abs($entry->amount)),
+                default => '—',
+            },
+            'amountColor' => match (true) {
+                $entry->amount > 0 => 'var(--fq-lime)',
+                $entry->amount < 0 => 'var(--fq-coral)',
+                default => 'var(--fq-text-6)',
+            },
+            'when' => $this->whenLabel($entry->created_at, $today),
+        ];
+    }
+
     public function with(): array
     {
         $completions = ChoreCompletion::where('profile_id', $this->profile->id)
@@ -204,6 +281,7 @@ new class extends Component
 
         $flows = $this->ledgerFlows();
         $earned = (int) $flows->sum('in');
+        $spent = (int) $flows->sum('out');
 
         /*
          * Derived from the balance rather than summed out of the ledger, which
@@ -224,6 +302,21 @@ new class extends Component
 
         $spins = Spin::where('profile_id', $this->profile->id)->count();
         $tripleSpins = Spin::where('profile_id', $this->profile->id)->where('multiplier', 3)->count();
+
+        $rerolls = OwnedPerk::where('profile_id', $this->profile->id)
+            ->where('effect', PerkEffect::QuestReroll)
+            ->whereNotNull('consumed_at')
+            ->count();
+
+        // Both directions of a trade: one this kid offered and one they were
+        // offered are the same event to them, and only the deals that actually
+        // settled count as done.
+        $trades = SiblingOffer::where(fn ($query) => $query
+            ->where('from_profile_id', $this->profile->id)
+            ->orWhere('to_profile_id', $this->profile->id))
+            ->selectRaw('count(*) as asked')
+            ->selectRaw('sum(case when status = ? then 1 else 0 end) as done', [SiblingOfferStatus::Accepted->value])
+            ->first();
 
         $badgesEarned = $this->profile->badges()->count();
 
@@ -248,59 +341,110 @@ new class extends Component
         $thisWeek = $this->dayWindow($byDay, $today, self::WEEK_DAYS);
         $strip = $this->dayWindow($byDay, $today->copy()->subDays($this->daysBack), self::RECENT_DAYS);
 
+        $history = $this->profile->ledgerEntries()
+            ->latest('created_at')
+            ->latest('id')
+            ->paginate(self::HISTORY_PER_PAGE, pageName: 'history');
+
+        $bestDayOn = $bestDayCount > 0
+            ? Carbon::parse($dayCounts->search($bestDayCount))->toFormattedDateString()
+            : 'still to come';
+
         return [
-            'choreSplit' => [
-                [
-                    'label' => 'Today',
-                    'count' => $thisWeek->last()['count'],
-                    'points' => $thisWeek->last()['points'],
-                    'color' => 'var(--fq-lime)',
-                ],
-                [
-                    'label' => 'Last 7 days',
-                    'count' => (int) $thisWeek->sum('count'),
-                    'points' => (int) $thisWeek->sum('points'),
-                    'color' => 'var(--fq-cyan)',
-                ],
-                [
-                    'label' => 'Lifetime',
-                    'count' => $completions->count(),
-                    'points' => (int) $completions->sum('points_awarded'),
-                    'color' => 'var(--fq-gold)',
-                ],
+            // The one number the page is opened for, at the size that says so —
+            // with today and the week beside it, because a lifetime total on
+            // its own can't answer "how am I doing right now".
+            'lifetimeChores' => $completions->count(),
+            'heroTiles' => [
+                ['label' => 'Today', 'count' => $thisWeek->last()['count'], 'color' => 'var(--fq-lime)'],
+                ['label' => 'Last 7 days', 'count' => (int) $thisWeek->sum('count'), 'color' => 'var(--fq-cyan)'],
+                ['label' => 'Pts banked', 'count' => $earned, 'color' => 'var(--fq-coral)'],
             ],
-            'tiles' => [
+            /*
+             * One cell per stat, all the same shape. The old layout paired two
+             * stats to a line and made the small print carry a value as well as
+             * a qualifier, which is more work than a caption can do.
+             */
+            'grid' => [
                 [
                     'label' => 'Points earned',
                     'value' => number_format($earned),
-                    'sub' => '≈ '.$this->dollars($earned).' all time',
+                    'suffix' => '≈ '.$this->dollars($earned),
                     'color' => 'var(--fq-gold)',
                 ],
                 [
-                    'label' => 'Cashed out',
-                    'value' => number_format($cashedOut),
-                    'sub' => '≈ '.$this->dollars($cashedOut).' collected',
+                    'label' => 'Points spent',
+                    'value' => number_format($spent),
+                    'suffix' => '≈ '.$this->dollars($spent),
                     'color' => 'var(--fq-coral)',
                 ],
                 [
                     'label' => 'Quests cleared',
                     'value' => number_format($questsCleared),
-                    'sub' => $questsAssigned > 0
-                        ? round($questsCleared / $questsAssigned * 100).'% of '.$questsAssigned.' handed out'
-                        : 'none handed out yet',
+                    'suffix' => $questsAssigned > 0 ? 'of '.$questsAssigned.' handed out' : 'none handed out yet',
                     'color' => 'var(--fq-violet)',
                 ],
                 [
-                    'label' => 'Badges',
+                    'label' => 'Best day',
+                    'value' => (string) $bestDayCount,
+                    'suffix' => $bestDayCount > 0 ? 'chores · '.$bestDayOn : $bestDayOn,
+                    'color' => 'var(--fq-text)',
+                ],
+                [
+                    'label' => 'Longest streak',
+                    'value' => (string) $this->longestStreak(),
+                    'suffix' => 'days',
+                    'color' => 'var(--fq-streak)',
+                ],
+                [
+                    'label' => 'Current streak',
+                    'value' => (string) $this->profile->streak,
+                    'suffix' => 'days right now',
+                    'color' => 'var(--fq-lime)',
+                ],
+                [
+                    'label' => 'Level',
+                    'value' => 'LVL '.$this->profile->level(),
+                    'suffix' => number_format($this->profile->xp).' XP',
+                    'color' => 'var(--fq-cyan)',
+                ],
+                [
+                    'label' => 'Badges earned',
                     'value' => $badgesEarned.' / '.Badge::count(),
-                    'sub' => 'trophy case',
+                    'suffix' => 'trophy case',
                     'color' => 'var(--fq-magenta)',
                 ],
                 [
                     'label' => 'Days active',
                     'value' => number_format($dayCounts->count()),
-                    'sub' => 'days with a chore done',
+                    'suffix' => 'with a chore done',
                     'color' => 'var(--fq-cyan)',
+                ],
+                [
+                    'label' => 'Wheel spins',
+                    'value' => (string) $spins,
+                    'suffix' => $tripleSpins.' landed 3×',
+                    'color' => 'var(--fq-lime)',
+                ],
+                [
+                    'label' => 'Quest rerolls',
+                    'value' => (string) $rerolls,
+                    'suffix' => 'used',
+                    'color' => 'var(--fq-cyan)',
+                ],
+                [
+                    'label' => 'Trades done',
+                    'value' => (string) (int) $trades->done,
+                    'suffix' => 'of '.(int) $trades->asked.' asked',
+                    'color' => 'var(--fq-text)',
+                ],
+                [
+                    'label' => 'Cash-outs',
+                    'value' => (string) $cashOutAmounts->count(),
+                    'suffix' => $cashOutAmounts->isNotEmpty()
+                        ? 'biggest '.number_format($cashOutAmounts->max())
+                        : 'nothing cashed out yet',
+                    'color' => 'var(--fq-coral)',
                 ],
             ],
             'topChores' => $this->topChores($completions),
@@ -314,42 +458,18 @@ new class extends Component
                 : $strip->first()['date']->toFormattedDateString().' – '.$strip->last()['date']->toFormattedDateString(),
             'canGoEarlier' => $this->daysBack < $maxDaysBack,
             'canGoLater' => $this->daysBack > 0,
-            'records' => [
-                [
-                    'label' => 'Best day',
-                    'value' => $bestDayCount.' '.Str::plural('chore', $bestDayCount),
-                    'sub' => $bestDayCount > 0
-                        ? Carbon::parse($dayCounts->search($bestDayCount))->toFormattedDateString()
-                        : 'still to come',
-                ],
-                [
-                    'label' => 'Longest streak',
-                    'value' => $this->longestStreak().'d',
-                    'sub' => 'best run of quest days',
-                ],
-                [
-                    'label' => 'Current streak',
-                    'value' => $this->profile->streak.'d',
-                    'sub' => 'days in a row right now',
-                ],
-                [
-                    'label' => 'Level',
-                    'value' => 'LVL '.$this->profile->level(),
-                    'sub' => number_format($this->profile->xp).' XP total',
-                ],
-                [
-                    'label' => 'Wheel spins',
-                    'value' => (string) $spins,
-                    'sub' => $tripleSpins.' landed 3×',
-                ],
-                [
-                    'label' => 'Cash-outs',
-                    'value' => (string) $cashOutAmounts->count(),
-                    'sub' => $cashOutAmounts->isNotEmpty()
-                        ? 'biggest: '.number_format($cashOutAmounts->max()).' pts'
-                        : 'nothing cashed out yet',
-                ],
-            ],
+            // The last few things that happened, and then the same ledger in
+            // full underneath. The short list is the one a kid reads; the long
+            // one is there for "where did that go?".
+            'activity' => $this->profile->ledgerEntries()
+                ->latest('created_at')
+                ->latest('id')
+                ->limit(self::RECENT_ENTRIES)
+                ->get()
+                ->map(fn (LedgerEntry $entry) => $this->ledgerRow($entry, $today)),
+            'history' => $history,
+            'historyRows' => collect($history->items())
+                ->map(fn (LedgerEntry $entry) => $this->ledgerRow($entry, $today)),
             'balance' => $this->profile->points,
             'balanceDollars' => $this->dollars($this->profile->points),
             'earned' => $earned,
@@ -389,40 +509,44 @@ new class extends Component
             </p>
         </div>
 
-        {{-- Chores get the wide card rather than a tile in the grid below:
-             "how am I doing today" is the question this page is opened with,
-             and a lifetime total on its own can't answer it. --}}
-        <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
-            <p class="font-mono-fq text-[10px] tracking-[0.16em] text-fq-text-4 uppercase">Chores done</p>
+        {{-- Chores get the hero rather than a cell in the grid below: "how am I
+             doing" is the question this page is opened with, and the lifetime
+             count is the answer, with today and the week beside it. --}}
+        <div class="flex flex-wrap items-end gap-5 rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
+            <div>
+                <p class="font-mono-fq text-[10px] tracking-[0.16em] text-fq-text-4 uppercase">Chores done, all time</p>
+                <p class="font-baloo text-[76px] leading-[0.9] font-extrabold text-fq-gold">
+                    {{ number_format($lifetimeChores) }}
+                </p>
+            </div>
 
-            <div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
-                @foreach ($choreSplit as $window)
+            <div class="ml-auto flex flex-wrap justify-end gap-[10px] pb-2">
+                @foreach ($heroTiles as $tile)
                     <div
-                        wire:key="window-{{ $window['label'] }}"
-                        class="rounded-[16px] border border-fq-line-2 bg-fq-sunk px-4 py-[14px]"
+                        wire:key="hero-{{ $tile['label'] }}"
+                        class="rounded-[14px] border border-fq-line-2 bg-fq-sunk px-[15px] py-[11px]"
                     >
-                        <p class="font-baloo text-[34px] leading-none font-extrabold" style="color: {{ $window['color'] }}">
-                            {{ number_format($window['count']) }}
+                        <p class="font-baloo text-[26px] leading-none font-extrabold" style="color: {{ $tile['color'] }}">
+                            {{ number_format($tile['count']) }}
                         </p>
-                        <p class="mt-2 font-mono-fq text-[10px] tracking-[0.16em] text-fq-text-4 uppercase">
-                            {{ $window['label'] }}
-                        </p>
-                        <p class="mt-[3px] text-[12px] text-fq-text-5">
-                            {{ number_format($window['points']) }} pts from chores
+                        <p class="mt-[5px] font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-4 uppercase">
+                            {{ $tile['label'] }}
                         </p>
                     </div>
                 @endforeach
             </div>
         </div>
 
-        <div class="grid grid-cols-[repeat(auto-fill,minmax(168px,1fr))] gap-3">
-            @foreach ($tiles as $tile)
-                <div wire:key="tile-{{ $tile['label'] }}" class="rounded-[20px] border border-fq-line bg-fq-panel p-4">
-                    <p class="font-mono-fq text-[10px] tracking-[0.16em] text-fq-text-4 uppercase">{{ $tile['label'] }}</p>
-                    <p class="mt-2 font-baloo text-[28px] leading-none font-extrabold" style="color: {{ $tile['color'] }}">
-                        {{ $tile['value'] }}
-                    </p>
-                    <p class="mt-[6px] text-[12px] text-fq-text-5">{{ $tile['sub'] }}</p>
+        <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
+            @foreach ($grid as $cell)
+                <div wire:key="cell-{{ $cell['label'] }}" class="rounded-[18px] border border-fq-line bg-fq-panel px-4 py-[14px]">
+                    <p class="font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-4 uppercase">{{ $cell['label'] }}</p>
+                    <div class="mt-[7px] flex flex-wrap items-baseline gap-[7px]">
+                        <span class="font-baloo text-2xl leading-none font-extrabold" style="color: {{ $cell['color'] }}">
+                            {{ $cell['value'] }}
+                        </span>
+                        <span class="font-mono-fq text-[10px] text-fq-text-5">{{ $cell['suffix'] }}</span>
+                    </div>
                 </div>
             @endforeach
         </div>
@@ -560,19 +684,78 @@ new class extends Component
         </div>
 
         <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
-            <h3 class="font-baloo text-xl font-bold">Records</h3>
-
-            <div class="mt-2 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-x-4">
-                @foreach ($records as $record)
-                    <div wire:key="record-{{ $record['label'] }}" class="flex items-center gap-3 border-b border-fq-divider py-[12px]">
-                        <div class="min-w-0 flex-1">
-                            <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">{{ $record['label'] }}</p>
-                            <p class="mt-[2px] text-[13px] text-fq-text-5">{{ $record['sub'] }}</p>
-                        </div>
-                        <span class="font-baloo text-[19px] font-extrabold whitespace-nowrap text-fq-text">{{ $record['value'] }}</span>
-                    </div>
-                @endforeach
+            <div class="flex items-baseline justify-between gap-3">
+                <h3 class="font-baloo text-xl font-bold">Recent activity</h3>
+                <span class="font-mono-fq text-[10px] text-fq-text-4">LAST {{ $activity->count() }}</span>
             </div>
+
+            <div class="mt-3 flex flex-col gap-2">
+                @forelse ($activity as $row)
+                    <div
+                        wire:key="activity-{{ $row['id'] }}"
+                        class="flex items-center gap-3 rounded-[14px] border border-fq-line-2 bg-fq-sunk px-[14px] py-[11px]"
+                    >
+                        {{-- Fixed width so the tags stack into a column: with
+                             the chips sized to their own words, a list of them
+                             reads as a ragged edge rather than a key. --}}
+                        <span
+                            class="inline-flex w-[80px] shrink-0 items-center justify-center rounded-fq-chip border py-[4px] font-mono-fq text-[9px] tracking-[0.1em]"
+                            style="border-color: var(--fq-tag-{{ $row['tone'] }}-line); background: var(--fq-tag-{{ $row['tone'] }}-bg); color: var(--fq-tag-{{ $row['tone'] }}-fg)"
+                        >{{ $row['tag'] }}</span>
+                        <span class="min-w-0 flex-1 truncate text-sm">{{ $row['text'] }}</span>
+                        <span
+                            class="shrink-0 font-mono-fq text-[11px]"
+                            style="color: {{ $row['amountColor'] }}"
+                        >{{ $row['amount'] }}</span>
+                        <span class="w-[56px] shrink-0 text-right font-mono-fq text-[10px] text-fq-text-5">{{ $row['when'] }}</span>
+                    </div>
+                @empty
+                    <p class="py-2 text-sm text-fq-text-5">Nothing has happened yet. Go clear a chore.</p>
+                @endforelse
+            </div>
+        </div>
+
+        {{-- The same entries again, in full. Narrower rows and a pager rather
+             than the cards above, because this one is read by scanning down a
+             column, not by looking at the top of it. --}}
+        <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
+            <div class="flex items-baseline justify-between gap-3">
+                <h3 class="font-baloo text-xl font-bold">Complete history</h3>
+                <span class="font-mono-fq text-[10px] text-fq-text-4">
+                    {{ number_format($history->total()) }} {{ $history->total() === 1 ? 'ENTRY' : 'ENTRIES' }}
+                </span>
+            </div>
+
+            <div class="mt-[10px] flex flex-col">
+                @forelse ($historyRows as $row)
+                    <div
+                        wire:key="history-{{ $row['id'] }}"
+                        class="grid grid-cols-[86px_minmax(0,1fr)_86px_74px] items-center gap-3 border-t border-fq-divider py-[10px]"
+                    >
+                        <span
+                            class="font-mono-fq text-[9px] tracking-[0.1em]"
+                            style="color: var(--fq-tag-{{ $row['tone'] }}-fg)"
+                        >{{ $row['tag'] }}</span>
+                        <span class="min-w-0 truncate text-[13px] text-fq-text-2">{{ $row['text'] }}</span>
+                        <span
+                            class="text-right font-mono-fq text-[11px]"
+                            style="color: {{ $row['amountColor'] }}"
+                        >{{ $row['amount'] }}</span>
+                        <span class="text-right font-mono-fq text-[10px] text-fq-text-5">{{ $row['when'] }}</span>
+                    </div>
+                @empty
+                    <p class="py-2 text-sm text-fq-text-5">Your history starts with the first chore you clear.</p>
+                @endforelse
+            </div>
+
+            @if ($history->hasPages())
+                <p class="mt-[14px] font-mono-fq text-[10px] text-fq-text-5">
+                    {{ number_format($history->firstItem()) }}&ndash;{{ number_format($history->lastItem()) }}
+                    OF {{ number_format($history->total()) }}
+                </p>
+            @endif
+
+            <x-pager :paginator="$history" page-name="history" />
         </div>
     </div>
 </x-kid.shell>

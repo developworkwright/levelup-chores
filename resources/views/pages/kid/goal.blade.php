@@ -147,6 +147,10 @@ new class extends Component
 
         $plans = $ladder->map(fn (int $perDay) => $this->forecast($remaining, $perDay, $today, $step));
 
+        // The plan a kid is actually on, spelled out at the top of the page
+        // rather than left to be read off a row of the table below.
+        $chosenPlan = $dailyGoal ? $this->forecast($remaining, $dailyGoal, $today, $step) : null;
+
         $kidCount = max(1, (int) $household->profiles()->where('role', ProfileRole::Kid)->count());
         $familyRemaining = max(0, $household->goal_target - $household->goal_now);
         $familyPace = $chores->householdDailyPace($household);
@@ -162,10 +166,15 @@ new class extends Component
             'earnedToday' => $earnedToday,
             'todayPercent' => $dailyGoal > 0 ? min(100, (int) round($earnedToday / $dailyGoal * 100)) : 0,
             'pace' => $pace,
-            // The plan a kid is actually on, spelled out at the top of the page
-            // rather than left to be read off a row of the table below.
-            'chosenPlan' => $dailyGoal
-                ? $this->forecast($remaining, $dailyGoal, $today, $step)
+            'chosenPlan' => $chosenPlan,
+            /*
+             * The whole page in one number. Only shown once all of its parts
+             * exist — something to save for, a daily target, and a date near
+             * enough to be worth naming — because a banner reading "— days
+             * until —" is worse than no banner at all.
+             */
+            'countdown' => $saving && $remaining > 0 && $chosenPlan && $chosenPlan['days'] !== null
+                ? $chosenPlan
                 : null,
             'pacePlan' => $pace >= 1
                 ? $this->forecast($remaining, (int) floor($pace), $today, $step)
@@ -195,6 +204,11 @@ new class extends Component
                     ];
                 })
             ),
+            // The family goal read against the kid's own target: the one rung
+            // of the family ladder they've already committed to.
+            'familyDaysAtMyTarget' => $dailyGoal
+                ? $this->daysAt($familyRemaining, $dailyGoal * $kidCount)
+                : null,
             'familyPace' => $familyPace,
             'familyPacePlan' => $familyPace >= 1
                 ? $this->forecast($familyRemaining, (int) floor($familyPace), $today, $step)
@@ -215,270 +229,305 @@ new class extends Component
             </p>
         </div>
 
-        @if ($saving)
+        @if ($countdown)
             <div
-                class="overflow-hidden rounded-[24px] border border-fq-line-3 p-5"
-                style="background: var(--fq-wash-goal)"
+                class="flex flex-wrap items-center gap-[18px] rounded-[22px] border border-fq-lime px-[22px] py-[18px]"
+                style="background: linear-gradient(120deg, #2a2405, #221046 55%, var(--fq-panel))"
             >
-                <div class="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                        <p class="font-mono-fq text-[10px] tracking-[0.22em] text-fq-text-4 uppercase">Saving up for</p>
-                        <h3 class="mt-[6px] font-baloo text-[27px] leading-[1.1] font-extrabold">{{ $saving->name }}</h3>
-                    </div>
-                    <a
-                        href="{{ route('kid.loot') }}"
-                        wire:navigate
-                        class="rounded-[12px] border border-dashed border-fq-line-4 bg-fq-sunk px-[14px] py-[9px] text-[13px] text-fq-text-2-b transition hover:border-solid hover:text-fq-text"
-                    >Change goal</a>
+                <span class="font-baloo text-[50px] leading-[0.9] font-extrabold text-fq-lime">
+                    {{ $countdown['days'] }}
+                </span>
+                <div class="min-w-[220px] flex-1">
+                    <p class="font-baloo text-[22px] leading-[1.2] font-extrabold">
+                        {{ Str::plural('day', $countdown['days']) }} until {{ $saving->name }} is yours
+                    </p>
+                    <p class="mt-1 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-3 uppercase">
+                        If you earn {{ number_format($dailyGoal) }} points a day ·
+                        {{ $countdown['date']->toFormattedDateString() }}
+                    </p>
                 </div>
-
-                <div class="mt-4 h-[18px] overflow-hidden rounded-full border border-fq-line bg-fq-track">
-                    <div
-                        class="h-full rounded-full transition-[width] duration-500"
-                        style="width:{{ $savingPercent }}%; background: linear-gradient(90deg, var(--fq-cyan), var(--fq-lime), var(--fq-gold))"
-                    ></div>
-                </div>
-
-                <div class="mt-3 flex flex-wrap items-center gap-4">
-                    <span class="font-mono-fq text-[11px] text-fq-text-2">
-                        {{ min($profile->points, $saving->cost) }} / {{ $saving->cost }} PTS
-                    </span>
-                    <span class="font-mono-fq text-[11px] text-fq-text-4">{{ $savingPercent }}%</span>
-                    <span class="font-mono-fq text-[11px] text-fq-gold">
-                        {{ number_format($savingRemaining) }} TO GO
-                    </span>
-                </div>
-            </div>
-        @else
-            <div class="rounded-[24px] border border-dashed border-fq-line-4 bg-fq-panel p-6 text-center">
-                <h3 class="font-baloo text-xl font-bold">Nothing picked yet</h3>
-                <p class="mx-auto mt-2 max-w-[320px] text-sm text-fq-text-2">
-                    Choose something in the Loot Shop to save for and this page will work
-                    out how long it takes. The family plan below works either way.
-                </p>
-                <a
-                    href="{{ route('kid.loot') }}"
-                    wire:navigate
-                    class="mt-4 inline-block rounded-[14px] px-5 py-[11px] font-baloo text-base font-extrabold text-fq-bg transition hover:brightness-110"
-                    style="background: var(--fq-gold)"
-                >Go pick one</a>
             </div>
         @endif
 
-        <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-                <h3 class="font-baloo text-xl font-bold">Your daily target</h3>
-                @if ($dailyGoal)
-                    <button
-                        type="button"
-                        wire:click="clearDailyGoal"
-                        class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase transition hover:text-fq-text"
-                    >Clear</button>
-                @endif
-            </div>
-
-            @if ($dailyGoal)
-                <div class="mt-3 flex flex-wrap items-center gap-4">
-                    <div class="flex items-center gap-2">
-                        <button
-                            type="button"
-                            wire:click="adjustDailyGoal(-{{ $suggestedGoal }})"
-                            class="h-10 w-10 rounded-[12px] border border-fq-line-3 bg-fq-sunk text-lg"
-                            aria-label="Lower the target"
-                        >&minus;</button>
-                        <span class="w-[92px] text-center font-baloo text-[34px] leading-none font-extrabold text-fq-lime">
-                            {{ number_format($dailyGoal) }}
-                        </span>
-                        <button
-                            type="button"
-                            wire:click="adjustDailyGoal({{ $suggestedGoal }})"
-                            class="h-10 w-10 rounded-[12px] border border-fq-line-3 bg-fq-sunk text-lg"
-                            aria-label="Raise the target"
-                        >+</button>
+        {{-- My plan on the left, ours on the right: the two halves are read
+             against each other, and stacking them buried the family goal under
+             a table on anything but a phone. --}}
+        <div class="flex flex-wrap items-start gap-[14px]">
+            <div class="flex min-w-0 flex-[1_1_420px] flex-col gap-[14px]">
+            @if ($saving)
+                <div
+                    class="overflow-hidden rounded-[24px] border border-fq-line-3 p-5"
+                    style="background: var(--fq-wash-goal)"
+                >
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <p class="font-mono-fq text-[10px] tracking-[0.22em] text-fq-text-4 uppercase">Saving up for</p>
+                            <h3 class="mt-[6px] font-baloo text-[27px] leading-[1.1] font-extrabold">{{ $saving->name }}</h3>
+                        </div>
+                        <a
+                            href="{{ route('kid.loot') }}"
+                            wire:navigate
+                            class="rounded-[12px] border border-dashed border-fq-line-4 bg-fq-sunk px-[14px] py-[9px] text-[13px] text-fq-text-2-b transition hover:border-solid hover:text-fq-text"
+                        >Change goal</a>
                     </div>
-                    <span class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Points a day</span>
+
+                    <div class="mt-4 h-[18px] overflow-hidden rounded-full border border-fq-line bg-fq-track">
+                        <div
+                            class="h-full rounded-full transition-[width] duration-500"
+                            style="width:{{ $savingPercent }}%; background: linear-gradient(90deg, var(--fq-cyan), var(--fq-lime), var(--fq-gold))"
+                        ></div>
+                    </div>
+
+                    <div class="mt-3 flex flex-wrap items-center gap-4">
+                        <span class="font-mono-fq text-[11px] text-fq-text-2">
+                            {{ min($profile->points, $saving->cost) }} / {{ $saving->cost }} PTS
+                        </span>
+                        <span class="font-mono-fq text-[11px] text-fq-text-4">{{ $savingPercent }}%</span>
+                        <span class="font-mono-fq text-[11px] text-fq-gold">
+                            {{ number_format($savingRemaining) }} TO GO
+                        </span>
+                    </div>
                 </div>
-
-                <div class="mt-4 h-4 overflow-hidden rounded-full border border-fq-line bg-fq-track">
-                    <div
-                        class="h-full rounded-full transition-[width] duration-500"
-                        style="width:{{ $todayPercent }}%; background: linear-gradient(90deg, var(--fq-cyan), var(--fq-lime))"
-                    ></div>
-                </div>
-                <p class="mt-2 font-mono-fq text-[11px] text-fq-text-4">
-                    TODAY {{ number_format($earnedToday) }} / {{ number_format($dailyGoal) }} PTS
-                    @if ($earnedToday >= $dailyGoal)
-                        · <span class="text-fq-lime">DONE FOR TODAY</span>
-                    @endif
-                </p>
-
-                @if ($chosenPlan && $savingRemaining > 0)
-                    <p class="mt-3 text-sm text-fq-text-2">
-                        @if ($chosenPlan['days'] === null)
-                            That's a slow road — try a bigger daily number below and watch the date jump.
-                        @else
-                            Keep that up and <span class="font-semibold text-fq-text">{{ $saving->name }}</span>
-                            is yours in
-                            <span class="font-baloo text-base font-extrabold text-fq-gold">{{ $chosenPlan['days'] }}</span>
-                            {{ Str::plural('day', $chosenPlan['days']) }} — by
-                            <span class="font-semibold text-fq-text">{{ $chosenPlan['date']->toFormattedDateString() }}</span>.
-                        @endif
-                    </p>
-                @elseif ($saving && $savingRemaining <= 0)
-                    <p class="mt-3 text-sm font-semibold text-fq-lime">
-                        You've already got enough for {{ $saving->name }} — go cash it out!
-                    </p>
-                @endif
-
-                {{-- The plan against the truth. A target nobody is hitting is
-                     worth knowing about while there's still time to lower it. --}}
-                <p class="mt-2 text-[13px] text-fq-text-5">
-                    Last {{ \App\Services\ChoreService::PACE_DAYS }} days you've averaged
-                    <span class="font-semibold text-fq-text-2">{{ number_format($pace, 0) }} pts</span> a day.
-                    @if ($pacePlan && $pacePlan['days'] !== null && $savingRemaining > 0)
-                        At that rate: {{ $pacePlan['days'] }} {{ Str::plural('day', $pacePlan['days']) }}.
-                    @endif
-                </p>
             @else
-                <p class="mt-2 text-sm text-fq-text-2">
-                    You haven't set one yet. Pick a number below — you can change it any time.
-                </p>
+                <div class="rounded-[24px] border border-dashed border-fq-line-4 bg-fq-panel p-6 text-center">
+                    <h3 class="font-baloo text-xl font-bold">Nothing picked yet</h3>
+                    <p class="mx-auto mt-2 max-w-[320px] text-sm text-fq-text-2">
+                        Choose something in the Loot Shop to save for and this page will work
+                        out how long it takes. The family plan below works either way.
+                    </p>
+                    <a
+                        href="{{ route('kid.loot') }}"
+                        wire:navigate
+                        class="mt-4 inline-block rounded-[14px] px-5 py-[11px] font-baloo text-base font-extrabold text-fq-bg transition hover:brightness-110"
+                        style="background: var(--fq-gold)"
+                    >Go pick one</a>
+                </div>
             @endif
 
-            <div class="mt-4 border-t border-fq-divider pt-[14px]">
-                <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
-                    What if I earned&hellip;
-                </p>
+            <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <h3 class="font-baloo text-xl font-bold">Your daily target</h3>
+                    @if ($dailyGoal)
+                        <button
+                            type="button"
+                            wire:click="clearDailyGoal"
+                            class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase transition hover:text-fq-text"
+                        >Clear</button>
+                    @endif
+                </div>
 
-                @if (! $saving)
-                    <p class="mt-2 text-[13px] text-fq-text-5">
-                        Pick something in the Loot Shop and these turn into finish dates.
-                    </p>
-                @endif
-
-                <div class="mt-3 flex flex-col gap-2">
-                    @foreach ($plans as $plan)
-                        @php $chosen = $plan['perDay'] === $dailyGoal; @endphp
-
-                        <div
-                            wire:key="plan-{{ $plan['perDay'] }}"
-                            class="flex flex-wrap items-center gap-4 rounded-[16px] border px-4 py-3 {{ $chosen ? 'border-fq-lime' : 'border-fq-line-2' }}"
-                            style="background: {{ $chosen ? 'var(--fq-wash-goal)' : 'var(--fq-sunk)' }}"
-                        >
-                            {{-- shrink-0 and nowrap together: a flex item with a
-                                 min-width set can otherwise be squeezed narrower
-                                 than its own label, which runs the rate straight
-                                 into the date beside it. --}}
-                            <div class="shrink-0">
-                                <p class="font-baloo text-[19px] leading-none font-extrabold" style="color: {{ $chosen ? 'var(--fq-lime)' : 'var(--fq-text)' }}">
-                                    {{ number_format($plan['perDay']) }}
-                                </p>
-                                <p class="mt-[2px] font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4">
-                                    PTS/DAY &middot; ~{{ $plan['chores'] }} {{ Str::plural('chore', $plan['chores']) }}
-                                </p>
-                            </div>
-
-                            <div class="min-w-[140px] flex-1">
-                                @if ($saving && $savingRemaining <= 0)
-                                    <p class="text-[13px] text-fq-lime">Already there!</p>
-                                @elseif ($saving && $plan['days'] === null)
-                                    <p class="text-[13px] text-fq-text-5">More than a year away.</p>
-                                @elseif ($saving)
-                                    <p class="text-sm font-semibold">
-                                        {{ $plan['days'] }} {{ Str::plural('day', $plan['days']) }}
-                                    </p>
-                                    <p class="font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4 uppercase">
-                                        BY {{ $plan['date']->toFormattedDateString() }}
-                                    </p>
-                                @endif
-                            </div>
-
+                @if ($dailyGoal)
+                    <div class="mt-3 flex flex-wrap items-center gap-4">
+                        <div class="flex items-center gap-2">
                             <button
                                 type="button"
-                                wire:click="setDailyGoal({{ $plan['perDay'] }})"
-                                @disabled($chosen)
-                                class="ml-auto rounded-[12px] px-4 py-[9px] text-[13px] font-semibold {{ $chosen ? 'cursor-default text-fq-bg' : 'border border-fq-line-3 bg-fq-panel text-fq-text-2-b transition hover:border-fq-lime hover:text-fq-text' }}"
-                                style="{{ $chosen ? 'background: var(--fq-lime)' : '' }}"
-                            >{{ $chosen ? 'My target' : 'Use this' }}</button>
+                                wire:click="adjustDailyGoal(-{{ $suggestedGoal }})"
+                                class="h-10 w-10 rounded-[12px] border border-fq-line-3 bg-fq-sunk text-lg"
+                                aria-label="Lower the target"
+                            >&minus;</button>
+                            <span class="w-[92px] text-center font-baloo text-[34px] leading-none font-extrabold text-fq-lime">
+                                {{ number_format($dailyGoal) }}
+                            </span>
+                            <button
+                                type="button"
+                                wire:click="adjustDailyGoal({{ $suggestedGoal }})"
+                                class="h-10 w-10 rounded-[12px] border border-fq-line-3 bg-fq-sunk text-lg"
+                                aria-label="Raise the target"
+                            >+</button>
                         </div>
-                    @endforeach
-                </div>
-            </div>
-        </div>
+                        <span class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Points a day</span>
+                    </div>
 
-        <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-                <h3 class="font-baloo text-xl font-bold">Family Goal plan</h3>
-                <span class="font-mono-fq text-[10px] text-fq-lime">{{ $familyPercent }}%</span>
-            </div>
-            <p class="mt-1 text-sm text-fq-text-2">{{ $household->goal_name }}</p>
-
-            <div class="mt-3 h-4 overflow-hidden rounded-full border border-fq-line bg-fq-track">
-                <div
-                    class="h-full rounded-full transition-[width] duration-500"
-                    style="width:{{ $familyPercent }}%;background:linear-gradient(90deg, var(--fq-cyan), var(--fq-lime), var(--fq-gold))"
-                ></div>
-            </div>
-            <p class="mt-2 font-mono-fq text-[11px] text-fq-text-4">
-                {{ number_format($household->goal_now) }} / {{ number_format($household->goal_target) }} PTS ·
-                {{ number_format($familyRemaining) }} TO GO ·
-                {{ $kidCount }} {{ Str::plural('KID', $kidCount) }} EARNING
-            </p>
-
-            @if ($familyRemaining <= 0)
-                <p class="mt-3 text-sm font-semibold text-fq-lime">You all did it. Ask a parent what's next!</p>
-            @else
-                <p class="mt-3 text-sm text-fq-text-2">
-                    This one only moves when everybody chips in — here's what it takes if you
-                    all earn the same each day.
-                </p>
-
-                <div class="mt-3 flex flex-col gap-2">
-                    @foreach ($familyPlans as $plan)
+                    <div class="mt-4 h-4 overflow-hidden rounded-full border border-fq-line bg-fq-track">
                         <div
-                            wire:key="family-plan-{{ $plan['each'] }}"
-                            class="flex flex-wrap items-center gap-4 rounded-[16px] border border-fq-line-2 bg-fq-sunk px-4 py-3"
-                        >
-                            <div class="shrink-0">
-                                <p class="font-baloo text-[19px] leading-none font-extrabold">{{ number_format($plan['each']) }}</p>
-                                <p class="mt-[2px] font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4">EACH, PER DAY</p>
-                            </div>
+                            class="h-full rounded-full transition-[width] duration-500"
+                            style="width:{{ $todayPercent }}%; background: linear-gradient(90deg, var(--fq-cyan), var(--fq-lime))"
+                        ></div>
+                    </div>
+                    <p class="mt-2 font-mono-fq text-[11px] text-fq-text-4">
+                        TODAY {{ number_format($earnedToday) }} / {{ number_format($dailyGoal) }} PTS
+                        @if ($earnedToday >= $dailyGoal)
+                            · <span class="text-fq-lime">DONE FOR TODAY</span>
+                        @endif
+                    </p>
 
-                            <div class="shrink-0">
-                                <p class="font-baloo text-[19px] leading-none font-extrabold text-fq-cyan">
-                                    {{ number_format($plan['together']) }}
-                                </p>
-                                <p class="mt-[2px] font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4">TOGETHER</p>
-                            </div>
-
-                            <div class="min-w-[140px] flex-1">
-                                @if ($plan['days'] === null)
-                                    <p class="text-[13px] text-fq-text-5">More than a year away.</p>
-                                @else
-                                    <p class="text-sm font-semibold">
-                                        {{ $plan['days'] }} {{ Str::plural('day', $plan['days']) }}
-                                    </p>
-                                    <p class="font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4 uppercase">
-                                        BY {{ $plan['date']->toFormattedDateString() }}
-                                    </p>
-                                @endif
-                            </div>
-                        </div>
-                    @endforeach
-                </div>
-
-                <p class="mt-3 text-[13px] text-fq-text-5">
-                    Right now the family is averaging
-                    <span class="font-semibold text-fq-text-2">{{ number_format($familyPace, 0) }} pts</span> a day between you.
-                    @if ($familyPacePlan && $familyPacePlan['days'] !== null)
-                        That's {{ $familyPacePlan['days'] }} {{ Str::plural('day', $familyPacePlan['days']) }} to go —
-                        {{ $familyPacePlan['date']->toFormattedDateString() }}.
+                    @if ($chosenPlan && $savingRemaining > 0)
+                        <p class="mt-3 text-sm text-fq-text-2">
+                            @if ($chosenPlan['days'] === null)
+                                That's a slow road — try a bigger daily number below and watch the date jump.
+                            @else
+                                Keep that up and <span class="font-semibold text-fq-text">{{ $saving->name }}</span>
+                                is yours in
+                                <span class="font-baloo text-base font-extrabold text-fq-gold">{{ $chosenPlan['days'] }}</span>
+                                {{ Str::plural('day', $chosenPlan['days']) }} — by
+                                <span class="font-semibold text-fq-text">{{ $chosenPlan['date']->toFormattedDateString() }}</span>.
+                            @endif
+                        </p>
+                    @elseif ($saving && $savingRemaining <= 0)
+                        <p class="mt-3 text-sm font-semibold text-fq-lime">
+                            You've already got enough for {{ $saving->name }} — go cash it out!
+                        </p>
                     @endif
-                </p>
-            @endif
 
-            <div class="mt-4 border-t border-fq-divider pt-[14px]">
-                <x-goal-mvp :contributors="$contributors" />
+                    {{-- The plan against the truth. A target nobody is hitting is
+                         worth knowing about while there's still time to lower it. --}}
+                    <p class="mt-2 text-[13px] text-fq-text-5">
+                        Last {{ \App\Services\ChoreService::PACE_DAYS }} days you've averaged
+                        <span class="font-semibold text-fq-text-2">{{ number_format($pace, 0) }} pts</span> a day.
+                        @if ($pacePlan && $pacePlan['days'] !== null && $savingRemaining > 0)
+                            At that rate: {{ $pacePlan['days'] }} {{ Str::plural('day', $pacePlan['days']) }}.
+                        @endif
+                    </p>
+                @else
+                    <p class="mt-2 text-sm text-fq-text-2">
+                        You haven't set one yet. Pick a number below — you can change it any time.
+                    </p>
+                @endif
+
+                <div class="mt-4 border-t border-fq-divider pt-[14px]">
+                    <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                        What if I earned&hellip;
+                    </p>
+
+                    @if (! $saving)
+                        <p class="mt-2 text-[13px] text-fq-text-5">
+                            Pick something in the Loot Shop and these turn into finish dates.
+                        </p>
+                    @endif
+
+                    <div class="mt-3 flex flex-col gap-2">
+                        @foreach ($plans as $plan)
+                            @php $chosen = $plan['perDay'] === $dailyGoal; @endphp
+
+                            <div
+                                wire:key="plan-{{ $plan['perDay'] }}"
+                                class="flex flex-wrap items-center gap-4 rounded-[16px] border px-4 py-3 {{ $chosen ? 'border-fq-lime' : 'border-fq-line-2' }}"
+                                style="background: {{ $chosen ? 'var(--fq-wash-goal)' : 'var(--fq-sunk)' }}"
+                            >
+                                {{-- shrink-0 and nowrap together: a flex item with a
+                                     min-width set can otherwise be squeezed narrower
+                                     than its own label, which runs the rate straight
+                                     into the date beside it. --}}
+                                <div class="shrink-0">
+                                    <p class="font-baloo text-[19px] leading-none font-extrabold" style="color: {{ $chosen ? 'var(--fq-lime)' : 'var(--fq-text)' }}">
+                                        {{ number_format($plan['perDay']) }}
+                                    </p>
+                                    <p class="mt-[2px] font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4">
+                                        PTS/DAY &middot; ~{{ $plan['chores'] }} {{ Str::plural('chore', $plan['chores']) }}
+                                    </p>
+                                </div>
+
+                                <div class="min-w-[140px] flex-1">
+                                    @if ($saving && $savingRemaining <= 0)
+                                        <p class="text-[13px] text-fq-lime">Already there!</p>
+                                    @elseif ($saving && $plan['days'] === null)
+                                        <p class="text-[13px] text-fq-text-5">More than a year away.</p>
+                                    @elseif ($saving)
+                                        <p class="text-sm font-semibold">
+                                            {{ $plan['days'] }} {{ Str::plural('day', $plan['days']) }}
+                                        </p>
+                                        <p class="font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4 uppercase">
+                                            BY {{ $plan['date']->toFormattedDateString() }}
+                                        </p>
+                                    @endif
+                                </div>
+
+                                <button
+                                    type="button"
+                                    wire:click="setDailyGoal({{ $plan['perDay'] }})"
+                                    @disabled($chosen)
+                                    class="ml-auto rounded-[12px] px-4 py-[9px] text-[13px] font-semibold {{ $chosen ? 'cursor-default text-fq-bg' : 'border border-fq-line-3 bg-fq-panel text-fq-text-2-b transition hover:border-fq-lime hover:text-fq-text' }}"
+                                    style="{{ $chosen ? 'background: var(--fq-lime)' : '' }}"
+                                >{{ $chosen ? 'My target' : 'Use this' }}</button>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+            </div>
+            </div>
+
+            <div class="flex min-w-0 flex-[1_1_360px] flex-col gap-[14px]">
+                <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <h3 class="font-baloo text-xl font-bold">Family Goal plan</h3>
+                        <span class="font-mono-fq text-[10px] text-fq-lime">{{ $familyPercent }}%</span>
+                    </div>
+                    <p class="mt-1 text-sm text-fq-text-2">{{ $household->goal_name }}</p>
+
+                    <div class="mt-3 h-4 overflow-hidden rounded-full border border-fq-line bg-fq-track">
+                        <div
+                            class="h-full rounded-full transition-[width] duration-500"
+                            style="width:{{ $familyPercent }}%;background:linear-gradient(90deg, var(--fq-cyan), var(--fq-lime), var(--fq-gold))"
+                        ></div>
+                    </div>
+                    <p class="mt-2 font-mono-fq text-[11px] text-fq-text-4">
+                        {{ number_format($household->goal_now) }} / {{ number_format($household->goal_target) }} PTS ·
+                        {{ number_format($familyRemaining) }} TO GO ·
+                        {{ $kidCount }} {{ Str::plural('KID', $kidCount) }} EARNING
+                    </p>
+
+                    {{-- The family goal answered with the kid's own number, so the two
+                         plans on this page are tied to the same commitment. --}}
+                    @if ($familyDaysAtMyTarget)
+                        <p class="mt-[6px] font-mono-fq text-[10px] tracking-[0.12em] text-fq-gold uppercase">{{ $familyDaysAtMyTarget }} {{ Str::plural('DAY', $familyDaysAtMyTarget) }} IF EVERYONE EARNS {{ number_format($dailyGoal) }} EACH</p>
+                    @endif
+
+                    @if ($familyRemaining <= 0)
+                        <p class="mt-3 text-sm font-semibold text-fq-lime">You all did it. Ask a parent what's next!</p>
+                    @else
+                        <p class="mt-3 text-sm text-fq-text-2">
+                            This one only moves when everybody chips in — here's what it takes if you
+                            all earn the same each day.
+                        </p>
+
+                        <div class="mt-3 flex flex-col gap-2">
+                            @foreach ($familyPlans as $plan)
+                                <div
+                                    wire:key="family-plan-{{ $plan['each'] }}"
+                                    class="flex flex-wrap items-center gap-4 rounded-[16px] border border-fq-line-2 bg-fq-sunk px-4 py-3"
+                                >
+                                    <div class="shrink-0">
+                                        <p class="font-baloo text-[19px] leading-none font-extrabold">{{ number_format($plan['each']) }}</p>
+                                        <p class="mt-[2px] font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4">EACH, PER DAY</p>
+                                    </div>
+
+                                    <div class="shrink-0">
+                                        <p class="font-baloo text-[19px] leading-none font-extrabold text-fq-cyan">
+                                            {{ number_format($plan['together']) }}
+                                        </p>
+                                        <p class="mt-[2px] font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4">TOGETHER</p>
+                                    </div>
+
+                                    <div class="min-w-[140px] flex-1">
+                                        @if ($plan['days'] === null)
+                                            <p class="text-[13px] text-fq-text-5">More than a year away.</p>
+                                        @else
+                                            <p class="text-sm font-semibold">
+                                                {{ $plan['days'] }} {{ Str::plural('day', $plan['days']) }}
+                                            </p>
+                                            <p class="font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4 uppercase">
+                                                BY {{ $plan['date']->toFormattedDateString() }}
+                                            </p>
+                                        @endif
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+
+                        <p class="mt-3 text-[13px] text-fq-text-5">
+                            Right now the family is averaging
+                            <span class="font-semibold text-fq-text-2">{{ number_format($familyPace, 0) }} pts</span> a day between you.
+                            @if ($familyPacePlan && $familyPacePlan['days'] !== null)
+                                That's {{ $familyPacePlan['days'] }} {{ Str::plural('day', $familyPacePlan['days']) }} to go —
+                                {{ $familyPacePlan['date']->toFormattedDateString() }}.
+                            @endif
+                        </p>
+                    @endif
+
+                    <div class="mt-4 border-t border-fq-divider pt-[14px]">
+                        <x-goal-mvp :contributors="$contributors" />
+                    </div>
+                </div>
             </div>
         </div>
     </div>

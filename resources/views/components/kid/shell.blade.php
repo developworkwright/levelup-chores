@@ -4,22 +4,53 @@
 @props(['profile', 'active', 'refreshAction' => '$refresh'])
 
 @php
-    $tabs = [
-        'quests' => ['label' => 'Quests', 'route' => 'kid.quests'],
-        'wheel' => ['label' => 'Bonus Wheel', 'route' => 'kid.wheel'],
-        'loot' => ['label' => 'Loot Shop', 'route' => 'kid.loot'],
-        'goal' => ['label' => 'Goal Plan', 'route' => 'kid.goal'],
-        'offers' => ['label' => 'Trades', 'route' => 'kid.offers'],
-        'bonus' => ['label' => 'Bonus Shop', 'route' => 'kid.bonus'],
-        'badges' => ['label' => 'Badges', 'route' => 'kid.badges'],
-        'stats' => ['label' => 'Stats', 'route' => 'kid.stats'],
+    $pages = [
+        'quests' => ['label' => 'Quests', 'glyph' => '⚑', 'route' => 'kid.quests'],
+        'wheel' => ['label' => 'Bonus Wheel', 'glyph' => '◎', 'route' => 'kid.wheel'],
+        'loot' => ['label' => 'Loot Shop', 'glyph' => '◈', 'route' => 'kid.loot'],
+        'goal' => ['label' => 'Goals', 'glyph' => '◔', 'route' => 'kid.goal'],
+        'offers' => ['label' => 'Trades', 'glyph' => '⇄', 'route' => 'kid.offers'],
+        'bonus' => ['label' => 'Bonus Shop', 'glyph' => '✦', 'route' => 'kid.bonus'],
+        'badges' => ['label' => 'Badges', 'glyph' => '★', 'route' => 'kid.badges'],
+        'stats' => ['label' => 'Stats', 'glyph' => '▤', 'route' => 'kid.stats'],
     ];
+
+    /*
+     * Eight pages grouped into three ideas a kid already has words for. Trades
+     * sits in both Earn and Spend because points flow both ways. Each world's
+     * pill row is justified under its own rail button, so the pages stay
+     * visually attached to the world that opened them.
+     */
+    $worlds = [
+        'earn' => ['label' => 'Earn', 'glyph' => '⚑', 'justify' => 'justify-start', 'pages' => ['quests', 'wheel', 'offers']],
+        'spend' => ['label' => 'Spend', 'glyph' => '◈', 'justify' => 'justify-center', 'pages' => ['loot', 'offers', 'bonus']],
+        'me' => ['label' => 'Me', 'glyph' => '★', 'justify' => 'justify-end', 'pages' => ['goal', 'badges', 'stats']],
+    ];
+
     $dollars = number_format($profile->points / $profile->household->points_per_dollar, 2);
 
     // The count lives in the shell rather than on the Trades page itself, so a
     // kid sees a trade waiting from Quests or the Wheel — not only once they
     // have already gone looking for it.
     $offersWaiting = App\Models\SiblingOffer::where('to_profile_id', $profile->id)->live()->count();
+    $counts = ['offers' => $offersWaiting];
+
+    /*
+     * Which world the rail lights up. A page can belong to two worlds, so the
+     * one the kid came in through wins for as long as it still holds the open
+     * page, and only then does it fall back to the page's own world. It rides
+     * in the session rather than the query string because a Livewire update
+     * posts to its own endpoint and would arrive with the parameter stripped —
+     * accepting a trade would kick the rail back to Earn mid-page.
+     */
+    $holdsPage = fn (mixed $world) => is_string($world)
+        && isset($worlds[$world])
+        && in_array($active, $worlds[$world]['pages'], true);
+
+    $activeWorld = collect([request()->query('world'), session('kid_world')])->first($holdsPage)
+        ?: collect($worlds)->search(fn (array $world) => in_array($active, $world['pages'], true)) ?: 'earn';
+
+    session(['kid_world' => $activeWorld]);
 @endphp
 
 <div class="mx-auto max-w-[1080px] px-[14px] pb-10">
@@ -107,28 +138,62 @@
         </div>
 
         <x-quest-board>
-            @foreach ($tabs as $key => $tab)
+            @foreach ($worlds as $key => $world)
+                @php
+                    // Switching worlds keeps you where you are when the page
+                    // you're on belongs to both, rather than bouncing you to
+                    // the top of the new one for no reason.
+                    $lands = in_array($active, $world['pages'], true) ? $active : $world['pages'][0];
+                    // A world carries the sum of its pages' badges, so a waiting
+                    // trade is visible from any page in the console.
+                    $waiting = collect($world['pages'])->sum(fn (string $page) => $counts[$page] ?? 0);
+                @endphp
+
                 <a
-                    href="{{ route($tab['route']) }}"
+                    href="{{ route($pages[$lands]['route']) }}?world={{ $key }}"
                     wire:navigate
-                    class="flex flex-1 items-center justify-center gap-[6px] rounded-[14px] border border-transparent px-4 py-[10px] text-center text-sm font-semibold whitespace-nowrap"
-                    style="{{ $active === $key ? 'background: var(--fq-tab-active); color: var(--fq-lime)' : 'background:transparent; color: var(--fq-ink)' }}"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-[14px] border border-transparent px-[14px] py-[11px] text-center text-[15px] font-bold whitespace-nowrap"
+                    style="{{ $activeWorld === $key ? 'background: var(--fq-tab-active); color: var(--fq-lime)' : 'background:transparent; color: var(--fq-ink)' }}"
                 >
-                    {{ $tab['label'] }}
-                    @if ($key === 'offers' && $offersWaiting > 0)
-                        <span
-                            class="inline-flex items-center justify-center font-mono-fq font-bold"
-                            {{-- Geometry inline rather than in arbitrary-value
-                                 utilities: a count badge that silently degrades
-                                 to a bare superscript numeral when the CSS is a
-                                 build behind is worse than no badge at all. --}}
-                            style="background: var(--fq-magenta); color: var(--fq-bg); min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; font-size: 11px; line-height: 1"
-                            title="{{ $offersWaiting }} sibling {{ Str::plural('trade', $offersWaiting) }} waiting on you"
-                        >{{ $offersWaiting }}</span>
-                    @endif
+                    <span class="text-sm">{{ $world['glyph'] }}</span>{{ $world['label'] }}
+                    <x-count-badge
+                        :count="$waiting"
+                        :title="$waiting.' sibling '.Str::plural('trade', $waiting).' waiting on you'"
+                    />
                 </a>
             @endforeach
         </x-quest-board>
+
+        {{-- The open world's pages, justified under the rail button that opened
+             them. No `world` parameter on these: the session already holds the
+             world, and a pill never changes it. --}}
+        <nav
+            aria-label="Pages in {{ $worlds[$activeWorld]['label'] }}"
+            class="mt-[10px] flex flex-wrap gap-2 px-[2px] {{ $worlds[$activeWorld]['justify'] }}"
+        >
+            @foreach ($worlds[$activeWorld]['pages'] as $key)
+                @php $open = $active === $key; @endphp
+
+                <a
+                    href="{{ route($pages[$key]['route']) }}"
+                    wire:navigate
+                    {{-- shrink-0 with the label unwrapped: the pill sizes to its
+                         own text plus the padding, so a long page name can never
+                         be squeezed narrower than the word it carries. --}}
+                    class="inline-flex shrink-0 items-center gap-2 rounded-full border px-[22px] py-[10px] text-sm whitespace-nowrap transition hover:border-fq-line-focus {{ $open ? 'border-fq-line-focus font-semibold text-fq-text' : 'border-fq-line text-fq-text-3' }}"
+                    style="background: {{ $open ? 'var(--fq-tab-active)' : 'var(--fq-panel)' }}"
+                    @if ($open) aria-current="page" @endif
+                >
+                    <span class="{{ $open ? 'text-fq-gold' : 'text-fq-text-4' }}">{{ $pages[$key]['glyph'] }}</span>
+                    {{ $pages[$key]['label'] }}
+                    <x-count-badge
+                        :count="$counts[$key] ?? 0"
+                        :title="($counts[$key] ?? 0).' sibling '.Str::plural('trade', $counts[$key] ?? 0).' waiting on you'"
+                        small
+                    />
+                </a>
+            @endforeach
+        </nav>
     </div>
 
     <div class="mt-4">

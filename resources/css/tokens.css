@@ -125,6 +125,21 @@
     /* Only affordable perks get the foil edge — it's the price tag, lit up. */
     --fq-foil: linear-gradient(160deg, #ffffff, #8b939c);
 
+    /*
+     * Ledger kind tags. Three trios rather than one per kind: points coming in,
+     * points going out, and everything that only moves them sideways. A row's
+     * direction is readable from the chip before the words are.
+     */
+    --fq-tag-in-bg: #2a2405;
+    --fq-tag-in-line: #7a6a12;
+    --fq-tag-in-fg: #ffe14d;
+    --fq-tag-out-bg: #2a0a1c;
+    --fq-tag-out-line: #7a1240;
+    --fq-tag-out-fg: #ff8ac7;
+    --fq-tag-side-bg: #120e2e;
+    --fq-tag-side-line: #4a2f7a;
+    --fq-tag-side-fg: #d8b4ff;
+
     /* Badge tiers — the metal a star is struck from, keyed off its XP reward. */
     --fq-tier-gold: linear-gradient(150deg, #fff6b0, #ffe14d 55%, #d9b41a);
     --fq-tier-gold-ring: #ffe14d;

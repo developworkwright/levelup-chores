@@ -11,6 +11,9 @@
     for why this matters: it's a distinct app, not "the browser". --}}
     <link rel="manifest" href="/manifest.webmanifest">
     <meta name="theme-color" content="#0a0512">
+    {{-- SVG first so a browser that can scale it never picks a raster fallback;
+    the PNGs stay for the ones that can't. --}}
+    <link rel="icon" type="image/svg+xml" href="/icons/icon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">

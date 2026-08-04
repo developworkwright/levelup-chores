@@ -75,15 +75,15 @@ class KidStatsPageTest extends TestCase
 
         Volt::test('kid.stats')
             ->assertOk()
-            ->assertSee('Chores done')
-            ->assertSee('300')
-            ->assertSee('≈ $3.00 all time')
-            ->assertSee('Cashed out')
-            ->assertSee('≈ $2.50 collected')
+            ->assertSee('Chores done, all time')
+            ->assertSee('Points earned')
+            ->assertSee('≈ $3.00')
+            ->assertSee('Points spent')
+            ->assertSee('≈ $2.50')
             ->assertSee('LVL 3')
-            ->assertSee('450 XP total')
+            ->assertSee('450 XP')
             // Two of the three chores landed on the same day.
-            ->assertSee('days with a chore done');
+            ->assertSee('with a chore done');
     }
 
     public function test_a_parent_payout_counts_as_a_cash_out(): void
@@ -111,10 +111,10 @@ class KidStatsPageTest extends TestCase
 
         Volt::test('kid.stats')
             ->assertOk()
-            ->assertSee('Cashed out')
-            ->assertSee('≈ $8.00 collected')
+            ->assertSee('Cash-outs')
+            ->assertSee('≈ $8.00')
             ->assertSee('Paid out by a parent')
-            ->assertSee('biggest: 800 pts')
+            ->assertSee('biggest 800')
             ->assertDontSee('nothing cashed out yet');
     }
 
@@ -199,8 +199,8 @@ class KidStatsPageTest extends TestCase
 
         $this->assertMatchesRegularExpression('/>\s*1\s*<.*?Today/s', $html);
         $this->assertMatchesRegularExpression('/>\s*3\s*<.*?Last 7 days/s', $html);
-        $this->assertMatchesRegularExpression('/>\s*4\s*<.*?Lifetime/s', $html);
-        $this->assertStringContainsString('160 pts from chores', $html);
+        // The lifetime count is the hero, so its label leads rather than trails.
+        $this->assertMatchesRegularExpression('/Chores done, all time.*?>\s*4\s*</s', $html);
     }
 
     public function test_todays_count_ends_at_the_household_day_boundary(): void
@@ -269,8 +269,8 @@ class KidStatsPageTest extends TestCase
 
     public function test_paging_the_strip_leaves_the_today_and_week_counts_alone(): void
     {
-        // The split card answers "how am I doing today", which is not a
-        // question about whatever window the strip happens to be showing.
+        // The hero answers "how am I doing today", which is not a question
+        // about whatever window the strip happens to be showing.
         $household = Household::factory()->create();
         $kid = $this->loginKid($household);
         $chore = Chore::factory()->for($household)->create();
@@ -286,7 +286,7 @@ class KidStatsPageTest extends TestCase
         $this->assertSame(14, $page->get('daysBack'));
         $this->assertMatchesRegularExpression('/>\s*1\s*<.*?Today/s', $html);
         $this->assertMatchesRegularExpression('/>\s*1\s*<.*?Last 7 days/s', $html);
-        $this->assertMatchesRegularExpression('/>\s*2\s*<.*?Lifetime/s', $html);
+        $this->assertMatchesRegularExpression('/Chores done, all time.*?>\s*2\s*</s', $html);
     }
 
     public function test_it_ranks_the_most_done_chores(): void
@@ -375,8 +375,7 @@ class KidStatsPageTest extends TestCase
 
         Volt::test('kid.stats')
             ->assertOk()
-            ->assertSee('2 chores')
-            ->assertSee('Mar 10, 2026');
+            ->assertSee('chores · Mar 10, 2026');
     }
 
     public function test_it_records_the_best_day_and_the_longest_streak(): void
@@ -409,13 +408,16 @@ class KidStatsPageTest extends TestCase
             ]);
         }
 
-        Volt::test('kid.stats')
+        $html = Volt::test('kid.stats')
             ->assertOk()
             ->assertSee('Best day')
-            ->assertSee('4 chores')
-            ->assertSee('Mar 5, 2026')
+            ->assertSee('chores · Mar 5, 2026')
             ->assertSee('Longest streak')
-            ->assertSee('4d');
+            ->html();
+
+        // The value leads its cell and the qualifier follows it, so the run
+        // length has to be read off the cell rather than a "4d" chip.
+        $this->assertMatchesRegularExpression('/Longest streak.*?>\s*4\s*<.*?days/s', $html);
     }
 
     public function test_a_repaired_day_keeps_the_longest_streak_alive(): void
@@ -438,10 +440,12 @@ class KidStatsPageTest extends TestCase
 
         StreakRepair::create(['profile_id' => $kid->id, 'repaired_date' => '2026-04-03']);
 
-        Volt::test('kid.stats')
+        $html = Volt::test('kid.stats')
             ->assertOk()
             ->assertSee('Longest streak')
-            ->assertSee('5d');
+            ->html();
+
+        $this->assertMatchesRegularExpression('/Longest streak.*?>\s*5\s*<.*?days/s', $html);
     }
 
     public function test_it_reports_the_quest_clear_rate(): void
@@ -463,7 +467,7 @@ class KidStatsPageTest extends TestCase
         Volt::test('kid.stats')
             ->assertOk()
             ->assertSee('Quests cleared')
-            ->assertSee('75% of 4 handed out');
+            ->assertSee('of 4 handed out');
     }
 
     public function test_it_reports_wheel_spins_badges_and_cash_outs(): void
@@ -481,9 +485,9 @@ class KidStatsPageTest extends TestCase
         Volt::test('kid.stats')
             ->assertOk()
             ->assertSee('1 landed 3×')
-            ->assertSee('biggest: 500 pts')
+            ->assertSee('biggest 500')
             ->assertSee('Loot Shop rewards')
-            ->assertSee('5d');
+            ->assertSee('Current streak');
     }
 
     public function test_it_counts_badges_earned(): void
@@ -510,6 +514,94 @@ class KidStatsPageTest extends TestCase
             ->assertSee('none handed out yet')
             ->assertSee('still to come')
             ->assertSee('nothing cashed out yet');
+    }
+
+    public function test_the_activity_list_tags_entries_by_direction(): void
+    {
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household);
+
+        foreach ([[LedgerKind::Earn, 300, 'Dishes'], [LedgerKind::Spend, -250, 'Movie night'], [LedgerKind::Transfer, 0, 'Swapped a chore']] as [$kind, $amount, $description]) {
+            LedgerEntry::create([
+                'household_id' => $household->id,
+                'profile_id' => $kid->id,
+                'kind' => $kind,
+                'amount' => $amount,
+                'description' => $description,
+            ]);
+        }
+
+        Volt::test('kid.stats')
+            ->assertOk()
+            ->assertSee('Recent activity')
+            ->assertSee('EARNED')
+            ->assertSee('SPENT')
+            ->assertSee('TRADE')
+            ->assertSee('+300')
+            ->assertSee('−250')
+            // Nothing moved, so the amount column says so rather than "0".
+            ->assertSee('—')
+            ->assertSee('TODAY');
+    }
+
+    public function test_the_history_pages_through_the_whole_ledger(): void
+    {
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household);
+
+        // Two pages' worth at eight to a page, and the oldest has to be
+        // reachable rather than cut off at the first screenful.
+        foreach (range(1, 12) as $index) {
+            LedgerEntry::create([
+                'household_id' => $household->id,
+                'profile_id' => $kid->id,
+                'kind' => LedgerKind::Earn,
+                'amount' => 100,
+                'description' => "Chore number {$index}",
+                'created_at' => now()->subMinutes(12 - $index),
+            ]);
+        }
+
+        $page = Volt::test('kid.stats')
+            ->assertOk()
+            ->assertSee('Complete history')
+            ->assertSee('12 ENTRIES')
+            ->assertSee('Chore number 12')
+            ->assertDontSee('Chore number 3');
+
+        // Checked against a first-page entry the activity list above doesn't
+        // also carry, since that one always shows the five newest whatever the
+        // history is paged to.
+        $page->call('nextPage', 'history')
+            ->assertSee('Chore number 3')
+            ->assertDontSee('Chore number 5');
+    }
+
+    public function test_another_kids_ledger_stays_out_of_the_history(): void
+    {
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household);
+        $sibling = Profile::factory()->for($household)->create();
+
+        LedgerEntry::create([
+            'household_id' => $household->id,
+            'profile_id' => $sibling->id,
+            'kind' => LedgerKind::Earn,
+            'amount' => 100,
+            'description' => 'Their chore',
+        ]);
+        LedgerEntry::create([
+            'household_id' => $household->id,
+            'profile_id' => $kid->id,
+            'kind' => LedgerKind::Earn,
+            'amount' => 100,
+            'description' => 'My chore',
+        ]);
+
+        Volt::test('kid.stats')
+            ->assertOk()
+            ->assertSee('My chore')
+            ->assertDontSee('Their chore');
     }
 
     public function test_a_parent_cannot_open_the_kid_stats_page(): void
