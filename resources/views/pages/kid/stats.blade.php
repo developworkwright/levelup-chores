@@ -28,9 +28,6 @@ new class extends Component
     /** How many household days the activity strip covers. */
     private const RECENT_DAYS = 14;
 
-    /** Entries in the "Recent activity" list above the full history. */
-    private const RECENT_ENTRIES = 5;
-
     /** History rows per page — a short page, because it's a scroll not a table. */
     private const HISTORY_PER_PAGE = 8;
 
@@ -235,8 +232,34 @@ new class extends Component
     }
 
     /**
-     * One ledger entry flattened for display, so the activity list and the
-     * history grid below it can't drift apart.
+     * The description with the kid's own name taken out of it.
+     *
+     * Ledger text is written for the parent's household-wide log, where naming
+     * the kid is the whole point. On a kid's own history every row is theirs
+     * already, so the name is a prefix that costs the description the width it
+     * needs to be readable on a phone.
+     */
+    private function withoutOwnName(string $description): string
+    {
+        $name = preg_quote($this->profile->name, '/');
+
+        // A trade names both sides. Dropping one would leave a dangling arrow,
+        // so the pair collapses to a direction and the sibling.
+        if (preg_match('/^(.+) → (.+): (.+)$/u', $description, $trade) === 1) {
+            return $trade[1] === $this->profile->name
+                ? "To {$trade[2]}: {$trade[3]}"
+                : "From {$trade[1]}: {$trade[3]}";
+        }
+
+        // One replacement only: a chore whose name happens to start with the
+        // kid's would otherwise lose a word to the second pass.
+        return Str::ucfirst(
+            preg_replace('/^'.$name.' (?:— )?|( (?:for|to) '.$name.')$/u', '', $description, 1)
+        );
+    }
+
+    /**
+     * One ledger entry flattened for display.
      *
      * @return array{id: int, tag: string, tone: string, text: string, amount: string, amountColor: string, when: string}
      */
@@ -248,7 +271,7 @@ new class extends Component
             'id' => $entry->id,
             'tag' => $tag['label'],
             'tone' => $tag['tone'],
-            'text' => $entry->description,
+            'text' => $this->withoutOwnName($entry->description),
             'amount' => match (true) {
                 $entry->amount > 0 => '+'.number_format($entry->amount),
                 $entry->amount < 0 => '−'.number_format(abs($entry->amount)),
@@ -458,15 +481,6 @@ new class extends Component
                 : $strip->first()['date']->toFormattedDateString().' – '.$strip->last()['date']->toFormattedDateString(),
             'canGoEarlier' => $this->daysBack < $maxDaysBack,
             'canGoLater' => $this->daysBack > 0,
-            // The last few things that happened, and then the same ledger in
-            // full underneath. The short list is the one a kid reads; the long
-            // one is there for "where did that go?".
-            'activity' => $this->profile->ledgerEntries()
-                ->latest('created_at')
-                ->latest('id')
-                ->limit(self::RECENT_ENTRIES)
-                ->get()
-                ->map(fn (LedgerEntry $entry) => $this->ledgerRow($entry, $today)),
             'history' => $history,
             'historyRows' => collect($history->items())
                 ->map(fn (LedgerEntry $entry) => $this->ledgerRow($entry, $today)),
@@ -683,44 +697,12 @@ new class extends Component
             </div>
         </div>
 
+        {{-- No separate "recent" list above this one: the first page of the
+             history is the recent list, and printing the same five rows twice
+             only pushed the rest of it further down. --}}
         <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
             <div class="flex items-baseline justify-between gap-3">
-                <h3 class="font-baloo text-xl font-bold">Recent activity</h3>
-                <span class="font-mono-fq text-[10px] text-fq-text-4">LAST {{ $activity->count() }}</span>
-            </div>
-
-            <div class="mt-3 flex flex-col gap-2">
-                @forelse ($activity as $row)
-                    <div
-                        wire:key="activity-{{ $row['id'] }}"
-                        class="flex items-center gap-3 rounded-[14px] border border-fq-line-2 bg-fq-sunk px-[14px] py-[11px]"
-                    >
-                        {{-- Fixed width so the tags stack into a column: with
-                             the chips sized to their own words, a list of them
-                             reads as a ragged edge rather than a key. --}}
-                        <span
-                            class="inline-flex w-[80px] shrink-0 items-center justify-center rounded-fq-chip border py-[4px] font-mono-fq text-[9px] tracking-[0.1em]"
-                            style="border-color: var(--fq-tag-{{ $row['tone'] }}-line); background: var(--fq-tag-{{ $row['tone'] }}-bg); color: var(--fq-tag-{{ $row['tone'] }}-fg)"
-                        >{{ $row['tag'] }}</span>
-                        <span class="min-w-0 flex-1 truncate text-sm">{{ $row['text'] }}</span>
-                        <span
-                            class="shrink-0 font-mono-fq text-[11px]"
-                            style="color: {{ $row['amountColor'] }}"
-                        >{{ $row['amount'] }}</span>
-                        <span class="w-[56px] shrink-0 text-right font-mono-fq text-[10px] text-fq-text-5">{{ $row['when'] }}</span>
-                    </div>
-                @empty
-                    <p class="py-2 text-sm text-fq-text-5">Nothing has happened yet. Go clear a chore.</p>
-                @endforelse
-            </div>
-        </div>
-
-        {{-- The same entries again, in full. Narrower rows and a pager rather
-             than the cards above, because this one is read by scanning down a
-             column, not by looking at the top of it. --}}
-        <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
-            <div class="flex items-baseline justify-between gap-3">
-                <h3 class="font-baloo text-xl font-bold">Complete history</h3>
+                <h3 class="font-baloo text-xl font-bold">History</h3>
                 <span class="font-mono-fq text-[10px] text-fq-text-4">
                     {{ number_format($history->total()) }} {{ $history->total() === 1 ? 'ENTRY' : 'ENTRIES' }}
                 </span>
@@ -728,9 +710,12 @@ new class extends Component
 
             <div class="mt-[10px] flex flex-col">
                 @forelse ($historyRows as $row)
+                    {{-- The three fixed columns tighten on a phone so the
+                         description keeps the width it needs to say what
+                         actually happened. --}}
                     <div
                         wire:key="history-{{ $row['id'] }}"
-                        class="grid grid-cols-[86px_minmax(0,1fr)_86px_74px] items-center gap-3 border-t border-fq-divider py-[10px]"
+                        class="grid grid-cols-[62px_minmax(0,1fr)_58px_42px] items-center gap-2 border-t border-fq-divider py-[10px] sm:grid-cols-[86px_minmax(0,1fr)_86px_74px] sm:gap-3"
                     >
                         <span
                             class="font-mono-fq text-[9px] tracking-[0.1em]"

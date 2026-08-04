@@ -516,7 +516,7 @@ class KidStatsPageTest extends TestCase
             ->assertSee('nothing cashed out yet');
     }
 
-    public function test_the_activity_list_tags_entries_by_direction(): void
+    public function test_the_history_tags_entries_by_direction(): void
     {
         $household = Household::factory()->create();
         $kid = $this->loginKid($household);
@@ -533,7 +533,7 @@ class KidStatsPageTest extends TestCase
 
         Volt::test('kid.stats')
             ->assertOk()
-            ->assertSee('Recent activity')
+            ->assertSee('History')
             ->assertSee('EARNED')
             ->assertSee('SPENT')
             ->assertSee('TRADE')
@@ -542,6 +542,70 @@ class KidStatsPageTest extends TestCase
             // Nothing moved, so the amount column says so rather than "0".
             ->assertSee('—')
             ->assertSee('TODAY');
+    }
+
+    public function test_the_history_drops_the_kids_own_name_from_their_rows(): void
+    {
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household, ['name' => 'Scout']);
+        $sibling = Profile::factory()->for($household)->create(['name' => 'Ziggy']);
+
+        // Every shape the household-wide log writes a name into. On a kid's own
+        // history the name is theirs on every row, so it only costs width.
+        $descriptions = [
+            'Scout — Clean gutters',
+            'Scout — 3-day streak bonus ($1)',
+            'Scout turned in $5 cash',
+            'Paid out $8.00 to Scout',
+            'Parent adjustment: +50 for Scout',
+            'Ziggy → Scout: 9 tickets for 100 pts',
+        ];
+
+        foreach ($descriptions as $description) {
+            LedgerEntry::create([
+                'household_id' => $household->id,
+                'profile_id' => $kid->id,
+                'kind' => LedgerKind::Earn,
+                'amount' => 100,
+                'description' => $description,
+            ]);
+        }
+
+        $page = Volt::test('kid.stats')->assertOk();
+
+        $page->assertSee('Clean gutters')
+            ->assertSee('3-day streak bonus ($1)')
+            ->assertSee('Turned in $5 cash')
+            ->assertSee('Paid out $8.00')
+            ->assertSee('Parent adjustment: +50')
+            // A trade names both sides, so it keeps the sibling and the
+            // direction rather than losing an end of its arrow.
+            ->assertSee('From Ziggy: 9 tickets for 100 pts')
+            ->assertDontSee('Scout —')
+            ->assertDontSee('to Scout')
+            ->assertDontSee('for Scout');
+
+        $this->assertSame('Ziggy', $sibling->name);
+    }
+
+    public function test_a_chore_starting_with_the_kids_name_keeps_its_words(): void
+    {
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household, ['name' => 'Scout']);
+
+        LedgerEntry::create([
+            'household_id' => $household->id,
+            'profile_id' => $kid->id,
+            'kind' => LedgerKind::Earn,
+            'amount' => 100,
+            'description' => 'Scout — Scout the back yard',
+        ]);
+
+        // Only the prefix goes: a second pass would eat the first word of the
+        // chore itself.
+        Volt::test('kid.stats')
+            ->assertOk()
+            ->assertSee('Scout the back yard');
     }
 
     public function test_the_history_pages_through_the_whole_ledger(): void
@@ -564,17 +628,14 @@ class KidStatsPageTest extends TestCase
 
         $page = Volt::test('kid.stats')
             ->assertOk()
-            ->assertSee('Complete history')
+            ->assertSee('History')
             ->assertSee('12 ENTRIES')
             ->assertSee('Chore number 12')
             ->assertDontSee('Chore number 3');
 
-        // Checked against a first-page entry the activity list above doesn't
-        // also carry, since that one always shows the five newest whatever the
-        // history is paged to.
         $page->call('nextPage', 'history')
             ->assertSee('Chore number 3')
-            ->assertDontSee('Chore number 5');
+            ->assertDontSee('Chore number 12');
     }
 
     public function test_another_kids_ledger_stays_out_of_the_history(): void
