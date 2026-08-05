@@ -89,9 +89,18 @@ class KidBadgesPageTest extends TestCase
         // the badge up and quietly does nothing when it's missing — so a gap
         // shows up as an achievement that simply never fires.
         $expected = [
-            'first_quest', 'streak_3', 'streak_7', 'streak_14',
+            'first_quest', 'streak_3', 'streak_7', 'streak_14', 'streak_30',
             'big_spender', 'big_saver', 'wheel_winner', 'busy_bee',
             'perfect_board', 'early_bird', 'night_owl', 'team_effort', 'speed_runner',
+            'chores_10', 'chores_50', 'chores_100', 'chores_365',
+            'quest_10', 'quest_50',
+            'earner_1000', 'earner_5000', 'earner_20000',
+            'level_10', 'level_25',
+            'spin_25', 'triple_threat',
+            'chest_7', 'chest_30',
+            'first_reward', 'big_ticket',
+            'dealmaker', 'trade_10', 'gadgeteer',
+            'comeback_kid', 'weekend_warrior', 'overachiever', 'all_rounder',
         ];
 
         $this->assertSame([], array_diff($expected, Badge::pluck('key')->all()));

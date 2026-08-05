@@ -64,6 +64,7 @@ class ChestService
         private TicketService $tickets,
         private LedgerService $ledger,
         private PerkInventoryService $inventory,
+        private BadgeService $badges,
     ) {}
 
     public function openedToday(Profile $profile): ?DailyChest
@@ -103,6 +104,10 @@ class ChestService
         ]);
 
         $this->grant($profile, $chest);
+
+        // A chest can pay points as well as tick the chest-opening badges off,
+        // so the check has to happen after the reward has landed.
+        $this->badges->evaluate($profile);
 
         return $chest;
     }

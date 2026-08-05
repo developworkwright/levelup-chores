@@ -4,13 +4,18 @@ namespace Tests\Feature;
 
 use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
+use App\Enums\PerkEffect;
+use App\Enums\RedemptionStatus;
 use App\Models\Badge;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
+use App\Models\DailyChest;
 use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\LedgerEntry;
+use App\Models\OwnedPerk;
 use App\Models\Profile;
+use App\Models\Redemption;
 use App\Models\Spin;
 use App\Models\StoreItem;
 use App\Models\StreakRepair;
@@ -197,10 +202,11 @@ class KidStatsPageTest extends TestCase
 
         $html = Volt::test('kid.stats')->assertOk()->html();
 
-        $this->assertMatchesRegularExpression('/>\s*1\s*<.*?Today/s', $html);
+        // Today is the hero, so its label leads rather than trails; the
+        // lifetime count sits in a tile alongside, where the value comes first.
+        $this->assertMatchesRegularExpression('/Chores today.*?>\s*1\s*</s', $html);
         $this->assertMatchesRegularExpression('/>\s*3\s*<.*?Last 7 days/s', $html);
-        // The lifetime count is the hero, so its label leads rather than trails.
-        $this->assertMatchesRegularExpression('/Chores done, all time.*?>\s*4\s*</s', $html);
+        $this->assertMatchesRegularExpression('/>\s*4\s*<.*?Chores done, all time/s', $html);
     }
 
     public function test_todays_count_ends_at_the_household_day_boundary(): void
@@ -216,7 +222,7 @@ class KidStatsPageTest extends TestCase
 
         $html = Volt::test('kid.stats')->assertOk()->html();
 
-        $this->assertMatchesRegularExpression('/>\s*0\s*<.*?Today/s', $html);
+        $this->assertMatchesRegularExpression('/Chores today.*?>\s*0\s*</s', $html);
         $this->assertMatchesRegularExpression('/>\s*1\s*<.*?Last 7 days/s', $html);
     }
 
@@ -284,9 +290,9 @@ class KidStatsPageTest extends TestCase
 
         $html = $page->html();
         $this->assertSame(14, $page->get('daysBack'));
-        $this->assertMatchesRegularExpression('/>\s*1\s*<.*?Today/s', $html);
+        $this->assertMatchesRegularExpression('/Chores today.*?>\s*1\s*</s', $html);
         $this->assertMatchesRegularExpression('/>\s*1\s*<.*?Last 7 days/s', $html);
-        $this->assertMatchesRegularExpression('/Chores done, all time.*?>\s*2\s*</s', $html);
+        $this->assertMatchesRegularExpression('/>\s*2\s*<.*?Chores done, all time/s', $html);
     }
 
     public function test_it_ranks_the_most_done_chores(): void
@@ -663,6 +669,224 @@ class KidStatsPageTest extends TestCase
             ->assertOk()
             ->assertSee('My chore')
             ->assertDontSee('Their chore');
+    }
+
+    public function test_the_hero_leads_with_todays_chores_and_money(): void
+    {
+        $household = Household::factory()->create(['points_per_dollar' => 100]);
+        $kid = $this->loginKid($household);
+        $chore = Chore::factory()->for($household)->create();
+
+        $this->approve($kid, $chore, now(), 150);
+        $this->approve($kid, $chore, now(), 90);
+        $this->approve($kid, $chore, now()->subDays(3), 500);
+
+        foreach ([[240, now()], [500, now()->subDays(3)]] as [$amount, $when]) {
+            LedgerEntry::create([
+                'household_id' => $household->id,
+                'profile_id' => $kid->id,
+                'kind' => LedgerKind::Earn,
+                'amount' => $amount,
+                'description' => 'Chores',
+                'created_at' => $when,
+            ]);
+        }
+
+        $html = Volt::test('kid.stats')
+            ->assertOk()
+            ->assertSee('Chores today')
+            ->assertSee('Earned today')
+            ->assertSee('$2.40')
+            ->assertSee('240 PTS')
+            ->html();
+
+        $this->assertMatchesRegularExpression('/Chores today.*?>\s*2\s*</s', $html);
+    }
+
+    public function test_todays_money_ignores_points_that_were_not_earned(): void
+    {
+        // Cash turned in at the kitchen table and a parent top-up both move the
+        // balance without a day's work behind them, so neither belongs in a
+        // figure a kid reads as "what I made today".
+        $household = Household::factory()->create(['points_per_dollar' => 100]);
+        $kid = $this->loginKid($household);
+
+        foreach ([[LedgerKind::CashIn, 500], [LedgerKind::Adjustment, 300]] as [$kind, $amount]) {
+            LedgerEntry::create([
+                'household_id' => $household->id,
+                'profile_id' => $kid->id,
+                'kind' => $kind,
+                'amount' => $amount,
+                'description' => 'Not earned',
+            ]);
+        }
+
+        Volt::test('kid.stats')
+            ->assertOk()
+            ->assertSee('Earned today')
+            ->assertSee('0 PTS');
+    }
+
+    public function test_it_ranks_the_three_best_days(): void
+    {
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household);
+        $chore = Chore::factory()->for($household)->create();
+
+        $days = [
+            ['2026-05-01', 300, 1],
+            ['2026-05-02', 900, 4],
+            ['2026-05-03', 600, 2],
+            ['2026-05-04', 100, 1],
+        ];
+
+        $this->travelTo(Carbon::parse('2026-05-10 12:00', $household->timezone));
+
+        foreach ($days as [$date, $points, $chores]) {
+            $at = Carbon::parse("{$date} 12:00", $household->timezone);
+
+            foreach (range(1, $chores) as $ignored) {
+                $this->approve($kid, $chore, $at, (int) ($points / $chores));
+            }
+
+            LedgerEntry::create([
+                'household_id' => $household->id,
+                'profile_id' => $kid->id,
+                'kind' => LedgerKind::Earn,
+                'amount' => $points,
+                'description' => 'Chores',
+                'created_at' => $at,
+            ]);
+        }
+
+        $rendered = Volt::test('kid.stats')->assertOk();
+
+        $rendered->assertSee('Best days')
+            ->assertSee('May 2, 2026')
+            ->assertSee('May 3, 2026')
+            ->assertSee('May 1, 2026')
+            // Ranked on points, so the smallest day never makes the board. The
+            // key rather than the date, which the charts below also print.
+            ->assertDontSee('best-2026-05-04')
+            ->assertSee('4 chores done')
+            ->assertSee('1 chore done');
+
+        $html = $rendered->html();
+        $this->assertLessThan(
+            strpos($html, 'May 3, 2026'),
+            strpos($html, 'May 2, 2026'),
+            'The day that paid the most should be ranked first.'
+        );
+    }
+
+    public function test_the_fortnight_charts_cover_chores_and_points(): void
+    {
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household);
+        $chore = Chore::factory()->for($household)->create();
+
+        $this->travelTo(Carbon::parse('2026-06-30 12:00', $household->timezone));
+
+        // Two chores inside the current fortnight, one in the fortnight before.
+        $days = [
+            ['2026-06-25 12:00', 2, 120],
+            ['2026-06-10 12:00', 1, 50],
+        ];
+
+        foreach ($days as [$when, $chores, $points]) {
+            $at = Carbon::parse($when, $household->timezone);
+
+            foreach (range(1, $chores) as $ignored) {
+                $this->approve($kid, $chore, $at, (int) ($points / $chores));
+            }
+
+            LedgerEntry::create([
+                'household_id' => $household->id,
+                'profile_id' => $kid->id,
+                'kind' => LedgerKind::Earn,
+                'amount' => $points,
+                'description' => 'Chores',
+                'created_at' => $at,
+            ]);
+        }
+
+        $page = Volt::test('kid.stats')
+            ->assertOk()
+            ->assertSee('Last 14 days')
+            ->assertSee('Chores done')
+            ->assertSee('Points earned')
+            ->assertSee('2 CHORES')
+            ->assertSee('120 PTS');
+
+        // One set of controls moves both charts, so paging back has to carry
+        // the pair together rather than leaving them showing different weeks.
+        $page->call('showEarlier')
+            ->assertSee('Jun 3, 2026 – Jun 16, 2026')
+            ->assertSee('1 CHORES')
+            ->assertSee('50 PTS');
+    }
+
+    public function test_it_reports_the_wider_stat_grid(): void
+    {
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household, ['bonus_tickets' => 4]);
+        $chore = Chore::factory()->for($household)->create();
+        $item = StoreItem::factory()->for($household)->create(['cost' => 200]);
+
+        $this->approve($kid, $chore, now(), 120);
+        ChoreCompletion::create([
+            'chore_id' => $chore->id,
+            'profile_id' => $kid->id,
+            'status' => CompletionStatus::Rejected,
+            'points_awarded' => 0,
+            'submitted_at' => now(),
+        ]);
+
+        DailyChest::create([
+            'profile_id' => $kid->id,
+            'chest_date' => now()->toDateString(),
+            'reward_kind' => 'tickets',
+            'reward_amount' => 1,
+            'quest_was_done' => false,
+        ]);
+
+        OwnedPerk::create([
+            'profile_id' => $kid->id,
+            'effect' => PerkEffect::WheelRespin,
+            'source' => OwnedPerk::SOURCE_SHOP,
+            'acquired_at' => now(),
+            'consumed_at' => now(),
+        ]);
+        OwnedPerk::create([
+            'profile_id' => $kid->id,
+            'effect' => PerkEffect::QuestReroll,
+            'source' => OwnedPerk::SOURCE_CHEST,
+            'acquired_at' => now(),
+        ]);
+
+        Redemption::create([
+            'store_item_id' => $item->id,
+            'profile_id' => $kid->id,
+            'cost_snapshot' => 200,
+            'status' => RedemptionStatus::Fulfilled,
+            'requested_at' => now(),
+            'fulfilled_at' => now(),
+        ]);
+
+        Volt::test('kid.stats')
+            ->assertOk()
+            ->assertSee('Points per chore')
+            ->assertSee('Chores approved')
+            // One of two submissions came back approved.
+            ->assertSee('50%')
+            ->assertSee('2 sent in')
+            ->assertSee('Chests opened')
+            ->assertSee('daily bonuses')
+            ->assertSee('Perks used')
+            ->assertSee('of 2 picked up')
+            ->assertSee('Bonus tickets')
+            ->assertSee('Rewards claimed')
+            ->assertSee('1 handed over');
     }
 
     public function test_a_parent_cannot_open_the_kid_stats_page(): void

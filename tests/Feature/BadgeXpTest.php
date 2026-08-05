@@ -75,8 +75,8 @@ class BadgeXpTest extends TestCase
         // fingers an extra digit, the total moves off this range.
         $total = Badge::sum('xp_reward');
 
-        $this->assertGreaterThanOrEqual(2000, $total);
-        $this->assertLessThanOrEqual(2500, $total);
+        $this->assertGreaterThanOrEqual(7000, $total);
+        $this->assertLessThanOrEqual(8000, $total);
     }
 
     public function test_level_and_xp_bar_track_the_curve_constant(): void

@@ -16,6 +16,8 @@ class SpinService
     /** Keeps the wheel legible and its segments tappable/readable at any household size. */
     public const MAX_WHEEL_CHORES = 10;
 
+    public function __construct(private BadgeService $badges) {}
+
     public function today(Profile $profile): ?Spin
     {
         $today = HouseholdClock::for($profile->household)->today();
@@ -131,12 +133,18 @@ class SpinService
         $chore = $eligible->random();
         $multiplier = (mt_rand() / mt_getrandmax()) < self::TRIPLE_CHANCE ? 3 : 2;
 
-        return Spin::create([
+        $spin = Spin::create([
             'profile_id' => $profile->id,
             'spin_date' => HouseholdClock::for($profile->household)->today(),
             'chore_id' => $chore->id,
             'multiplier' => $multiplier,
         ]);
+
+        // The wheel badges would otherwise wait for the next chore approval to
+        // notice a spin that already happened.
+        $this->badges->evaluate($profile);
+
+        return $spin;
     }
 
     public function multiplierFor(Profile $profile, Chore $chore): int

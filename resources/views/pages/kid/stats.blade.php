@@ -3,13 +3,17 @@
 use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
 use App\Enums\PerkEffect;
+use App\Enums\RedemptionStatus;
 use App\Enums\SiblingOfferStatus;
 use App\Models\Badge;
+use App\Models\BonusTicketEntry;
 use App\Models\ChoreCompletion;
+use App\Models\DailyChest;
 use App\Models\DailyQuest;
 use App\Models\LedgerEntry;
 use App\Models\OwnedPerk;
 use App\Models\Profile;
+use App\Models\Redemption;
 use App\Models\SiblingOffer;
 use App\Models\Spin;
 use App\Models\StreakRepair;
@@ -40,6 +44,9 @@ new class extends Component
 
     /** How many entries the most-done list shows. */
     private const TOP_CHORES = 5;
+
+    /** How many days the record board ranks. */
+    private const BEST_DAYS = 3;
 
     public Profile $profile;
 
@@ -89,29 +96,78 @@ new class extends Component
     }
 
     /**
+     * Points that actually landed in the bank on each household day, keyed by
+     * date string.
+     *
+     * The Earn ledger only: cash turned in at the kitchen table and parent
+     * top-ups move a balance without a day's work behind them, and a chart
+     * called "points earned" that spiked on pocket money would be lying.
+     *
+     * @return Collection<string, int>
+     */
+    private function earnedByDay(): Collection
+    {
+        $clock = HouseholdClock::for($this->profile->household);
+
+        return $this->profile->ledgerEntries()
+            ->where('kind', LedgerKind::Earn)
+            ->get(['id', 'amount', 'created_at'])
+            ->groupBy(fn (LedgerEntry $entry) => $clock->dayFor($entry->created_at)->toDateString())
+            ->map(fn (Collection $day) => (int) $day->sum('amount'));
+    }
+
+    /**
      * One entry per day for a window ending on $endDate, oldest first,
      * including the days nothing happened — a gap is as much of the picture as
      * a tall bar.
      *
      * @param  Collection<string, Collection<int, ChoreCompletion>>  $byDay
+     * @param  Collection<string, int>  $earnedByDay
      * @return Collection<int, array{date: Carbon, count: int, points: int, isToday: bool}>
      */
-    private function dayWindow(Collection $byDay, Carbon $endDate, int $length): Collection
+    private function dayWindow(Collection $byDay, Collection $earnedByDay, Carbon $endDate, int $length): Collection
     {
         $today = HouseholdClock::for($this->profile->household)->today()->toDateString();
 
         return collect(range($length - 1, 0))
-            ->map(function (int $daysAgo) use ($endDate, $byDay, $today) {
+            ->map(function (int $daysAgo) use ($endDate, $byDay, $earnedByDay, $today) {
                 $date = $endDate->copy()->subDays($daysAgo);
-                $day = $byDay->get($date->toDateString(), collect());
+                $key = $date->toDateString();
 
                 return [
                     'date' => $date,
-                    'count' => $day->count(),
-                    'points' => (int) $day->sum('points_awarded'),
-                    'isToday' => $date->toDateString() === $today,
+                    'count' => $byDay->get($key, collect())->count(),
+                    'points' => (int) $earnedByDay->get($key, 0),
+                    'isToday' => $key === $today,
                 ];
             });
+    }
+
+    /**
+     * The days worth bragging about, best first — ranked on points earned,
+     * with the chores that paid for them alongside.
+     *
+     * Ties break on chores done and then on the later date, so two identical
+     * days come out in a fixed order rather than however the map happened to
+     * be built.
+     *
+     * @param  Collection<string, Collection<int, ChoreCompletion>>  $byDay
+     * @param  Collection<string, int>  $earnedByDay
+     * @return Collection<int, array{date: Carbon, count: int, points: int}>
+     */
+    private function bestDays(Collection $byDay, Collection $earnedByDay): Collection
+    {
+        return $byDay->keys()
+            ->merge($earnedByDay->keys())
+            ->unique()
+            ->map(fn (string $date) => [
+                'date' => Carbon::parse($date),
+                'count' => $byDay->get($date, collect())->count(),
+                'points' => (int) $earnedByDay->get($date, 0),
+            ])
+            ->sortByDesc(fn (array $day) => [$day['points'], $day['count'], $day['date']->timestamp])
+            ->take(self::BEST_DAYS)
+            ->values();
     }
 
     /**
@@ -294,6 +350,7 @@ new class extends Component
             ->get(['id', 'chore_id', 'points_awarded', 'submitted_at']);
 
         $byDay = $this->groupByDay($completions);
+        $earnedByDay = $this->earnedByDay();
         $dayCounts = $byDay->map(fn (Collection $day) => $day->count());
         $bestDayCount = (int) $dayCounts->max();
 
@@ -343,6 +400,27 @@ new class extends Component
 
         $badgesEarned = $this->profile->badges()->count();
 
+        // Everything a kid has sent in, not just what came back approved —
+        // the pair is what makes a hit rate mean anything.
+        $submissions = ChoreCompletion::where('profile_id', $this->profile->id)->count();
+        $chorePoints = (int) $completions->sum('points_awarded');
+
+        $chestsOpened = DailyChest::where('profile_id', $this->profile->id)->count();
+
+        $perks = OwnedPerk::where('profile_id', $this->profile->id)
+            ->selectRaw('count(*) as picked_up')
+            ->selectRaw('sum(case when consumed_at is null then 0 else 1 end) as used')
+            ->first();
+
+        $ticketsEarned = (int) BonusTicketEntry::where('profile_id', $this->profile->id)
+            ->where('amount', '>', 0)
+            ->sum('amount');
+
+        $rewards = Redemption::where('profile_id', $this->profile->id)
+            ->selectRaw('count(*) as claimed')
+            ->selectRaw('sum(case when status = ? then 1 else 0 end) as handed_over', [RedemptionStatus::Fulfilled->value])
+            ->first();
+
         $today = HouseholdClock::for($this->profile->household)->today();
 
         /*
@@ -350,7 +428,7 @@ new class extends Component
          * ever got approved, rounded out to the end of the strip it sits in.
          * Without the clamp a kid could page into an empty century.
          */
-        $firstDay = $dayCounts->keys()->min();
+        $firstDay = $dayCounts->keys()->merge($earnedByDay->keys())->min();
         $maxDaysBack = $firstDay === null
             ? 0
             : intdiv((int) Carbon::parse($firstDay)->diffInDays($today), self::RECENT_DAYS) * self::RECENT_DAYS;
@@ -361,8 +439,11 @@ new class extends Component
 
         // Anchored to today no matter where the strip is scrolled: "Today" and
         // "Last 7 days" answer what a kid did today, not what the window shows.
-        $thisWeek = $this->dayWindow($byDay, $today, self::WEEK_DAYS);
-        $strip = $this->dayWindow($byDay, $today->copy()->subDays($this->daysBack), self::RECENT_DAYS);
+        $thisWeek = $this->dayWindow($byDay, $earnedByDay, $today, self::WEEK_DAYS);
+        $strip = $this->dayWindow($byDay, $earnedByDay, $today->copy()->subDays($this->daysBack), self::RECENT_DAYS);
+
+        $earnedToday = (int) $thisWeek->last()['points'];
+        $earnedThisWeek = (int) $thisWeek->sum('points');
 
         $history = $this->profile->ledgerEntries()
             ->latest('created_at')
@@ -374,14 +455,20 @@ new class extends Component
             : 'still to come';
 
         return [
-            // The one number the page is opened for, at the size that says so —
-            // with today and the week beside it, because a lifetime total on
-            // its own can't answer "how am I doing right now".
-            'lifetimeChores' => $completions->count(),
+            /*
+             * Today leads the page. A lifetime total is the number a kid is
+             * proud of, but it isn't the one they open this page to check —
+             * "what have I done today, and what is it worth" is, so both of
+             * those get the hero and everything else lines up behind them.
+             */
+            'choresToday' => (int) $thisWeek->last()['count'],
+            'earnedToday' => $earnedToday,
+            'earnedTodayDollars' => $this->dollars($earnedToday),
             'heroTiles' => [
-                ['label' => 'Today', 'count' => $thisWeek->last()['count'], 'color' => 'var(--fq-lime)'],
-                ['label' => 'Last 7 days', 'count' => (int) $thisWeek->sum('count'), 'color' => 'var(--fq-cyan)'],
-                ['label' => 'Pts banked', 'count' => $earned, 'color' => 'var(--fq-coral)'],
+                ['label' => 'Chores done, all time', 'value' => number_format($completions->count()), 'color' => 'var(--fq-gold)'],
+                ['label' => 'Last 7 days', 'value' => number_format((int) $thisWeek->sum('count')), 'color' => 'var(--fq-cyan)'],
+                ['label' => 'Earned this week', 'value' => $this->dollars($earnedThisWeek), 'color' => 'var(--fq-lime)'],
+                ['label' => 'Pts banked', 'value' => number_format($earned), 'color' => 'var(--fq-coral)'],
             ],
             /*
              * One cell per stat, all the same shape. The old layout paired two
@@ -410,7 +497,9 @@ new class extends Component
                 [
                     'label' => 'Best day',
                     'value' => (string) $bestDayCount,
-                    'suffix' => $bestDayCount > 0 ? 'chores · '.$bestDayOn : $bestDayOn,
+                    'suffix' => $bestDayCount > 0
+                        ? Str::plural('chore', $bestDayCount).' · '.$bestDayOn
+                        : $bestDayOn,
                     'color' => 'var(--fq-text)',
                 ],
                 [
@@ -469,12 +558,83 @@ new class extends Component
                         : 'nothing cashed out yet',
                     'color' => 'var(--fq-coral)',
                 ],
+                [
+                    'label' => 'Earned this week',
+                    'value' => number_format($earnedThisWeek),
+                    'suffix' => '≈ '.$this->dollars($earnedThisWeek),
+                    'color' => 'var(--fq-lime)',
+                ],
+                [
+                    'label' => 'Points per chore',
+                    'value' => $completions->isNotEmpty()
+                        ? number_format(round($chorePoints / $completions->count()))
+                        : '0',
+                    'suffix' => 'on average',
+                    'color' => 'var(--fq-gold)',
+                ],
+                [
+                    'label' => 'Chores approved',
+                    'value' => $submissions > 0
+                        ? round($completions->count() / $submissions * 100).'%'
+                        : '—',
+                    'suffix' => number_format($submissions).' sent in',
+                    'color' => 'var(--fq-lime)',
+                ],
+                [
+                    'label' => 'Chests opened',
+                    'value' => number_format($chestsOpened),
+                    'suffix' => 'daily bonuses',
+                    'color' => 'var(--fq-gold)',
+                ],
+                [
+                    'label' => 'Perks used',
+                    'value' => number_format((int) $perks->used),
+                    'suffix' => 'of '.number_format((int) $perks->picked_up).' picked up',
+                    'color' => 'var(--fq-violet)',
+                ],
+                [
+                    'label' => 'Bonus tickets',
+                    'value' => number_format($this->profile->bonus_tickets),
+                    'suffix' => number_format($ticketsEarned).' won all time',
+                    'color' => 'var(--fq-magenta)',
+                ],
+                [
+                    'label' => 'Rewards claimed',
+                    'value' => number_format((int) $rewards->claimed),
+                    'suffix' => number_format((int) $rewards->handed_over).' handed over',
+                    'color' => 'var(--fq-coral)',
+                ],
             ],
+            'bestDays' => $this->bestDays($byDay, $earnedByDay),
             'topChores' => $this->topChores($completions),
             'strip' => $strip,
-            // Bars are scaled against the busiest day on the strip rather than
-            // an all-time best, so a quiet fortnight still has shape.
-            'stripMax' => max(1, (int) $strip->max('count')),
+            /*
+             * Two readings of the same fortnight, on one set of paging
+             * controls. Chores done and points earned aren't the same shape —
+             * a single big chore can outweigh a busy day of small ones — and
+             * stacking them is how that shows up.
+             *
+             * Each is scaled against the busiest day on the strip rather than
+             * an all-time best, so a quiet fortnight still has shape.
+             */
+            'charts' => [
+                [
+                    'title' => 'Chores done',
+                    'key' => 'count',
+                    'unit' => 'chores',
+                    'max' => max(1, (int) $strip->max('count')),
+                    'total' => number_format((int) $strip->sum('count')),
+                    'fill' => 'linear-gradient(180deg, var(--fq-cyan), var(--fq-violet))',
+                ],
+                [
+                    'title' => 'Points earned',
+                    'key' => 'points',
+                    'unit' => 'pts',
+                    'max' => max(1, (int) $strip->max('points')),
+                    'total' => number_format((int) $strip->sum('points')),
+                    'fill' => 'linear-gradient(180deg, var(--fq-gold), var(--fq-coral))',
+                ],
+            ],
             'stripTotal' => (int) $strip->sum('count'),
             'stripLabel' => $this->daysBack === 0
                 ? 'Last '.self::RECENT_DAYS.' days'
@@ -523,25 +683,41 @@ new class extends Component
             </p>
         </div>
 
-        {{-- Chores get the hero rather than a cell in the grid below: "how am I
-             doing" is the question this page is opened with, and the lifetime
-             count is the answer, with today and the week beside it. --}}
-        <div class="flex flex-wrap items-end gap-5 rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
+        {{-- Today gets the hero: "how am I doing right now" is the question
+             this page is opened with, and a lifetime total can't answer it.
+             The all-time figures keep their place in the tiles alongside. --}}
+        {{-- Both figures are label-over-value and exactly two lines tall, so
+             they line up on the top and the bottom. The points behind the money
+             ride the same baseline rather than adding a third line to one side
+             and knocking the pair out of step. --}}
+        <div class="flex flex-wrap items-end gap-x-9 gap-y-5 rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
             <div>
-                <p class="font-mono-fq text-[10px] tracking-[0.16em] text-fq-text-4 uppercase">Chores done, all time</p>
-                <p class="font-baloo text-[76px] leading-[0.9] font-extrabold text-fq-gold">
-                    {{ number_format($lifetimeChores) }}
+                <p class="font-mono-fq text-[10px] tracking-[0.16em] text-fq-text-4 uppercase">Chores today</p>
+                <p class="mt-[6px] font-baloo text-[60px] leading-[0.9] font-extrabold text-fq-lime">
+                    {{ number_format($choresToday) }}
                 </p>
             </div>
 
-            <div class="ml-auto flex flex-wrap justify-end gap-[10px] pb-2">
+            <div>
+                <p class="font-mono-fq text-[10px] tracking-[0.16em] text-fq-text-4 uppercase">Earned today</p>
+                <div class="mt-[6px] flex items-baseline gap-[7px]">
+                    <span class="font-baloo text-[60px] leading-[0.9] font-extrabold text-fq-gold">
+                        {{ $earnedTodayDollars }}
+                    </span>
+                    <span class="font-mono-fq text-[11px] whitespace-nowrap text-fq-text-5">
+                        {{ number_format($earnedToday) }} PTS
+                    </span>
+                </div>
+            </div>
+
+            <div class="ml-auto flex flex-wrap justify-end gap-[10px]">
                 @foreach ($heroTiles as $tile)
                     <div
                         wire:key="hero-{{ $tile['label'] }}"
                         class="rounded-[14px] border border-fq-line-2 bg-fq-sunk px-[15px] py-[11px]"
                     >
                         <p class="font-baloo text-[26px] leading-none font-extrabold" style="color: {{ $tile['color'] }}">
-                            {{ number_format($tile['count']) }}
+                            {{ $tile['value'] }}
                         </p>
                         <p class="mt-[5px] font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-4 uppercase">
                             {{ $tile['label'] }}
@@ -596,67 +772,132 @@ new class extends Component
                 </div>
             </div>
 
+            {{-- The record board: which days actually paid, and what it took
+                 to get there. Ranked on points rather than chores, because a
+                 single big job can beat an afternoon of little ones. --}}
             <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
                 <div class="flex items-baseline justify-between gap-3">
-                    <h3 class="font-baloo text-xl font-bold">{{ $stripLabel }}</h3>
-                    <span class="font-mono-fq text-[10px] text-fq-text-4">{{ $stripTotal }} CHORES</span>
+                    <h3 class="font-baloo text-xl font-bold">Best days</h3>
+                    <span class="font-mono-fq text-[10px] text-fq-text-4">YOUR RECORDS</span>
                 </div>
 
-                <div class="mt-4 flex h-[110px] items-end gap-[4px]">
-                    @foreach ($strip as $day)
+                <div class="mt-3 flex flex-col">
+                    @forelse ($bestDays as $day)
                         @php
-                            // A no-chore day keeps a 3px stub, so the strip
-                            // still reads as a row of days rather than a hole.
-                            $height = max(3, round($day['count'] / $stripMax * 88));
-                            $fill = match (true) {
-                                $day['count'] === 0 => 'var(--fq-line-2)',
-                                $day['isToday'] => 'var(--fq-fill-gold)',
-                                default => 'linear-gradient(180deg, var(--fq-cyan), var(--fq-violet))',
-                            };
+                            $medal = ['var(--fq-gold)', 'var(--fq-text-2)', 'var(--fq-coral)'][$loop->index];
                         @endphp
 
-                        <div wire:key="day-{{ $day['date']->toDateString() }}" class="flex h-full flex-1 flex-col justify-end gap-[6px]">
-                            <div
-                                class="w-full rounded-[4px]"
-                                title="{{ $day['date']->toFormattedDateString() }} — {{ $day['count'] }} {{ Str::plural('chore', $day['count']) }}, {{ $day['points'] }} pts"
-                                style="height: {{ $height }}px; background: {{ $fill }}"
-                            ></div>
+                        <div
+                            wire:key="best-{{ $day['date']->toDateString() }}"
+                            class="flex items-center gap-3 border-b border-fq-divider py-[11px] last:border-b-0"
+                        >
                             <span
-                                class="text-center font-mono-fq text-[9px]"
-                                style="color: {{ $day['isToday'] ? 'var(--fq-lime)' : 'var(--fq-text-5)' }}"
-                            >{{ mb_substr($day['date']->format('D'), 0, 1) }}</span>
+                                class="w-[22px] shrink-0 font-baloo text-[19px] leading-none font-extrabold"
+                                style="color: {{ $medal }}"
+                            >{{ $loop->iteration }}</span>
+
+                            <div class="min-w-0 flex-1">
+                                <p class="truncate text-sm font-semibold">{{ $day['date']->toFormattedDateString() }}</p>
+                                <p class="font-mono-fq text-[10px] text-fq-text-5">
+                                    {{ $day['count'] }} {{ Str::plural('chore', $day['count']) }} done
+                                </p>
+                            </div>
+
+                            <span class="font-baloo text-[19px] leading-none font-extrabold whitespace-nowrap text-fq-lime">
+                                {{ number_format($day['points']) }}
+                            </span>
+                            <span class="font-mono-fq text-[10px] text-fq-text-4">PTS</span>
                         </div>
-                    @endforeach
+                    @empty
+                        <p class="py-2 text-sm text-fq-text-5">
+                            No record days yet. The first one is whichever day you earn on.
+                        </p>
+                    @endforelse
                 </div>
-
-                {{-- Only rendered once there's history to walk back into, so a
-                     kid on their first week isn't offered a dead button. --}}
-                @if ($canGoEarlier || $canGoLater)
-                    <div class="mt-4 flex items-center justify-between gap-2 border-t border-fq-divider pt-3">
-                        <button
-                            type="button"
-                            wire:click="showEarlier"
-                            @disabled(! $canGoEarlier)
-                            class="rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[13px] py-[8px] text-[13px] text-fq-text-2-b transition hover:border-fq-line-4 hover:text-fq-text disabled:cursor-default disabled:opacity-35 disabled:hover:border-fq-line-2"
-                        >&larr; Earlier</button>
-
-                        @if ($canGoLater)
-                            <button
-                                type="button"
-                                wire:click="showToday"
-                                class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase transition hover:text-fq-lime"
-                            >Back to today</button>
-                        @endif
-
-                        <button
-                            type="button"
-                            wire:click="showLater"
-                            @disabled(! $canGoLater)
-                            class="rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[13px] py-[8px] text-[13px] text-fq-text-2-b transition hover:border-fq-line-4 hover:text-fq-text disabled:cursor-default disabled:opacity-35 disabled:hover:border-fq-line-2"
-                        >Later &rarr;</button>
-                    </div>
-                @endif
             </div>
+        </div>
+
+        {{-- Both readings of the same fortnight, on one set of controls, so
+             paging back moves them together and the pair stays comparable. --}}
+        <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
+            <div class="flex items-baseline justify-between gap-3">
+                <h3 class="font-baloo text-xl font-bold">{{ $stripLabel }}</h3>
+                <span class="font-mono-fq text-[10px] text-fq-text-4">{{ $stripTotal }} CHORES</span>
+            </div>
+
+            <div class="mt-2 flex flex-col gap-4">
+                @foreach ($charts as $chart)
+                    <div wire:key="chart-{{ $chart['key'] }}">
+                        <div class="flex items-baseline justify-between gap-3">
+                            <p class="font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-4 uppercase">
+                                {{ $chart['title'] }}
+                            </p>
+                            <span class="font-mono-fq text-[10px] text-fq-text-5">
+                                {{ $chart['total'] }} {{ strtoupper($chart['unit']) }}
+                            </span>
+                        </div>
+
+                        <div class="mt-2 flex h-[110px] items-end gap-[4px]">
+                            @foreach ($strip as $day)
+                                @php
+                                    $value = $day[$chart['key']];
+                                    // An empty day keeps a 3px stub, so the strip
+                                    // still reads as a row of days rather than a hole.
+                                    $height = max(3, round($value / $chart['max'] * 88));
+                                    $fill = match (true) {
+                                        $value === 0 => 'var(--fq-line-2)',
+                                        $day['isToday'] => 'var(--fq-fill-gold)',
+                                        default => $chart['fill'],
+                                    };
+                                @endphp
+
+                                <div
+                                    wire:key="{{ $chart['key'] }}-{{ $day['date']->toDateString() }}"
+                                    class="flex h-full flex-1 flex-col justify-end gap-[6px]"
+                                >
+                                    <div
+                                        class="w-full rounded-[4px]"
+                                        title="{{ $day['date']->toFormattedDateString() }} — {{ $day['count'] }} {{ Str::plural('chore', $day['count']) }}, {{ $day['points'] }} pts"
+                                        style="height: {{ $height }}px; background: {{ $fill }}"
+                                    ></div>
+                                    <span
+                                        class="text-center font-mono-fq text-[9px]"
+                                        style="color: {{ $day['isToday'] ? 'var(--fq-lime)' : 'var(--fq-text-5)' }}"
+                                    >{{ mb_substr($day['date']->format('D'), 0, 1) }}</span>
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+
+            {{-- Only rendered once there's history to walk back into, so a
+                 kid on their first week isn't offered a dead button. --}}
+            @if ($canGoEarlier || $canGoLater)
+                <div class="mt-4 flex items-center justify-between gap-2 border-t border-fq-divider pt-3">
+                    <button
+                        type="button"
+                        wire:click="showEarlier"
+                        @disabled(! $canGoEarlier)
+                        class="rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[13px] py-[8px] text-[13px] text-fq-text-2-b transition hover:border-fq-line-4 hover:text-fq-text disabled:cursor-default disabled:opacity-35 disabled:hover:border-fq-line-2"
+                    >&larr; Earlier</button>
+
+                    @if ($canGoLater)
+                        <button
+                            type="button"
+                            wire:click="showToday"
+                            class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase transition hover:text-fq-lime"
+                        >Back to today</button>
+                    @endif
+
+                    <button
+                        type="button"
+                        wire:click="showLater"
+                        @disabled(! $canGoLater)
+                        class="rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[13px] py-[8px] text-[13px] text-fq-text-2-b transition hover:border-fq-line-4 hover:text-fq-text disabled:cursor-default disabled:opacity-35 disabled:hover:border-fq-line-2"
+                    >Later &rarr;</button>
+                </div>
+            @endif
         </div>
 
         {{-- Every point in and out, so the two tiles above can be checked

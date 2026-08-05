@@ -21,6 +21,7 @@ class PerkInventoryService
     public function __construct(
         private SpinService $spins,
         private ChoreService $chores,
+        private BadgeService $badges,
     ) {}
 
     public function grant(Profile $profile, PerkEffect $effect, string $source): OwnedPerk
@@ -83,6 +84,10 @@ class PerkInventoryService
 
         $owned->consumed_at = now();
         $owned->save();
+
+        // Spending a perk is what "Gadgeteer" counts, and a Streak Restore is
+        // the only thing that ever unlocks "Comeback Kid".
+        $this->badges->evaluate($profile);
 
         return $outcome;
     }
