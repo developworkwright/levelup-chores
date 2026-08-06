@@ -9,6 +9,7 @@ use App\Models\ChoreCompletion;
 use App\Models\Profile;
 use App\Services\ChestService;
 use App\Services\ChoreService;
+use App\Services\GratitudeService;
 use App\Services\HouseholdClock;
 use App\Services\PerkInventoryService;
 use App\Services\SpinService;
@@ -54,6 +55,17 @@ new class extends Component
     public ?string $boardMessage = null;
 
     public string $search = '';
+
+    /**
+     * The three boxes of the gratitude quest. Deferred rather than live —
+     * nothing on the page reacts to a half-typed answer, so there's no reason
+     * to spend a round trip per keystroke.
+     *
+     * @var array<int, string>
+     */
+    public array $gratitude = ['', '', ''];
+
+    public ?string $gratitudeMessage = null;
 
     public function clearSearch(): void
     {
@@ -151,6 +163,29 @@ new class extends Component
         }
 
         $this->dailyChestPrize = app(ChestService::class)->describe($chest);
+    }
+
+    /**
+     * The gratitude quest. Both refusals are worth their own wording: one is
+     * "you missed a box", the other is "you already did this today", and a
+     * button that silently does nothing explains neither.
+     */
+    public function logGratitude(): void
+    {
+        $service = app(GratitudeService::class);
+
+        if ($service->record($this->profile, $this->gratitude)) {
+            $this->gratitude = ['', '', ''];
+            $this->gratitudeMessage = null;
+
+            $this->dispatch('celebrate', message: 'Gratitude logged! +'.GratitudeService::TICKETS.' tickets.');
+
+            return;
+        }
+
+        $this->gratitudeMessage = $service->isAvailable($this->profile)
+            ? 'Fill in all three before you hand it in.'
+            : "Today's gratitude quest is already done — back tomorrow!";
     }
 
     public function usePerk(string $effect): void
@@ -276,6 +311,8 @@ new class extends Component
         $mysteryChore = $service->mysteryChoreFor($household);
         $mysteryClaimant = $mysteryChore ? $service->claimantFor($mysteryChore) : null;
 
+        $gratitude = app(GratitudeService::class);
+
         $nextMilestone = $service->nextStreakMilestone($this->profile);
 
         $earnedToday = $service->pointsEarnedToday($this->profile);
@@ -311,6 +348,9 @@ new class extends Component
             'mysteryChore' => $mysteryChore,
             'mysteryClaimant' => $mysteryClaimant,
             'mysteryHint' => $service->mysteryHintFor($this->profile),
+            // Today's only. Everything older lives on the Journal tab — this
+            // page is about the day in front of you.
+            'gratitudeToday' => $gratitude->todayFor($this->profile),
             // Contextual "use it here" buttons for the perks that act on this
             // page, so a kid doesn't have to go hunting in the shop.
             'heldPerks' => collect([PerkEffect::QuestReroll, PerkEffect::MysteryHint, PerkEffect::StreakRestore])
@@ -611,15 +651,28 @@ new class extends Component
                 </div>
             @endif
 
-            {{-- Suppressed while the rescue card is up: that one already
-                 carries the same button, with the day and the number it buys
-                 back written on it. --}}
+            {{-- No button here on purpose. The rescue card above owns every
+                 case where a restore can actually be spent, so anything
+                 reaching this branch is a perk with nothing to fix — and a
+                 permanently greyed-out "Use Streak Restore" under a healthy
+                 streak reads as the app being broken rather than as the kid
+                 having nothing to repair. --}}
             @if (isset($heldPerks['streak_restore']) && ! $streakRepair)
+                @php
+                    $restoresHeld = $heldPerks['streak_restore']['count'];
+                    // Built here rather than across template lines, so the
+                    // sentence renders as one run of text instead of picking
+                    // up the indentation between its clauses.
+                    $restoreNote = $restoresHeld > 1
+                        ? "{$restoresHeld} Streak Restores are in your pocket. Nothing to fix right now — they'll be here if you ever miss a day."
+                        : "A Streak Restore is in your pocket. Nothing to fix right now — it'll be here if you ever miss a day.";
+                @endphp
+
                 <div class="flex flex-wrap items-center gap-3 rounded-[18px] border border-fq-steel-line p-[14px]" style="background: var(--fq-panel)">
-                    <p class="min-w-0 flex-1 text-sm text-fq-text-2">
-                        You're holding a Streak Restore — it can buy back a day you missed.
-                    </p>
-                    <x-perk-button :entry="$heldPerks['streak_restore']" />
+                    <span class="font-baloo text-sm" style="color: var(--fq-steel-text)">
+                        {{ App\Enums\PerkEffect::StreakRestore->defaults()['glyph'] }}
+                    </span>
+                    <p class="min-w-0 flex-1 text-sm text-fq-text-2">{{ $restoreNote }}</p>
                 </div>
             @endif
 
@@ -668,6 +721,76 @@ new class extends Component
                     @endif
                 </div>
             @endif
+
+            {{-- The one quest that isn't work. It sits with the chests rather
+                 than on the board because there's nothing for a parent to
+                 approve — the tickets land the moment it's handed in. --}}
+            <div
+                wire:key="gratitude-quest"
+                class="rounded-[24px] border p-5"
+                style="background: var(--fq-wash-blue); border-color: var(--fq-line-cool)"
+            >
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: var(--fq-cyan)">Gratitude Quest</p>
+                    <span class="font-mono-fq text-[11px]" style="color: {{ $gratitudeToday ? 'var(--fq-text-4)' : 'var(--fq-lime)' }}">
+                        {{ $gratitudeToday ? 'Done today' : '+'.\App\Services\GratitudeService::TICKETS.' tickets' }}
+                    </span>
+                </div>
+
+                @if ($gratitudeToday)
+                    <h2 class="mt-2 font-baloo text-xl font-bold">Today you were grateful for&hellip;</h2>
+
+                    <ol class="mt-3 flex flex-col gap-2">
+                        @foreach ($gratitudeToday->items as $index => $item)
+                            <li class="flex items-start gap-[10px] rounded-[14px] border border-fq-line-2 bg-fq-sunk px-[13px] py-[10px]">
+                                <span class="font-baloo text-[13px] font-extrabold" style="color: var(--fq-cyan)">{{ $index + 1 }}</span>
+                                <span class="min-w-0 flex-1 text-sm text-fq-text-2">{{ $item }}</span>
+                            </li>
+                        @endforeach
+                    </ol>
+
+                    <p class="mt-3 text-[13px] text-fq-text-5">
+                        A new one opens up tomorrow. Everything you've written is kept in your
+                        <a href="{{ route('kid.journal') }}" wire:navigate class="font-semibold underline" style="color: var(--fq-cyan)">Journal</a>.
+                    </p>
+                @else
+                    <h2 class="mt-2 font-baloo text-xl font-bold">Name three good things</h2>
+                    <p class="mt-1 max-w-[420px] text-sm text-fq-text-2">
+                        Tell us three things you're grateful for today. No chores, no waiting on a
+                        parent — hand it in and {{ \App\Services\GratitudeService::TICKETS }} tickets are yours.
+                    </p>
+
+                    <div class="mt-4 flex flex-col gap-2">
+                        @foreach (range(0, \App\Services\GratitudeService::ITEMS - 1) as $index)
+                            <div class="flex items-center gap-[10px]">
+                                <span class="w-4 shrink-0 text-center font-baloo text-[13px] font-extrabold" style="color: var(--fq-cyan)">{{ $index + 1 }}</span>
+                                <input
+                                    type="text"
+                                    wire:model="gratitude.{{ $index }}"
+                                    wire:keydown.enter="logGratitude"
+                                    maxlength="{{ \App\Services\GratitudeService::MAX_LENGTH }}"
+                                    placeholder="Something good&hellip;"
+                                    aria-label="Grateful for, number {{ $index + 1 }}"
+                                    class="min-w-0 flex-1 rounded-[14px] border border-fq-line-2 bg-fq-sunk px-4 py-[10px] text-sm outline-none focus:border-fq-cyan"
+                                >
+                            </div>
+                        @endforeach
+                    </div>
+
+                    <button
+                        type="button"
+                        wire:click="logGratitude"
+                        wire:loading.attr="disabled"
+                        wire:target="logGratitude"
+                        class="mt-4 rounded-[16px] px-[22px] py-[13px] font-baloo text-[16px] font-bold transition hover:brightness-110 disabled:opacity-60"
+                        style="background: var(--fq-cyan); color: var(--fq-ink)"
+                    >Hand it in</button>
+                @endif
+
+                @if ($gratitudeMessage)
+                    <p class="mt-3 text-[13px]" style="color: var(--fq-gold)">{{ $gratitudeMessage }}</p>
+                @endif
+            </div>
 
             <div class="flex items-center justify-between">
                 <h3 class="font-baloo text-xl font-bold">Side Quests</h3>

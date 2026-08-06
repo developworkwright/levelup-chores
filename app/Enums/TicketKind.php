@@ -12,6 +12,9 @@ enum TicketKind: string
     /** Tickets moving between two kids in the same household (a sibling trade). */
     case Trade = 'trade';
 
+    /** Paid for naming three things you're grateful for. */
+    case Gratitude = 'gratitude';
+
     public function label(): string
     {
         return match ($this) {
@@ -20,6 +23,7 @@ enum TicketKind: string
             self::Purchase => 'Purchase',
             self::Adjustment => 'Adjustment',
             self::Trade => 'Trade',
+            self::Gratitude => 'Gratitude',
         };
     }
 }

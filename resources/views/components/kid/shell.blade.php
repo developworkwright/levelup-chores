@@ -13,10 +13,11 @@
         'bonus' => ['label' => 'Bonus Shop', 'glyph' => '✦', 'route' => 'kid.bonus'],
         'badges' => ['label' => 'Badges', 'glyph' => '★', 'route' => 'kid.badges'],
         'stats' => ['label' => 'Stats', 'glyph' => '▤', 'route' => 'kid.stats'],
+        'journal' => ['label' => 'Journal', 'glyph' => '♡', 'route' => 'kid.journal'],
     ];
 
     /*
-     * Eight pages grouped into three ideas a kid already has words for. Trades
+     * Nine pages grouped into three ideas a kid already has words for. Trades
      * sits in both Earn and Spend because points flow both ways. Each world's
      * pill row is justified under its own rail button, so the pages stay
      * visually attached to the world that opened them.
@@ -24,7 +25,7 @@
     $worlds = [
         'earn' => ['label' => 'Earn', 'glyph' => '⚑', 'justify' => 'justify-start', 'pages' => ['quests', 'wheel', 'offers']],
         'spend' => ['label' => 'Spend', 'glyph' => '◈', 'justify' => 'justify-center', 'pages' => ['loot', 'offers', 'bonus']],
-        'me' => ['label' => 'Me', 'glyph' => '★', 'justify' => 'justify-end', 'pages' => ['goal', 'badges', 'stats']],
+        'me' => ['label' => 'Me', 'glyph' => '★', 'justify' => 'justify-end', 'pages' => ['goal', 'badges', 'stats', 'journal']],
     ];
 
     $dollars = number_format($profile->points / $profile->household->points_per_dollar, 2);
@@ -315,6 +316,23 @@
             aria-label="Pages in {{ $worlds[$activeWorld]['label'] }}"
             class="mt-[10px] flex flex-wrap gap-[6px] px-[2px] sm:gap-2 {{ $worlds[$activeWorld]['justify'] }}"
         >
+            @php
+                /*
+                 * Three pills share a phone row comfortably; four don't, and
+                 * left to wrap they strand the last one full-width on a row of
+                 * its own. Four go 2x2 instead, which reads as a deliberate
+                 * block rather than an overflow. Width rather than flex-1 in
+                 * that branch, so the two rules can't fight over flex-basis.
+                 *
+                 * The underscores are Tailwind's escape for the spaces CSS
+                 * requires around calc's minus — `calc(50%-3px)` is a syntax
+                 * error, and half the row would silently go full width.
+                 */
+                $pillWidth = count($worlds[$activeWorld]['pages']) > 3
+                    ? 'w-[calc(50%_-_3px)] sm:w-auto'
+                    : 'flex-1';
+            @endphp
+
             @foreach ($worlds[$activeWorld]['pages'] as $key)
                 @php $open = $active === $key; @endphp
 
@@ -328,7 +346,7 @@
                          label, which is what lets the row sit justified under
                          the world button that opened it. The label is never
                          wrapped or shrunk in either mode. --}}
-                    class="inline-flex flex-1 items-center justify-center gap-[6px] rounded-full border px-3 py-[11px] text-[13px] whitespace-nowrap transition hover:border-fq-line-focus sm:flex-none sm:gap-2 sm:px-[22px] sm:py-[10px] sm:text-sm {{ $open ? 'border-fq-line-focus font-semibold text-fq-text' : 'border-fq-line text-fq-text-3' }}"
+                    class="inline-flex {{ $pillWidth }} items-center justify-center gap-[6px] rounded-full border px-3 py-[11px] text-[13px] whitespace-nowrap transition hover:border-fq-line-focus sm:flex-none sm:gap-2 sm:px-[22px] sm:py-[10px] sm:text-sm {{ $open ? 'border-fq-line-focus font-semibold text-fq-text' : 'border-fq-line text-fq-text-3' }}"
                     style="background: {{ $open ? 'var(--fq-tab-active)' : 'var(--fq-panel)' }}"
                     @if ($open) aria-current="page" @endif
                 >

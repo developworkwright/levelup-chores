@@ -47,6 +47,7 @@ Route::middleware(['auth:profile', 'role:kid', 'sync-streak'])->prefix('kid')->g
     Volt::route('/bonus', 'kid.bonus')->name('kid.bonus');
     Volt::route('/badges', 'kid.badges')->name('kid.badges');
     Volt::route('/stats', 'kid.stats')->name('kid.stats');
+    Volt::route('/journal', 'kid.journal')->name('kid.journal');
 });
 
 Route::middleware(['auth:profile', 'role:parent'])->prefix('parent')->group(function () {
