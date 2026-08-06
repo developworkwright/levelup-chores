@@ -238,6 +238,11 @@ new class extends Component
         $spin = app(SpinService::class);
         $inventory = app(PerkInventoryService::class);
 
+        // A Livewire round trip doesn't pass back through the route middleware
+        // that expires a lapsed streak, and this is the page a kid is most
+        // likely to be sitting on when the household day rolls over.
+        $service->syncStreak($this->profile);
+
         $board = $service->boardFor($this->profile);
 
         $quest = $service->questFor($this->profile);
@@ -317,6 +322,10 @@ new class extends Component
                 ]]),
             'nextMilestone' => $nextMilestone,
             'streakBonuses' => $streakBonuses,
+            // Null unless a broken chain is still savable — which stops being
+            // true the moment today's quest is cleared, so the offer has to be
+            // on the page a kid is looking at when they decide.
+            'streakRepair' => $service->repairPreview($this->profile),
             'pending' => ChoreCompletion::where('profile_id', $this->profile->id)
                 ->where('status', CompletionStatus::Pending)
                 ->with('chore')
@@ -417,7 +426,9 @@ new class extends Component
                         <span class="font-mono-fq text-[11px] text-fq-streak">{{ $profile->streak }}-day streak</span>
                     </div>
                     <p class="mt-1 text-sm text-fq-text-2">
-                        @if ($nextMilestone && $profile->streak + 1 === $nextMilestone && ! $questDone)
+                        @if ($streakRepair)
+                            Your streak ran out — but it isn't gone yet.
+                        @elseif ($nextMilestone && $profile->streak + 1 === $nextMilestone && ! $questDone)
                             Complete today's quest and come back tomorrow to open the chest!
                         @elseif ($nextMilestone)
                             Keep your streak alive — a chest unlocks at day {{ $nextMilestone }}.
@@ -425,6 +436,41 @@ new class extends Component
                             You've unlocked every streak chest. Amazing!
                         @endif
                     </p>
+
+                    {{-- The rescue window, and it really is a window: clearing
+                         today's quest starts a fresh chain and closes it, so
+                         the copy has to say that before a kid taps past it. --}}
+                    @if ($streakRepair)
+                        <div
+                            wire:key="streak-repair"
+                            class="mt-4 rounded-[18px] border p-4"
+                            style="background: var(--fq-wash-streak); border-color: color-mix(in srgb, var(--fq-streak) 55%, transparent)"
+                        >
+                            <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-streak uppercase">Streak Rescue</p>
+
+                            <p class="mt-2 text-sm text-fq-text-2">
+                                You missed {{ $streakRepair['date']->toFormattedDateString() }}. A Streak Restore buys that day
+                                back and puts you on a
+                                <span class="font-bold text-fq-streak">{{ $streakRepair['restoresTo'] }}-day streak</span>.
+                            </p>
+
+                            <p class="mt-1 font-mono-fq text-[11px] text-fq-text-4">
+                                Use it before you clear today's quest — after that the day is gone for good.
+                            </p>
+
+                            <div class="mt-3">
+                                @if (isset($heldPerks['streak_restore']))
+                                    <x-perk-button :entry="$heldPerks['streak_restore']" />
+                                @else
+                                    <a
+                                        href="{{ route('kid.bonus') }}"
+                                        wire:navigate
+                                        class="inline-flex items-center gap-2 rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[13px] py-[8px] text-[13px] text-fq-text-2-b transition hover:border-fq-line-4 hover:text-fq-text"
+                                    >Get a Streak Restore &rarr;</a>
+                                @endif
+                            </div>
+                        </div>
+                    @endif
 
                     {{-- Struck-metal markers rather than purple ones: the chest
                          at the end pays out in cash, so the track reads like a
@@ -565,7 +611,10 @@ new class extends Component
                 </div>
             @endif
 
-            @if (isset($heldPerks['streak_restore']))
+            {{-- Suppressed while the rescue card is up: that one already
+                 carries the same button, with the day and the number it buys
+                 back written on it. --}}
+            @if (isset($heldPerks['streak_restore']) && ! $streakRepair)
                 <div class="flex flex-wrap items-center gap-3 rounded-[18px] border border-fq-steel-line p-[14px]" style="background: var(--fq-panel)">
                     <p class="min-w-0 flex-1 text-sm text-fq-text-2">
                         You're holding a Streak Restore — it can buy back a day you missed.

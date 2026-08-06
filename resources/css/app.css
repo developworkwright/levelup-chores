@@ -90,6 +90,15 @@ body {
     animation: fq-rainbow-ink 8s linear infinite;
 }
 
+/*
+ * The nudge a header tile gives when its balance moves. A named class rather
+ * than an arbitrary utility: it's applied from an Alpine :class expression,
+ * which Tailwind's scanner doesn't read as a class name.
+ */
+.fq-bump {
+    animation: fq-bump 0.5s ease;
+}
+
 /* Still rainbow-coloured, just no longer moving. */
 @media (prefers-reduced-motion: reduce) {
     .fq-rainbow-star,

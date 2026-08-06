@@ -30,16 +30,24 @@
              prize overlay on the phase alone re-fires the whole celebration
              every time a kid navigates back to the tab. --}}
         justOpened: false,
+        {{-- The suspense runs *before* the server call, not alongside it.
+             Opening banks the reward, and the response re-renders the header
+             with the new balance — so calling first meant the points and
+             tickets in the header quietly climbed while the chest was still
+             rattling, and the prize card then announced something that had
+             already happened four seconds earlier. --}}
         async open() {
             if (this.phase !== 'closed') return;
             this.phase = 'opening';
+            await new Promise(resolve => setTimeout(resolve, 4600));
             @if ($openAction) await $wire.{{ $openAction }}(); @endif
             @if ($prizeProperty) this.label = $wire.{{ $prizeProperty }} ?? this.label; @endif
-            setTimeout(() => {
-                this.phase = 'revealed';
-                this.justOpened = true;
-                window.dispatchEvent(new CustomEvent('celebrate', { detail: { message: @js($celebrateMessage) ?? this.label, style: 'confetti' } }));
-            }, 4600);
+            this.phase = 'revealed';
+            this.justOpened = true;
+            {{-- Held for longer than the 2800ms reveal card below, so the
+                 badge and level cards queued behind this one don't stack on
+                 top of a chest still showing its prize. --}}
+            window.dispatchEvent(new CustomEvent('celebrate', { detail: { message: @js($celebrateMessage) ?? this.label, style: 'confetti', hold: 3200 } }));
         },
     }"
 >

@@ -283,6 +283,21 @@
     50% { transform: translateY(-6px); }
 }
 
+/* The "+N" chip a header tile throws when its balance moves. */
+@keyframes fq-rise {
+    0% { opacity: 0; transform: translateY(6px) scale(0.9); }
+    20% { opacity: 1; transform: translateY(-2px) scale(1.06); }
+    70% { opacity: 1; transform: translateY(-10px) scale(1); }
+    100% { opacity: 0; transform: translateY(-20px) scale(1); }
+}
+
+/* The tile itself, so the new number is impossible to miss. */
+@keyframes fq-bump {
+    0% { transform: scale(1); }
+    35% { transform: scale(1.09); }
+    100% { transform: scale(1); }
+}
+
 @keyframes fq-pulse {
     0%, 100% { opacity: 0.55; }
     50% { opacity: 1; }

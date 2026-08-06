@@ -769,12 +769,54 @@ class ChoreService
     }
 
     /**
+     * Drops a cached streak that has quietly died.
+     *
+     * `profiles.streak` is a cache, and only an approval used to refresh it —
+     * so a kid who skipped a day carried yesterday's number on their header
+     * until they next got something signed off, and a repair bought at that
+     * point stapled the old run onto the new one.
+     *
+     * This is the read-side half, and it's O(1) on purpose so it can run on
+     * every page load: a live chain always ends on today or yesterday, so if
+     * neither day counts there is nothing left to walk back through.
+     *
+     * The milestone high-water mark is deliberately left alone — it is what
+     * stops a lapse-and-repair cycle from paying every bonus twice.
+     */
+    public function syncStreak(Profile $profile): void
+    {
+        if ($profile->streak === 0) {
+            return;
+        }
+
+        $today = HouseholdClock::for($profile->household)->today();
+
+        if (
+            $this->questApprovedOn($profile, $today)
+            || $this->questApprovedOn($profile, $today->copy()->subDay())
+        ) {
+            return;
+        }
+
+        $profile->streak = 0;
+        $profile->save();
+    }
+
+    /**
      * The day a streak repair would actually buy back, or null when there's
-     * nothing worth fixing — yesterday already counts, or there was no live
-     * chain to save in the first place.
+     * nothing worth fixing — yesterday already counts, today's quest has
+     * already been cleared, or there was no live chain to save.
      */
     public function repairableStreakDate(Profile $profile): ?Carbon
     {
+        // A restore is a rescue, not a top-up. Once today's quest is in, the
+        // kid is on a fresh one-day streak and the broken day sits behind it;
+        // buying it back there would splice a finished run onto a new one and
+        // hand over days that were never saved.
+        if ($this->isQuestDoneToday($profile)) {
+            return null;
+        }
+
         $yesterday = HouseholdClock::for($profile->household)->today()->subDay();
 
         if ($this->questApprovedOn($profile, $yesterday)) {
@@ -786,6 +828,35 @@ class ChoreService
         return $this->questApprovedOn($profile, $yesterday->copy()->subDay())
             ? $yesterday
             : null;
+    }
+
+    /**
+     * What a Streak Restore is worth right now: the day it buys back and the
+     * streak the kid would be left holding, so the offer can say so before
+     * they spend a perk on it.
+     *
+     * @return array{date: Carbon, restoresTo: int}|null
+     */
+    public function repairPreview(Profile $profile): ?array
+    {
+        $date = $this->repairableStreakDate($profile);
+
+        if (! $date) {
+            return null;
+        }
+
+        // The bought-back day, plus the unbroken run behind it. Today's quest
+        // is undone — that's a precondition for offering this at all — so the
+        // restored chain ends on the day being repaired.
+        $restoresTo = 1;
+        $cursor = $date->copy()->subDay();
+
+        while ($restoresTo < self::MAX_STREAK_DAYS && $this->questApprovedOn($profile, $cursor)) {
+            $restoresTo++;
+            $cursor = $cursor->copy()->subDay();
+        }
+
+        return ['date' => $date, 'restoresTo' => $restoresTo];
     }
 
     /** Buys back the missed day and recomputes. Null when there was nothing to repair. */

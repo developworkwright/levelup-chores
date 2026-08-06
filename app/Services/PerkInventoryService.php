@@ -102,9 +102,7 @@ class PerkInventoryService
             PerkEffect::QuestReroll => $this->chores->isQuestDoneToday($profile)
                 ? "Today's quest is already cleared"
                 : null,
-            PerkEffect::StreakRestore => $this->chores->repairableStreakDate($profile)
-                ? null
-                : 'No broken streak to fix',
+            PerkEffect::StreakRestore => $this->streakRestoreReason($profile),
             PerkEffect::MysteryHint => $this->mysteryHintReason($profile),
         };
     }
@@ -157,6 +155,23 @@ class PerkInventoryService
         }
 
         return "Hint unlocked: {$hint}";
+    }
+
+    /**
+     * A restore only saves a chain that's still hanging. Clearing today's
+     * quest starts a new one and closes the window, and saying so is worth a
+     * separate message — "no broken streak to fix" reads as a bug to a kid
+     * looking at a streak they know they just broke.
+     */
+    private function streakRestoreReason(Profile $profile): ?string
+    {
+        if ($this->chores->repairableStreakDate($profile)) {
+            return null;
+        }
+
+        return $this->chores->isQuestDoneToday($profile)
+            ? "Too late — today's quest is already done"
+            : 'No broken streak to fix';
     }
 
     private function mysteryHintReason(Profile $profile): ?string

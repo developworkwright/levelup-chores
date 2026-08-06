@@ -7,16 +7,72 @@
         big: false,
         celebrating: false,
         burst: 0,
-        celebrate(message, treat, style, big) {
-            this.toast = message;
-            this.treat = treat || null;
-            this.mode = style || 'money';
-            this.big = !!big;
+        queue: [],
+        showing: false,
+        {{-- Set when a queued celebration is big enough to deserve the chest's
+             full-screen reveal rather than a toast along the bottom edge. --}}
+        card: null,
+        {{-- Queued rather than overwritten. One action routinely pays out more
+             than once — a chest hands over tickets and the badges it just
+             unlocked hand over more — and a single toast that gets replaced
+             mid-flight leaves the extra tickets looking like they appeared
+             from nowhere. --}}
+        celebrate(message, treat, style, big, hold, card) {
+            this.queue.push({
+                message,
+                treat: treat || null,
+                style: style || 'money',
+                big: !!big,
+                hold: hold || null,
+                card: card || null,
+            });
+
+            if (! this.showing) {
+                this.advance();
+            }
+        },
+        advance() {
+            const next = this.queue.shift();
+
+            if (! next) {
+                this.showing = false;
+                this.toast = null;
+                this.card = null;
+                this.celebrating = false;
+
+                return;
+            }
+
+            this.showing = true;
+            this.card = next.card;
+            // A card carries its own headline, so a toast repeating it along
+            // the bottom would just be the same news said twice.
+            this.toast = next.card ? null : next.message;
+            this.treat = next.treat;
+            this.mode = next.style;
+            this.big = next.big;
             this.celebrating = true;
-            clearTimeout(this.toastTimer);
-            this.toastTimer = setTimeout(() => { this.toast = null; this.celebrating = false }, this.big ? 5200 : 3400);
             this.burst++;
             this.playSound();
+
+            clearTimeout(this.toastTimer);
+            this.toastTimer = setTimeout(() => this.advance(), next.hold ?? (next.big ? 5200 : 3400));
+        },
+        {{-- Held back a tick on purpose. Livewire fires its browser events
+             while the response is still being applied, which is before a chest
+             or wheel resolves its own await and announces the prize — so
+             without the gap these would jump the reveal that earned them. --}}
+        queueRewards(rewards) {
+            setTimeout(() => {
+                (rewards || []).forEach((reward) => this.celebrate(
+                    reward.message,
+                    null,
+                    'confetti',
+                    reward.big,
+                    reward.big ? 4200 : 3000,
+                    reward.card,
+                ));
+            }, 60);
         },
         pieceCount() {
             return this.big ? 320 : 210;
@@ -120,28 +176,68 @@
             } catch (e) {}
         },
     }"
-    x-on:celebrate.window="celebrate($event.detail.message, $event.detail.treat, $event.detail.style, $event.detail.big)"
+    x-on:celebrate.window="celebrate($event.detail.message, $event.detail.treat, $event.detail.style, $event.detail.big, $event.detail.hold)"
+    x-on:rewards-earned.window="queueRewards($event.detail.rewards)"
 >
+    {{-- x-show and :style must not share an element. x-show hides by writing
+         style.display, and a :style binding re-renders the whole attribute the
+         next time anything it reads changes — wiping the display and stranding
+         the element on screen. That never bit while `big` only ever moved as a
+         toast appeared; a queued card now flips it while the toast is hidden,
+         which used to strand an empty one. So the wrapper owns visibility and
+         the box inside owns its looks. --}}
     <div
         x-show="toast"
         x-transition
-        :style="big
-            ? 'animation: fq-pop .26s ease both; box-shadow: 0 20px 50px -14px var(--fq-gold); background: var(--fq-sunk); border-color: var(--fq-gold)'
-            : 'animation: fq-pop .26s ease both; box-shadow: var(--fq-shadow-toast); background: var(--fq-sunk); border-color: var(--fq-success-border)'"
-        class="fixed bottom-6 left-1/2 z-[60] flex max-w-[92vw] -translate-x-1/2 items-center gap-2 rounded-[18px] border px-5 py-[14px]"
+        class="fixed bottom-6 left-1/2 z-[60] max-w-[92vw] -translate-x-1/2"
     >
         <div
-            x-show="big"
-            x-cloak
-            class="pointer-events-none absolute -z-10"
-            style="inset:-16px; border-radius:26px; background: radial-gradient(circle, var(--fq-gold) 0%, transparent 70%); filter:blur(9px); animation: fq-pulse 1s ease-in-out infinite"
-        ></div>
+            :style="big
+                ? 'animation: fq-pop .26s ease both; box-shadow: 0 20px 50px -14px var(--fq-gold); background: var(--fq-sunk); border-color: var(--fq-gold)'
+                : 'animation: fq-pop .26s ease both; box-shadow: var(--fq-shadow-toast); background: var(--fq-sunk); border-color: var(--fq-success-border)'"
+            class="relative flex items-center gap-2 rounded-[18px] border px-5 py-[14px]"
+        >
+            <div
+                x-show="big"
+                x-cloak
+                class="pointer-events-none absolute -z-10"
+                style="inset:-16px; border-radius:26px; background: radial-gradient(circle, var(--fq-gold) 0%, transparent 70%); filter:blur(9px); animation: fq-pulse 1s ease-in-out infinite"
+            ></div>
 
-        <span x-show="treat === 'cookie'" x-cloak><x-cookie-icon class="h-[18px] w-[18px] shrink-0" /></span>
-        <span x-show="treat !== 'cookie' && !big" class="h-[9px] w-[9px] shrink-0 rounded-full bg-fq-lime"></span>
-        <span x-show="treat !== 'cookie' && big" x-cloak class="h-[9px] w-[9px] shrink-0 rounded-full" style="background:var(--fq-gold)"></span>
-        <span class="font-semibold" :class="big ? 'text-[16px]' : 'text-[15px]'" x-text="toast"></span>
+            <span x-show="treat === 'cookie'" x-cloak><x-cookie-icon class="h-[18px] w-[18px] shrink-0" /></span>
+            <span x-show="treat !== 'cookie' && !big" class="h-[9px] w-[9px] shrink-0 rounded-full bg-fq-lime"></span>
+            <span x-show="treat !== 'cookie' && big" x-cloak class="h-[9px] w-[9px] shrink-0 rounded-full" style="background:var(--fq-gold)"></span>
+            <span class="font-semibold" :class="big ? 'text-[16px]' : 'text-[15px]'" x-text="toast"></span>
+        </div>
     </div>
+
+    {{-- The chest's reveal card, lifted out so anything worth that much noise
+         can borrow it. A badge or a level is exactly the kind of thing a kid
+         needs shoved in front of them — a toast along the bottom edge is what
+         they were already missing. --}}
+    <template x-if="card">
+        <div class="pointer-events-none fixed inset-0 z-[58] flex items-center justify-center px-4">
+            <div class="relative flex flex-col items-center">
+                <div
+                    class="absolute"
+                    :style="`top:50%; left:50%; width:420px; height:420px; border-radius:50%; transform:translate(-50%,-50%); background: radial-gradient(circle, ${card.accent} 0%, transparent 70%); opacity:.45; filter:blur(4px); animation: fq-glow-pulse 1.6s ease-in-out infinite`"
+                ></div>
+
+                <div
+                    class="relative rounded-[22px] border px-10 py-8 text-center"
+                    :style="`animation: fq-pop .4s ease both; background: var(--fq-sunk); border-color: ${card.accent}; box-shadow: 0 26px 60px -20px #000`"
+                >
+                    <p
+                        class="font-mono-fq text-[11px] tracking-[0.2em] uppercase"
+                        :style="`color: ${card.accent}`"
+                        x-text="card.sub"
+                    ></p>
+                    <p class="mt-2 max-w-[70vw] font-baloo text-[28px] leading-tight font-extrabold" x-text="card.label"></p>
+                    <p class="mt-2 font-mono-fq text-[12px] text-fq-text-3" x-text="card.note"></p>
+                </div>
+            </div>
+        </div>
+    </template>
 
     {{-- Big spinning coin with a glow behind it — money celebrations only; chests/wheel use plain confetti. --}}
     <div

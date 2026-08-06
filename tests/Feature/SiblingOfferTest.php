@@ -397,10 +397,12 @@ class SiblingOfferTest extends TestCase
 
         $this->service()->accept($offer, $sam);
 
+        // A settled trade also unlocks Dealmaker for both sides, and a badge
+        // mints a ticket — so each balance carries one more than the swap.
         $this->assertSame(400, $alex->refresh()->points);
-        $this->assertSame(2, $alex->bonus_tickets);
+        $this->assertSame(2 + 1, $alex->bonus_tickets);
         $this->assertSame(100, $sam->refresh()->points);
-        $this->assertSame(2, $sam->bonus_tickets);
+        $this->assertSame(4 - 2 + 1, $sam->bonus_tickets);
     }
 
     public function test_a_swap_the_recipient_cannot_cover_throws_in_the_currency_they_were_asked_for(): void

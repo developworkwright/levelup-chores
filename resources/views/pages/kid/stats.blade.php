@@ -18,6 +18,8 @@ use App\Models\SiblingOffer;
 use App\Models\Spin;
 use App\Models\StreakRepair;
 use App\Services\HouseholdClock;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
@@ -222,6 +224,57 @@ new class extends Component
             ->sortByDesc('count')
             ->take(self::TOP_CHORES)
             ->values();
+    }
+
+    /**
+     * The ticket feed with a running balance beside every row.
+     *
+     * Tickets arrive from four different places and never from anything a kid
+     * deliberately did — a level crossed, a badge unlocked, a chest opened —
+     * so a bare list of amounts still doesn't answer "why do I suddenly have
+     * nine of these". Each row carries what the balance was before it and what
+     * it became, so the column reads as a chain back to the number in the
+     * header.
+     *
+     * The balance is walked backwards from the live one rather than forwards
+     * from zero, which is what lets page two pick up exactly where page one
+     * stopped without loading everything in between.
+     *
+     * @param  LengthAwarePaginator<int, BonusTicketEntry>  $page
+     * @return Collection<int, array{id: int, text: string, kind: string, when: string, amount: string, color: string, before: int, after: int}>
+     */
+    private function ticketRows(LengthAwarePaginator $page, Carbon $today): Collection
+    {
+        $top = $page->first();
+
+        $newer = $top === null ? 0 : (int) BonusTicketEntry::where('profile_id', $this->profile->id)
+            ->where(fn (Builder $query) => $query
+                ->where('created_at', '>', $top->created_at)
+                ->orWhere(fn (Builder $tie) => $tie
+                    ->where('created_at', $top->created_at)
+                    ->where('id', '>', $top->id)))
+            ->sum('amount');
+
+        $after = $this->profile->bonus_tickets - $newer;
+
+        return collect($page->items())->map(function (BonusTicketEntry $entry) use (&$after, $today) {
+            $before = $after - $entry->amount;
+
+            $row = [
+                'id' => $entry->id,
+                'text' => $this->withoutOwnName($entry->description),
+                'kind' => strtoupper($entry->kind->label()),
+                'when' => $this->whenLabel($entry->created_at, $today),
+                'amount' => ($entry->amount > 0 ? '+' : '').number_format($entry->amount),
+                'color' => $entry->amount < 0 ? 'var(--fq-coral)' : 'var(--fq-lime)',
+                'before' => $before,
+                'after' => $after,
+            ];
+
+            $after = $before;
+
+            return $row;
+        });
     }
 
     /** Points in the household's own currency — the same conversion the header uses. */
@@ -450,6 +503,12 @@ new class extends Component
             ->latest('id')
             ->paginate(self::HISTORY_PER_PAGE, pageName: 'history');
 
+        // Its own cursor, so paging one feed doesn't drag the other with it.
+        $ticketHistory = $this->profile->bonusTicketEntries()
+            ->latest('created_at')
+            ->latest('id')
+            ->paginate(self::HISTORY_PER_PAGE, pageName: 'tickets');
+
         $bestDayOn = $bestDayCount > 0
             ? Carbon::parse($dayCounts->search($bestDayCount))->toFormattedDateString()
             : 'still to come';
@@ -644,6 +703,9 @@ new class extends Component
             'history' => $history,
             'historyRows' => collect($history->items())
                 ->map(fn (LedgerEntry $entry) => $this->ledgerRow($entry, $today)),
+            'ticketHistory' => $ticketHistory,
+            'ticketRows' => $this->ticketRows($ticketHistory, $today),
+            'ticketsHeld' => $this->profile->bonus_tickets,
             'balance' => $this->profile->points,
             'balanceDollars' => $this->dollars($this->profile->points),
             'earned' => $earned,
@@ -982,6 +1044,58 @@ new class extends Component
             @endif
 
             <x-pager :paginator="$history" page-name="history" />
+        </div>
+
+        {{-- Tickets get their own feed rather than a column in the one above:
+             they're a separate currency, and nothing a kid does earns them
+             directly — they turn up off levels, badges and chests. The running
+             balance beside each row is the point of the card, because "why do
+             I suddenly have nine of these" is the only question it's opened
+             with. --}}
+        <div class="rounded-[22px] border border-fq-ticket-line p-[18px]" style="background: var(--fq-panel)">
+            <div class="flex items-baseline justify-between gap-3">
+                <h3 class="font-baloo text-xl font-bold">Ticket activity</h3>
+                <span class="font-mono-fq text-[10px] text-fq-text-4">
+                    {{ number_format($ticketsHeld) }} IN HAND
+                </span>
+            </div>
+
+            <div class="mt-[10px] flex flex-col">
+                @forelse ($ticketRows as $row)
+                    <div
+                        wire:key="ticket-{{ $row['id'] }}"
+                        class="flex items-center gap-3 border-t border-fq-divider py-[10px]"
+                    >
+                        <span
+                            class="h-2 w-2 shrink-0 rounded-full"
+                            style="background: {{ $row['color'] }}"
+                        ></span>
+
+                        <div class="min-w-0 flex-1">
+                            <p class="truncate text-[13px] text-fq-text-2">{{ $row['text'] }}</p>
+                            <p class="font-mono-fq text-[9px] tracking-[0.1em] text-fq-text-5">
+                                {{ $row['kind'] }} · {{ $row['when'] }}
+                            </p>
+                        </div>
+
+                        <div class="shrink-0 text-right">
+                            <p
+                                class="font-baloo text-[15px] leading-none font-extrabold"
+                                style="color: {{ $row['color'] }}"
+                            >{{ $row['amount'] }}</p>
+                            <p class="mt-[3px] font-mono-fq text-[10px] whitespace-nowrap text-fq-text-5">
+                                {{ number_format($row['before']) }} → {{ number_format($row['after']) }}
+                            </p>
+                        </div>
+                    </div>
+                @empty
+                    <p class="py-2 text-sm text-fq-text-5">
+                        No tickets yet. They turn up when you level up, unlock a badge, or open a chest.
+                    </p>
+                @endforelse
+            </div>
+
+            <x-pager :paginator="$ticketHistory" page-name="tickets" />
         </div>
     </div>
 </x-kid.shell>

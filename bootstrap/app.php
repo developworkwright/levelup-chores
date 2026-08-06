@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\EnsureRole;
+use App\Http\Middleware\SyncStreak;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -15,6 +16,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'role' => EnsureRole::class,
+            'sync-streak' => SyncStreak::class,
         ]);
 
         // Laravel Cloud terminates TLS at its edge load balancer, so trust it

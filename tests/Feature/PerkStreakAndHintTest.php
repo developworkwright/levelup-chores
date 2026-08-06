@@ -3,8 +3,10 @@
 namespace Tests\Feature;
 
 use App\Enums\PerkEffect;
+use App\Enums\TicketKind;
 use App\Exceptions\PerkUnavailableException;
 use App\Models\BonusPerk;
+use App\Models\BonusTicketEntry;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\LedgerEntry;
@@ -66,7 +68,48 @@ class PerkStreakAndHintTest extends TestCase
         $kid = Profile::factory()->for($household)->create(['bonus_tickets' => 10]);
         Chore::factory()->for($household)->create(['points' => 0, 'min_age' => 1]);
 
-        // Two days on, one missed, then today.
+        // Two days on, one missed, then standing on the next day with today's
+        // quest still untouched — the only window a restore is good for.
+        $this->clearQuest($kid, $parent);
+        Carbon::setTestNow(now()->addDay());
+        $this->clearQuest($kid, $parent);
+
+        Carbon::setTestNow(now()->addDays(2));
+
+        // The gap killed the chain, and the cached count says so without
+        // waiting for an approval to notice.
+        app(ChoreService::class)->syncStreak($kid->refresh());
+        $this->assertSame(0, $kid->refresh()->streak);
+
+        $this->buyAndUse($kid, PerkEffect::StreakRestore);
+
+        // Yesterday now counts, reconnecting the run behind it.
+        $this->assertSame(3, $kid->refresh()->streak);
+
+        // Asserted off the ticket ledger rather than the balance: levelling up
+        // and unlocking badges both mint tickets along the way, so the balance
+        // moves for reasons that have nothing to do with the price paid.
+        $this->assertSame(
+            -$this->perk($kid, PerkEffect::StreakRestore)->cost,
+            (int) BonusTicketEntry::where('profile_id', $kid->id)
+                ->where('kind', TicketKind::Purchase)
+                ->sum('amount'),
+        );
+
+        // And today's quest lands on top of the rescued chain.
+        $this->clearQuest($kid, $parent);
+        $this->assertSame(4, $kid->refresh()->streak);
+    }
+
+    public function test_a_restore_is_refused_once_todays_quest_is_cleared(): void
+    {
+        // The window closes when the new chain starts: buying the broken day
+        // back at that point would splice a finished run onto a fresh one.
+        $household = Household::factory()->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $kid = Profile::factory()->for($household)->create(['bonus_tickets' => 10]);
+        Chore::factory()->for($household)->create(['points' => 0, 'min_age' => 1]);
+
         $this->clearQuest($kid, $parent);
         Carbon::setTestNow(now()->addDay());
         $this->clearQuest($kid, $parent);
@@ -74,18 +117,12 @@ class PerkStreakAndHintTest extends TestCase
         Carbon::setTestNow(now()->addDays(2));
         $this->clearQuest($kid, $parent);
 
-        // The gap reset the chain to just today.
         $this->assertSame(1, $kid->refresh()->streak);
 
-        // Captured here, not assumed — clearing quests mints tickets of its
-        // own through levelling and badges.
-        $before = $kid->bonus_tickets;
+        $this->expectException(PerkUnavailableException::class);
+        $this->expectExceptionMessage("Too late — today's quest is already done");
 
         $this->buyAndUse($kid, PerkEffect::StreakRestore);
-
-        // Yesterday now counts, reconnecting the run.
-        $this->assertSame(4, $kid->refresh()->streak);
-        $this->assertSame($before - $this->perk($kid, PerkEffect::StreakRestore)->cost, $kid->bonus_tickets);
     }
 
     public function test_restoring_is_refused_when_no_streak_is_broken(): void
@@ -133,11 +170,17 @@ class PerkStreakAndHintTest extends TestCase
             ->where('description', 'like', '%3-day streak bonus%')->count();
         $this->assertSame(1, $paidForDayThree);
 
-        // Miss a day, come back, then buy the repair.
+        // Miss a day, come back, and buy the repair before touching today's
+        // quest — the only order the restore is still allowed in.
         Carbon::setTestNow(now()->addDays(2));
-        $this->clearQuest($kid, $parent);
-        $this->buyAndUse($kid, PerkEffect::StreakRestore);
+        app(ChoreService::class)->syncStreak($kid->refresh());
+        $this->assertSame(0, $kid->refresh()->streak);
 
+        $this->buyAndUse($kid, PerkEffect::StreakRestore);
+        $this->clearQuest($kid, $parent);
+
+        // Three cleared days, the bought-back one, and today.
+        $this->assertSame(5, $kid->refresh()->streak);
         $this->assertSame(1, LedgerEntry::where('profile_id', $kid->id)
             ->where('description', 'like', '%3-day streak bonus%')->count());
     }

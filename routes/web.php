@@ -37,7 +37,7 @@ Route::post('/logout', function () {
     return redirect('/');
 })->middleware('auth:profile')->name('logout');
 
-Route::middleware(['auth:profile', 'role:kid'])->prefix('kid')->group(function () {
+Route::middleware(['auth:profile', 'role:kid', 'sync-streak'])->prefix('kid')->group(function () {
     Route::redirect('/', '/kid/quests');
     Volt::route('/quests', 'kid.quests')->name('kid.quests');
     Volt::route('/wheel', 'kid.wheel')->name('kid.wheel');

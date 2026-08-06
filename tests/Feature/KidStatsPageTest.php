@@ -6,7 +6,9 @@ use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
 use App\Enums\PerkEffect;
 use App\Enums\RedemptionStatus;
+use App\Enums\TicketKind;
 use App\Models\Badge;
+use App\Models\BonusTicketEntry;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyChest;
@@ -887,6 +889,117 @@ class KidStatsPageTest extends TestCase
             ->assertSee('Bonus tickets')
             ->assertSee('Rewards claimed')
             ->assertSee('1 handed over');
+    }
+
+    public function test_the_ticket_feed_walks_the_balance_back_row_by_row(): void
+    {
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household, ['bonus_tickets' => 9]);
+
+        // 0 → 1 → 3 → 9, then a purchase back down to 6... except the feed is
+        // newest first, so the rows have to read 9 ← 6 ← 3 ← 1 on the way up.
+        $moves = [
+            [TicketKind::LevelUp, 1, 'Reached level 2'],
+            [TicketKind::Badge, 2, 'Earned two badges'],
+            [TicketKind::Adjustment, 6, 'Daily chest'],
+            [TicketKind::Purchase, -3, 'Streak Restore'],
+        ];
+
+        foreach ($moves as $index => [$kind, $amount, $description]) {
+            BonusTicketEntry::create([
+                'household_id' => $household->id,
+                'profile_id' => $kid->id,
+                'kind' => $kind,
+                'amount' => $amount,
+                'description' => $description,
+                'created_at' => now()->subMinutes(10 - $index),
+            ]);
+        }
+
+        $kid->update(['bonus_tickets' => 6]);
+
+        $rendered = Volt::test('kid.stats')->assertOk();
+
+        $rendered->assertSee('Ticket activity')
+            ->assertSee('6 IN HAND')
+            // Newest first: the purchase took 9 down to 6.
+            ->assertSee('Streak Restore')
+            ->assertSee('9 → 6', false)
+            ->assertSee('3 → 9', false)
+            ->assertSee('1 → 3', false)
+            ->assertSee('0 → 1', false)
+            ->assertSee('PURCHASE')
+            ->assertSee('LEVEL UP');
+
+        $html = $rendered->html();
+        $this->assertLessThan(
+            strpos($html, '0 → 1'),
+            strpos($html, '9 → 6'),
+            'The newest movement should sit at the top of the feed.'
+        );
+    }
+
+    public function test_the_ticket_feed_keeps_counting_across_pages(): void
+    {
+        // The running balance is walked back from the live one, so page two
+        // has to resume where page one stopped rather than restarting.
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household, ['bonus_tickets' => 12]);
+
+        foreach (range(1, 12) as $index) {
+            BonusTicketEntry::create([
+                'household_id' => $household->id,
+                'profile_id' => $kid->id,
+                'kind' => TicketKind::Badge,
+                'amount' => 1,
+                'description' => "Badge number {$index}",
+                'created_at' => now()->subMinutes(12 - $index),
+            ]);
+        }
+
+        $page = Volt::test('kid.stats')
+            ->assertOk()
+            ->assertSee('11 → 12', false)
+            ->assertSee('4 → 5', false)
+            ->assertDontSee('3 → 4', false);
+
+        $page->call('nextPage', 'tickets')
+            ->assertSee('3 → 4', false)
+            ->assertSee('0 → 1', false)
+            ->assertDontSee('11 → 12', false);
+    }
+
+    public function test_a_kid_with_no_tickets_gets_told_where_they_come_from(): void
+    {
+        $household = Household::factory()->create();
+        $this->loginKid($household);
+
+        Volt::test('kid.stats')
+            ->assertOk()
+            ->assertSee('Ticket activity')
+            ->assertSee('No tickets yet.');
+    }
+
+    public function test_another_kids_tickets_stay_out_of_the_feed(): void
+    {
+        $household = Household::factory()->create();
+        $kid = $this->loginKid($household);
+        $sibling = Profile::factory()->for($household)->create();
+
+        foreach ([[$sibling, 'Their badge'], [$kid, 'My badge']] as [$owner, $description]) {
+            BonusTicketEntry::create([
+                'household_id' => $household->id,
+                'profile_id' => $owner->id,
+                'kind' => TicketKind::Badge,
+                'amount' => 1,
+                'description' => $description,
+            ]);
+        }
+
+        Volt::test('kid.stats')
+            ->assertOk()
+            ->assertSee('My badge')
+            ->assertDontSee('Their badge');
     }
 
     public function test_a_parent_cannot_open_the_kid_stats_page(): void

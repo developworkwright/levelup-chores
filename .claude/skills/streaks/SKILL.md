@@ -33,11 +33,23 @@ Only the *visual reveal* is deferred: `pending_streak_chest` is set to the miles
 
 `nextStreakMilestone(Profile)` returns the smallest key in `STREAK_BONUSES` still greater than the profile's current streak, or `null` past day 30 — used for "X days to your next bonus" UI copy. There's no interpolation between milestones; days between keys (e.g. day 4, day 10) earn no bonus.
 
+## The cached streak expires on its own
+
+`profiles.streak` is a cache, and `refreshStreak()` only runs on approval. That alone left a kid staring at yesterday's number the morning after a miss — and a repair bought at that point stapled the dead run onto the new one.
+
+`syncStreak(Profile)` is the read-side half, and it is **O(1) on purpose**: a live chain always ends on today or yesterday, so if neither day counts the streak drops to `0` without walking anything back. It never touches `streak_milestone_paid_through`.
+
+It runs from the `sync-streak` middleware on the whole `kid` route group (`App\Http\Middleware\SyncStreak`), and again inside `kid/quests.blade.php`'s `with()` — a Livewire round trip posts to its own endpoint and never passes back through route middleware, and Quests is the page a kid is most likely sitting on when the household day rolls over.
+
 ## Streak restore
 
 The Bonus Shop's Streak Restore perk writes a `streak_repairs` row for the missed day. `questApprovedOn()` treats a repaired date exactly like an approved one, so the existing walk-back recompute needs no special casing.
 
-`repairableStreakDate()` only offers yesterday, and only when the day before it counted — repairing a day with nothing behind it would just manufacture a one-day streak rather than saving a real run.
+`repairableStreakDate()` only offers yesterday, and only when the day before it counted — repairing a day with nothing behind it would just manufacture a one-day streak rather than saving a real run. Two or more missed days therefore can't be bought back at all.
+
+**The window closes the moment today's quest is cleared.** `repairableStreakDate()` returns null once `isQuestDoneToday()` is true: clearing today starts a fresh chain of one, and buying the broken day back there would splice a finished run onto it. `PerkInventoryService::streakRestoreReason()` says exactly that instead of falling back to "no broken streak to fix", which reads as a bug to a kid who knows they just broke one.
+
+`repairPreview(Profile)` returns `['date' => Carbon, 'restoresTo' => int]` — the day a restore buys back and the streak it would leave behind — so the Quests page's "Streak Rescue" card can quote the number before a perk is spent on it.
 
 **`profiles.streak_milestone_paid_through` is a high-water mark, and it must stay one.** `refreshStreak()` gates payouts on it rather than on the live `streak` value. Gating on the live value was a genuine exploit: let a streak lapse (it recomputes down), buy a repair, and every milestone pays a second time — at day 30 that's $40 for a 5-ticket purchase.
 

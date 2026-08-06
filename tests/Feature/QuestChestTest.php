@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Enums\CompletionStatus;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
+use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Services\ChoreService;
@@ -76,7 +78,32 @@ class QuestChestTest extends TestCase
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['streak' => 2]);
-        Chore::factory()->for($household)->create();
+        $chore = Chore::factory()->for($household)->create();
+
+        // A real two-day run behind the counter, not just the number: the page
+        // expires a cached streak with nothing under it, which would drop this
+        // to zero and take the day-3 wording with it.
+        foreach ([1, 2] as $daysAgo) {
+            $at = now()->copy()->subDays($daysAgo);
+
+            DailyQuest::create([
+                'household_id' => $household->id,
+                'profile_id' => $kid->id,
+                'chore_id' => $chore->id,
+                'quest_date' => $at->toDateString(),
+                'revealed_at' => $at,
+                'completed_at' => $at,
+            ]);
+
+            ChoreCompletion::create([
+                'chore_id' => $chore->id,
+                'profile_id' => $kid->id,
+                'status' => CompletionStatus::Approved,
+                'points_awarded' => 10,
+                'submitted_at' => $at,
+                'decided_at' => $at,
+            ]);
+        }
 
         Auth::guard('profile')->login($kid);
 

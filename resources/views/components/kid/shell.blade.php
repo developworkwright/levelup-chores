@@ -51,9 +51,101 @@
         ?: collect($worlds)->search(fn (array $world) => in_array($active, $world['pages'], true)) ?: 'earn';
 
     session(['kid_world' => $activeWorld]);
+
+    /*
+     * Anything that quietly moved a balance since this kid last looked.
+     *
+     * It lives in the shell rather than on the pages because the shell is the
+     * one thing that re-renders on every kid page load *and* every Livewire
+     * round trip, whoever caused it — a chest the kid opened, a chore a parent
+     * approved an hour ago, a family goal a sibling finished off. Each of those
+     * hands over tickets, and a balance that climbs with nothing to explain it
+     * reads as the app shortchanging them.
+     *
+     * Tracked in the session rather than a column: a celebration is a
+     * per-device moment, and there is nothing to reconcile if it's missed.
+     * A first visit seeds the marker without celebrating, so a kid who already
+     * holds twenty badges isn't met with twenty toasts.
+     */
+    $quietRewards = collect();
+    $tickets = fn (int $count) => '+'.$count.' '.Str::plural('ticket', $count);
+
+    $earnedBadgeIds = $profile->badges()->pluck('badges.id')->all();
+    $seenBadgeIds = session('fq_seen_badges');
+    $unseenBadgeIds = $seenBadgeIds === null ? [] : array_diff($earnedBadgeIds, $seenBadgeIds);
+
+    session(['fq_seen_badges' => $earnedBadgeIds]);
+
+    foreach (App\Models\Badge::whereIn('id', $unseenBadgeIds)->get() as $badge) {
+        $quietRewards->push([
+            'message' => $badge->name.' badge unlocked!',
+            'big' => false,
+            'card' => [
+                'accent' => $badge->color->cssVar(),
+                'sub' => 'Badge Unlocked',
+                'label' => $badge->name,
+                'note' => $tickets(App\Services\TicketService::PER_BADGE)
+                    .($badge->xp_reward > 0 ? ' · +'.number_format($badge->xp_reward).' XP' : ''),
+            ],
+        ]);
+    }
+
+    // Levels mint tickets too, and they're the one reward nothing in the app
+    // ever stopped to announce — the bar just crept round and the balance went
+    // up. Levels crossed together are one card rather than a queue of them.
+    $level = $profile->level();
+    $seenLevel = session('fq_seen_level');
+    $levelsGained = $seenLevel === null ? 0 : max(0, $level - $seenLevel);
+
+    session(['fq_seen_level' => $level]);
+
+    if ($levelsGained > 0) {
+        $quietRewards->push([
+            'message' => 'Level '.$level.'!',
+            'big' => true,
+            'card' => [
+                'accent' => 'var(--fq-gold)',
+                'sub' => 'Level Up',
+                'label' => 'Level '.$level,
+                'note' => $tickets($levelsGained * App\Services\TicketService::PER_LEVEL),
+            ],
+        ]);
+    }
+
+    // The family goal only on the crossing — holding at 100% until a parent
+    // resets it must not re-fire on every page.
+    $goalReached = $profile->household->goal_target > 0
+        && $profile->household->goal_now >= $profile->household->goal_target;
+    $goalWasReached = session('fq_goal_reached');
+
+    session(['fq_goal_reached' => $goalReached]);
+
+    if ($goalWasReached === false && $goalReached) {
+        $quietRewards->push([
+            'message' => 'Family goal reached!',
+            'big' => true,
+            'card' => [
+                'accent' => 'var(--fq-lime)',
+                'sub' => 'Family Goal',
+                'label' => $profile->household->goal_name ?: 'Goal reached!',
+                'note' => 'Everyone pulled together',
+            ],
+        ]);
+    }
 @endphp
 
 <div class="mx-auto max-w-[1080px] px-[14px] pb-10">
+    {{-- Keyed on what it's announcing, so Livewire tears the element down and
+         builds a new one whenever the news changes — which is what re-runs
+         x-init. A re-render carrying nothing new renders nothing at all. --}}
+    @if ($quietRewards->isNotEmpty())
+        <div
+            wire:key="rewards-{{ md5($quietRewards->pluck('message')->implode('|')) }}"
+            x-data
+            x-init="$dispatch('rewards-earned', { rewards: @js($quietRewards->all()) })"
+        ></div>
+    @endif
+
     <div class="pt-[14px] pb-[10px]">
         <div class="flex flex-wrap items-center gap-3 rounded-[22px] border border-fq-line bg-fq-panel p-[12px_14px]">
             <div
@@ -81,7 +173,34 @@
             {{-- Every control from here right is 52px tall, so the row reads as
                  one bank of buttons rather than a ragged mix of sizes. --}}
             <div class="flex flex-wrap items-center gap-2">
-                <div class="flex h-[52px] w-[92px] flex-col items-end justify-center rounded-[15px] border border-fq-line-2 bg-fq-sunk px-3">
+                {{-- The two currency tiles announce their own changes: a chest
+                     that pays out while the counter silently swaps to a new
+                     number reads as having paid nothing at all. --}}
+                <div
+                    x-data="fqTicker"
+                    data-fq-value="{{ $profile->points }}"
+                    {{-- The bump rides on :class for the same reason as the
+                         chip's colour: a :style binding is one more thing that
+                         rewrites the attribute out from under a morph. --}}
+                    :class="delta !== 0 ? 'fq-bump' : ''"
+                    class="relative flex h-[52px] w-[92px] flex-col items-end justify-center rounded-[15px] border border-fq-line-2 bg-fq-sunk px-3"
+                >
+                    <span
+                        {{-- Entirely Alpine's, so Livewire is told to leave it
+                             alone. x-show hides by writing style.display, and
+                             a morph rewriting the style attribute from the
+                             server markup wipes it — which stranded a chip
+                             reading 0 above every tile on a refresh. For the
+                             same reason the colour rides on :class: a :style
+                             binding would clobber it from the other side. --}}
+                        wire:ignore
+                        x-show="delta !== 0"
+                        x-text="deltaLabel"
+                        :class="delta < 0 ? 'text-fq-coral' : 'text-fq-lime'"
+                        class="pointer-events-none absolute -top-[6px] right-2 font-baloo text-[14px] leading-none font-extrabold"
+                        style="animation: fq-rise 1.6s ease-out both"
+                    ></span>
+
                     <span class="font-baloo text-[19px] leading-none font-extrabold text-fq-lime">{{ $profile->points }}</span>
                     <span class="font-mono-fq text-[9px] text-fq-text-4">PTS · ${{ $dollars }}</span>
                 </div>
@@ -96,9 +215,28 @@
                 <a
                     href="{{ route('kid.bonus') }}"
                     wire:navigate
-                    class="flex h-[52px] w-[86px] flex-col items-end justify-center rounded-[15px] border border-fq-ticket-line px-3 transition hover:border-fq-lime"
+                    x-data="fqTicker"
+                    data-fq-value="{{ $profile->bonus_tickets }}"
+                    :class="delta !== 0 ? 'fq-bump' : ''"
+                    class="relative flex h-[52px] w-[86px] flex-col items-end justify-center rounded-[15px] border border-fq-ticket-line px-3 transition hover:border-fq-lime"
                     style="background: var(--fq-ticket-bg); box-shadow: var(--fq-shadow-ticket)"
                 >
+                    <span
+                        {{-- Entirely Alpine's, so Livewire is told to leave it
+                             alone. x-show hides by writing style.display, and
+                             a morph rewriting the style attribute from the
+                             server markup wipes it — which stranded a chip
+                             reading 0 above every tile on a refresh. For the
+                             same reason the colour rides on :class: a :style
+                             binding would clobber it from the other side. --}}
+                        wire:ignore
+                        x-show="delta !== 0"
+                        x-text="deltaLabel"
+                        :class="delta < 0 ? 'text-fq-coral' : 'text-fq-lime'"
+                        class="pointer-events-none absolute -top-[6px] right-2 font-baloo text-[14px] leading-none font-extrabold"
+                        style="animation: fq-rise 1.6s ease-out both"
+                    ></span>
+
                     <span class="font-baloo text-[19px] leading-none font-extrabold text-fq-lime">{{ $profile->bonus_tickets }}</span>
                     <span class="font-mono-fq text-[9px] text-fq-ticket-label">TICKETS</span>
                 </a>
