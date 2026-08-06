@@ -6,6 +6,7 @@ use App\Models\Badge;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\Profile;
+use App\Services\ChoreService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Volt;
@@ -35,12 +36,24 @@ class KidCelebrationTest extends TestCase
         Auth::guard('profile')->login($this->kid);
     }
 
+    /**
+     * Hands over a badge a moment after whatever came before it, so it lands
+     * strictly after the watermark the last visit wrote.
+     */
     private function award(string $key): Badge
     {
+        $this->travel(1)->seconds();
+
         $badge = Badge::where('key', $key)->firstOrFail();
         $this->kid->badges()->attach($badge->id, ['earned_at' => now()]);
 
         return $badge;
+    }
+
+    /** Re-reads the profile the guard hands to the page, markers and all. */
+    private function reload(): void
+    {
+        Auth::guard('profile')->login($this->kid->fresh());
     }
 
     public function test_a_first_visit_seeds_the_marker_without_celebrating(): void
@@ -86,6 +99,24 @@ class KidCelebrationTest extends TestCase
             ->assertSee('+400 XP', false);
     }
 
+    public function test_a_level_up_survives_being_signed_out_in_between(): void
+    {
+        // The marker is a column, so a fresh session is not a fresh slate —
+        // this is the whole point of not keeping it in the session.
+        Volt::test('kid.quests')->assertOk();
+
+        $this->kid->update(['xp' => Profile::XP_PER_LEVEL]);
+
+        Auth::guard('profile')->logout();
+        session()->flush();
+        $this->reload();
+
+        Volt::test('kid.quests')
+            ->assertOk()
+            ->assertSee('rewards-earned')
+            ->assertSee('Level 2', false);
+    }
+
     public function test_a_level_up_is_announced_with_the_tickets_it_minted(): void
     {
         Volt::test('kid.quests')->assertOk();
@@ -93,7 +124,7 @@ class KidCelebrationTest extends TestCase
         // Two levels in one go — a badge's XP can carry a kid past a boundary
         // on top of whatever put them there — so it's one card, not two.
         $this->kid->update(['xp' => Profile::XP_PER_LEVEL * 2]);
-        Auth::guard('profile')->login($this->kid->fresh());
+        $this->reload();
 
         Volt::test('kid.quests')
             ->assertOk()
@@ -107,35 +138,86 @@ class KidCelebrationTest extends TestCase
             ->assertDontSee('rewards-earned');
     }
 
-    public function test_the_family_goal_is_announced_on_the_crossing_only(): void
+    /** Approves a chore worth enough to finish the family goal off. */
+    private function crossTheGoal(): void
     {
-        Volt::test('kid.quests')->assertOk()->assertDontSee('rewards-earned');
+        $this->household->update(['goal_name' => 'Pizza night']);
 
-        $this->household->update(['goal_now' => 1000, 'goal_name' => 'Pizza night']);
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        $chore = Chore::factory()->for($this->household)->create(['points' => 1000]);
 
-        // The guard hands back the instance it was handed at login, relations
-        // and all. A real second page load resolves the profile from the
-        // session and reads the household fresh, so say so here.
-        Auth::guard('profile')->login($this->kid->fresh());
+        $service = app(ChoreService::class);
+        $service->approve($service->claim($this->kid, $chore), $parent);
+    }
+
+    public function test_crossing_the_goal_queues_the_celebration_for_every_kid(): void
+    {
+        // A parent tapping approve is a screen no kid is looking at, so the
+        // moment has to wait on each of their profiles — including siblings
+        // who had nothing to do with the chore that finished it.
+        $sibling = Profile::factory()->for($this->household)->create();
+
+        $this->crossTheGoal();
+
+        $this->assertSame('Pizza night', $this->kid->fresh()->pending_goal_celebration);
+        $this->assertSame('Pizza night', $sibling->fresh()->pending_goal_celebration);
+    }
+
+    public function test_the_goal_celebration_waits_through_a_sign_out(): void
+    {
+        Volt::test('kid.quests')->assertOk()->assertDontSee('Everyone pulled together');
+
+        $this->crossTheGoal();
+
+        // Signed out and back in with nothing left in the session — the case
+        // the old session-backed marker lost outright.
+        Auth::guard('profile')->logout();
+        session()->flush();
+        $this->reload();
 
         Volt::test('kid.quests')
             ->assertOk()
             ->assertSee('rewards-earned')
-            ->assertSee('Family Goal', false)
+            ->assertSee('Everyone pulled together', false)
             ->assertSee('Pizza night', false);
 
-        // Still at 100% until a parent resets it — which is not news twice.
+        // Shown once. The bar stays at 100% until a parent resets it, which is
+        // not news a second time.
+        $this->reload();
+
         Volt::test('kid.quests')
             ->assertOk()
-            ->assertDontSee('rewards-earned');
+            // The card's own note. "Family Goal" is also the heading of the
+            // progress panel that sits on this page every day.
+            ->assertDontSee('Everyone pulled together');
     }
 
     public function test_a_goal_already_met_on_arrival_is_not_announced(): void
     {
+        // Nothing queued it, so there is nothing owed — a kid joining a
+        // household that finished its goal last month hears nothing.
         $this->household->update(['goal_now' => 1000]);
 
         Volt::test('kid.quests')
             ->assertOk()
-            ->assertDontSee('rewards-earned');
+            // The card's own note. "Family Goal" is also the heading of the
+            // progress panel that sits on this page every day.
+            ->assertDontSee('Everyone pulled together');
+    }
+
+    public function test_a_renamed_goal_still_announces_the_one_that_was_reached(): void
+    {
+        $this->crossTheGoal();
+
+        // A parent resets and repoints the goal before the kid ever logs in.
+        $this->household->update(['goal_now' => 0, 'goal_name' => 'Trip to the zoo']);
+        $this->reload();
+
+        // The goal panel on the page now reads "Trip to the zoo", so the only
+        // thing that can still be naming the old one is the card.
+        Volt::test('kid.quests')
+            ->assertOk()
+            ->assertSee('Everyone pulled together', false)
+            ->assertSee('Pizza night', false);
     }
 }

@@ -47,6 +47,9 @@ class Profile extends Model implements Authenticatable
         'tickets_granted_through_level',
         'streak',
         'pending_streak_chest',
+        'badges_seen_at',
+        'level_seen',
+        'pending_goal_celebration',
         'saving_for_store_item_id',
         'daily_points_goal',
         'goal_contribution',
@@ -62,6 +65,7 @@ class Profile extends Model implements Authenticatable
             'role' => ProfileRole::class,
             'color' => AccentColor::class,
             'locked_until' => 'datetime',
+            'badges_seen_at' => 'datetime',
         ];
     }
 

@@ -1166,8 +1166,13 @@ class ChoreService
         $profile->goal_contribution += $credited;
         $profile->save();
 
+        $wasReached = $this->goalIsReached($household);
         $household->goal_now = min($household->goal_target, $household->goal_now + $credited);
         $household->save();
+
+        if (! $wasReached && $this->goalIsReached($household)) {
+            $this->flagGoalCelebration($household);
+        }
 
         // Before badges, not after — the streak_3/7/14 badges read the
         // profile's streak, so it has to be current by the time they run.
@@ -1181,6 +1186,30 @@ class ChoreService
         // After badges, so a level crossed by badge XP is caught in the same
         // pass. Idempotent, so the badge path having already synced is fine.
         $this->tickets->syncLevelTickets($profile);
+    }
+
+    private function goalIsReached(Household $household): bool
+    {
+        return $household->goal_target > 0 && $household->goal_now >= $household->goal_target;
+    }
+
+    /**
+     * Queues the family-goal celebration for every kid in the household.
+     *
+     * The goal is crossed by a parent tapping approve, which is a screen no kid
+     * is looking at — so the moment has to wait on the profile until each of
+     * them next opens the app. Signing out must not lose it, which is why this
+     * is a column and not the session.
+     *
+     * The goal's name is stored rather than a flag: a parent who resets and
+     * renames the goal before a kid logs in shouldn't have the new one
+     * announced as already finished.
+     */
+    private function flagGoalCelebration(Household $household): void
+    {
+        Profile::where('household_id', $household->id)
+            ->where('role', ProfileRole::Kid)
+            ->update(['pending_goal_celebration' => $household->goal_name ?: 'Goal reached!']);
     }
 
     public function sendBack(ChoreCompletion $completion, Profile $approver): void

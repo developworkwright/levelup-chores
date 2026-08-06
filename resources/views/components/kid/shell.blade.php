@@ -58,25 +58,28 @@
      * It lives in the shell rather than on the pages because the shell is the
      * one thing that re-renders on every kid page load *and* every Livewire
      * round trip, whoever caused it — a chest the kid opened, a chore a parent
-     * approved an hour ago, a family goal a sibling finished off. Each of those
+     * approved overnight, a family goal a sibling finished off. Each of those
      * hands over tickets, and a balance that climbs with nothing to explain it
      * reads as the app shortchanging them.
      *
-     * Tracked in the session rather than a column: a celebration is a
-     * per-device moment, and there is nothing to reconcile if it's missed.
-     * A first visit seeds the marker without celebrating, so a kid who already
-     * holds twenty badges isn't met with twenty toasts.
+     * The markers are columns rather than session keys: almost none of this
+     * happens while the kid is watching, and a session only lasts as long as a
+     * login does. A null marker seeds itself here without celebrating, so a kid
+     * who already holds twenty badges isn't met with twenty cards.
      */
     $quietRewards = collect();
     $tickets = fn (int $count) => '+'.$count.' '.Str::plural('ticket', $count);
+    $markers = [];
 
-    $earnedBadgeIds = $profile->badges()->pluck('badges.id')->all();
-    $seenBadgeIds = session('fq_seen_badges');
-    $unseenBadgeIds = $seenBadgeIds === null ? [] : array_diff($earnedBadgeIds, $seenBadgeIds);
+    $unseenBadges = $profile->badges_seen_at === null
+        ? collect()
+        : $profile->badges()->wherePivot('earned_at', '>', $profile->badges_seen_at)->get();
 
-    session(['fq_seen_badges' => $earnedBadgeIds]);
+    if ($profile->badges_seen_at === null || $unseenBadges->isNotEmpty()) {
+        $markers['badges_seen_at'] = now();
+    }
 
-    foreach (App\Models\Badge::whereIn('id', $unseenBadgeIds)->get() as $badge) {
+    foreach ($unseenBadges as $badge) {
         $quietRewards->push([
             'message' => $badge->name.' badge unlocked!',
             'big' => false,
@@ -94,10 +97,11 @@
     // ever stopped to announce — the bar just crept round and the balance went
     // up. Levels crossed together are one card rather than a queue of them.
     $level = $profile->level();
-    $seenLevel = session('fq_seen_level');
-    $levelsGained = $seenLevel === null ? 0 : max(0, $level - $seenLevel);
+    $levelsGained = $profile->level_seen === null ? 0 : max(0, $level - $profile->level_seen);
 
-    session(['fq_seen_level' => $level]);
+    if ($profile->level_seen !== $level) {
+        $markers['level_seen'] = $level;
+    }
 
     if ($levelsGained > 0) {
         $quietRewards->push([
@@ -112,25 +116,27 @@
         ]);
     }
 
-    // The family goal only on the crossing — holding at 100% until a parent
-    // resets it must not re-fire on every page.
-    $goalReached = $profile->household->goal_target > 0
-        && $profile->household->goal_now >= $profile->household->goal_target;
-    $goalWasReached = session('fq_goal_reached');
-
-    session(['fq_goal_reached' => $goalReached]);
-
-    if ($goalWasReached === false && $goalReached) {
+    // Queued by ChoreService the moment a parent's approval crossed the goal —
+    // which is why it survives the kid being signed out at the time.
+    if ($profile->pending_goal_celebration !== null) {
         $quietRewards->push([
             'message' => 'Family goal reached!',
             'big' => true,
             'card' => [
                 'accent' => 'var(--fq-lime)',
                 'sub' => 'Family Goal',
-                'label' => $profile->household->goal_name ?: 'Goal reached!',
+                'label' => $profile->pending_goal_celebration,
                 'note' => 'Everyone pulled together',
             ],
         ]);
+
+        $markers['pending_goal_celebration'] = null;
+    }
+
+    // One write, and only when something actually moved — the shell renders on
+    // every round trip and most of them have nothing to report.
+    if ($markers !== []) {
+        $profile->forceFill($markers)->save();
     }
 @endphp
 
