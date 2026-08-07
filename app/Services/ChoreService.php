@@ -243,11 +243,6 @@ class ChoreService
         return $profile->household->chores
             ->filter(fn (Chore $chore) => $chore->isAppropriateFor($profile))
             ->reject(fn (Chore $chore) => $chore->id === $quest->chore_id)
-            // One-time chores ride at the top of the board. They're the only
-            // thing on it with a real deadline — first kid to tap one takes it
-            // for good — so burying them under the daily regulars would hide
-            // the very chores worth hurrying for.
-            ->sortBy(fn (Chore $chore) => $chore->isOneTime() ? 0 : 1)
             ->map(function (Chore $chore) use ($profile, $gated) {
                 $claimant = $chore->cadence === ChoreCadence::Unlimited
                     ? null
@@ -279,6 +274,27 @@ class ChoreService
             // pending: they'd otherwise watch the card vanish the instant they
             // tapped it, with nothing to say it went through.
             ->reject(fn (array $entry) => $entry['chore']->isUsedUp() && $entry['state'] !== 'pending')
+            // Urgency first, then payout.
+            //
+            // The two top tiers are the chores that won't wait: a one-time
+            // chore the first kid to tap takes for good, and anything a parent
+            // has put on a clock. Burying either under the daily regulars would
+            // hide the very cards worth hurrying for. Everything below them is
+            // ordered by what it pays, which is the only question left once
+            // nothing is expiring.
+            //
+            // Sorted after the map, not before it, so the deadline tier can
+            // read the 'closesAt' the map already resolved rather than working
+            // the household day out a second time.
+            ->sortBy(fn (array $entry) => [
+                match (true) {
+                    $entry['chore']->isOneTime() => 0,
+                    $entry['closesAt'] !== null => 1,
+                    default => 2,
+                },
+                // Negated for a descending sort — biggest payout first.
+                -$entry['chore']->points,
+            ])
             ->values();
     }
 

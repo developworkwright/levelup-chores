@@ -36,4 +36,42 @@ class StoreItem extends Model
     {
         return $this->hasMany(Redemption::class);
     }
+
+    /**
+     * Columns free-text search looks at.
+     *
+     * Wider than Chore::SEARCHABLE deliberately — a reward's description is
+     * where the actual thing lives ("a trip out for ice cream" under a name
+     * like "Sweet Friday"), so a kid hunting for it by the obvious word has to
+     * be able to find it.
+     *
+     * @var array<int, string>
+     */
+    public const SEARCHABLE = ['name', 'description'];
+
+    /**
+     * Free-text search across a reward's searchable columns.
+     *
+     * In-memory rather than a scope: the catalog is a single household's worth
+     * of rows, already loaded and grouped into shelves by the time the filter
+     * applies, so a second query would buy nothing.
+     */
+    public function matches(?string $term): bool
+    {
+        $term = trim((string) $term);
+
+        if ($term === '') {
+            return true;
+        }
+
+        $needle = mb_strtolower($term);
+
+        foreach (self::SEARCHABLE as $column) {
+            if (str_contains(mb_strtolower((string) $this->{$column}), $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

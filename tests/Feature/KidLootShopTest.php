@@ -235,6 +235,99 @@ class KidLootShopTest extends TestCase
         $this->assertSame($next->id, $kid->refresh()->saving_for_store_item_id);
     }
 
+    public function test_searching_narrows_the_shelves_to_matching_rewards(): void
+    {
+        $household = Household::factory()->create();
+        StoreItem::factory()->for($household)->create(['name' => 'Lego set', 'cost' => 1500]);
+        StoreItem::factory()->for($household)->create(['name' => 'Ice cream run', 'cost' => 100]);
+
+        $this->loginKid($household, ['points' => 0]);
+
+        Volt::test('kid.loot')
+            ->set('search', 'lego')
+            ->assertSee('Lego set')
+            ->assertDontSee('Ice cream run')
+            // The shelf its only match sat on goes with it.
+            ->assertSee('Big ticket')
+            ->assertDontSee('Treat yourself');
+    }
+
+    public function test_the_search_reaches_into_descriptions(): void
+    {
+        // The name is often a nickname; the description is where the thing
+        // itself is written down.
+        $household = Household::factory()->create();
+        StoreItem::factory()->for($household)->create([
+            'name' => 'Sweet Friday',
+            'description' => 'A trip out for ice cream.',
+            'cost' => 300,
+        ]);
+
+        $this->loginKid($household, ['points' => 0]);
+
+        Volt::test('kid.loot')
+            ->set('search', 'ice cream')
+            ->assertSee('Sweet Friday');
+    }
+
+    public function test_a_search_that_matches_nothing_says_so(): void
+    {
+        $household = Household::factory()->create();
+        StoreItem::factory()->for($household)->create(['name' => 'Lego set', 'cost' => 1500]);
+
+        $this->loginKid($household, ['points' => 0]);
+
+        Volt::test('kid.loot')
+            ->set('search', 'trampoline')
+            ->assertSee('Nothing in the shop matches')
+            ->assertDontSee('Lego set');
+    }
+
+    public function test_clearing_the_search_puts_the_whole_catalog_back(): void
+    {
+        $household = Household::factory()->create();
+        StoreItem::factory()->for($household)->create(['name' => 'Lego set', 'cost' => 1500]);
+        StoreItem::factory()->for($household)->create(['name' => 'Ice cream run', 'cost' => 100]);
+
+        $this->loginKid($household, ['points' => 0]);
+
+        Volt::test('kid.loot')
+            ->set('search', 'lego')
+            ->assertDontSee('Ice cream run')
+            ->call('clearSearch')
+            ->assertSee('Ice cream run')
+            ->assertSee('Lego set');
+    }
+
+    public function test_an_active_search_does_not_shorten_the_goal_picker(): void
+    {
+        // The picker answers "what am I aiming at next?" — a search typed to
+        // find something else has no business hiding the rest of the catalog.
+        $household = Household::factory()->create();
+        $current = StoreItem::factory()->for($household)->create(['name' => 'Lego set', 'cost' => 1500]);
+        StoreItem::factory()->for($household)->create(['name' => 'Ice cream run', 'cost' => 100]);
+
+        $this->loginKid($household, ['points' => 0, 'saving_for_store_item_id' => $current->id]);
+
+        Volt::test('kid.loot')
+            ->set('search', 'lego')
+            ->call('togglePicker')
+            ->assertSee('Ice cream run');
+    }
+
+    public function test_the_search_stays_inside_the_household(): void
+    {
+        $household = Household::factory()->create();
+        StoreItem::factory()->for(Household::factory()->create())->create(['name' => 'Lego set', 'cost' => 1500]);
+
+        $this->loginKid($household, ['points' => 0]);
+
+        Volt::test('kid.loot')
+            ->set('search', 'lego')
+            ->assertDontSee('Lego set')
+            ->assertSee('Nothing in the shop matches');
+    }
+
     public function test_retiring_the_reward_a_kid_was_saving_for_just_clears_the_goal(): void
     {
         $household = Household::factory()->create();

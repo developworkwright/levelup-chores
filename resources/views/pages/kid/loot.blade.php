@@ -41,10 +41,17 @@ new class extends Component
     /** Transient — the goal picker is open for this visit only. */
     public bool $pickingSaving = false;
 
+    public string $search = '';
+
     public function mount(): void
     {
         $this->profile = Auth::guard('profile')->user();
         abort_unless($this->profile->isKid(), 403);
+    }
+
+    public function clearSearch(): void
+    {
+        $this->search = '';
     }
 
     public function togglePicker(): void
@@ -100,8 +107,15 @@ new class extends Component
 
         $remaining = $saving ? max(0, $saving->cost - $this->profile->points) : 0;
 
+        // Only the shelves narrow. The goal picker keeps the whole catalog:
+        // it answers "what am I aiming at next?", which a search typed to find
+        // something else has no business shortening.
+        $matching = $items->filter(fn (StoreItem $item) => $item->matches($this->search));
+
         return [
             'items' => $items,
+            'matchCount' => $matching->count(),
+            'catalogCount' => $items->count(),
             'saving' => $saving,
             'savingPercent' => $saving && $saving->cost > 0
                 ? min(100, (int) round($this->profile->points / $saving->cost * 100))
@@ -112,7 +126,7 @@ new class extends Component
                 ->map(fn (array $band) => [
                     ...$band,
                     'sub' => $this->bandLabel($band['min'], $band['max']),
-                    'items' => $items->filter(fn (StoreItem $item) => $item->cost >= $band['min']
+                    'items' => $matching->filter(fn (StoreItem $item) => $item->cost >= $band['min']
                         && ($band['max'] === null || $item->cost < $band['max'])),
                 ])
                 ->reject(fn (array $band) => $band['items']->isEmpty()),
@@ -209,6 +223,31 @@ new class extends Component
                     </div>
                 </div>
             @endif
+        </div>
+    @endif
+
+    <div class="mt-[22px] flex flex-wrap items-center gap-2">
+        <input
+            type="search"
+            wire:model.live.debounce.300ms="search"
+            placeholder="Find a reward"
+            class="min-w-[160px] flex-1 rounded-[14px] border border-fq-line-2 bg-fq-sunk px-4 py-[10px] text-sm outline-none focus:border-fq-cyan"
+        >
+        @if (trim($search) !== '')
+            <span class="font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4">
+                {{ $matchCount }} / {{ $catalogCount }}
+            </span>
+            <button
+                type="button"
+                wire:click="clearSearch"
+                class="rounded-[14px] border border-fq-line-3 bg-fq-sunk px-3 py-[10px] text-xs text-fq-text-3"
+            >Clear</button>
+        @endif
+    </div>
+
+    @if ($bands->isEmpty() && trim($search) !== '')
+        <div class="mt-3 rounded-[18px] border border-dashed border-fq-line-3 bg-fq-panel p-6 text-center text-sm text-fq-text-5">
+            Nothing in the shop matches "{{ $search }}".
         </div>
     @endif
 

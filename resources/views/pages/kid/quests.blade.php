@@ -57,6 +57,30 @@ new class extends Component
     public string $search = '';
 
     /**
+     * Board states a kid can't act on right now.
+     *
+     * 'locked' is deliberately absent: with require_quest_first on it covers
+     * the entire board, so hiding it would leave a kid staring at nothing and
+     * no clue why. 'pending' is absent too — their own claim waiting on a
+     * parent is progress, and the card is the only proof the tap landed.
+     *
+     * @var array<int, string>
+     */
+    private const UNAVAILABLE_STATES = ['done', 'expired'];
+
+    /**
+     * Transient, like the search beside it — a board with half of it taken
+     * looks very different an hour later, so this defaults back to showing
+     * everything rather than quietly hiding chores that have since reopened.
+     */
+    public bool $hideUnavailable = false;
+
+    public function toggleUnavailable(): void
+    {
+        $this->hideUnavailable = ! $this->hideUnavailable;
+    }
+
+    /**
      * The three boxes of the gratitude quest. Deferred rather than live —
      * nothing on the page reacts to a half-typed answer, so there's no reason
      * to spend a round trip per keystroke.
@@ -280,6 +304,11 @@ new class extends Component
 
         $board = $service->boardFor($this->profile);
 
+        // Hidden before the search rather than after, so the search's "2 / 5"
+        // counter is measured against the board actually on screen.
+        $isUnavailable = fn (array $entry) => in_array($entry['state'], self::UNAVAILABLE_STATES, true);
+        $shown = $this->hideUnavailable ? $board->reject($isUnavailable) : $board;
+
         $quest = $service->questFor($this->profile);
         $questRevealed = $quest->revealed_at !== null;
         $questDone = $quest->completed_at !== null;
@@ -343,8 +372,11 @@ new class extends Component
             // Filtered in PHP rather than re-queried — the board is already
             // loaded, and Chore::matches() is the in-memory twin of the
             // scope the parent admin searches with.
-            'board' => $board->filter(fn (array $entry) => $entry['chore']->matches($this->search))->values(),
-            'boardTotal' => $board->count(),
+            'board' => $shown->filter(fn (array $entry) => $entry['chore']->matches($this->search))->values(),
+            'boardTotal' => $shown->count(),
+            // Counted off the whole board, never off $shown — it's the number
+            // the toggle offers to bring back, so it has to survive being on.
+            'unavailableCount' => $board->filter($isUnavailable)->count(),
             'mysteryChore' => $mysteryChore,
             'mysteryClaimant' => $mysteryClaimant,
             'mysteryHint' => $service->mysteryHintFor($this->profile),
@@ -816,11 +848,35 @@ new class extends Component
                         class="rounded-[14px] border border-fq-line-3 bg-fq-sunk px-3 py-[10px] text-xs text-fq-text-3"
                     >Clear</button>
                 @endif
+
+                {{-- Only offered when there's actually something to hide. An
+                     always-on switch that does nothing on a clear board is one
+                     more control to wonder about. --}}
+                @if ($unavailableCount > 0)
+                    <button
+                        type="button"
+                        wire:click="toggleUnavailable"
+                        class="rounded-[14px] border px-3 py-[10px] text-xs whitespace-nowrap transition"
+                        style="{{ $hideUnavailable
+                            ? 'border-color: var(--fq-lime); color: var(--fq-lime); background: var(--fq-sunk)'
+                            : 'border-color: var(--fq-line-3); color: var(--fq-text-3); background: var(--fq-sunk)' }}"
+                    >
+                        {{ $hideUnavailable
+                            ? 'Show '.$unavailableCount.' more'
+                            : "Hide {$unavailableCount} I can't do" }}
+                    </button>
+                @endif
             </div>
 
             @if ($board->isEmpty() && trim($search) !== '')
                 <div class="rounded-[18px] border border-dashed border-fq-line-3 bg-fq-panel p-6 text-center text-sm text-fq-text-5">
                     Nothing matches "{{ $search }}".
+                </div>
+            @elseif ($board->isEmpty() && $hideUnavailable)
+                {{-- Hiding everything leaves a blank column that reads as a
+                     bug. Say where the chores went, and how to get them back. --}}
+                <div class="rounded-[18px] border border-dashed border-fq-line-3 bg-fq-panel p-6 text-center text-sm text-fq-text-5">
+                    Everything else is taken or closed for today.
                 </div>
             @endif
 
