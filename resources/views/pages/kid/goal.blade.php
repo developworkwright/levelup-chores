@@ -3,6 +3,7 @@
 use App\Enums\ProfileRole;
 use App\Models\Chore;
 use App\Models\Profile;
+use App\Services\BossService;
 use App\Services\ChoreService;
 use App\Services\HouseholdClock;
 use Illuminate\Support\Carbon;
@@ -129,6 +130,40 @@ new class extends Component
             : $plans->take(max(self::MIN_ROWS, $stopAt + 1));
     }
 
+    /**
+     * The boss, and any stages of the fight this kid hasn't watched yet.
+     *
+     * Built in `with()` rather than `mount()`, which is the opposite of the
+     * rule the chest animations follow — and deliberately so. Those have to
+     * survive a refresh; this must not outlive one. The replay is defined as
+     * "damage dealt since this kid last looked", and `markSeen()` immediately
+     * afterwards is what makes looking count: the first render plays what was
+     * missed, and every render after it has nothing left to play.
+     *
+     * Marking has to come *after* the replay is built, or it would erase the
+     * very gap it is meant to describe.
+     *
+     * @return array{bossState: ?array, bossSteps: array, bossHits: ?Collection}
+     */
+    private function boss(\App\Models\Household $household): array
+    {
+        $boss = app(BossService::class);
+        $state = $boss->stateFor($household);
+
+        if ($state === null) {
+            return ['bossState' => null, 'bossSteps' => [], 'bossHits' => null];
+        }
+
+        $steps = $boss->replayFor($household, $this->profile);
+        $boss->markSeen($household, $this->profile);
+
+        return [
+            'bossState' => $state,
+            'bossSteps' => $steps,
+            'bossHits' => $boss->hits($household),
+        ];
+    }
+
     public function with(): array
     {
         $chores = app(ChoreService::class);
@@ -214,6 +249,7 @@ new class extends Component
                 ? $this->forecast($familyRemaining, (int) floor($familyPace), $today, $step)
                 : null,
             'contributors' => $chores->goalContributors($household),
+            ...$this->boss($household),
         ];
     }
 }; ?>
@@ -247,6 +283,13 @@ new class extends Component
                     </p>
                 </div>
             </div>
+        @endif
+
+        {{-- Full width and above the split: the monster is the family goal, and
+             the two planning columns below it are how you work out what it
+             takes to finish the thing off. --}}
+        @if ($bossState)
+            <x-boss-arena :state="$bossState" :steps="$bossSteps" :hits="$bossHits" />
         @endif
 
         {{-- My plan on the left, ours on the right: the two halves are read
@@ -454,13 +497,10 @@ new class extends Component
                     </div>
                     <p class="mt-1 text-sm text-fq-text-2">{{ $household->goal_name }}</p>
 
-                    <div class="mt-3 h-4 overflow-hidden rounded-full border border-fq-line bg-fq-track">
-                        <div
-                            class="h-full rounded-full transition-[width] duration-500"
-                            style="width:{{ $familyPercent }}%;background:linear-gradient(90deg, var(--fq-cyan), var(--fq-lime), var(--fq-gold))"
-                        ></div>
-                    </div>
-                    <p class="mt-2 font-mono-fq text-[11px] text-fq-text-4">
+                    {{-- No bar here: the arena above is the same number, drawn
+                         far better. Saying it twice on one page just invites
+                         the two to disagree. --}}
+                    <p class="mt-3 font-mono-fq text-[11px] text-fq-text-4">
                         {{ number_format($household->goal_now) }} / {{ number_format($household->goal_target) }} PTS ·
                         {{ number_format($familyRemaining) }} TO GO ·
                         {{ $kidCount }} {{ Str::plural('KID', $kidCount) }} EARNING

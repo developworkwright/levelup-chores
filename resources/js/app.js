@@ -82,3 +82,95 @@ document.addEventListener('alpine:init', () => {
         },
     }));
 });
+
+/** How long each stage of a catch-up replay holds before the next blow lands. */
+const BOSS_STEP_MS = 1500;
+
+/** Matches the fq-boss-hit keyframes in app.css. */
+const BOSS_HIT_MS = 520;
+
+/**
+ * Replays the damage a kid missed while they were away.
+ *
+ * A family goal moves whenever anyone's chore is approved, so a kid who logs in
+ * after a busy afternoon would otherwise find the monster simply *already*
+ * beaten up — the part that makes it worth watching having happened to somebody
+ * else. So the server hands over every stage between what this kid last saw and
+ * where the boss stands now, and the arena walks through them one blow at a
+ * time before settling on the truth.
+ *
+ * The steps are rendered server-side and stacked; this only decides which one
+ * is visible. That keeps six monsters' worth of artwork out of JavaScript.
+ */
+document.addEventListener('alpine:init', () => {
+    window.Alpine.data('fqBossReplay', (steps) => ({
+        steps,
+        index: 0,
+        hit: false,
+        timer: null,
+        hitTimer: null,
+
+        init() {
+            if (this.steps.length < 2) {
+                return;
+            }
+
+            // Someone who has asked the OS for less movement gets the outcome
+            // without the show.
+            if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                this.finish();
+
+                return;
+            }
+
+            this.queue();
+        },
+
+        destroy() {
+            clearTimeout(this.timer);
+            clearTimeout(this.hitTimer);
+        },
+
+        queue() {
+            this.timer = setTimeout(() => this.advance(), BOSS_STEP_MS);
+        },
+
+        advance() {
+            if (! this.replaying) {
+                return;
+            }
+
+            this.index++;
+            this.hit = true;
+            clearTimeout(this.hitTimer);
+            this.hitTimer = setTimeout(() => (this.hit = false), BOSS_HIT_MS);
+
+            if (this.replaying) {
+                this.queue();
+            }
+        },
+
+        /** Tapping the arena skips to the end — patience is not universal. */
+        finish() {
+            clearTimeout(this.timer);
+            clearTimeout(this.hitTimer);
+            this.index = this.steps.length - 1;
+            this.hit = false;
+        },
+
+        get current() {
+            return this.steps[this.index];
+        },
+
+        get replaying() {
+            return this.index < this.steps.length - 1;
+        },
+
+        /** The blow that got us to the step now showing, as a "-320" chip. */
+        get hitLabel() {
+            const landed = this.current.landed;
+
+            return landed > 0 ? `-${landed.toLocaleString()}` : '';
+        },
+    }));
+});

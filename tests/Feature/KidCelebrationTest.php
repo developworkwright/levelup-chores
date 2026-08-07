@@ -2,10 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Enums\BossSkin;
 use App\Models\Badge;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\Profile;
+use App\Services\BossService;
 use App\Services\ChoreService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -165,7 +167,7 @@ class KidCelebrationTest extends TestCase
 
     public function test_the_goal_celebration_waits_through_a_sign_out(): void
     {
-        Volt::test('kid.quests')->assertOk()->assertDontSee('Everyone pulled together');
+        Volt::test('kid.quests')->assertOk()->assertDontSee('landed the final blow');
 
         $this->crossTheGoal();
 
@@ -178,7 +180,7 @@ class KidCelebrationTest extends TestCase
         Volt::test('kid.quests')
             ->assertOk()
             ->assertSee('rewards-earned')
-            ->assertSee('Everyone pulled together', false)
+            ->assertSee('landed the final blow', false)
             ->assertSee('Pizza night', false);
 
         // Shown once. The bar stays at 100% until a parent resets it, which is
@@ -189,7 +191,7 @@ class KidCelebrationTest extends TestCase
             ->assertOk()
             // The card's own note. "Family Goal" is also the heading of the
             // progress panel that sits on this page every day.
-            ->assertDontSee('Everyone pulled together');
+            ->assertDontSee('landed the final blow');
     }
 
     public function test_a_goal_already_met_on_arrival_is_not_announced(): void
@@ -202,7 +204,7 @@ class KidCelebrationTest extends TestCase
             ->assertOk()
             // The card's own note. "Family Goal" is also the heading of the
             // progress panel that sits on this page every day.
-            ->assertDontSee('Everyone pulled together');
+            ->assertDontSee('landed the final blow');
     }
 
     public function test_a_renamed_goal_still_announces_the_one_that_was_reached(): void
@@ -217,7 +219,27 @@ class KidCelebrationTest extends TestCase
         // thing that can still be naming the old one is the card.
         Volt::test('kid.quests')
             ->assertOk()
-            ->assertSee('Everyone pulled together', false)
+            ->assertSee('landed the final blow', false)
             ->assertSee('Pizza night', false);
+    }
+
+    public function test_the_kill_is_pinned_to_the_monster_that_was_standing(): void
+    {
+        $this->crossTheGoal();
+
+        // A parent starting the next goal rotates the skin. The card has to
+        // keep naming the one that actually died, for the same reason it keeps
+        // naming the goal that was actually reached.
+        app(BossService::class)->startNewBattle($this->household);
+        $this->reload();
+
+        Volt::test('kid.quests')
+            ->assertOk()
+            // The card still names the monster that actually died...
+            ->assertSee(BossSkin::default()->label(), false)
+            // ...while the sidebar has already moved on to the one now
+            // standing. Both on the same page at once is the point: the kill
+            // is history, the arena is live.
+            ->assertSee(BossSkin::default()->next()->label(), false);
     }
 }

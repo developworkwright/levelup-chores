@@ -7,6 +7,7 @@ use App\Models\Badge;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\Profile;
+use App\Services\BossService;
 use App\Services\ChestService;
 use App\Services\ChoreService;
 use App\Services\GratitudeService;
@@ -413,6 +414,9 @@ new class extends Component
                 ? min(100, round($household->goal_now / $household->goal_target * 100))
                 : 0,
             'goalContributors' => $service->goalContributors($household),
+            // Status only — no replay, and nothing marked seen. See
+            // <x-boss-mini> for why the catch-up belongs to the Goal page.
+            'bossState' => app(BossService::class)->stateFor($household),
             // The plan made on the Goal Planner, reported back where the work
             // actually happens — a target you only see on the page you set it
             // on is a wish rather than something to play against.
@@ -1057,20 +1061,36 @@ new class extends Component
             </div>
 
             <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
-                <div class="flex items-center justify-between">
-                    <h3 class="font-baloo text-lg font-bold">Family Goal</h3>
-                    <span class="font-mono-fq text-[10px] text-fq-lime">{{ $goalPercent }}%</span>
-                </div>
-                <p class="mt-1 text-sm text-fq-text-2">{{ $household->goal_name }}</p>
-                <div class="mt-3 h-4 overflow-hidden rounded-full border border-fq-line bg-fq-track">
-                    <div
-                        class="h-full rounded-full transition-[width] duration-500"
-                        style="width:{{ $goalPercent }}%;background:linear-gradient(90deg, var(--fq-cyan), var(--fq-lime), var(--fq-gold))"
-                    ></div>
-                </div>
-                <p class="mt-2 font-mono-fq text-[11px] text-fq-text-4">
-                    {{ $household->goal_now }} / {{ $household->goal_target }} PTS · EVERYONE'S POINTS COUNT
-                </p>
+                {{-- The family goal, as the thing it is fighting. Falls back to
+                     the plain bar for a household with no target set, which has
+                     no monster to draw. --}}
+                {{-- Keyed so a Livewire morph matches this block to itself
+                     rather than to whatever the plain-bar branch left behind.
+                     The two branches render different shapes, and this panel
+                     re-renders on every refresh-on-focus. --}}
+                @if ($bossState)
+                    <x-boss-mini :state="$bossState" wire:key="family-boss" />
+
+                    <p class="mt-3 text-sm text-fq-text-2">{{ $household->goal_name }}</p>
+                    <p class="mt-1 font-mono-fq text-[11px] text-fq-text-4">
+                        BEAT IT TOGETHER · EVERYONE'S POINTS COUNT
+                    </p>
+                @else
+                    <div class="flex items-center justify-between">
+                        <h3 class="font-baloo text-lg font-bold">Family Goal</h3>
+                        <span class="font-mono-fq text-[10px] text-fq-lime">{{ $goalPercent }}%</span>
+                    </div>
+                    <p class="mt-1 text-sm text-fq-text-2">{{ $household->goal_name }}</p>
+                    <div class="mt-3 h-4 overflow-hidden rounded-full border border-fq-line bg-fq-track">
+                        <div
+                            class="h-full rounded-full transition-[width] duration-500"
+                            style="width:{{ $goalPercent }}%;background:linear-gradient(90deg, var(--fq-cyan), var(--fq-lime), var(--fq-gold))"
+                        ></div>
+                    </div>
+                    <p class="mt-2 font-mono-fq text-[11px] text-fq-text-4">
+                        {{ $household->goal_now }} / {{ $household->goal_target }} PTS · EVERYONE'S POINTS COUNT
+                    </p>
+                @endif
 
                 <div class="mt-4 border-t border-fq-divider pt-[14px]">
                     <x-goal-mvp :contributors="$goalContributors" />

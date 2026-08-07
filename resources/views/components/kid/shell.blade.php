@@ -138,19 +138,37 @@
 
     // Queued by ChoreService the moment a parent's approval crossed the goal —
     // which is why it survives the kid being signed out at the time.
+    //
+    // The boss name and the finisher were stamped alongside it, so a parent who
+    // starts the next goal (rotating the monster and zeroing the bar) before a
+    // kid logs in can't rewrite whose kill this was. Both are null on anything
+    // queued before the boss battle existed, which is why the card still knows
+    // how to announce a plain family goal.
     if ($profile->pending_goal_celebration !== null) {
+        $boss = $profile->pending_boss_name;
+        $finisher = $profile->pending_goal_finisher;
+
+        // The monster is the headline, but the goal is the reason anyone was
+        // fighting it — the card names both, or beating Gnash reads as its own
+        // reward rather than as pizza night.
+        $blow = $finisher ? $finisher.' landed the final blow' : 'Everyone pulled together';
+
         $quietRewards->push([
-            'message' => 'Family goal reached!',
+            'message' => $boss ? $boss.' is down!' : 'Family goal reached!',
             'big' => true,
             'card' => [
                 'accent' => 'var(--fq-lime)',
-                'sub' => 'Family Goal',
-                'label' => $profile->pending_goal_celebration,
-                'note' => 'Everyone pulled together',
+                'sub' => $boss ? 'Boss Defeated' : 'Family Goal',
+                'label' => $boss ?: $profile->pending_goal_celebration,
+                'note' => $boss
+                    ? $blow.' · '.$profile->pending_goal_celebration
+                    : $blow,
             ],
         ]);
 
         $markers['pending_goal_celebration'] = null;
+        $markers['pending_goal_finisher'] = null;
+        $markers['pending_boss_name'] = null;
     }
 
     // One write, and only when something actually moved — the shell renders on

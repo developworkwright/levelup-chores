@@ -60,6 +60,7 @@ class ChoreService
         private SpinService $spin,
         private BadgeService $badges,
         private TicketService $tickets,
+        private BossService $boss,
     ) {}
 
     public function questFor(Profile $profile): DailyQuest
@@ -1239,7 +1240,12 @@ class ChoreService
         $household->save();
 
         if (! $wasReached && $this->goalIsReached($household)) {
-            $this->flagGoalCelebration($household);
+            // Banked before the celebration is queued: the trophy row is the
+            // record of the battle, and the celebration is only the telling of
+            // it. The snapshot it takes also has to happen while every kid's
+            // goal_contribution is still standing.
+            $this->boss->recordDefeat($household, $profile);
+            $this->flagGoalCelebration($household, $profile);
         }
 
         // Before badges, not after — the streak_3/7/14 badges read the
@@ -1317,13 +1323,31 @@ class ChoreService
      *
      * The goal's name is stored rather than a flag: a parent who resets and
      * renames the goal before a kid logs in shouldn't have the new one
-     * announced as already finished.
+     * announced as already finished. The monster's name is stored for the same
+     * reason — a rotated skin must not rename a kill that already happened.
+     *
+     * The finisher is stored as the word the kid reading it should see — "You"
+     * on the profile that landed the blow, their name on everyone else's. Both
+     * read the same sentence ("... landed the final blow"), which is cheaper
+     * and more honest than storing an id and having the view work out whether
+     * it is looking at itself: two kids can share a name, ids can be deleted,
+     * and neither problem exists if the row already says what to print.
      */
-    private function flagGoalCelebration(Household $household): void
+    private function flagGoalCelebration(Household $household, Profile $finisher): void
     {
-        Profile::where('household_id', $household->id)
-            ->where('role', ProfileRole::Kid)
-            ->update(['pending_goal_celebration' => $household->goal_name ?: 'Goal reached!']);
+        $shared = [
+            'pending_goal_celebration' => $household->goal_name ?: 'Goal reached!',
+            'pending_boss_name' => $this->boss->skinFor($household)->label(),
+        ];
+
+        $kids = fn () => Profile::where('household_id', $household->id)
+            ->where('role', ProfileRole::Kid);
+
+        $kids()->whereKeyNot($finisher->id)
+            ->update([...$shared, 'pending_goal_finisher' => $finisher->name]);
+
+        $kids()->whereKey($finisher->id)
+            ->update([...$shared, 'pending_goal_finisher' => 'You']);
     }
 
     public function sendBack(ChoreCompletion $completion, Profile $approver): void

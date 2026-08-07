@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\BossSkin;
 use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
 use App\Enums\ProfileRole;
@@ -7,6 +8,7 @@ use App\Enums\TicketKind;
 use App\Models\ChoreCompletion;
 use App\Models\Profile;
 use App\Services\BadgeService;
+use App\Services\BossService;
 use App\Services\ChoreService;
 use App\Services\LedgerService;
 use App\Services\SpinService;
@@ -199,6 +201,22 @@ new class extends Component
         // new goal starts everyone level rather than handing whoever won the
         // last one an unbeatable head start.
         $household->profiles()->update(['goal_contribution' => 0]);
+
+        // A new goal is a new monster. This is the only place the skin rotates:
+        // the defeated one stays standing (KO'd) until a parent is ready to
+        // start the next fight, so the kids get to keep the win on screen.
+        app(BossService::class)->startNewBattle($household);
+    }
+
+    public function setBossSkin(string $key): void
+    {
+        $skin = BossSkin::tryFrom($key);
+
+        if ($skin === null) {
+            return;
+        }
+
+        app(BossService::class)->setSkin($this->profile->household, $skin);
     }
 
     public function changePin(int $profileId): void
@@ -274,6 +292,8 @@ new class extends Component
                 : null,
             'mysteryClaimant' => $mysteryClaimant,
             'household' => $household,
+            'bossSkin' => app(BossService::class)->skinFor($household),
+            'bossDefeats' => app(BossService::class)->defeats($household, 6),
         ];
     }
 }; ?>
@@ -327,9 +347,61 @@ new class extends Component
             <button
                 type="button"
                 wire:click="resetGoalProgress"
-                wire:confirm="Reset progress back to 0? Good for starting a new goal once this one's done."
+                wire:confirm="Reset progress back to 0 and send in the next monster? Good for starting a new goal once this one's done."
                 class="ml-auto rounded-[12px] border border-dashed border-fq-line-4 bg-fq-sunk px-3 py-2 text-xs text-fq-text-3"
             >Start a new goal</button>
+        </div>
+
+        {{-- The kids see this goal as a monster with the target for health.
+             Starting a new goal sends in the next one on its own; this is here
+             for the child who has a favourite. --}}
+        <div class="mt-4 border-t border-fq-divider pt-[14px]">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                    Monster &middot; {{ $bossSkin->label() }}
+                </p>
+                @if ($bossDefeats->isNotEmpty())
+                    <p class="font-mono-fq text-[10px] text-fq-lime">
+                        {{ $bossDefeats->count() }} BEATEN
+                    </p>
+                @endif
+            </div>
+
+            <p class="mt-1 text-[13px] text-fq-text-3">{{ $bossSkin->tagline() }}</p>
+
+            <div class="mt-3 flex flex-wrap gap-2">
+                @foreach (App\Enums\BossSkin::cases() as $skin)
+                    <button
+                        type="button"
+                        wire:key="boss-skin-{{ $skin->value }}"
+                        wire:click="setBossSkin('{{ $skin->value }}')"
+                        @disabled($skin === $bossSkin)
+                        class="rounded-[12px] border px-3 py-2 text-xs transition {{ $skin === $bossSkin ? 'border-fq-lime text-fq-lime' : 'border-fq-line-3 bg-fq-sunk text-fq-text-3 hover:border-fq-line-focus' }}"
+                    >{{ $skin->label() }}</button>
+                @endforeach
+            </div>
+
+            @if ($bossDefeats->isNotEmpty())
+                <div class="mt-4 flex flex-col gap-[6px]">
+                    @foreach ($bossDefeats as $defeat)
+                        <div
+                            wire:key="boss-defeat-{{ $defeat->id }}"
+                            class="flex flex-wrap items-center gap-2 rounded-[12px] border border-fq-line-2 bg-fq-sunk px-3 py-2"
+                        >
+                            <span class="text-[13px] font-semibold">{{ $defeat->boss_name }}</span>
+                            <span class="font-mono-fq text-[10px] text-fq-text-4">
+                                {{ number_format($defeat->health) }} HP
+                                @if ($defeat->finisher)
+                                    &middot; FINISHED BY {{ Str::upper($defeat->finisher->name) }}
+                                @endif
+                            </span>
+                            <span class="ml-auto font-mono-fq text-[10px] text-fq-text-5">
+                                {{ $defeat->defeated_at->toFormattedDateString() }}
+                            </span>
+                        </div>
+                    @endforeach
+                </div>
+            @endif
         </div>
     </div>
 

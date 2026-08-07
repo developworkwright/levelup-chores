@@ -124,3 +124,120 @@ body {
     color: transparent;
     animation: fq-shimmer 6s linear infinite alternate;
 }
+
+/*
+ * The boss battle's monster.
+ *
+ * All of it rides on custom properties set inline by <x-boss.frame> from the
+ * skin's palette and the stage, so one stylesheet drives six monsters across
+ * five states without Tailwind needing to see a single generated class name.
+ */
+.fq-boss {
+    --boss-breath: 4s;
+    --boss-tilt: 0deg;
+    display: block;
+    width: 100%;
+}
+
+.fq-boss svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+}
+
+/* The whole monster leans further off-true the worse it is doing. */
+.fq-boss-body {
+    transform-box: fill-box;
+    transform-origin: 50% 92%;
+    animation: fq-boss-breathe var(--boss-breath) ease-in-out infinite;
+}
+
+.fq-boss-eye {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: fq-boss-dart 5.5s ease-in-out infinite;
+}
+
+/*
+ * Fired by the arena when a fresh hit lands. One shot: the class is keyed on
+ * the damage total, so Livewire rebuilds the element and the animation replays
+ * only when the number actually moved.
+ */
+.fq-boss-hit {
+    animation: fq-boss-hit 0.5s ease-out;
+}
+
+@keyframes fq-boss-breathe {
+    0%,
+    100% {
+        transform: rotate(var(--boss-tilt)) scale(1, 1);
+    }
+    50% {
+        transform: rotate(var(--boss-tilt)) scale(1.03, 0.97);
+    }
+}
+
+@keyframes fq-boss-dart {
+    0%,
+    40%,
+    100% {
+        transform: translate(0, 0);
+    }
+    45%,
+    60% {
+        transform: translate(2.5px, 1px);
+    }
+    70%,
+    85% {
+        transform: translate(-2px, -1px);
+    }
+}
+
+@keyframes fq-boss-hit {
+    0% {
+        transform: translate(0, 0);
+        filter: none;
+    }
+    20% {
+        transform: translate(-7px, 2px);
+        filter: brightness(2.4) saturate(0.4);
+    }
+    45% {
+        transform: translate(6px, -2px);
+        filter: brightness(1.6);
+    }
+    70% {
+        transform: translate(-3px, 1px);
+    }
+    100% {
+        transform: translate(0, 0);
+        filter: none;
+    }
+}
+
+/*
+ * Monsters hold still for anyone who has asked the OS for less movement. The
+ * tilt is a transform rather than an animation, so it survives — a cornered
+ * boss still visibly cannot stand up straight.
+ */
+@media (prefers-reduced-motion: reduce) {
+    .fq-boss-body,
+    .fq-boss-eye,
+    .fq-boss-hit {
+        animation: none;
+    }
+
+    .fq-boss-body {
+        transform: rotate(var(--boss-tilt));
+    }
+}
+
+/*
+ * Alpine strips this attribute once it has booted. Without the rule, every
+ * stage of a boss replay is painted on top of the others for the frame or two
+ * before that happens.
+ */
+[x-cloak] {
+    display: none !important;
+}
