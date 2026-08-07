@@ -6,9 +6,18 @@ namespace App\Enums;
  * The monsters the family goal can wear.
  *
  * A skin is art and copy only — every number behind the battle is the goal's
- * (`goal_target` as max health, `goal_now` as damage dealt). Adding a case here
- * means adding a matching `resources/views/components/boss/{value}.blade.php`;
- * `BossSkinCatalogTest` fails loudly if the two get out of step.
+ * (`goal_target` as max health, `goal_now` as damage dealt).
+ *
+ * **The artwork lives in `resources/js/monsters.js`**, shipped verbatim from the
+ * design bundle, and so do the palettes. This enum holds only what the server
+ * needs to say out loud: the key it stores on a household, and the name and
+ * tagline it renders into HTML, stamps onto a defeat, and puts in a celebration
+ * a kid reads days later. Nothing here draws anything.
+ *
+ * Cases, order, names and taglines must match `FQMonsters.SKINS` exactly —
+ * order because it is the rotation, the rest because both sides are read by
+ * kids on the same screen. `BossSkinCatalogTest` parses the JavaScript and
+ * fails if the two drift.
  */
 enum BossSkin: string
 {
@@ -18,6 +27,15 @@ enum BossSkin: string
     case Tangleboy = 'tangleboy';
     case MoldKing = 'mold-king';
     case Dustwyrm = 'dustwyrm';
+    case Static = 'static';
+    case Chorus = 'chorus';
+    case Drip = 'drip';
+    case Wallcrack = 'wallcrack';
+    case Rattle = 'rattle';
+    case Hushpuppet = 'hushpuppet';
+    case Longlegs = 'longlegs';
+    case Leaner = 'leaner';
+    case Balloonhead = 'balloonhead';
 
     public function label(): string
     {
@@ -28,6 +46,15 @@ enum BossSkin: string
             self::Tangleboy => 'Tangleboy',
             self::MoldKing => 'The Mold King',
             self::Dustwyrm => 'Dustwyrm',
+            self::Static => 'Static',
+            self::Chorus => 'The Chorus',
+            self::Drip => 'Drip',
+            self::Wallcrack => 'Wallcrack',
+            self::Rattle => 'Rattle',
+            self::Hushpuppet => 'Hushpuppet',
+            self::Longlegs => 'Longlegs',
+            self::Leaner => 'The Leaner',
+            self::Balloonhead => 'Balloonhead',
         };
     }
 
@@ -41,42 +68,15 @@ enum BossSkin: string
             self::Tangleboy => 'A knot of chargers that learned to walk.',
             self::MoldKing => 'Crowned himself at the back of the fridge.',
             self::Dustwyrm => 'Long, grey, and full of things you dropped.',
-        };
-    }
-
-    /**
-     * Body colours. Deliberately outside the app's purple/gold tokens — the
-     * monster should read as an intruder in the room, not as more furniture.
-     *
-     * @return array{body: string, shade: string, glow: string, teeth: string, eye: string}
-     */
-    public function palette(): array
-    {
-        return match ($this) {
-            self::Gnash => [
-                'body' => '#d81b7a', 'shade' => '#8a0f4c', 'glow' => '#ff5fb0',
-                'teeth' => '#fff6fb', 'eye' => '#ffe14d',
-            ],
-            self::Sockmoth => [
-                'body' => '#8e8ba6', 'shade' => '#4c4a63', 'glow' => '#c3c0dd',
-                'teeth' => '#f2f0ff', 'eye' => '#ff8ac7',
-            ],
-            self::Crumbler => [
-                'body' => '#a9752f', 'shade' => '#5e3f14', 'glow' => '#e0a558',
-                'teeth' => '#fff3dc', 'eye' => '#9cff5e',
-            ],
-            self::Tangleboy => [
-                'body' => '#2f3d55', 'shade' => '#161d2b', 'glow' => '#5cc8ff',
-                'teeth' => '#e8f7ff', 'eye' => '#5cc8ff',
-            ],
-            self::MoldKing => [
-                'body' => '#5f8f3a', 'shade' => '#2c4a17', 'glow' => '#9cff5e',
-                'teeth' => '#f4ffe8', 'eye' => '#ffc93d',
-            ],
-            self::Dustwyrm => [
-                'body' => '#7a7288', 'shade' => '#3d3847', 'glow' => '#b9aed4',
-                'teeth' => '#fbf7ff', 'eye' => '#ff6b6b',
-            ],
+            self::Static => 'Came in on a channel nobody subscribes to.',
+            self::Chorus => 'One voice per mouth, and it knows your name.',
+            self::Drip => 'Left the tap running for eleven years.',
+            self::Wallcrack => 'Not a shadow. The wall is not that thick.',
+            self::Rattle => 'Plays its own ribs when the house goes quiet.',
+            self::Hushpuppet => 'Somebody else is holding the strings.',
+            self::Longlegs => 'Hangs in the corner. Counts everyone who walks under.',
+            self::Leaner => 'Stands at the end of the hall with its head on wrong.',
+            self::Balloonhead => 'Left over from a party nobody remembers.',
         };
     }
 
@@ -90,12 +90,6 @@ enum BossSkin: string
         $at = array_search($this, $cases, true);
 
         return $cases[($at + 1) % count($cases)];
-    }
-
-    /** The blade component drawing this skin. */
-    public function component(): string
-    {
-        return 'boss.'.$this->value;
     }
 
     public static function default(): self

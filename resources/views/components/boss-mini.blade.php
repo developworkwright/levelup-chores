@@ -8,13 +8,16 @@
 
 <div {{ $attributes }}>
     <div class="flex items-center gap-3">
-        <div class="w-[74px] shrink-0">
-            <x-dynamic-component
-                :component="$state['skin']->component()"
-                :skin="$state['skin']"
-                :stage="$state['stage']"
-            />
-        </div>
+        {{-- Drawn by monsters.js; see <x-boss-arena> for why this is left
+             alone by Livewire's morph and keyed on what it is drawing. --}}
+        <div
+            wire:key="boss-mini-{{ $state['skin']->value }}-{{ $state['stage']->value }}"
+            wire:ignore
+            x-data="fqMonster(@js($state['skin']->value), @js($state['stage']->value))"
+            x-html="svg"
+            :style="{ background: cardBg }"
+            class="fq-boss aspect-square w-[74px] shrink-0 overflow-hidden rounded-[14px]"
+        ></div>
 
         <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-baseline gap-x-2">
@@ -31,9 +34,12 @@
                 ></div>
             </div>
 
+            {{-- Health, matching the bar above it. The damage total is a fine
+                 number but it belongs nowhere near a bar showing what's left —
+                 see <x-boss-arena>. --}}
             <p class="mt-[6px] font-mono-fq text-[10px] text-fq-text-4">
-                {{ number_format($state['health']) }} HP LEFT ·
-                <span class="text-fq-coral">{{ $state['damagePercent'] }}% BEATEN</span>
+                {{ number_format($state['health']) }} / {{ number_format($state['maxHealth']) }} HP LEFT ·
+                <span class="text-fq-coral">{{ $state['healthPercent'] }}%</span>
             </p>
         </div>
     </div>

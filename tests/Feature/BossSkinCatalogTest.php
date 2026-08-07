@@ -4,49 +4,131 @@ namespace Tests\Feature;
 
 use App\Enums\BossSkin;
 use App\Enums\BossStage;
-use Illuminate\Support\Facades\Blade;
-use Illuminate\Support\Facades\View;
 use Tests\TestCase;
 
 /**
- * A skin is an enum case plus a blade component, and the two have to arrive
- * together. Adding the case without the artwork is a 500 on the kids' Goal
- * page the next time the rotation lands on it — which could be weeks later.
+ * The boss artwork lives in `resources/js/monsters.js`, shipped verbatim from
+ * the design bundle; PHP holds only the keys, names and taglines the server has
+ * to say out loud. That is a seam, and this is the guard on it.
+ *
+ * A skin the enum knows about but the artwork doesn't is a blank monster on the
+ * kids' Goals page, weeks later, when the rotation finally reaches it. Names
+ * drifting apart is worse in a quieter way: a defeat stamps the name it knew at
+ * the time, so the trophy shelf would start disagreeing with the screen.
  */
 class BossSkinCatalogTest extends TestCase
 {
-    public function test_every_skin_has_artwork(): void
+    /**
+     * @return array<int, array{key: string, name: string, tagline: string, body: string}>
+     */
+    private function artworkSkins(): array
     {
-        foreach (BossSkin::cases() as $skin) {
-            $this->assertTrue(
-                View::exists('components.boss.'.$skin->value),
-                "{$skin->value} has no component at resources/views/components/boss/{$skin->value}.blade.php",
-            );
+        $source = file_get_contents(resource_path('js/monsters.js'));
+
+        preg_match('/const SKIN_LIST = \[(.*?)\n\];/s', $source, $block);
+
+        $this->assertNotEmpty($block, 'Could not find SKIN_LIST in monsters.js.');
+
+        preg_match_all(
+            "/key: '([^']+)', name: '([^']+)', tagline: '([^']+)'.*?body: '([^']+)'/",
+            $block[1],
+            $matches,
+            PREG_SET_ORDER,
+        );
+
+        return array_map(fn (array $m) => [
+            'key' => $m[1],
+            'name' => $m[2],
+            'tagline' => $m[3],
+            'body' => $m[4],
+        ], $matches);
+    }
+
+    /**
+     * @return array<int, array{key: string, label: string, taunt: string}>
+     */
+    private function artworkStages(): array
+    {
+        $source = file_get_contents(resource_path('js/monsters.js'));
+
+        preg_match('/const STAGES = \[(.*?)\n\];/s', $source, $block);
+
+        $this->assertNotEmpty($block, 'Could not find STAGES in monsters.js.');
+
+        preg_match_all(
+            "/key: '([^']+)', label: '([^']+)'.*?taunt: '(.*?)'\s*\}/",
+            $block[1],
+            $matches,
+            PREG_SET_ORDER,
+        );
+
+        return array_map(fn (array $m) => [
+            'key' => $m[1],
+            'label' => $m[2],
+            'taunt' => $m[3],
+        ], $matches);
+    }
+
+    public function test_every_skin_in_the_enum_has_artwork_and_vice_versa(): void
+    {
+        $artwork = array_column($this->artworkSkins(), 'key');
+        $enum = array_map(fn (BossSkin $skin) => $skin->value, BossSkin::cases());
+
+        // Order matters as well as membership: the enum's order *is* the
+        // rotation a family meets the monsters in.
+        $this->assertSame($artwork, $enum);
+    }
+
+    public function test_names_and_taglines_match_the_artwork(): void
+    {
+        foreach ($this->artworkSkins() as $skin) {
+            $case = BossSkin::from($skin['key']);
+
+            $this->assertSame($skin['name'], $case->label(), "{$skin['key']} has drifted on name.");
+            $this->assertSame($skin['tagline'], $case->tagline(), "{$skin['key']} has drifted on tagline.");
         }
     }
 
-    public function test_every_skin_renders_at_every_stage(): void
+    public function test_every_stage_in_the_enum_has_artwork_and_the_same_words(): void
     {
-        foreach (BossSkin::cases() as $skin) {
-            foreach (BossStage::cases() as $stage) {
-                $svg = Blade::render(
-                    '<x-dynamic-component :component="$skin->component()" :skin="$skin" :stage="$stage" />',
-                    ['skin' => $skin, 'stage' => $stage],
-                );
+        $artwork = $this->artworkStages();
 
-                $this->assertStringContainsString('<svg', $svg, "{$skin->value} did not draw at {$stage->value}");
-                $this->assertStringContainsString($skin->palette()['body'], $svg);
-            }
+        $this->assertSame(
+            array_column($artwork, 'key'),
+            array_map(fn (BossStage $stage) => $stage->value, BossStage::cases()),
+        );
+
+        foreach ($artwork as $stage) {
+            $case = BossStage::from($stage['key']);
+
+            $this->assertSame($stage['label'], $case->label(), "{$stage['key']} has drifted on label.");
+            $this->assertSame($stage['taunt'], $case->taunt(), "{$stage['key']} has drifted on taunt.");
         }
     }
 
-    public function test_every_skin_carries_its_own_name_and_colours(): void
+    public function test_no_two_monsters_share_a_name_or_a_body_colour(): void
     {
-        $labels = array_map(fn (BossSkin $skin) => $skin->label(), BossSkin::cases());
-        $bodies = array_map(fn (BossSkin $skin) => $skin->palette()['body'], BossSkin::cases());
+        $skins = $this->artworkSkins();
 
-        $this->assertSame($labels, array_unique($labels), 'Two monsters share a name.');
+        $names = array_column($skins, 'name');
+        $bodies = array_column($skins, 'body');
+
+        $this->assertSame($names, array_unique($names), 'Two monsters share a name.');
         $this->assertSame($bodies, array_unique($bodies), 'Two monsters share a body colour.');
+    }
+
+    public function test_the_artwork_defines_nothing_but_its_own_global(): void
+    {
+        // It is shipped verbatim from a design bundle and loaded on every kid
+        // page, so a later drop of the file gets the same read the first one
+        // did rather than being trusted on the strength of the last one.
+        $source = file_get_contents(resource_path('js/monsters.js'));
+
+        foreach (['fetch(', 'XMLHttpRequest', 'eval(', 'new Function', 'document.cookie', 'localStorage', 'import ', 'require('] as $forbidden) {
+            $this->assertStringNotContainsString($forbidden, $source, "monsters.js reaches for {$forbidden}.");
+        }
+
+        $this->assertStringContainsString('if (window.FQMonsters) return;', $source, 'monsters.js is no longer idempotent.');
     }
 
     public function test_the_stage_boundaries_and_their_inverses_agree(): void

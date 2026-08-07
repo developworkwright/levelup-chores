@@ -29,7 +29,7 @@
 @endphp
 
 <div
-    x-data="fqBossReplay(@js($timeline))"
+    x-data="fqBossReplay(@js($timeline), @js($skin->value))"
     @click="finish()"
     class="overflow-hidden rounded-[24px] border border-fq-line-2"
     style="background: linear-gradient(160deg, #1d0b2f, var(--fq-panel) 60%)"
@@ -37,23 +37,27 @@
     <div class="flex flex-wrap items-start gap-5 p-5 sm:p-6">
         {{-- Square, and holding its own height: every stage is absolutely
              positioned so they stack, which means none of them can be the one
-             propping the box open. The viewBox is square, so the ratio is the
-             artwork's own. --}}
-        <div class="relative mx-auto aspect-square w-[190px] shrink-0 sm:mx-0 sm:w-[210px]">
-            {{-- The monster, one layer per stage. Stage 0 renders uncloaked so
-                 the monster is on screen before Alpine boots — during a replay
-                 that is the oldest stage, which is exactly where it should
-                 start from. --}}
+             propping the box open. --}}
+        <div
+            class="relative mx-auto aspect-square w-[190px] shrink-0 overflow-hidden rounded-[20px] sm:mx-0 sm:w-[200px]"
+            :style="{ background: cardBg }"
+        >
+            {{-- The monster, one layer per stage.
+
+                 Drawn by monsters.js rather than by Blade, so `wire:ignore`
+                 keeps Livewire's morph from wiping markup the server never
+                 rendered. The key carries the stage, so a genuine change still
+                 replaces the node and Alpine redraws it. --}}
             @foreach ($steps as $index => $step)
                 <div
-                    wire:key="boss-step-{{ $index }}"
+                    wire:key="boss-step-{{ $skin->value }}-{{ $step['stage']->value }}-{{ $index }}"
+                    wire:ignore
                     x-show="index === {{ $index }}"
                     @if ($index > 0) x-cloak @endif
                     :class="hit && index === {{ $index }} ? 'fq-boss-hit' : ''"
-                    class="absolute inset-0"
-                >
-                    <x-dynamic-component :component="$skin->component()" :skin="$skin" :stage="$step['stage']" />
-                </div>
+                    x-html="monster(@js($step['stage']->value))"
+                    class="fq-boss absolute inset-0"
+                ></div>
             @endforeach
 
             {{-- The damage chip for the blow that just landed. --}}
@@ -93,12 +97,17 @@
                     ></div>
                 </div>
 
+                {{-- Both figures describe the bar above, so both are health.
+                     A "% beaten" reading next to a bar showing what's left is
+                     two numbers for one bar, disagreeing — the damage total
+                     lives over the hit feed instead, where nothing suggests it
+                     is measuring this. --}}
                 <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono-fq text-[11px]">
                     <span class="text-fq-text-2">
-                        <span x-text="current.health.toLocaleString()"></span> / {{ number_format($state['maxHealth']) }} HP
+                        <span x-text="current.health.toLocaleString()"></span> / {{ number_format($state['maxHealth']) }} HP LEFT
                     </span>
                     <span class="text-fq-coral">
-                        <span x-text="current.damagePercent"></span>% BEATEN
+                        <span x-text="current.healthPercent"></span>% LEFT
                     </span>
                 </div>
             </div>
@@ -126,7 +135,12 @@
 
     @if ($hits && $hits->isNotEmpty())
         <div class="border-t border-fq-divider px-5 pt-[14px] pb-5 sm:px-6">
-            <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Latest hits</p>
+            <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                Latest hits
+                <span class="text-fq-coral">
+                    &middot; <span x-text="current.damagePercent"></span>% of it beaten so far
+                </span>
+            </p>
 
             <div class="mt-[10px] flex flex-col gap-[6px]">
                 @foreach ($hits as $hit)

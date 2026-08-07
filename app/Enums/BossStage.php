@@ -6,6 +6,17 @@ namespace App\Enums;
  * How beaten up the boss looks. Derived entirely from the health left on the
  * family goal — the stage is a way of drawing `goal_now`, never a thing that
  * gets stored, so it can't drift from the bar it sits under.
+ *
+ * The *visual* side of a stage — how far the grin opens, pupil size, tilt,
+ * wear, breathing rate — belongs to `resources/js/monsters.js`, which draws
+ * every monster from these same five numbers. That is deliberately one place:
+ * fifteen monsters behaving like one family is the whole point, and a second
+ * copy of the curve in PHP would be a second thing to re-tune. What stays here
+ * is the server's half: which stage a health figure lands in, and the words
+ * that go with it.
+ *
+ * Case values, labels and taunts must match `FQMonsters.STAGES`, which
+ * `BossSkinCatalogTest` checks.
  */
 enum BossStage: string
 {
@@ -68,69 +79,6 @@ enum BossStage: string
             self::Damaged => 'Stop that. I mean it. Stop.',
             self::Desperate => 'No no no not the vacuum NOT THE VACUUM',
             self::Defeated => 'Beaten by a bunch of kids with a mop.',
-        };
-    }
-
-    /**
-     * How far the grin hangs open, 0-1. A cornered monster gapes; a lurking one
-     * keeps it to a smirk.
-     */
-    public function openness(): float
-    {
-        return match ($this) {
-            self::Fresh => 0.35,
-            self::Angry => 0.6,
-            self::Damaged => 0.8,
-            self::Desperate => 1.0,
-            self::Defeated => 0.15,
-        };
-    }
-
-    /** Pupil size, 0-1. Wide eyes read as rattled, pinpricks as defeated. */
-    public function eyeScale(): float
-    {
-        return match ($this) {
-            self::Fresh => 1.0,
-            self::Angry => 0.75,
-            self::Damaged => 1.15,
-            self::Desperate => 1.35,
-            self::Defeated => 0.2,
-        };
-    }
-
-    /** Degrees of list, so a hurt boss visibly can't hold itself straight. */
-    public function tilt(): float
-    {
-        return match ($this) {
-            self::Fresh => 0.0,
-            self::Angry => -2.0,
-            self::Damaged => 4.0,
-            self::Desperate => -7.0,
-            self::Defeated => 14.0,
-        };
-    }
-
-    /** Opacity of the scuffs, tears and stitches layered over the body. */
-    public function wear(): float
-    {
-        return match ($this) {
-            self::Fresh => 0.0,
-            self::Angry => 0.25,
-            self::Damaged => 0.55,
-            self::Desperate => 0.85,
-            self::Defeated => 1.0,
-        };
-    }
-
-    /** Seconds per idle breath. Panic breathes faster. */
-    public function breathSeconds(): float
-    {
-        return match ($this) {
-            self::Fresh => 4.0,
-            self::Angry => 3.0,
-            self::Damaged => 2.2,
-            self::Desperate => 1.3,
-            self::Defeated => 6.0,
         };
     }
 

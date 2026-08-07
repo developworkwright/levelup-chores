@@ -1,3 +1,15 @@
+/*
+ * The boss artwork: 15 skins x 5 stages, as `window.FQMonsters`.
+ *
+ * Shipped verbatim from the design bundle in handoff/design_handoff_boss_battle
+ * rather than ported into Blade partials. It is several hundred hand-tuned
+ * coordinates, and hand-porting it would re-derive every one of them and then
+ * drift from the design the first time either side changed. It is
+ * framework-free, defines nothing but that one global, and is guarded against
+ * being loaded twice. Update it by replacing the file from a new bundle.
+ */
+import './monsters.js';
+
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js').catch(() => {});
@@ -102,9 +114,43 @@ const BOSS_HIT_MS = 520;
  * The steps are rendered server-side and stacked; this only decides which one
  * is visible. That keeps six monsters' worth of artwork out of JavaScript.
  */
+/**
+ * How dread-soaked the arena's floor glow and card wash are, 0-1. The design
+ * bundle's gallery exposes this as a slider; the arena is pinned to 0.7 and the
+ * sidebar thumbnail sits lower, where a heavy glow would just be murk.
+ */
+const BOSS_DREAD = 0.7;
+
+const BOSS_DREAD_MINI = 0.55;
+
+/** Draws a monster, or nothing at all if the artwork failed to load. */
+function monsterSvg(skin, stage, dread) {
+    return window.FQMonsters ? window.FQMonsters.svg(skin, stage, { dread }) : '';
+}
+
+function monsterCardBg(skin, dread) {
+    return window.FQMonsters ? window.FQMonsters.cardBg(skin, dread) : '';
+}
+
+/**
+ * A single monster, for the Quests sidebar. The arena has its own component
+ * because it also owns the replay.
+ */
 document.addEventListener('alpine:init', () => {
-    window.Alpine.data('fqBossReplay', (steps) => ({
+    window.Alpine.data('fqMonster', (skin, stage, dread = BOSS_DREAD_MINI) => ({
+        get svg() {
+            return monsterSvg(skin, stage, dread);
+        },
+        get cardBg() {
+            return monsterCardBg(skin, dread);
+        },
+    }));
+});
+
+document.addEventListener('alpine:init', () => {
+    window.Alpine.data('fqBossReplay', (steps, skin) => ({
         steps,
+        skin,
         index: 0,
         hit: false,
         timer: null,
@@ -164,6 +210,15 @@ document.addEventListener('alpine:init', () => {
 
         get replaying() {
             return this.index < this.steps.length - 1;
+        },
+
+        /** The artwork for one step of the replay. */
+        monster(stage) {
+            return monsterSvg(this.skin, stage, BOSS_DREAD);
+        },
+
+        get cardBg() {
+            return monsterCardBg(this.skin, BOSS_DREAD);
         },
 
         /** The blow that got us to the step now showing, as a "-320" chip. */
