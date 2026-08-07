@@ -135,11 +135,29 @@ Cooldown/pending boundaries always use `HouseholdClock`, never raw `now()` — t
 
 Among the survivors, chores with a parent-written `hint` win the draw outright; the full pool is only used when none of them has one. That keeps the Bonus Shop's mystery-hint perk sellable — it should never charge tickets for a chore nobody wrote a clue for. Practical consequence: **if only one or two chores have hints, the mystery becomes guessable**, so hints want to be written broadly rather than on a favourite few.
 
-The pick uses genuine randomness (`Arr::random()`), matching the spin's actual result — **not** the bonus wheel's deterministic display-subset hash (see [[bonus-wheel]]); those are unrelated mechanisms. `ChoreService::MYSTERY_BONUS_POINTS = 500` is added on top of normal points (with spin multiplier) when the claimed chore matches today's pick — see `claim()`.
+The pick uses genuine randomness (`Arr::random()`), matching the spin's actual result — **not** the bonus wheel's deterministic display-subset hash (see [[bonus-wheel]]); those are unrelated mechanisms.
 
-Exclusivity is household-wide via `claimantFor()` — the same lock every other chore now uses, so the mystery needs no special-casing on the board.
+### The bonus is won at approval, never at claim
 
-`rerollMysteryChore()` lets a parent swap the pick from Kids & Points. It refuses once anyone has claimed it — moving the finish line after someone crossed it would rob the winner. Both it and the daily draw go through the private `drawMysteryChore()`, so the fairness rules can't drift apart between them. A kid who already bought a hint sees the *new* chore's hint automatically, since `mysteryHintFor()` resolves against the current pick rather than storing the text.
+`ChoreService::MYSTERY_BONUS_POINTS = 500` is added by **`approve()`**, via the private `awardMysteryBonus()`. It used to be folded into `points_awarded` by `claim()`, and the kid's page called the race off `claimantFor()` — which counts a *pending* claim. Between them, tapping "Mark it done" was enough to be told you'd found it, so submitting every chore on the board was a way of being handed the answer with none of the work verified. Four things follow, and none of them should be undone:
+
+- **The winner is a column, not a lookup.** `daily_mysteries.found_by_profile_id` / `found_at`, stamped by the approval. `mysteryFinderFor(Household)` reads it; **every kid-facing "has it been found?" check must go through that**, never `claimantFor()`.
+- **The day is the one the work was submitted in**, resolved with `HouseholdClock::dayFor($completion->submitted_at)` — a chore found at bedtime and approved over breakfast still wins that night's mystery. `mysteryOn()` is the lookup that never draws, precisely so an approval can't conjure a pick for a day that never had one.
+- **Nothing at claim time may mention the mystery.** The kid Quests page (`claimChore`, `claimQuest`) and the Bonus Wheel's claim all dispatch ordinary "claimed!" celebrations. `PerkInventoryService::mysteryHintReason()` is the subtle one: it blocks the hint sale on a *sibling's* claim but deliberately not on the kid's own, since a label flipping on their own tap is the same leak in miniature.
+- **The win is announced by the kid shell**, from `profiles.pending_mystery_celebration` (the chore's name), queued by the approval and cleared when shown — the same deferred-celebration path as `pending_goal_celebration`, because a parent's approvals screen is not one any kid is looking at.
+
+`claim()` still calls `mysteryChoreFor()`, now purely for the assignment: the draw skips chores that already have a claimant, so a day whose first lookup happened after the claim could never pick that chore, and the kid would be racing for something they'd ruled themselves out of.
+
+Board exclusivity is still household-wide via `claimantFor()` — the same lock every other chore uses, so the mystery needs no special-casing on the board.
+
+`rerollMysteryChore()` lets a parent swap the pick from Kids & Points. It refuses in exactly two cases, and the difference between them matters:
+
+- **A *pending* claim blocks it** — that kid has done the work and is one approval away from the bonus; swapping the chore out from under them takes something they've earned.
+- **A recorded winner blocks it** — the payout has happened, and moving the finish line would hang a second +500 on a different chore the same day.
+
+An **approved** claim that won nothing does *not* block it. That's where every mystery decided before the bonus moved to approval sits: the chore is on household-wide cooldown, so nobody can win today's bonus on it any more, and refusing would leave the parent staring at a dead mystery until tomorrow. The parent page reads this state as "NOBODY WON IT" — note it must test the claim's *status*, since `claimantFor()` counts an approved claim inside the cooldown and reading that as "needs approval" tells a parent to sign off work they already signed off.
+
+Both the reroll and the daily draw go through the private `drawMysteryChore()`, so the fairness rules can't drift apart between them. A kid who already bought a hint sees the *new* chore's hint automatically, since `mysteryHintFor()` resolves against the current pick rather than storing the text.
 
 ## Searching chores
 
@@ -162,11 +180,11 @@ Three things exist for a reason and shouldn't be simplified away:
 
 ### Gotcha: `assertDontSee` on a chore name
 
-Once the mystery chore is found, the kid page names it ("Completed by Nova — Rake the leaves!"). So a render test asserting a chore has left the *board* can fail at random when that chore happens to win the day's mystery draw. Give the fixture a decoy chore with a `hint` — hinted chores win the draw outright — to pin the pick somewhere harmless.
+Once the mystery chore is found, the kid page names it ("Completed by Nova — Rake the leaves!"). So a render test that *approves* something and then asserts a chore has left the *board* can fail at random when that chore happens to win the day's mystery draw. Give the fixture a decoy chore with a `hint` — hinted chores win the draw outright — to pin the pick somewhere harmless. A test that only claims is safe: nothing names the mystery until an approval settles it.
 
 ### Gotcha: setting up "already completed" test fixtures
 
-`claim()` calls `mysteryChoreFor()` internally (to compute the bonus) **before** creating the chore's own `ChoreCompletion`. In real usage this is always safe because a kid must load the Quests page first — which calls `mysteryChoreFor()` via `with()` — before any claim action can fire, so the day's pick is already locked in by the time `claim()` runs. But if a test calls `service()->claim($kid, $chore)` as its *first* mystery-related call of the day, that call can itself make (and persist) the day's random pick — possibly picking the very chore being claimed, before its completion exists to exclude it. To set up an "already completed today" precondition in a test without tripping this, create the `ChoreCompletion` directly:
+`claim()` calls `mysteryChoreFor()` internally (to make sure the day's pick exists) **before** creating the chore's own `ChoreCompletion`. In real usage this is always safe because a kid must load the Quests page first — which calls `mysteryChoreFor()` via `with()` — before any claim action can fire, so the day's pick is already locked in by the time `claim()` runs. But if a test calls `service()->claim($kid, $chore)` as its *first* mystery-related call of the day, that call can itself make (and persist) the day's random pick — possibly picking the very chore being claimed, before its completion exists to exclude it. To set up an "already completed today" precondition in a test without tripping this, create the `ChoreCompletion` directly:
 
 ```php
 ChoreCompletion::create([

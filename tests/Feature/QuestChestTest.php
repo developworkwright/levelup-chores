@@ -10,6 +10,7 @@ use App\Models\Household;
 use App\Models\Profile;
 use App\Services\ChoreService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Volt;
 use Tests\TestCase;
@@ -17,6 +18,26 @@ use Tests\TestCase;
 class QuestChestTest extends TestCase
 {
     use RefreshDatabase;
+
+    /**
+     * Pinned to midday because the household day rolls over at 4am, not
+     * midnight. The streak fixtures below are dated with now()->subDays(), so a
+     * suite run in the small hours landed "yesterday's" quest on the
+     * household's *today* — which reads as today already being cleared, and
+     * takes the come-back-tomorrow wording with it.
+     */
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Carbon::setTestNow(Carbon::now()->startOfDay()->addHours(12));
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
+    }
 
     public function test_the_quests_page_shows_the_streak_chest_ready_to_open(): void
     {

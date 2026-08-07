@@ -50,6 +50,7 @@ class Profile extends Model implements Authenticatable
         'badges_seen_at',
         'level_seen',
         'pending_goal_celebration',
+        'pending_mystery_celebration',
         'saving_for_store_item_id',
         'daily_points_goal',
         'goal_contribution',

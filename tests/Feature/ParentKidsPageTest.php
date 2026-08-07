@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\TicketKind;
 use App\Models\BonusTicketEntry;
 use App\Models\Chore;
+use App\Models\DailyMystery;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Models\Spin;
@@ -41,14 +42,59 @@ class ParentKidsPageTest extends TestCase
             ->assertSee('UP FOR GRABS');
     }
 
-    public function test_it_shows_who_claimed_the_mystery_chore(): void
+    public function test_a_claimed_mystery_chore_is_shown_as_waiting_on_the_parent(): void
     {
+        // Nobody has won it yet — the bonus is settled by the approval, so the
+        // label has to say what's actually outstanding rather than call it.
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['name' => 'Nova']);
         $chore = Chore::factory()->for($household)->create(['name' => 'Scrub the tub']);
         $this->actingAsParent($household);
 
         app(ChoreService::class)->claim($kid, $chore);
+
+        Volt::test('parent.kids')
+            ->assertSee('NOVA — NEEDS APPROVAL', escape: false)
+            ->assertDontSee('FOUND BY NOVA')
+            ->assertDontSee('UP FOR GRABS');
+    }
+
+    public function test_a_mystery_chore_signed_off_without_a_winner_says_so(): void
+    {
+        // claimantFor() counts an *approved* claim inside the cooldown too, so
+        // reading it as "needs approval" told a parent to go and sign off work
+        // they'd already signed off. This is where any mystery decided before
+        // the bonus moved to approval lands.
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create(['name' => 'Nova']);
+        $settled = Chore::factory()->for($household)->create(['name' => 'Scrub the tub']);
+        $parent = $this->actingAsParent($household);
+
+        $chores = app(ChoreService::class);
+        $chores->approve($chores->claim($kid, $settled), $parent);
+
+        DailyMystery::where('household_id', $household->id)->firstOrFail()->forceFill([
+            'chore_id' => $settled->id,
+            'found_by_profile_id' => null,
+            'found_at' => null,
+        ])->save();
+
+        Volt::test('parent.kids')
+            ->assertSee('NOBODY WON IT')
+            ->assertDontSee('NEEDS APPROVAL')
+            ->assertDontSee('FOUND BY NOVA')
+            ->assertDontSee('UP FOR GRABS');
+    }
+
+    public function test_it_shows_who_won_the_mystery_chore_once_it_is_approved(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create(['name' => 'Nova']);
+        $chore = Chore::factory()->for($household)->create(['name' => 'Scrub the tub']);
+        $parent = $this->actingAsParent($household);
+
+        $chores = app(ChoreService::class);
+        $chores->approve($chores->claim($kid, $chore), $parent);
 
         Volt::test('parent.kids')
             ->assertSee('FOUND BY NOVA')

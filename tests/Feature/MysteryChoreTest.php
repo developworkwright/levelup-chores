@@ -3,15 +3,18 @@
 namespace Tests\Feature;
 
 use App\Enums\CompletionStatus;
+use App\Enums\LedgerKind;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyMystery;
 use App\Models\DailyQuest;
 use App\Models\Household;
+use App\Models\LedgerEntry;
 use App\Models\Profile;
 use App\Services\ChoreService;
 use App\Services\HouseholdClock;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Volt;
 use Tests\TestCase;
@@ -19,6 +22,12 @@ use Tests\TestCase;
 class MysteryChoreTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
+    }
 
     private function service(): ChoreService
     {
@@ -81,10 +90,9 @@ class MysteryChoreTest extends TestCase
         $alreadyDone = Chore::factory()->for($household)->create(['name' => 'Already done today']);
         $stillOpen = Chore::factory()->for($household)->create(['name' => 'Still open']);
 
-        // Deliberately not using service()->claim() here: it internally
-        // calls mysteryChoreFor() for its own bonus check, which could
-        // itself make the day's first (persisted) pick before this
-        // completion exists to exclude it from candidacy.
+        // Built directly rather than through claim(), which drags the spin
+        // multiplier and the parent notification in for no reason — the
+        // precondition here is just "this chore is spoken for".
         ChoreCompletion::create([
             'chore_id' => $alreadyDone->id,
             'profile_id' => $kid->id,
@@ -169,6 +177,62 @@ class MysteryChoreTest extends TestCase
         $this->assertNull($service->rerollMysteryChore($household));
     }
 
+    public function test_a_reroll_is_refused_while_a_claim_is_waiting_on_a_parent(): void
+    {
+        // That kid has done the work and is one approval away from the bonus.
+        // Plenty of alternatives exist, so a null here is the guard talking
+        // rather than an empty pool.
+        $household = Household::factory()->create(['require_quest_first' => false]);
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->count(4)->create();
+
+        $this->service()->claim($kid, $this->service()->mysteryChoreFor($household));
+
+        $this->assertNull($this->service()->rerollMysteryChore($household));
+    }
+
+    public function test_a_reroll_is_refused_once_the_bonus_has_been_won(): void
+    {
+        // Swapping after the payout would hang a second +500 on a different
+        // chore the same day.
+        $household = Household::factory()->create(['require_quest_first' => false]);
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->count(4)->create();
+
+        $chore = $this->service()->mysteryChoreFor($household);
+        $this->service()->approve($this->service()->claim($kid, $chore), $parent);
+
+        $this->assertNull($this->service()->rerollMysteryChore($household));
+    }
+
+    public function test_a_reroll_is_allowed_once_a_claim_is_decided_with_nobody_winning(): void
+    {
+        // Where every mystery approved before the bonus moved to approval ends
+        // up: the chore is on cooldown for the whole household, so nobody can
+        // win today's bonus on it any more. Refusing the swap would leave the
+        // parent with a dead mystery for the rest of the day.
+        $household = Household::factory()->create(['require_quest_first' => false]);
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $kid = Profile::factory()->for($household)->create();
+        $settled = Chore::factory()->for($household)->create(['name' => 'Already signed off']);
+        Chore::factory()->for($household)->count(3)->create();
+
+        $this->service()->approve($this->service()->claim($kid, $settled), $parent);
+
+        // The day's mystery, pointed at the settled chore with no winner on it.
+        DailyMystery::where('household_id', $household->id)->firstOrFail()->forceFill([
+            'chore_id' => $settled->id,
+            'found_by_profile_id' => null,
+            'found_at' => null,
+        ])->save();
+
+        $rerolled = $this->service()->rerollMysteryChore($household);
+
+        $this->assertNotNull($rerolled);
+        $this->assertNotSame($settled->id, $rerolled->id);
+    }
+
     public function test_a_reroll_assigns_one_when_none_was_drawn_yet(): void
     {
         $household = Household::factory()->create();
@@ -186,20 +250,151 @@ class MysteryChoreTest extends TestCase
         $this->assertNull($this->service()->mysteryChoreFor($household));
     }
 
-    public function test_claiming_the_mystery_chore_folds_the_bonus_into_points_awarded(): void
+    public function test_claiming_the_mystery_chore_awards_nothing_on_its_own(): void
     {
         $household = Household::factory()->create(['require_quest_first' => false]);
         $winner = Profile::factory()->for($household)->create();
         $chore = Chore::factory()->for($household)->create(['points' => 100]);
 
         // The only eligible chore, so it's guaranteed to become the mystery.
+        $this->service()->mysteryChoreFor($household);
         $completion = $this->service()->claim($winner, $chore);
 
-        $this->assertSame(100 + ChoreService::MYSTERY_BONUS_POINTS, $completion->points_awarded);
+        // Submitting is a kid saying they did it. The bonus waits for a parent
+        // to say the same — otherwise submitting the whole board is a way of
+        // being told which chore carries it.
+        $this->assertSame(100, $completion->points_awarded);
+        $this->assertNull($this->service()->mysteryFinderFor($household));
 
         $claimant = $this->service()->claimantFor($chore);
         $this->assertNotNull($claimant);
         $this->assertSame($winner->id, $claimant->profile_id);
+    }
+
+    public function test_approving_the_mystery_chore_pays_the_bonus(): void
+    {
+        $household = Household::factory()->create(['require_quest_first' => false]);
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $winner = Profile::factory()->for($household)->create(['points' => 0]);
+        $chore = Chore::factory()->for($household)->create(['points' => 100]);
+
+        $this->service()->mysteryChoreFor($household);
+        $completion = $this->service()->claim($winner, $chore);
+        $this->service()->approve($completion, $parent);
+
+        $this->assertSame(100 + ChoreService::MYSTERY_BONUS_POINTS, $completion->refresh()->points_awarded);
+        $this->assertSame(100 + ChoreService::MYSTERY_BONUS_POINTS, $winner->refresh()->points);
+        $this->assertSame($winner->id, $this->service()->mysteryFinderFor($household)->id);
+    }
+
+    public function test_the_bonus_reaches_the_ledger_as_part_of_the_approval(): void
+    {
+        // One entry, not two — the ledger is what the parent's Activity feed
+        // reads, and a split payout there would read as the chore paying twice.
+        $household = Household::factory()->create(['require_quest_first' => false]);
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $winner = Profile::factory()->for($household)->create(['points' => 0]);
+        $chore = Chore::factory()->for($household)->create(['points' => 100]);
+
+        $this->service()->mysteryChoreFor($household);
+        $this->service()->approve($this->service()->claim($winner, $chore), $parent);
+
+        $entries = LedgerEntry::where('profile_id', $winner->id)->where('kind', LedgerKind::Earn)->get();
+
+        $this->assertCount(1, $entries);
+        $this->assertSame(100 + ChoreService::MYSTERY_BONUS_POINTS, $entries->first()->amount);
+    }
+
+    public function test_a_sent_back_mystery_claim_wins_nothing(): void
+    {
+        $household = Household::factory()->create(['require_quest_first' => false]);
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $kid = Profile::factory()->for($household)->create(['points' => 0]);
+        $chore = Chore::factory()->for($household)->create(['points' => 100]);
+
+        $this->service()->mysteryChoreFor($household);
+        $this->service()->sendBack($this->service()->claim($kid, $chore), $parent);
+
+        $this->assertSame(0, $kid->refresh()->points);
+        $this->assertNull($kid->pending_mystery_celebration);
+        // Still up for grabs — a rejection reopens the chore, so the race it
+        // carries has to reopen with it.
+        $this->assertNull($this->service()->mysteryFinderFor($household));
+    }
+
+    public function test_the_race_survives_a_rejection_and_the_next_kid_can_win_it(): void
+    {
+        $household = Household::factory()->create(['require_quest_first' => false]);
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $first = Profile::factory()->for($household)->create();
+        $second = Profile::factory()->for($household)->create(['points' => 0]);
+        $chore = Chore::factory()->for($household)->create(['points' => 100]);
+
+        $this->service()->mysteryChoreFor($household);
+        $this->service()->sendBack($this->service()->claim($first, $chore), $parent);
+        $this->service()->approve($this->service()->claim($second, $chore), $parent);
+
+        $this->assertSame($second->id, $this->service()->mysteryFinderFor($household)->id);
+        $this->assertSame(100 + ChoreService::MYSTERY_BONUS_POINTS, $second->refresh()->points);
+    }
+
+    public function test_approving_an_ordinary_chore_pays_no_bonus(): void
+    {
+        $household = Household::factory()->create(['require_quest_first' => false]);
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $kid = Profile::factory()->for($household)->create(['points' => 0]);
+        // Hinted chores win the draw outright, which pins the mystery here.
+        Chore::factory()->for($household)->create(['name' => 'The mystery', 'hint' => 'Under the sink']);
+        $ordinary = Chore::factory()->for($household)->create(['name' => 'Ordinary', 'points' => 100]);
+
+        $this->service()->mysteryChoreFor($household);
+        $this->service()->approve($this->service()->claim($kid, $ordinary), $parent);
+
+        $this->assertSame(100, $kid->refresh()->points);
+        $this->assertNull($this->service()->mysteryFinderFor($household));
+    }
+
+    public function test_the_bonus_is_paid_once_even_if_approve_is_called_twice(): void
+    {
+        $household = Household::factory()->create(['require_quest_first' => false]);
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $kid = Profile::factory()->for($household)->create(['points' => 0]);
+        $chore = Chore::factory()->for($household)->create(['points' => 100]);
+
+        $this->service()->mysteryChoreFor($household);
+        $completion = $this->service()->claim($kid, $chore);
+
+        $this->service()->approve($completion, $parent);
+        $this->service()->approve($completion, $parent);
+
+        $this->assertSame(100 + ChoreService::MYSTERY_BONUS_POINTS, $kid->refresh()->points);
+    }
+
+    public function test_a_find_approved_the_next_morning_still_counts_for_the_night_it_was_done(): void
+    {
+        // Keyed to the household day the work was submitted in, not the one the
+        // approval lands in — otherwise a parent who signs off over breakfast
+        // quietly costs a kid the bonus they won at bedtime.
+        Carbon::setTestNow(Carbon::parse('2026-08-05 18:00:00'));
+
+        $household = Household::factory()->create(['require_quest_first' => false]);
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $kid = Profile::factory()->for($household)->create(['points' => 0]);
+        $chore = Chore::factory()->for($household)->create(['points' => 100]);
+
+        $yesterdaysMystery = $this->service()->mysteryChoreFor($household);
+        $completion = $this->service()->claim($kid, $chore);
+
+        Carbon::setTestNow(Carbon::parse('2026-08-06 09:00:00'));
+
+        $this->service()->approve($completion, $parent);
+
+        $this->assertSame($chore->id, $yesterdaysMystery->id);
+        $this->assertSame(100 + ChoreService::MYSTERY_BONUS_POINTS, $kid->refresh()->points);
+        $this->assertSame(
+            $kid->id,
+            DailyMystery::whereDate('mystery_date', '2026-08-05')->first()->found_by_profile_id,
+        );
     }
 
     public function test_the_mystery_chore_stays_in_the_normal_side_quest_board(): void
@@ -303,15 +498,48 @@ class MysteryChoreTest extends TestCase
             ->assertSee('+'.ChoreService::MYSTERY_BONUS_POINTS.' pts');
     }
 
-    public function test_the_quests_page_reveals_who_completed_it(): void
+    /**
+     * A household whose mystery chore is pinned to 'Scrub the tub' — the
+     * unlimited filler is excluded from the draw — plus the parent needed to
+     * settle the race, since nothing is won until someone approves it.
+     *
+     * @return array{0: Household, 1: Profile, 2: Chore}
+     */
+    private function pinnedMystery(): array
     {
         $household = Household::factory()->create(['require_quest_first' => false]);
-        $winner = Profile::factory()->for($household)->create(['name' => 'Winner Kid']);
-        $other = Profile::factory()->for($household)->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
         $chore = Chore::factory()->for($household)->create(['name' => 'Scrub the tub']);
         Chore::factory()->for($household)->create(['name' => 'Filler chore', 'cadence' => 'unlimited']);
 
-        $this->service()->claim($winner, $chore);
+        return [$household, $parent, $chore];
+    }
+
+    public function test_the_quests_page_says_nothing_while_the_claim_is_still_pending(): void
+    {
+        // The bug this whole mechanism exists to close: submitting a chore used
+        // to name it as the mystery on the spot, so a kid could hand in the
+        // whole board and be told the answer for free.
+        [$household, , $chore] = $this->pinnedMystery();
+        $kid = Profile::factory()->for($household)->create(['name' => 'Winner Kid']);
+
+        $this->service()->claim($kid, $chore);
+
+        Auth::guard('profile')->login($kid);
+
+        Volt::test('kid.quests')
+            ->assertSee('Still not completed')
+            ->assertDontSee('You found it')
+            ->assertDontSee('Scrub the tub!', escape: false);
+    }
+
+    public function test_the_quests_page_reveals_who_completed_it_once_it_is_approved(): void
+    {
+        [$household, $parent, $chore] = $this->pinnedMystery();
+        $winner = Profile::factory()->for($household)->create(['name' => 'Winner Kid']);
+        $other = Profile::factory()->for($household)->create();
+
+        $this->service()->approve($this->service()->claim($winner, $chore), $parent);
 
         Auth::guard('profile')->login($other);
 
@@ -322,12 +550,10 @@ class MysteryChoreTest extends TestCase
 
     public function test_the_winner_sees_their_own_congratulations_not_better_luck_next_time(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        [$household, $parent, $chore] = $this->pinnedMystery();
         $winner = Profile::factory()->for($household)->create(['name' => 'Winner Kid']);
-        $chore = Chore::factory()->for($household)->create(['name' => 'Scrub the tub']);
-        Chore::factory()->for($household)->create(['name' => 'Filler chore', 'cadence' => 'unlimited']);
 
-        $this->service()->claim($winner, $chore);
+        $this->service()->approve($this->service()->claim($winner, $chore), $parent);
 
         Auth::guard('profile')->login($winner);
 
@@ -339,17 +565,50 @@ class MysteryChoreTest extends TestCase
 
     public function test_the_winner_is_told_which_chore_it_was(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        [$household, $parent, $chore] = $this->pinnedMystery();
         $winner = Profile::factory()->for($household)->create();
-        $chore = Chore::factory()->for($household)->create(['name' => 'Scrub the tub']);
-        Chore::factory()->for($household)->create(['name' => 'Filler chore', 'cadence' => 'unlimited']);
 
-        $this->service()->claim($winner, $chore);
+        $this->service()->approve($this->service()->claim($winner, $chore), $parent);
 
         Auth::guard('profile')->login($winner);
 
         // A kid with several claims waiting on a parent can't otherwise tell
         // which one carried the bonus.
         Volt::test('kid.quests')->assertSee('You found it — Scrub the tub!', escape: false);
+    }
+
+    public function test_the_win_is_celebrated_on_the_kids_screen_the_next_time_they_look(): void
+    {
+        // Approval happens on a screen no kid is watching, so the moment has to
+        // wait on the profile — the same path the family goal takes.
+        [$household, $parent, $chore] = $this->pinnedMystery();
+        $winner = Profile::factory()->for($household)->create();
+
+        Auth::guard('profile')->login($winner);
+        Volt::test('kid.quests')->assertOk()->assertDontSee('You found the Mystery Chore!');
+
+        $this->service()->approve($this->service()->claim($winner, $chore), $parent);
+
+        $this->assertSame('Scrub the tub', $winner->refresh()->pending_mystery_celebration);
+
+        Volt::test('kid.quests')
+            ->assertOk()
+            ->assertSee('rewards-earned')
+            ->assertSee('You found the Mystery Chore!', escape: false)
+            ->assertSee('Scrub the tub');
+
+        // Shown once. A card that fires on every page load stops being a moment.
+        Volt::test('kid.quests')->assertOk()->assertDontSee('rewards-earned');
+    }
+
+    public function test_the_losing_sibling_gets_no_celebration_card(): void
+    {
+        [$household, $parent, $chore] = $this->pinnedMystery();
+        $winner = Profile::factory()->for($household)->create();
+        $loser = Profile::factory()->for($household)->create();
+
+        $this->service()->approve($this->service()->claim($winner, $chore), $parent);
+
+        $this->assertNull($loser->refresh()->pending_mystery_celebration);
     }
 }

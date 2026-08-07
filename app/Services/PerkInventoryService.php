@@ -187,6 +187,20 @@ class PerkInventoryService
         }
 
         // A clue is worthless once the race is over.
-        return $this->chores->claimantFor($chore) ? 'Already found today' : null;
+        if ($this->chores->mysteryFinderFor($profile->household)) {
+            return 'Already found today';
+        }
+
+        // A sibling's pending claim locks the chore for the whole household, so
+        // the clue is spent even before a parent gets to it. The kid's *own*
+        // claim deliberately doesn't count: a label that flipped on their own
+        // tap would let them submit the board one chore at a time and read off
+        // which one carries the bonus — the same hole that moving the award to
+        // approval closed everywhere else.
+        $claimant = $this->chores->claimantFor($chore);
+
+        return $claimant && $claimant->profile_id !== $profile->id
+            ? 'Someone got there first'
+            : null;
     }
 }

@@ -19,6 +19,20 @@ class GratitudeQuestTest extends TestCase
 {
     use RefreshDatabase;
 
+    /**
+     * Pinned to midday because the household day rolls over at 4am, not
+     * midnight. Fixtures here date themselves with now()->subDays(), so a suite
+     * run between midnight and 4am put "yesterday" on the household's *today* —
+     * the entry meant to prove old days stay off this page turned up on it, and
+     * the test failed for reasons that had nothing to do with the code.
+     */
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Carbon::setTestNow(Carbon::now()->startOfDay()->addHours(12));
+    }
+
     protected function tearDown(): void
     {
         Carbon::setTestNow();

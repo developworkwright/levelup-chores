@@ -117,6 +117,25 @@
         ]);
     }
 
+    // Queued by ChoreService when a parent's approval won the mystery bonus.
+    // The find is announced here rather than on the tap that submitted the
+    // chore: telling a kid at claim time which chore carried the bonus made
+    // submitting the whole board a way of being told the answer.
+    if ($profile->pending_mystery_celebration !== null) {
+        $quietRewards->push([
+            'message' => 'You found the Mystery Chore!',
+            'big' => true,
+            'card' => [
+                'accent' => 'var(--fq-magenta)',
+                'sub' => 'Mystery Chore',
+                'label' => $profile->pending_mystery_celebration,
+                'note' => '+'.number_format(App\Services\ChoreService::MYSTERY_BONUS_POINTS).' pts',
+            ],
+        ]);
+
+        $markers['pending_mystery_celebration'] = null;
+    }
+
     // Queued by ChoreService the moment a parent's approval crossed the goal —
     // which is why it survives the kid being signed out at the time.
     if ($profile->pending_goal_celebration !== null) {

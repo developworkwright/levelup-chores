@@ -238,13 +238,12 @@ new class extends Component
             return;
         }
 
-        $todaysMystery = $service->mysteryChoreFor($this->profile->household);
-
+        // Silent about the mystery chore on purpose — the find is announced
+        // once a parent approves the work, by the card the kid shell queues.
+        // Saying it here made submitting a chore enough to be told the answer.
         $this->dispatch(
             'celebrate',
-            message: $todaysMystery && $todaysMystery->id === $chore->id
-                ? 'You found the Mystery Chore! +'.ChoreService::MYSTERY_BONUS_POINTS.' bonus!'
-                : "{$chore->name} claimed at {$boost->multiplier}x! Bonus wheel treat earned.",
+            message: "{$chore->name} claimed at {$boost->multiplier}x! Bonus wheel treat earned.",
             treat: 'cookie',
         );
 

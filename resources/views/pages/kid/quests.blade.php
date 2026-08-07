@@ -154,17 +154,16 @@ new class extends Component
         $quest = $service->questFor($this->profile);
         $wasDone = $service->isQuestDoneToday($this->profile);
         $boosted = app(SpinService::class)->multiplierFor($this->profile, $quest->chore) > 1;
-        $todaysMystery = $service->mysteryChoreFor($this->profile->household);
 
         $service->claimQuest($this->profile);
 
         // The streak (and any milestone bonus) now moves on a parent's
         // approval, so don't quote a day count here that hasn't been earned
-        // yet — and when it is earned, the chest still does the reveal.
+        // yet — and when it is earned, the chest still does the reveal. A quest
+        // that happens to be the mystery chore says nothing about it either,
+        // for the same reason claimChore() doesn't.
         if (! $wasDone) {
-            if ($todaysMystery && $todaysMystery->id === $quest->chore_id) {
-                $this->dispatch('celebrate', message: 'You found the Mystery Chore! +'.\App\Services\ChoreService::MYSTERY_BONUS_POINTS.' bonus!');
-            } elseif ($boosted) {
+            if ($boosted) {
                 $this->dispatch('celebrate', message: 'Quest cleared! Bonus wheel treat earned.', treat: 'cookie');
             } else {
                 $this->dispatch('celebrate', message: 'Quest cleared! Your streak grows once a parent approves.');
@@ -278,11 +277,13 @@ new class extends Component
         }
 
         $boosted = app(SpinService::class)->multiplierFor($this->profile, $chore) > 1;
-        $todaysMystery = $service->mysteryChoreFor($this->profile->household);
 
-        if ($todaysMystery && $todaysMystery->id === $chore->id) {
-            $this->dispatch('celebrate', message: 'You found the Mystery Chore! +'.\App\Services\ChoreService::MYSTERY_BONUS_POINTS.' bonus!');
-        } elseif ($boosted) {
+        // Nothing here says anything about the mystery chore, deliberately.
+        // Announcing the find on the tap told a kid which chore carried the
+        // bonus for the price of submitting it, so submitting everything on the
+        // board was a way to be told the answer. It's announced when a parent
+        // approves the work, by the card the kid shell queues.
+        if ($boosted) {
             $this->dispatch('celebrate', message: "{$chore->name} claimed! Bonus wheel treat earned.", treat: 'cookie');
         } else {
             $this->dispatch('celebrate', message: "{$chore->name} claimed! Waiting on parent.");
@@ -338,7 +339,11 @@ new class extends Component
         $household = $this->profile->household;
 
         $mysteryChore = $service->mysteryChoreFor($household);
-        $mysteryClaimant = $mysteryChore ? $service->claimantFor($mysteryChore) : null;
+
+        // Whoever a parent has actually signed off, not whoever tapped first —
+        // a pending claim used to name the chore here, which handed the answer
+        // to anyone willing to submit the whole board.
+        $mysteryFinder = $service->mysteryFinderFor($household);
 
         $gratitude = app(GratitudeService::class);
 
@@ -378,7 +383,7 @@ new class extends Component
             // the toggle offers to bring back, so it has to survive being on.
             'unavailableCount' => $board->filter($isUnavailable)->count(),
             'mysteryChore' => $mysteryChore,
-            'mysteryClaimant' => $mysteryClaimant,
+            'mysteryFinder' => $mysteryFinder,
             'mysteryHint' => $service->mysteryHintFor($this->profile),
             // Today's only. Everything older lives on the Journal tab — this
             // page is about the day in front of you.
@@ -715,10 +720,10 @@ new class extends Component
                     style="background: var(--fq-wash-violet); border-color: color-mix(in srgb, var(--fq-magenta) 50%, transparent)"
                 >
                     <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: var(--fq-magenta)">Mystery Chore</p>
-                    @if ($mysteryClaimant === null)
+                    @if ($mysteryFinder === null)
                         <h2 class="mt-2 font-baloo text-xl font-bold">Still not completed</h2>
                         <p class="mt-1 max-w-[420px] text-sm text-fq-text-2">
-                            One of today's chores is secretly worth a bonus — nobody knows which one until someone finishes it. First to find it earns +{{ \App\Services\ChoreService::MYSTERY_BONUS_POINTS }} pts!
+                            One of today's chores is secretly worth a bonus — nobody knows which one until a parent approves it. First to get it signed off earns +{{ \App\Services\ChoreService::MYSTERY_BONUS_POINTS }} pts!
                         </p>
 
                         @if ($mysteryHint)
@@ -734,7 +739,7 @@ new class extends Component
                                 @endif
                             </div>
                         @endif
-                    @elseif ($mysteryClaimant->profile_id === $profile->id)
+                    @elseif ($mysteryFinder->id === $profile->id)
                         {{-- Naming the chore matters here: a kid with several
                              claims waiting on a parent has no way to tell which
                              one carried the bonus. --}}
@@ -746,7 +751,7 @@ new class extends Component
                         {{-- Named for everyone: once it's found the secret is
                              spent, and knowing which chore it was is half the
                              fun of losing. --}}
-                        <h2 class="mt-2 font-baloo text-xl font-bold">Completed by {{ $mysteryClaimant->profile->name }} — {{ $mysteryChore->name }}!</h2>
+                        <h2 class="mt-2 font-baloo text-xl font-bold">Completed by {{ $mysteryFinder->name }} — {{ $mysteryChore->name }}!</h2>
                         <p class="mt-1 max-w-[420px] text-sm text-fq-text-2">
                             They found it and banked a +{{ \App\Services\ChoreService::MYSTERY_BONUS_POINTS }} pt bonus. Better luck next time.
                         </p>

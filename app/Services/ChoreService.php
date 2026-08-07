@@ -318,9 +318,7 @@ class ChoreService
     {
         $today = HouseholdClock::for($household)->today();
 
-        $existing = DailyMystery::where('household_id', $household->id)
-            ->whereDate('mystery_date', $today)
-            ->first();
+        $existing = $this->mysteryOn($household, $today);
 
         if ($existing) {
             return $existing->chore;
@@ -342,20 +340,59 @@ class ChoreService
     }
 
     /**
+     * The mystery drawn for a given household day, if one has been. Unlike
+     * mysteryChoreFor() it never draws one itself — approval reads the day the
+     * work was submitted against, and a lookup that far after the fact must not
+     * conjure a pick for a day that never had one.
+     */
+    private function mysteryOn(Household $household, Carbon $date): ?DailyMystery
+    {
+        return DailyMystery::where('household_id', $household->id)
+            ->whereDate('mystery_date', $date)
+            ->first();
+    }
+
+    /**
+     * Who won today's mystery bonus, or null while it's still up for grabs.
+     *
+     * Reads the settled winner rather than whoever holds a claim: a pending
+     * claim is a kid saying they did it, and the whole point of moving the
+     * award to approval is that saying so isn't enough.
+     */
+    public function mysteryFinderFor(Household $household): ?Profile
+    {
+        return $this->mysteryOn($household, HouseholdClock::for($household)->today())?->foundBy;
+    }
+
+    /**
      * Swaps today's mystery for a different eligible chore. Returns null when
-     * there's nothing to swap to, or when someone has already won it — once
-     * the race is over, moving the finish line would rob the winner.
+     * there's nothing to swap to, or when the swap would be unfair to someone.
      */
     public function rerollMysteryChore(Household $household): ?Chore
     {
         $today = HouseholdClock::for($household)->today();
 
-        $existing = DailyMystery::where('household_id', $household->id)
-            ->whereDate('mystery_date', $today)
-            ->first();
+        $existing = $this->mysteryOn($household, $today);
 
-        if ($existing && $this->claimantFor($existing->chore)) {
-            return null;
+        if ($existing) {
+            // The race is over and the bonus is paid. Moving the finish line
+            // now would hang a second +500 on a different chore the same day.
+            if ($existing->isFound()) {
+                return null;
+            }
+
+            $claimant = $this->claimantFor($existing->chore);
+
+            // Only a *pending* claim blocks the swap: that kid has done the
+            // work and is waiting on a parent, and swapping the chore out from
+            // under them would take a bonus they've already earned. An approved
+            // claim that won nothing is the opposite case — the chore is on
+            // cooldown for the whole household, so nobody can win today's bonus
+            // on it any more, and refusing here would leave the parent stuck
+            // with a dead mystery for the rest of the day.
+            if ($claimant?->status === CompletionStatus::Pending) {
+                return null;
+            }
         }
 
         $chore = $this->drawMysteryChore($household, $existing?->chore_id);
@@ -714,17 +751,27 @@ class ChoreService
             : 'done';
     }
 
+    /**
+     * The mystery bonus is deliberately absent here — see awardMysteryBonus().
+     * points_awarded is what the kid has earned so far, and until a parent has
+     * signed the work off that is the chore's own points and nothing more.
+     */
     public function claim(Profile $profile, Chore $chore): ChoreCompletion
     {
         $multiplier = $this->spin->multiplierFor($profile, $chore);
-        $todaysMystery = $this->mysteryChoreFor($profile->household);
-        $mysteryBonus = ($todaysMystery && $todaysMystery->id === $chore->id) ? self::MYSTERY_BONUS_POINTS : 0;
+
+        // Not for the bonus — for the assignment. The draw excludes chores that
+        // already have a claimant, so a day whose first mystery lookup happened
+        // *after* this claim could never pick this chore, and the kid would be
+        // racing for something they'd already ruled themselves out of. Making
+        // sure the pick exists before the completion does keeps them in it.
+        $this->mysteryChoreFor($profile->household);
 
         $completion = ChoreCompletion::create([
             'chore_id' => $chore->id,
             'profile_id' => $profile->id,
             'status' => CompletionStatus::Pending,
-            'points_awarded' => ($chore->points * $multiplier) + $mysteryBonus,
+            'points_awarded' => $chore->points * $multiplier,
             'submitted_at' => now(),
         ]);
 
@@ -1161,6 +1208,11 @@ class ChoreService
         $profile = $completion->profile;
         $household = $profile->household;
 
+        // Before the ledger and before the goal math below, both of which read
+        // points_awarded — the bonus has to be part of the single entry this
+        // approval writes, not a second one bolted on afterwards.
+        $this->awardMysteryBonus($completion, $profile, $household);
+
         $this->ledger->record(
             $household,
             $profile,
@@ -1202,6 +1254,52 @@ class ChoreService
         // After badges, so a level crossed by badge XP is caught in the same
         // pass. Idempotent, so the badge path having already synced is fine.
         $this->tickets->syncLevelTickets($profile);
+    }
+
+    /**
+     * Settles the mystery race, if this approval is what won it.
+     *
+     * The bonus used to be baked into points_awarded by claim(), and the kid's
+     * page called the race off claimantFor() — which counts a *pending* claim.
+     * Between them that meant tapping "Mark it done" was enough: a kid could
+     * submit every chore on the board and read straight off their own screen
+     * which one carried the bonus, having had none of it checked by anyone. The
+     * race is now decided by a parent signing the work off, which is the only
+     * event in the app that means the chore actually got done.
+     *
+     * Resolved against the household day the work was *submitted* in, not the
+     * one the approval lands in. A chore found at bedtime and approved over
+     * breakfast is still that day's find — keying it to the approval would let
+     * a parent's timing quietly cost a kid the bonus they won.
+     */
+    private function awardMysteryBonus(ChoreCompletion $completion, Profile $profile, Household $household): void
+    {
+        $clock = HouseholdClock::for($household);
+        $mystery = $this->mysteryOn($household, $clock->dayFor($completion->submitted_at));
+
+        if (! $mystery || $mystery->chore_id !== $completion->chore_id) {
+            return;
+        }
+
+        // A guard rather than a real path — cooldowns are household-wide, so a
+        // second completion of the same chore can't reach approval inside the
+        // same day. Paying the bonus twice is not worth leaving to that.
+        if ($mystery->isFound()) {
+            return;
+        }
+
+        $mystery->found_by_profile_id = $profile->id;
+        $mystery->found_at = now();
+        $mystery->save();
+
+        $completion->points_awarded += self::MYSTERY_BONUS_POINTS;
+        $completion->save();
+
+        // Queued rather than dispatched: the kid isn't looking at the parent's
+        // approvals screen, so the celebration has to wait on their profile
+        // until they next open the app. Saved by approve() along with the XP
+        // and goal contribution it's about to write.
+        $profile->pending_mystery_celebration = $completion->chore->name;
     }
 
     private function goalIsReached(Household $household): bool

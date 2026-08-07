@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
 use App\Enums\ProfileRole;
 use App\Enums\TicketKind;
@@ -250,6 +251,7 @@ new class extends Component
         $chores = app(ChoreService::class);
         $household = $this->profile->household;
         $mysteryChore = $chores->mysteryChoreFor($household);
+        $mysteryClaimant = $mysteryChore ? $chores->claimantFor($mysteryChore) : null;
 
         return [
             'kids' => $kids,
@@ -260,7 +262,17 @@ new class extends Component
                 return [$kid->id => $spin?->loadMissing('chore')];
             }),
             'mysteryChore' => $mysteryChore,
-            'mysteryClaimant' => $mysteryChore ? $chores->claimantFor($mysteryChore) : null,
+            // Who won it, settled by an approval.
+            'mysteryFinder' => $chores->mysteryFinderFor($household),
+            // Who's waiting on you for it — and only that. claimantFor() also
+            // returns an *approved* claim inside the cooldown, so reading it
+            // as "needs approval" tells you to go and sign off work you already
+            // signed off. A chore approved without winning (anything decided
+            // before the bonus moved to approval) has to read as its own state.
+            'mysteryAwaiting' => $mysteryClaimant?->status === CompletionStatus::Pending
+                ? $mysteryClaimant->profile
+                : null,
+            'mysteryClaimant' => $mysteryClaimant,
             'household' => $household,
         ];
     }
@@ -337,16 +349,34 @@ new class extends Component
                 @if ($mysteryChore)
                     <span
                         class="rounded-[10px] border px-3 py-2 font-mono-fq text-[11px] whitespace-nowrap"
-                        style="border-color: var(--fq-line-2); color: {{ $mysteryClaimant ? 'var(--fq-lime)' : 'var(--fq-gold)' }}"
+                        style="border-color: var(--fq-line-2); color: {{ match (true) {
+                            $mysteryFinder !== null => 'var(--fq-lime)',
+                            $mysteryClaimant !== null && $mysteryAwaiting === null => 'var(--fq-text-4)',
+                            default => 'var(--fq-gold)',
+                        } }}"
                     >
-                        {{ $mysteryClaimant ? 'FOUND BY '.strtoupper($mysteryClaimant->profile->name) : 'UP FOR GRABS' }}
+                        @if ($mysteryFinder)
+                            FOUND BY {{ strtoupper($mysteryFinder->name) }}
+                        @elseif ($mysteryAwaiting)
+                            {{-- Waiting on you: the bonus is yours to hand over
+                                 or send back, and until you do nobody has won. --}}
+                            {{ strtoupper($mysteryAwaiting->name) }} — NEEDS APPROVAL
+                        @elseif ($mysteryClaimant)
+                            {{-- Done and signed off, but no bonus recorded — the
+                                 chore is on cooldown for the whole house, so
+                                 today's bonus can't be won on it any more. Pick
+                                 a different one to put the game back in play. --}}
+                            NOBODY WON IT
+                        @else
+                            UP FOR GRABS
+                        @endif
                     </span>
                 @endif
 
                 <button
                     type="button"
                     wire:click="rerollMystery"
-                    @disabled($mysteryClaimant !== null)
+                    @disabled($mysteryFinder !== null || $mysteryAwaiting !== null)
                     class="rounded-[10px] border bg-fq-sunk px-3 py-2 text-xs whitespace-nowrap text-fq-text-3 disabled:opacity-40"
                     style="border-color: var(--fq-line-3)"
                 >Pick a different one</button>
@@ -359,7 +389,7 @@ new class extends Component
 
         <p class="mt-2 text-xs text-fq-text-5">
             Only visible here — on the kids' boards this looks like any other chore, worth
-            +{{ \App\Services\ChoreService::MYSTERY_BONUS_POINTS }} to whoever finishes it first.
+            +{{ \App\Services\ChoreService::MYSTERY_BONUS_POINTS }} to whoever you approve for it first.
         </p>
     </div>
 
