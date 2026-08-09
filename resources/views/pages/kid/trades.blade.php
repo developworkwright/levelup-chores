@@ -213,7 +213,7 @@ new class extends Component
 
             $sender = $offer->fromProfile->name;
             $this->flashMessage = "Swapped! You gave {$offer->getText()} for {$offer->giveText()}.";
-            $this->dispatch('celebrate', message: "+{$offer->giveText()} from {$sender}!");
+            $this->dispatch('celebrate', message: "+{$offer->giveText()} from {$sender}!", motion: 'burst', origin: 'tap');
         });
     }
 

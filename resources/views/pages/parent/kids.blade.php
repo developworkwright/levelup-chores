@@ -62,7 +62,7 @@ new class extends Component
         );
 
         if ($delta > 0) {
-            $this->dispatch('celebrate', message: "{$kid->name} got {$sign}{$delta} points!");
+            $this->dispatch('celebrate', message: "{$kid->name} got {$sign}{$delta} points!", motion: 'burst', origin: 'tap');
         }
 
         app(BadgeService::class)->evaluate($kid);
@@ -85,7 +85,7 @@ new class extends Component
             "{$kid->name} turned in \$5 cash",
         );
 
-        $this->dispatch('celebrate', message: "{$kid->name} turned in \$5 cash!");
+        $this->dispatch('celebrate', message: "{$kid->name} turned in \$5 cash!", motion: 'burst', origin: 'tap');
 
         app(BadgeService::class)->evaluate($kid);
     }

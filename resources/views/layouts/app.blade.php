@@ -27,9 +27,15 @@
     @livewireStyles
 </head>
 <body class="antialiased">
-    {{ $slot }}
-
+    {{-- Ahead of the page, not after it. Alpine initialises roots in document
+         order, and the kid shell dispatches its "here is what you missed"
+         event from x-init — so an overlay further down the document had no
+         listener attached yet and the news was dropped on the floor. It is
+         fixed-positioned with its own z-index, so nothing about where it sits
+         in the markup affects what it looks like. --}}
     <x-overlays />
+
+    {{ $slot }}
 
     @livewireScripts
 </body>

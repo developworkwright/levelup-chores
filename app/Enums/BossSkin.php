@@ -96,4 +96,32 @@ enum BossSkin: string
     {
         return self::Gnash;
     }
+
+    /**
+     * Recovers a skin from the name stamped on a queued defeat.
+     *
+     * The celebration stores the label rather than the key, and it has to: a
+     * kid can be days late to it, by which time the household has rotated to
+     * the next monster, so asking the household who the boss is would name the
+     * wrong one. The label is what the kid will be shown, and this turns it
+     * back into the artwork that goes with it.
+     *
+     * Null for a defeat queued before the boss battle existed, and for anything
+     * whose name no longer matches a case — a renamed monster loses its picture
+     * rather than the whole celebration.
+     */
+    public static function fromLabel(?string $label): ?self
+    {
+        if ($label === null) {
+            return null;
+        }
+
+        foreach (self::cases() as $case) {
+            if ($case->label() === $label) {
+                return $case;
+            }
+        }
+
+        return null;
+    }
 }

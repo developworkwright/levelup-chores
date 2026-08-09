@@ -43,18 +43,24 @@
              tickets in the header quietly climbed while the chest was still
              rattling, and the prize card then announced something that had
              already happened four seconds earlier. --}}
+        {{-- 100ms past the 2.5s .fq-chest-opening jiggle in app.css, so the
+             chest has stopped shaking before the prize lands. Change one and
+             change the other. --}}
         async open() {
             if (this.phase !== 'closed') return;
             this.phase = 'opening';
-            await new Promise(resolve => setTimeout(resolve, 4600));
+            await new Promise(resolve => setTimeout(resolve, 2600));
             @if ($openAction) await $wire.{{ $openAction }}(); @endif
             @if ($prizeProperty) this.label = $wire.{{ $prizeProperty }} ?? this.label; @endif
             this.phase = 'revealed';
             this.justOpened = true;
-            {{-- Held for longer than the 2800ms reveal card below, so the
+            {{-- Held for longer than the 2200ms reveal card below, so the
                  badge and level cards queued behind this one don't stack on
                  top of a chest still showing its prize. --}}
-            window.dispatchEvent(new CustomEvent('celebrate', { detail: { message: @js($celebrateMessage) ?? this.label, style: 'confetti', hold: 3200 } }));
+            {{-- Burst from the chest rather than rained from the top: the tap
+                 that started this is still the last one recorded, even though
+                 the rattle has been running for two and a half seconds. --}}
+            window.dispatchEvent(new CustomEvent('celebrate', { detail: { message: @js($celebrateMessage) ?? this.label, style: 'confetti', motion: 'burst', origin: 'tap', hold: 2600 } }));
         },
     }"
 >
@@ -71,20 +77,16 @@
         style="animation: fq-pop .3s ease both; background: {{ $wash }}; border-color: {{ $accent }}"
     >
         <div class="relative flex shrink-0 items-center justify-center">
-            {{-- Centred by inset/margin rather than by a transform, because
-                 fq-glow-breathe animates scale and a transform-based centring
-                 would compose with it — see .fq-glow in app.css.
-
-                 The layout is inline rather than left to that class on purpose:
-                 taken out of position this is a 150px block *in* the row, and it
-                 shoulders the chest sideways. A glow that doesn't pulse because
-                 a stylesheet is stale is a missing animation; one that isn't
-                 positioned is a broken card. --}}
+            {{-- The size goes through --fq-glow-size rather than a width
+                 utility because .fq-glow centres itself off half that number —
+                 see app.css, which carries the two ways this has been got wrong
+                 before. Only the accent stays inline; it's the one part Blade
+                 has to interpolate. --}}
             <div
                 x-show="phase === 'opening'"
                 x-cloak
-                class="fq-glow h-[120px] w-[120px]"
-                style="position:absolute; inset:0; margin:auto; border-radius:50%; pointer-events:none; background: radial-gradient(circle, {{ $accent }} 0%, transparent 70%)"
+                class="fq-glow"
+                style="--fq-glow-size: 120px; background: radial-gradient(circle, {{ $accent }} 0%, transparent 70%)"
             ></div>
 
             {{-- :class, never :style — the chest carries its body colour in

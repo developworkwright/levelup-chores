@@ -184,7 +184,13 @@ class GratitudeQuestTest extends TestCase
             ->assertSee('Hand it in')
             ->set('gratitude', $this->threeThings())
             ->call('logGratitude')
-            ->assertDispatched('celebrate')
+            // Hearts rather than the money rain every other quest throws. This
+            // is the one thing on the board that isn't about earning, and the
+            // tickets it pays are a thank-you rather than the point of it.
+            ->assertDispatched(
+                'celebrate',
+                fn (string $event, array $params) => $params['style'] === 'heart',
+            )
             ->assertSee('Today you were grateful for')
             ->assertSee('Pancakes')
             ->assertDontSee('Hand it in')

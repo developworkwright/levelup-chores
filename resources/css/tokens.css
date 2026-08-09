@@ -339,6 +339,157 @@
     100% { transform: translateY(640px) rotate(540deg); opacity: 0; }
 }
 
+/*
+ * The two motions that aren't a straight fall.
+ *
+ * A keyframe can't be written per piece, but it can read one: each piece hands
+ * its own direction over as --fq-dx/--fq-dy and these do the moving. The
+ * fallbacks matter — a piece whose motion forgot to set them should stay put
+ * rather than fly to the top-left corner.
+ */
+
+/* Launched, arcing over a peak, then falling away past it. */
+@keyframes fq-arc {
+    0% {
+        transform: translate(0, 0) rotate(0deg);
+        opacity: 1;
+    }
+    45% {
+        transform: translate(calc(var(--fq-dx, 0px) * 0.55), var(--fq-dy, 0px)) rotate(calc(var(--fq-spin, 0deg) * 0.45));
+        opacity: 1;
+    }
+    100% {
+        transform: translate(var(--fq-dx, 0px), var(--fq-drop, 20vh)) rotate(var(--fq-spin, 0deg));
+        opacity: 0;
+    }
+}
+
+/* Thrown outward from a point, all at once. */
+@keyframes fq-burst {
+    0% {
+        transform: translate(0, 0) scale(0.5);
+        opacity: 1;
+    }
+    15% {
+        opacity: 1;
+    }
+    100% {
+        transform: translate(var(--fq-dx, 0px), var(--fq-dy, 0px)) rotate(var(--fq-spin, 0deg)) scale(1);
+        opacity: 0;
+    }
+}
+
+/*
+ * The two set pieces. A card that matters arrives differently from one that
+ * merely happened — fq-pop is a card appearing, these are a card landing.
+ */
+
+/* A level, thrown at the screen from somewhere past it. */
+@keyframes fq-slam {
+    0% {
+        opacity: 0;
+        transform: scale(2.6);
+    }
+    55% {
+        opacity: 1;
+        transform: scale(0.92);
+    }
+    72% {
+        transform: scale(1.05);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* The ring the impact throws off, timed to leave as the card settles. */
+@keyframes fq-shockwave {
+    0% {
+        opacity: 0.9;
+        transform: translate(-50%, -50%) scale(0.15);
+    }
+    100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(2.6);
+    }
+}
+
+/* One wash of the accent across the whole screen, gone almost immediately. */
+@keyframes fq-hero-flash {
+    0% {
+        opacity: 0;
+    }
+    10% {
+        opacity: 0.5;
+    }
+    100% {
+        opacity: 0;
+    }
+}
+
+/* Something heavy hitting the floor, and the room still going afterwards. */
+@keyframes fq-ko-shake {
+    0% {
+        opacity: 0;
+        transform: scale(1.5);
+    }
+    30% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    40% {
+        transform: translate(-9px, 3px);
+    }
+    50% {
+        transform: translate(8px, -3px);
+    }
+    60% {
+        transform: translate(-6px, 2px);
+    }
+    70% {
+        transform: translate(5px, -1px);
+    }
+    85% {
+        transform: translate(-2px, 1px);
+    }
+    100% {
+        transform: translate(0, 0);
+    }
+}
+
+/* Stamped on, not faded in. */
+@keyframes fq-ko-stamp {
+    0% {
+        opacity: 0;
+        transform: rotate(-14deg) scale(2.8);
+    }
+    60% {
+        opacity: 1;
+        transform: rotate(-14deg) scale(0.94);
+    }
+    100% {
+        opacity: 1;
+        transform: rotate(-14deg) scale(1);
+    }
+}
+
+/* The monster arriving upright and slowly giving up on it. */
+@keyframes fq-ko-monster {
+    0% {
+        opacity: 0;
+        transform: translateY(-10px) rotate(-4deg);
+    }
+    35% {
+        opacity: 1;
+        transform: translateY(0) rotate(0deg);
+    }
+    100% {
+        opacity: 0.75;
+        transform: translateY(10px) rotate(7deg);
+    }
+}
+
 @keyframes fq-shimmer {
     0% { background-position: 0% 0%; }
     100% { background-position: 200% 0%; }
@@ -389,6 +540,13 @@
     50% { opacity: 1; transform: scale(1.3); }
 }
 
+/*
+ * The rattle before a chest gives in. The escalation is the whole point — a
+ * nudge, then a shove, then something inside clearly trying to get out — so
+ * shortening it means running the same curve faster rather than lopping the
+ * quiet start off. Timed by .fq-chest-opening in app.css, which the `await` in
+ * <x-chest> and <x-loot-slot> shadows.
+ */
 @keyframes fq-chest-jiggle {
     0%, 100% { transform: rotate(0deg) scale(1); }
     8% { transform: rotate(-3deg) scale(1.02); }

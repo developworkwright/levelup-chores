@@ -12,7 +12,7 @@
 <template x-if="phase === 'revealed' && justOpened">
     <div
         x-data="{ show: true }"
-        x-init="setTimeout(() => show = false, 2800)"
+        x-init="setTimeout(() => show = false, 2200)"
         x-show="show"
         x-transition:enter="transition duration-300 ease-out"
         x-transition:enter-start="opacity-0"
@@ -23,9 +23,12 @@
         class="pointer-events-none fixed inset-0 z-[58] flex items-center justify-center px-4"
     >
         <div class="relative flex flex-col items-center">
+            {{-- .fq-card-halo owns the centring transform and the pulse, so
+                 that reduced motion can drop the animation without the halo
+                 losing the only thing holding it over the card. --}}
             <div
-                class="absolute"
-                style="top:50%; left:50%; width:420px; height:420px; border-radius:50%; transform:translate(-50%,-50%); background: radial-gradient(circle, {{ $accent }} 0%, transparent 70%); opacity:.45; filter:blur(4px); animation: fq-glow-pulse 1.6s ease-in-out infinite"
+                class="fq-card-halo absolute"
+                style="top:50%; left:50%; width:420px; height:420px; border-radius:50%; background: radial-gradient(circle, {{ $accent }} 0%, transparent 70%); opacity:.45; filter:blur(4px)"
             ></div>
 
             <div

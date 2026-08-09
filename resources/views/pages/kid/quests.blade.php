@@ -164,9 +164,14 @@ new class extends Component
         // back before the response re-renders with a stale number on it.
         $this->profile->refresh();
 
-        $this->dispatch('celebrate', message: $bounty->kind->posterPays()
-            ? "It's yours — go and do it!"
-            : 'Hired! They will let you know when it is done.');
+        $this->dispatch(
+            'celebrate',
+            message: $bounty->kind->posterPays()
+                ? "It's yours — go and do it!"
+                : 'Hired! They will let you know when it is done.',
+            motion: 'burst',
+            origin: 'tap',
+        );
     }
 
     public function mount(): void
@@ -228,9 +233,9 @@ new class extends Component
         // for the same reason claimChore() doesn't.
         if (! $wasDone) {
             if ($boosted) {
-                $this->dispatch('celebrate', message: 'Quest cleared! Bonus wheel treat earned.', treat: 'cookie');
+                $this->dispatch('celebrate', message: 'Quest cleared! Bonus wheel treat earned.', treat: 'cookie', motion: 'burst', origin: 'tap');
             } else {
-                $this->dispatch('celebrate', message: 'Quest cleared! Your streak grows once a parent approves.');
+                $this->dispatch('celebrate', message: 'Quest cleared! Your streak grows once a parent approves.', motion: 'burst', origin: 'tap');
             }
         }
     }
@@ -265,7 +270,16 @@ new class extends Component
             $this->gratitude = ['', '', ''];
             $this->gratitudeMessage = null;
 
-            $this->dispatch('celebrate', message: 'Gratitude logged! +'.GratitudeService::TICKETS.' tickets.');
+            // Hearts, not coins — this is the one quest that isn't about
+            // earning anything, and the tickets are a thank-you rather than
+            // the point of it.
+            $this->dispatch(
+                'celebrate',
+                message: 'Gratitude logged! +'.GratitudeService::TICKETS.' tickets.',
+                style: 'heart',
+                motion: 'burst',
+                origin: 'tap',
+            );
 
             return;
         }
@@ -286,7 +300,7 @@ new class extends Component
         try {
             $outcome = app(PerkInventoryService::class)->use($this->profile, $case);
             $this->perkMessage = null;
-            $this->dispatch('celebrate', message: $outcome);
+            $this->dispatch('celebrate', message: $outcome, motion: 'burst', origin: 'tap');
         } catch (PerkUnavailableException $e) {
             $this->perkMessage = $e->getMessage();
         }
@@ -348,9 +362,9 @@ new class extends Component
         // board was a way to be told the answer. It's announced when a parent
         // approves the work, by the card the kid shell queues.
         if ($boosted) {
-            $this->dispatch('celebrate', message: "{$chore->name} claimed! Bonus wheel treat earned.", treat: 'cookie');
+            $this->dispatch('celebrate', message: "{$chore->name} claimed! Bonus wheel treat earned.", treat: 'cookie', motion: 'burst', origin: 'tap');
         } else {
-            $this->dispatch('celebrate', message: "{$chore->name} claimed! Waiting on parent.");
+            $this->dispatch('celebrate', message: "{$chore->name} claimed! Waiting on parent.", motion: 'burst', origin: 'tap');
         }
 
         $service->claim($this->profile, $chore);

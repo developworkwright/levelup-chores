@@ -245,6 +245,8 @@ new class extends Component
             'celebrate',
             message: "{$chore->name} claimed at {$boost->multiplier}x! Bonus wheel treat earned.",
             treat: 'cookie',
+            motion: 'burst',
+            origin: 'tap',
         );
 
         $service->claim($this->profile, $chore);

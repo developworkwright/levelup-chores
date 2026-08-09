@@ -54,6 +54,59 @@ class ChestOverlayTest extends TestCase
             ->assertDontSee('justOpened: true', false);
     }
 
+    /**
+     * The halo is centred off half its own size, so the size has to reach the
+     * stylesheet as a number. Sizing it with a width utility instead leaves
+     * .fq-glow solving `calc(var(--fq-glow-size) / -2)` against nothing, and
+     * the halo goes back to hanging off the chest's right-hand side.
+     */
+    public function test_the_opening_halo_hands_its_size_to_the_stylesheet(): void
+    {
+        $kid = $this->kidWithChores();
+        Auth::guard('profile')->login($kid);
+
+        Volt::test('kid.quests')->assertSee('--fq-glow-size: 120px', false);
+
+        $this->assertStringContainsString(
+            'margin-left: calc(var(--fq-glow-size) / -2)',
+            file_get_contents(resource_path('css/app.css')),
+        );
+    }
+
+    /**
+     * The suspense before the server call and the jiggle it shadows are one
+     * timing kept in two files, so this is the seam they drift at — shorten the
+     * wait alone and the chest is still shaking when the prize lands; shorten
+     * the animation alone and it sits still waiting to be opened.
+     */
+    public function test_the_chest_suspense_outlasts_the_jiggle_it_shadows(): void
+    {
+        $kid = $this->kidWithChores();
+        Auth::guard('profile')->login($kid);
+
+        Volt::test('kid.quests')->assertSee('setTimeout(resolve, 2600)', false);
+
+        $this->assertStringContainsString(
+            'animation: fq-chest-jiggle 2.5s',
+            file_get_contents(resource_path('css/app.css')),
+        );
+    }
+
+    /**
+     * A chest's toast has to outlast its own reveal card, or the badge and
+     * level cards queued behind it land on top of a chest still showing its
+     * prize.
+     */
+    public function test_the_chest_toast_outlasts_the_card_it_covers(): void
+    {
+        $kid = $this->kidWithChores();
+        Auth::guard('profile')->login($kid);
+
+        Volt::test('kid.quests')
+            ->assertSee('hold: 2600', false)
+            ->assertSee('show = false, 2200', false);
+    }
+
     public function test_an_already_revealed_quest_still_renders_its_chest_open(): void
     {
         $kid = $this->kidWithChores();

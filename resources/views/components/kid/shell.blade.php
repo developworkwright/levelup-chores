@@ -88,6 +88,9 @@
         $quietRewards->push([
             'message' => $badge->name.' badge unlocked!',
             'big' => false,
+            // A badge pays in tickets, so it rains tickets. The style picks the
+            // voice on its own — see CELEBRATION_VOICES.
+            'style' => 'ticket',
             'card' => [
                 'accent' => $badge->color->cssVar(),
                 'sub' => 'Badge Unlocked',
@@ -112,6 +115,12 @@
         $quietRewards->push([
             'message' => 'Level '.$level.'!',
             'big' => true,
+            'style' => 'star',
+            // Fired up from the bottom corners rather than dropped from the
+            // top: a level is the one reward that is unambiguously about
+            // going up, and rain says the opposite of that.
+            'motion' => 'cannon',
+            'hero' => 'level',
             'card' => [
                 'accent' => 'var(--fq-gold)',
                 'sub' => 'Level Up',
@@ -129,6 +138,10 @@
         $quietRewards->push([
             'message' => 'You found the Mystery Chore!',
             'big' => true,
+            // Thrown outward from the middle of the screen, where the card
+            // announcing it is — nothing was tapped to earn this, so there is
+            // no better origin than the news itself.
+            'motion' => 'burst',
             'card' => [
                 'accent' => 'var(--fq-magenta)',
                 'sub' => 'Mystery Chore',
@@ -157,9 +170,25 @@
         // reward rather than as pizza night.
         $blow = $finisher ? $finisher.' landed the final blow' : 'Everyone pulled together';
 
+        // Recovered from the name rather than read off the household, which has
+        // very likely rotated to the next monster by now. The knockout is gated
+        // on it rather than on the name: a monster renamed since the defeat was
+        // queued has no artwork to find, and the set piece is mostly artwork —
+        // without it the card would open on an empty gap where a body should
+        // be. It falls back to the plain goal celebration, which still says
+        // everything true.
+        $skin = App\Enums\BossSkin::fromLabel($boss);
+
         $quietRewards->push([
             'message' => $boss ? $boss.' is down!' : 'Family goal reached!',
-            'big' => true,
+            // The rarest thing that happens in the app, and the only one the
+            // whole household worked on — so it gets the tier nothing else
+            // uses, and shells going off across the screen rather than one
+            // burst.
+            'tier' => 'epic',
+            'motion' => 'fireworks',
+            'sound' => $boss ? 'impact' : 'chime',
+            'hero' => $skin ? 'boss' : null,
             'card' => [
                 'accent' => 'var(--fq-lime)',
                 'sub' => $boss ? 'Boss Defeated' : 'Family Goal',
@@ -167,6 +196,7 @@
                 'note' => $boss
                     ? $blow.' · '.$profile->pending_goal_celebration
                     : $blow,
+                'skin' => $skin?->value,
             ],
         ]);
 
@@ -186,11 +216,26 @@
     {{-- Keyed on what it's announcing, so Livewire tears the element down and
          builds a new one whenever the news changes — which is what re-runs
          x-init. A re-render carrying nothing new renders nothing at all. --}}
+    {{-- Deferred a tick, and this matters more than it looks.
+
+         Alpine initialises roots in document order and runs x-init as it goes,
+         so on a fresh page load this fired while <x-overlays> — further down the
+         layout — had not yet registered the window listener that catches it.
+         The event went nowhere. Worse, the marker saying "this kid has been
+         told" is cleared by the render that produced this element, so the news
+         wasn't retried: it was lost outright. It only ever worked when the
+         rewards arrived over a Livewire round trip, with the overlay already
+         alive from an earlier load — which is why the kid sitting on the app
+         when a goal was finished saw it and the one logging in fresh did not.
+
+         $nextTick runs after every root is initialised. The layout also now
+         puts the overlay ahead of the page, so this has two independent reasons
+         to work rather than one. --}}
     @if ($quietRewards->isNotEmpty())
         <div
             wire:key="rewards-{{ md5($quietRewards->pluck('message')->implode('|')) }}"
             x-data
-            x-init="$dispatch('rewards-earned', { rewards: @js($quietRewards->all()) })"
+            x-init="$nextTick(() => $dispatch('rewards-earned', { rewards: @js($quietRewards->all()) }))"
         ></div>
     @endif
 

@@ -33,7 +33,12 @@ new class extends Component
         if ($completion) {
             $completion->loadMissing('profile', 'chore');
             app(ChoreService::class)->approve($completion, $this->profile);
-            $this->dispatch('celebrate', message: "{$completion->profile->name} earned +{$completion->points_awarded} for {$completion->chore->name}!");
+            $this->dispatch(
+                'celebrate',
+                message: "{$completion->profile->name} earned +{$completion->points_awarded} for {$completion->chore->name}!",
+                motion: 'burst',
+                origin: 'tap',
+            );
         }
     }
 

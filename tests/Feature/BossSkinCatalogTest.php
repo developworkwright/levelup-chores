@@ -131,6 +131,36 @@ class BossSkinCatalogTest extends TestCase
         $this->assertStringContainsString('if (window.FQMonsters) return;', $source, 'monsters.js is no longer idempotent.');
     }
 
+    /**
+     * A queued defeat stores the monster's name, because the household will
+     * very likely have rotated on by the time a kid reads it. The knockout card
+     * has to turn that name back into artwork — so every label has to be
+     * unique, and every one has to survive the round trip.
+     */
+    public function test_every_label_finds_its_way_back_to_its_own_skin(): void
+    {
+        $labels = array_map(fn (BossSkin $skin) => $skin->label(), BossSkin::cases());
+
+        $this->assertSame(
+            count($labels),
+            count(array_unique($labels)),
+            'Two monsters share a name, so a defeat can no longer name which one it was.',
+        );
+
+        foreach (BossSkin::cases() as $skin) {
+            $this->assertSame($skin, BossSkin::fromLabel($skin->label()));
+        }
+    }
+
+    public function test_an_unrecognised_name_loses_the_picture_and_nothing_else(): void
+    {
+        // Defeats queued before the boss battle existed carry no name at all,
+        // and a monster renamed since carries one that matches nothing.
+        $this->assertNull(BossSkin::fromLabel(null));
+        $this->assertNull(BossSkin::fromLabel('The Sock Moth'));
+        $this->assertNull(BossSkin::fromLabel('gnash'));
+    }
+
     public function test_the_stage_boundaries_and_their_inverses_agree(): void
     {
         // fromHealth() and entryDamagePercent() are read by the live state and

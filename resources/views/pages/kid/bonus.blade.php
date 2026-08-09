@@ -33,7 +33,7 @@ new class extends Component
         try {
             app(BonusShopService::class)->purchase($this->profile, $perk);
             $this->flashMessage = null;
-            $this->dispatch('celebrate', message: "{$perk->name} added to your perks!");
+            $this->dispatch('celebrate', message: "{$perk->name} added to your perks!", style: 'ticket', motion: 'burst', origin: 'tap');
         } catch (InsufficientTicketsException|PerkUnavailableException $e) {
             $this->flashMessage = $e->getMessage();
         }
@@ -50,7 +50,7 @@ new class extends Component
         try {
             $outcome = app(PerkInventoryService::class)->use($this->profile, $case);
             $this->flashMessage = null;
-            $this->dispatch('celebrate', message: $outcome);
+            $this->dispatch('celebrate', message: $outcome, motion: 'burst', origin: 'tap');
         } catch (PerkUnavailableException $e) {
             $this->flashMessage = $e->getMessage();
         }

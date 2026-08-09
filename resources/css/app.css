@@ -119,8 +119,12 @@ body {
     animation: fq-float 3s ease-in-out infinite;
 }
 
+/*
+ * Kept in step with the `await` in <x-chest> and <x-loot-slot>, which waits
+ * 100ms longer so the chest is finished shaking before the prize lands.
+ */
 .fq-chest-opening {
-    animation: fq-chest-jiggle 4.5s ease-in-out both;
+    animation: fq-chest-jiggle 2.5s ease-in-out both;
 }
 
 /* Same reasoning, for anything that pulses only some of the time. */
@@ -131,21 +135,38 @@ body {
 /*
  * The halo behind a chest that's being opened.
  *
- * Centred by `inset:0; margin:auto`, which needs no transform at all — the
- * previous attempts positioned it with 50% offsets and let fq-glow-pulse supply
- * the pull-back, and that put the glow anywhere but on the chest. Both a
- * Tailwind -translate-* utility (which writes the `translate` property, and so
- * *composes* with the keyframe's `transform` rather than replacing it) and the
- * static position it fell back to without an anchor moved it off by amounts
- * that depended on the layout around it.
+ * Centred by a 50% offset and a negative margin of half its own size, which is
+ * why the caller hands that size over as --fq-glow-size rather than as a width
+ * utility: the maths needs the number, not just the box.
  *
- * So the keyframe here animates scale and opacity only. Nothing about where it
- * sits is left to the animation.
+ * Two earlier approaches are worth not repeating.
+ *
+ * A transform can't do the pull-back, because fq-glow-breathe animates
+ * `transform: scale()` and would replace it — and the Tailwind -translate-*
+ * utility that looks like a way round that writes the *`translate`* property,
+ * which composes with the keyframe instead of replacing it, so the halo drifts
+ * as the animation breathes.
+ *
+ * `inset: 0; margin: auto` looks like it sidesteps both, and centres correctly
+ * right up until the halo is bigger than the thing it lights — which it always
+ * is. CSS 2.1 §10.3.7 solves for equal margins only "unless this would make
+ * them negative, in which case, when direction is ltr, set margin-left to zero
+ * and solve for margin-right". A 120px halo on a 76px chest wants -22px each
+ * side, so the browser bails out to that fallback and pins the halo's left edge
+ * to the chest's, spilling the other 44px out to the right. It measured 22px
+ * off-centre on the quest hero, and it was never going to be anything else.
+ *
+ * So: nothing about where this sits is left to the animation, and nothing about
+ * it depends on the halo being smaller than its parent.
  */
 .fq-glow {
     position: absolute;
-    inset: 0;
-    margin: auto;
+    top: 50%;
+    left: 50%;
+    width: var(--fq-glow-size);
+    height: var(--fq-glow-size);
+    margin-top: calc(var(--fq-glow-size) / -2);
+    margin-left: calc(var(--fq-glow-size) / -2);
     border-radius: 50%;
     pointer-events: none;
     animation: fq-glow-breathe 1s ease-in-out infinite;
@@ -156,12 +177,91 @@ body {
     50% { transform: scale(1.15); opacity: 0.85; }
 }
 
+/*
+ * The celebration overlay's moving parts.
+ *
+ * These are classes rather than inline `animation:` declarations so that the
+ * reduced-motion block below can reach them. The two halos carry their centring
+ * transform here as well as in the keyframe: an animation replaces the transform
+ * property outright while it runs, so the moment it is switched off the only
+ * thing holding a halo over its subject is this rule.
+ */
+.fq-toast-halo {
+    animation: fq-pulse 1s ease-in-out infinite;
+}
+
+.fq-card-halo,
+.fq-coin-halo {
+    transform: translate(-50%, -50%);
+    animation: fq-glow-pulse 1.6s ease-in-out infinite;
+}
+
+.fq-coin {
+    animation: fq-coin-spin 1.8s linear infinite;
+}
+
+.fq-coin-sparkle {
+    animation: fq-sparkle 1.4s ease-in-out infinite;
+}
+
+/*
+ * The set pieces: the level-up slam and the boss knockout. Both are the
+ * celebration card arriving differently, plus the things that arrive with it.
+ */
+.fq-hero-flash {
+    animation: fq-hero-flash 0.9s ease-out both;
+}
+
+.fq-shockwave {
+    top: 50%;
+    left: 50%;
+    width: 260px;
+    height: 260px;
+    border-radius: 50%;
+    border-width: 3px;
+    border-style: solid;
+    transform: translate(-50%, -50%);
+    animation: fq-shockwave 0.8s cubic-bezier(0.1, 0.7, 0.3, 1) 0.2s both;
+}
+
+.fq-ko-monster {
+    animation: fq-ko-monster 1.6s ease-in both;
+}
+
+/*
+ * The tilt is here as well as in the keyframe, for the same reason the halos
+ * carry their centring twice: an animation replaces the transform property
+ * while it runs, so switching it off would otherwise stand the stamp up
+ * straight.
+ */
+.fq-ko-stamp {
+    transform: rotate(-14deg);
+    animation: fq-ko-stamp 0.5s cubic-bezier(0.2, 1.4, 0.4, 1) 0.25s both;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .fq-chest-idle,
     .fq-chest-opening,
     .fq-pulsing,
-    .fq-glow {
+    .fq-glow,
+    .fq-toast-halo,
+    .fq-card-halo,
+    .fq-coin-halo,
+    .fq-coin,
+    .fq-coin-sparkle,
+    .fq-ko-monster,
+    .fq-ko-stamp {
         animation: none;
+    }
+
+    /*
+     * These two are nothing but movement — a shockwave that doesn't expand is
+     * a ring sitting over the card, and a flash that doesn't fade is a colour
+     * wash left on the screen. There is no still version worth showing.
+     */
+    .fq-shockwave,
+    .fq-hero-flash {
+        display: none;
     }
 }
 

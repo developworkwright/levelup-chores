@@ -185,18 +185,28 @@ class QuestPageLayoutTest extends TestCase
 
     public function test_the_opening_glow_is_anchored_to_the_middle_of_its_chest(): void
     {
-        // Regression, twice over. Both earlier attempts centred the glow with
-        // percentage offsets and let the keyframe's transform supply the
-        // pull-back, and both landed it somewhere off the chest. .fq-glow
-        // centres with inset/margin instead and its keyframe only scales, so
-        // nothing about where it sits depends on the animation.
+        // Regression, three times over now.
+        //
+        // The first two attempts centred the glow with percentage offsets and
+        // let the keyframe's transform supply the pull-back, and both landed it
+        // somewhere off the chest. The third centred it with `inset: 0;
+        // margin: auto`, which is correct only while the glow is smaller than
+        // the thing it lights — and it never is. CSS 2.1 §10.3.7 abandons the
+        // equal-margins rule the moment those margins would go negative, pins
+        // margin-left to 0 instead, and lets the rest hang off to the right. It
+        // measured 22px out on this page.
+        //
+        // So the size travels as --fq-glow-size and .fq-glow centres off half
+        // of it. Sizing the halo with a width utility instead leaves that
+        // calc() with nothing to work from.
         Volt::test('kid.quests')
             ->assertOk()
-            // The prize overlay still animates with fq-glow-pulse, and rightly:
-            // it centres itself on the viewport with a plain inline transform,
-            // so nothing there can compose with the keyframe.
-            ->assertSee('fq-glow h-[90px] w-[90px]', escape: false)
-            ->assertSee('fq-glow h-[120px] w-[120px]', escape: false)
+            ->assertSee('--fq-glow-size: 90px', escape: false)
+            ->assertSee('--fq-glow-size: 120px', escape: false)
+            ->assertDontSee('fq-glow h-[', escape: false)
+            ->assertDontSee('margin:auto', escape: false)
+            // The chest's keyframe only ever scales, so nothing about where the
+            // halo sits depends on the animation running.
             ->assertDontSee('animation: fq-glow-pulse 1s', escape: false);
     }
 
@@ -274,7 +284,15 @@ class QuestPageLayoutTest extends TestCase
             ->assertSee('Make my bed')
             ->assertSee('You get')
             ->call('takeJob', $job->id)
-            ->assertDispatched('celebrate');
+            // Thrown out of the button that was pressed rather than rained from
+            // the top of the screen. The coordinates only exist on the client,
+            // so the payload names the origin and the overlay looks up where
+            // the last tap landed.
+            ->assertDispatched(
+                'celebrate',
+                fn (string $event, array $params) => $params['motion'] === 'burst'
+                    && $params['origin'] === 'tap',
+            );
 
         $job->refresh();
 

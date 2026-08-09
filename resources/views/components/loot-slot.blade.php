@@ -46,15 +46,17 @@
             phase: 'closed',
             label: @js($prizeLabel),
             justOpened: false,
+            {{-- 100ms past the 2.5s .fq-chest-opening jiggle in app.css — see
+                 <x-chest>, which keeps the same pair in step. --}}
             async open() {
                 if (this.phase !== 'closed') return;
                 this.phase = 'opening';
-                await new Promise(resolve => setTimeout(resolve, 4600));
+                await new Promise(resolve => setTimeout(resolve, 2600));
                 await $wire.{{ $openAction }}();
                 @if ($prizeProperty) this.label = $wire.{{ $prizeProperty }} ?? this.label; @endif
                 this.phase = 'revealed';
                 this.justOpened = true;
-                window.dispatchEvent(new CustomEvent('celebrate', { detail: { message: @js($celebrateMessage) ?? this.label, style: 'confetti', hold: 3200 } }));
+                window.dispatchEvent(new CustomEvent('celebrate', { detail: { message: @js($celebrateMessage) ?? this.label, style: 'confetti', motion: 'burst', origin: 'tap', hold: 2600 } }));
             },
         }"
     @endif
@@ -108,13 +110,13 @@
         </div>
     @elseif ($openAction)
         <div class="relative flex items-center justify-center">
-            {{-- Positioned inline rather than by .fq-glow alone — see
-                 <x-chest> for why the layout can't live in the class. --}}
+            {{-- Sized through --fq-glow-size, not a width utility — see
+                 <x-chest> and .fq-glow in app.css for why. --}}
             <div
                 x-show="phase === 'opening'"
                 x-cloak
-                class="fq-glow h-[90px] w-[90px]"
-                style="position:absolute; inset:0; margin:auto; border-radius:50%; pointer-events:none; background: radial-gradient(circle, {{ $accent }} 0%, transparent 70%)"
+                class="fq-glow"
+                style="--fq-glow-size: 90px; background: radial-gradient(circle, {{ $accent }} 0%, transparent 70%)"
             ></div>
 
             {{-- :class, never :style — the chest carries its body colour in
