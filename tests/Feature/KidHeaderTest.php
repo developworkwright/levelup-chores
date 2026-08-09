@@ -85,7 +85,9 @@ class KidHeaderTest extends TestCase
         $earn = $this->pills(Volt::test('kid.quests')->html());
 
         $this->assertStringContainsString('Bonus Wheel', $earn);
-        $this->assertStringContainsString('Trades', $earn);
+        // Swaps and jobs share one page, and the pill names both so a kid can
+        // see where each of them lives.
+        $this->assertStringContainsString('Trades &amp; Jobs', $earn);
         // Spend and Me pages belong to other worlds, so their pills stay folded
         // away until that world is opened.
         $this->assertStringNotContainsString('Loot Shop', $earn);
@@ -105,14 +107,14 @@ class KidHeaderTest extends TestCase
         // Trades belongs to both Earn and Spend. Arriving from Spend has to
         // leave the Spend pills up rather than snapping back to Earn.
         $fromSpend = $this->pills(
-            $this->withSession(['kid_world' => 'spend'])->get(route('kid.offers'))->assertOk()->content()
+            $this->withSession(['kid_world' => 'spend'])->get(route('kid.trades'))->assertOk()->content()
         );
 
         $this->assertStringContainsString('Loot Shop', $fromSpend);
         $this->assertStringNotContainsString('Bonus Wheel', $fromSpend);
 
         $fromEarn = $this->pills(
-            $this->withSession(['kid_world' => 'earn'])->get(route('kid.offers'))->assertOk()->content()
+            $this->withSession(['kid_world' => 'earn'])->get(route('kid.trades'))->assertOk()->content()
         );
 
         $this->assertStringContainsString('Bonus Wheel', $fromEarn);
@@ -126,7 +128,7 @@ class KidHeaderTest extends TestCase
         // What the rail's own links carry: arriving at Trades through Spend has
         // to open Spend even with nothing in the session yet.
         $pills = $this->pills(
-            $this->get(route('kid.offers').'?world=spend')->assertOk()->content()
+            $this->get(route('kid.trades').'?world=spend')->assertOk()->content()
         );
 
         $this->assertStringContainsString('Bonus Shop', $pills);
@@ -147,6 +149,6 @@ class KidHeaderTest extends TestCase
         // Waiting on the Trades page, but the count has to be visible from the
         // Quests tab — that's the point of hanging it on the world.
         Volt::test('kid.quests')
-            ->assertSee('1 sibling trade waiting on you');
+            ->assertSee('1 thing waiting on you');
     }
 }

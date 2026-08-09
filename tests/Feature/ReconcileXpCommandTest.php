@@ -11,6 +11,7 @@ use App\Models\Profile;
 use App\Services\ChestService;
 use App\Services\ChoreService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 class ReconcileXpCommandTest extends TestCase
@@ -209,6 +210,11 @@ class ReconcileXpCommandTest extends TestCase
         // The two constants used to be separate literals. If they drift, an
         // undone day leaves XP behind or takes too much away.
         $household = Household::factory()->create();
+        // Pinned to the middle of the day: `early_bird` and `night_owl` key off
+        // the wall clock and pay 100 XP each, which lands in the middle of the
+        // exact XP arithmetic this test exists to check.
+        $this->travelTo(Carbon::parse('2026-05-01 12:00', $household->timezone));
+
         $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create(['xp' => 0]);
         $chore = Chore::factory()->for($household)->create(['points' => 100, 'min_age' => 1]);

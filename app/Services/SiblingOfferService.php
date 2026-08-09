@@ -20,24 +20,26 @@ use LogicException;
 use Throwable;
 
 /**
- * Kid-to-kid trades. A trade has two sides — what the sender gives and what
- * they want back — and each side is points, tickets or a favour. That covers
- * three shapes with one set of rules:
+ * Kid-to-kid **swaps**: one currency for another, between two named siblings,
+ * settled the instant it is accepted. "100 points for 2 tickets."
  *
- * - "100 points for the dishes" — sender gives a currency, wants a favour.
- * - "I'll do the dishes for 100 points" — sender gives a favour, wants a currency.
- * - "100 points for 2 tickets" — a straight swap, no favour either way.
+ * Work-for-pay used to live here too, as a trade with a favour on one side.
+ * It doesn't any more — {@see BountyService} owns every deal where somebody
+ * does something, whether it is aimed at one sibling or open to the household.
+ * The reason is that the two behaved differently for no reason a kid could see:
+ * a favour trade paid the moment it was accepted, before the dishes were
+ * touched, while the same deal posted openly went through claim, done and
+ * confirm. Now there is one answer, and this service is left doing the one
+ * thing that genuinely settles immediately, because a swap has no work in it.
  *
- * The sender's side is escrowed at offer time whenever it is a currency,
- * exactly as {@see StoreService::redeem()} deducts up front, so three 100-point
- * offers can't be fired off on a 100-point balance. The recipient's side is
- * checked when they answer instead: they never agreed to hold anything, and
- * their balance can move between the offer landing and them reading it.
+ * The sender's side is escrowed at offer time, exactly as
+ * {@see StoreService::redeem()} deducts up front, so three 100-point offers
+ * can't be fired off on a 100-point balance. The recipient's side is checked
+ * when they answer instead: they never agreed to hold anything, and their
+ * balance can move between the offer landing and them reading it.
  */
 class SiblingOfferService
 {
-    public const MAX_DESCRIPTION = 120;
-
     public function __construct(
         private LedgerService $ledger,
         private TicketService $tickets,
@@ -51,10 +53,7 @@ class SiblingOfferService
         int $giveAmount,
         TradeAsset $getAsset,
         int $getAmount,
-        string $description = '',
     ): SiblingOffer {
-        $description = trim($description);
-
         if (! $from->isKid() || ! $to->isKid()) {
             throw new InvalidArgumentException('Sibling trades are between kids.');
         }
@@ -63,10 +62,11 @@ class SiblingOfferService
             throw new InvalidArgumentException('Pick a sibling to send this to.');
         }
 
-        // Nothing on either side moves a balance, so there would be nothing for
-        // the app to do when it was accepted.
-        if (! $giveAsset->isCurrency() && ! $getAsset->isCurrency()) {
-            throw new InvalidArgumentException('A trade needs points or tickets on one side.');
+        // A swap moves two balances. Anything involving work belongs on the
+        // bounty board, which is the only place a job is claimed and signed
+        // off rather than paid on trust — see the class docblock.
+        if (! $giveAsset->isCurrency() || ! $getAsset->isCurrency()) {
+            throw new InvalidArgumentException('Swap points or tickets. To trade a job, post it on the board.');
         }
 
         if ($giveAsset === $getAsset) {
@@ -76,14 +76,10 @@ class SiblingOfferService
         $this->assertAmountInRange($giveAsset, $giveAmount);
         $this->assertAmountInRange($getAsset, $getAmount);
 
-        $description = $this->normaliseDescription($giveAsset, $getAsset, $description);
-
         // Only the sender's side is held now — see the class docblock.
-        if ($giveAsset->isCurrency()) {
-            $this->assertCanAfford($from, $giveAsset, $giveAmount);
-        }
+        $this->assertCanAfford($from, $giveAsset, $giveAmount);
 
-        $offer = DB::transaction(function () use ($from, $to, $giveAsset, $giveAmount, $getAsset, $getAmount, $description) {
+        $offer = DB::transaction(function () use ($from, $to, $giveAsset, $giveAmount, $getAsset, $getAmount) {
             $offer = SiblingOffer::create([
                 'household_id' => $from->household_id,
                 'from_profile_id' => $from->id,
@@ -92,7 +88,10 @@ class SiblingOfferService
                 'give_amount' => $giveAsset->isCurrency() ? $giveAmount : 0,
                 'get_asset' => $getAsset,
                 'get_amount' => $getAsset->isCurrency() ? $getAmount : 0,
-                'description' => $description,
+                // Nothing to say about a swap that the two amounts don't
+                // already say. The column stays for the favour trades written
+                // before jobs moved to the bounty board.
+                'description' => null,
                 'status' => SiblingOfferStatus::Pending,
                 'expires_at' => now()->addHours(SiblingOffer::LIFETIME_HOURS),
             ]);
@@ -175,7 +174,9 @@ class SiblingOfferService
      * Lapse every offer in the household that ran out of time, refunding
      * whatever it was holding.
      *
-     * The app has no scheduler, so this runs lazily off the Loot Shop. It
+     * The app has no scheduler, so this runs lazily off the Trades & Jobs
+     * page, alongside {@see BountyService::sweep()} — the two settle together
+     * because they now share a page and a kid's held points can be in either. It
      * sweeps the whole household rather than one kid's offers, so whichever
      * sibling opens the shop first settles everybody's — and the kid with
      * something tied up is the one most motivated to look.
@@ -281,28 +282,6 @@ class SiblingOfferService
                 'Offer between '.$asset->minAmount().' and '.$asset->maxAmount().' '.strtolower($asset->label()).'.'
             );
         }
-    }
-
-    /**
-     * The typed line is the favour, so it is required exactly when one side is
-     * one — and dropped when neither is, rather than being kept as a note the
-     * cards would have nowhere to show.
-     */
-    private function normaliseDescription(TradeAsset $giveAsset, TradeAsset $getAsset, string $description): ?string
-    {
-        if ($giveAsset->isCurrency() && $getAsset->isCurrency()) {
-            return null;
-        }
-
-        if ($description === '') {
-            throw new InvalidArgumentException('Say what the trade is first.');
-        }
-
-        if (mb_strlen($description) > self::MAX_DESCRIPTION) {
-            throw new InvalidArgumentException('That is too long — keep it to one line.');
-        }
-
-        return $description;
     }
 
     /**

@@ -73,6 +73,10 @@ class ChoreFlowTest extends TestCase
     public function test_approving_a_completion_credits_points_xp_and_family_goal(): void
     {
         $household = Household::factory()->create(['goal_target' => 1000, 'goal_now' => 0]);
+        // Pinned to the middle of the day. `early_bird` and `night_owl` key off
+        // the wall clock and each pay 100 XP, so on the real one this asserted
+        // 50 XP by day and failed by 150 after 10pm.
+        $this->travelTo(Carbon::parse('2026-05-01 12:00', $household->timezone));
         $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create();
         // Age-gated so it can never be auto-picked as the day's mystery

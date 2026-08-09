@@ -9,16 +9,18 @@ use NotificationChannels\WebPush\WebPushChannel;
 use NotificationChannels\WebPush\WebPushMessage;
 
 /**
- * Sent to the kid a sibling offer is pointed at. Only lands if that kid has a
- * push subscription; the badge on their Trades tab is the reliable signal.
+ * Sent when a bounty changes hands: posted, taken, reported done, or hired by
+ * a parent. Only lands if the profile has a push subscription; the count on the
+ * Trades & Jobs tab is the reliable signal, exactly as with sibling trades.
  */
-class SiblingOfferReceived extends Notification implements ShouldQueue
+class BountyUpdate extends Notification implements ShouldQueue
 {
     use Queueable;
 
     public function __construct(
         private readonly string $title,
         private readonly string $body,
+        private readonly string $url = '/kid/trades',
     ) {}
 
     /** @return array<int, string> */
@@ -33,8 +35,8 @@ class SiblingOfferReceived extends Notification implements ShouldQueue
             ->title($this->title)
             ->icon('/icons/icon-192.png')
             ->body($this->body)
-            ->tag('sibling-offer')
+            ->tag('bounty')
             ->renotify()
-            ->data(['url' => '/kid/trades']);
+            ->data(['url' => $this->url]);
     }
 }

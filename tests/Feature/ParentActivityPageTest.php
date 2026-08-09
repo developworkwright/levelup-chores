@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\LedgerKind;
 use App\Enums\TicketKind;
 use App\Enums\TradeAsset;
+use App\Models\BonusTicketEntry;
 use App\Models\Household;
 use App\Models\LedgerEntry;
 use App\Models\Profile;
@@ -45,8 +46,9 @@ class ParentActivityPageTest extends TestCase
     public function test_it_shows_both_legs_of_a_sibling_trade(): void
     {
         $household = Household::factory()->create();
-        // Alex does the dishes, Sam pays for it — so Sam is the one who needs a balance.
-        $alex = Profile::factory()->for($household)->create(['name' => 'Alex']);
+        // Alex puts a ticket up, Sam pays points for it — so Sam is the one who
+        // needs a balance.
+        $alex = Profile::factory()->for($household)->create(['name' => 'Alex', 'bonus_tickets' => 2]);
         $sam = Profile::factory()->for($household)->create(['name' => 'Sam', 'points' => 400]);
         $this->actingAsParent($household);
 
@@ -54,7 +56,6 @@ class ParentActivityPageTest extends TestCase
             'household_id' => $household->id,
             'from_profile_id' => $alex->id,
             'to_profile_id' => $sam->id,
-            'description' => 'do your dishes',
         ]);
 
         app(SiblingOfferService::class)->accept($offer, $sam);
@@ -65,7 +66,7 @@ class ParentActivityPageTest extends TestCase
         // can tell which way it ran without opening anything.
         Volt::test('parent.activity')
             ->assertOk()
-            ->assertSee('Alex → Sam: do your dishes for 100 pts', false)
+            ->assertSee('Alex → Sam: 1 ticket for 100 pts', false)
             ->assertSee('-100')
             ->assertSee('+100');
     }
@@ -74,7 +75,7 @@ class ParentActivityPageTest extends TestCase
     {
         $household = Household::factory()->create();
         $alex = Profile::factory()->for($household)->create(['name' => 'Alex', 'bonus_tickets' => 5]);
-        $sam = Profile::factory()->for($household)->create(['name' => 'Sam']);
+        $sam = Profile::factory()->for($household)->create(['name' => 'Sam', 'points' => 200]);
         $this->actingAsParent($household);
 
         $offer = SiblingOffer::factory()->create([
@@ -83,18 +84,28 @@ class ParentActivityPageTest extends TestCase
             'to_profile_id' => $sam->id,
             'give_asset' => TradeAsset::Tickets,
             'give_amount' => 3,
-            'description' => 'walk the dog',
+            'get_asset' => TradeAsset::Points,
+            'get_amount' => 50,
         ]);
 
         app(SiblingOfferService::class)->accept($offer, $sam);
 
-        // The two currencies never sum, so a ticket trade must not turn up in
-        // the points column pretending to be one.
+        // The two currencies never sum, so the ticket half of a swap must not
+        // turn up in the points column pretending to be one.
         Volt::test('parent.activity')
             ->assertOk()
-            ->assertSee('Alex → Sam: 3 tickets for walk the dog', false);
+            ->assertSee('Alex → Sam: 3 tickets for 50 pts', false);
 
-        $this->assertSame(0, LedgerEntry::count());
+        // Every swap now moves both sides, so the ledger is no longer empty —
+        // what matters is that the two currencies never cross into each
+        // other's feed. Points move by the points half and nothing else.
+        $this->assertSame(2, LedgerEntry::count());
+        $this->assertSame(0, LedgerEntry::whereNotIn('amount', [50, -50])->count());
+        // Scoped to the trade's own entries: settling one also unlocks
+        // Dealmaker, and a badge mints a ticket of its own.
+        $this->assertSame(3, (int) BonusTicketEntry::where('profile_id', $sam->id)
+            ->where('kind', TicketKind::Trade)
+            ->sum('amount'));
     }
 
     public function test_it_shows_ticket_activity_in_its_own_card(): void

@@ -3,12 +3,18 @@
 namespace App\Enums;
 
 /**
- * What one side of a sibling trade puts up. Two of these make a trade: what
- * the sender gives and what they want back.
+ * What one side of a deal puts up, and what a bounty is priced in.
  *
- * `Favour` is the odd one out on purpose — it moves no balance, it is just the
- * free text the two kids agreed on. Everything else here is a currency the app
- * actually holds, so a trade with a currency on both sides is a straight swap.
+ * `Favour` is **legacy and unwritable**. Work-for-pay used to be a sibling
+ * trade with a favour on one side, which paid the moment it was accepted —
+ * before any of the work. That whole idea now lives on the bounty board, where
+ * a job is claimed, reported done and confirmed, whether it is aimed at one
+ * sibling or open to the household. {@see SiblingOfferService::offer()} refuses
+ * a favour outright, so no new row can carry one.
+ *
+ * The case stays because rows written before the move still do, and the trade
+ * history a kid scrolls past has to keep rendering. Do not price anything in
+ * it, and do not add it back to {@see self::currencies()}.
  */
 enum TradeAsset: string
 {

@@ -43,7 +43,9 @@ Route::middleware(['auth:profile', 'role:kid', 'sync-streak'])->prefix('kid')->g
     Volt::route('/wheel', 'kid.wheel')->name('kid.wheel');
     Volt::route('/loot', 'kid.loot')->name('kid.loot');
     Volt::route('/goal', 'kid.goal')->name('kid.goal');
-    Volt::route('/offers', 'kid.offers')->name('kid.offers');
+    // Swaps and jobs on one page: they were only ever one idea, split by who
+    // the deal was aimed at rather than by what kind of deal it was.
+    Volt::route('/trades', 'kid.trades')->name('kid.trades');
     Volt::route('/bonus', 'kid.bonus')->name('kid.bonus');
     Volt::route('/badges', 'kid.badges')->name('kid.badges');
     Volt::route('/stats', 'kid.stats')->name('kid.stats');

@@ -28,7 +28,7 @@ class KidLootShopTest extends TestCase
     {
         // Trades live on their own tab: a catalogue of things to buy from a
         // parent and a negotiation with a sibling are unrelated errands, and
-        // the trade notification deep-links to /kid/offers, not here.
+        // the trade notification deep-links to /kid/trades, not here.
         $household = Household::factory()->create();
         $alex = Profile::factory()->for($household)->create(['name' => 'Alex', 'points' => 400]);
         $sam = $this->loginKid($household, ['name' => 'Sam', 'points' => 0]);

@@ -9,7 +9,7 @@
         'wheel' => ['label' => 'Bonus Wheel', 'glyph' => '◎', 'route' => 'kid.wheel'],
         'loot' => ['label' => 'Loot Shop', 'glyph' => '◈', 'route' => 'kid.loot'],
         'goal' => ['label' => 'Goals', 'glyph' => '◔', 'route' => 'kid.goal'],
-        'offers' => ['label' => 'Trades', 'glyph' => '⇄', 'route' => 'kid.offers'],
+        'trades' => ['label' => 'Trades & Jobs', 'glyph' => '⇄', 'route' => 'kid.trades'],
         'bonus' => ['label' => 'Bonus Shop', 'glyph' => '✦', 'route' => 'kid.bonus'],
         'badges' => ['label' => 'Badges', 'glyph' => '★', 'route' => 'kid.badges'],
         'stats' => ['label' => 'Stats', 'glyph' => '▤', 'route' => 'kid.stats'],
@@ -23,8 +23,8 @@
      * visually attached to the world that opened them.
      */
     $worlds = [
-        'earn' => ['label' => 'Earn', 'glyph' => '⚑', 'justify' => 'justify-start', 'pages' => ['quests', 'wheel', 'offers']],
-        'spend' => ['label' => 'Spend', 'glyph' => '◈', 'justify' => 'justify-center', 'pages' => ['loot', 'offers', 'bonus']],
+        'earn' => ['label' => 'Earn', 'glyph' => '⚑', 'justify' => 'justify-start', 'pages' => ['quests', 'wheel', 'trades']],
+        'spend' => ['label' => 'Spend', 'glyph' => '◈', 'justify' => 'justify-center', 'pages' => ['loot', 'trades', 'bonus']],
         'me' => ['label' => 'Me', 'glyph' => '★', 'justify' => 'justify-end', 'pages' => ['goal', 'badges', 'stats', 'journal']],
     ];
 
@@ -34,7 +34,41 @@
     // kid sees a trade waiting from Quests or the Wheel — not only once they
     // have already gone looking for it.
     $offersWaiting = App\Models\SiblingOffer::where('to_profile_id', $profile->id)->live()->count();
-    $counts = ['offers' => $offersWaiting];
+
+    /*
+     * Jobs stuck behind this kid: work they took and haven't reported, and
+     * work reported to them that they haven't paid for. Counted rather than
+     * merely "jobs I'm in", because the badge is a nudge, and a deal waiting
+     * on the *other* kid is not something this one can act on.
+     *
+     * Both sides come off the kind rather than a column — see BountyKind — so
+     * a wanted job counts its taker and an offered one counts its poster.
+     */
+    $bountiesWaiting = App\Models\Bounty::where('household_id', $profile->household_id)
+        ->where(fn ($query) => $query
+            ->where(fn ($q) => $q
+                ->where('status', App\Enums\BountyStatus::Claimed)
+                ->where(fn ($w) => $w
+                    ->where(fn ($wanted) => $wanted
+                        ->where('kind', App\Enums\BountyKind::Wanted)
+                        ->where('claimed_by_profile_id', $profile->id))
+                    ->orWhere(fn ($offered) => $offered
+                        ->where('kind', App\Enums\BountyKind::Offered)
+                        ->where('poster_profile_id', $profile->id))))
+            ->orWhere(fn ($q) => $q
+                ->where('status', App\Enums\BountyStatus::Done)
+                ->where(fn ($p) => $p
+                    ->where(fn ($wanted) => $wanted
+                        ->where('kind', App\Enums\BountyKind::Wanted)
+                        ->where('poster_profile_id', $profile->id))
+                    ->orWhere(fn ($offered) => $offered
+                        ->where('kind', App\Enums\BountyKind::Offered)
+                        ->where('claimed_by_profile_id', $profile->id)))))
+        ->count();
+
+    // One page now, so one count: swaps sent to this kid plus jobs stuck
+    // behind them.
+    $counts = ['trades' => $offersWaiting + $bountiesWaiting];
 
     /*
      * Which world the rail lights up. A page can belong to two worlds, so the
@@ -338,9 +372,11 @@
                     style="{{ $activeWorld === $key ? 'background: var(--fq-tab-active); color: var(--fq-lime)' : 'background:transparent; color: var(--fq-ink)' }}"
                 >
                     <span class="text-sm">{{ $world['glyph'] }}</span>{{ $world['label'] }}
+                    {{-- Generic wording now that the badge covers trades and
+                         jobs both: a world's count is the sum of its pages'. --}}
                     <x-count-badge
                         :count="$waiting"
-                        :title="$waiting.' sibling '.Str::plural('trade', $waiting).' waiting on you'"
+                        :title="$waiting.' '.Str::plural('thing', $waiting).' waiting on you'"
                     />
                 </a>
             @endforeach
@@ -364,10 +400,16 @@
                  * The underscores are Tailwind's escape for the spaces CSS
                  * requires around calc's minus — `calc(50%-3px)` is a syntax
                  * error, and half the row would silently go full width.
+                 *
+                 * `basis-0 grow` rather than `flex-1` in the three-pill case:
+                 * both share the row evenly, but a label longer than its third
+                 * ("Trades & Jobs", with a count badge beside it) takes its own
+                 * width and wraps to a second line instead of pushing the row
+                 * wider than the phone. Nothing is ever truncated either way.
                  */
                 $pillWidth = count($worlds[$activeWorld]['pages']) > 3
                     ? 'w-[calc(50%_-_3px)] sm:w-auto'
-                    : 'flex-1';
+                    : 'basis-0 grow';
             @endphp
 
             @foreach ($worlds[$activeWorld]['pages'] as $key)
@@ -391,7 +433,7 @@
                     {{ $pages[$key]['label'] }}
                     <x-count-badge
                         :count="$counts[$key] ?? 0"
-                        :title="($counts[$key] ?? 0).' sibling '.Str::plural('trade', $counts[$key] ?? 0).' waiting on you'"
+                        :title="($counts[$key] ?? 0).' '.Str::plural('thing', $counts[$key] ?? 0).' waiting on you'"
                         small
                     />
                 </a>

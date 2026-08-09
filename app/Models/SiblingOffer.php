@@ -74,21 +74,12 @@ class SiblingOffer extends Model
         return $this->status === SiblingOfferStatus::Pending && $this->expires_at->isFuture();
     }
 
-    /**
-     * Whether the sender's side is already out of their balance. Only a
-     * currency can be held, so this follows from the give side rather than
-     * being a flag that could disagree with it.
+    /*
+     * `isEscrowed()` and `isSwap()` lived here to tell a favour trade from a
+     * currency one. Every offer is now a currency swap with the sender's side
+     * held, so both answered true for every row that could exist — a question
+     * with one answer is worse than no question.
      */
-    public function isEscrowed(): bool
-    {
-        return $this->give_asset->isCurrency();
-    }
-
-    /** Both sides are currencies — a straight swap with no favour attached. */
-    public function isSwap(): bool
-    {
-        return $this->give_asset->isCurrency() && $this->get_asset->isCurrency();
-    }
 
     /** What the sender puts up, as it reads on a card. */
     public function giveText(): string
