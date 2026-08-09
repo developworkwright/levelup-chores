@@ -35,40 +35,10 @@
     // have already gone looking for it.
     $offersWaiting = App\Models\SiblingOffer::where('to_profile_id', $profile->id)->live()->count();
 
-    /*
-     * Jobs stuck behind this kid: work they took and haven't reported, and
-     * work reported to them that they haven't paid for. Counted rather than
-     * merely "jobs I'm in", because the badge is a nudge, and a deal waiting
-     * on the *other* kid is not something this one can act on.
-     *
-     * Both sides come off the kind rather than a column — see BountyKind — so
-     * a wanted job counts its taker and an offered one counts its poster.
-     */
-    $bountiesWaiting = App\Models\Bounty::where('household_id', $profile->household_id)
-        ->where(fn ($query) => $query
-            ->where(fn ($q) => $q
-                ->where('status', App\Enums\BountyStatus::Claimed)
-                ->where(fn ($w) => $w
-                    ->where(fn ($wanted) => $wanted
-                        ->where('kind', App\Enums\BountyKind::Wanted)
-                        ->where('claimed_by_profile_id', $profile->id))
-                    ->orWhere(fn ($offered) => $offered
-                        ->where('kind', App\Enums\BountyKind::Offered)
-                        ->where('poster_profile_id', $profile->id))))
-            ->orWhere(fn ($q) => $q
-                ->where('status', App\Enums\BountyStatus::Done)
-                ->where(fn ($p) => $p
-                    ->where(fn ($wanted) => $wanted
-                        ->where('kind', App\Enums\BountyKind::Wanted)
-                        ->where('poster_profile_id', $profile->id))
-                    ->orWhere(fn ($offered) => $offered
-                        ->where('kind', App\Enums\BountyKind::Offered)
-                        ->where('claimed_by_profile_id', $profile->id)))))
-        ->count();
-
     // One page now, so one count: swaps sent to this kid plus jobs stuck
-    // behind them.
-    $counts = ['trades' => $offersWaiting + $bountiesWaiting];
+    // behind them. The job half is the Quests page's bounty-board pill too, so
+    // it lives in the service rather than being written out twice.
+    $counts = ['trades' => $offersWaiting + app(App\Services\BountyService::class)->waitingOn($profile)];
 
     /*
      * Which world the rail lights up. A page can belong to two worlds, so the
@@ -317,6 +287,21 @@
 
                     <span class="font-baloo text-[19px] leading-none font-extrabold text-fq-lime">{{ $profile->bonus_tickets }}</span>
                     <span class="font-mono-fq text-[9px] text-fq-ticket-label">TICKETS</span>
+                </a>
+
+                {{-- The badge grid used to be a panel on the Quests page, where
+                     it competed with the day's work for room. As a count it says
+                     the same thing — you have three, there are more — and the
+                     wall itself is one tap away on the page built for it. --}}
+                <a
+                    href="{{ route('kid.badges') }}"
+                    wire:navigate
+                    title="Your badges"
+                    class="flex h-[52px] w-[86px] flex-col items-end justify-center rounded-[15px] border border-fq-badge-line px-3 transition hover:border-fq-magenta"
+                    style="background: var(--fq-badge-bg)"
+                >
+                    <span class="font-baloo text-[19px] leading-none font-extrabold" style="color: var(--fq-magenta)">{{ $profile->badges->count() }}</span>
+                    <span class="font-mono-fq text-[9px] text-fq-text-4">BADGES</span>
                 </a>
 
                 {{-- Pulls down points, streak, tickets and — on the Quests tab —

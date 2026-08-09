@@ -1,25 +1,32 @@
+{{-- The quest chest, as the hero panel of the Quests page.
+
+     It is the only chest that gets a panel of its own — everything else lives
+     in the loot tray — because it gates the board: nothing else opens until
+     this one is cleared, so there is exactly one place to tap and it is the
+     loudest thing above the fold.
+
+     prizeProperty names a Livewire property to read the prize from once the
+     open action has run. A chest whose prize is known up front (the streak
+     chest) doesn't need it — but one that's only decided on opening does,
+     because the reveal card sits inside a <template x-if> and gets cloned from
+     markup Blade rendered before the prize existed. --}}
 @props([
     'wireKey',
     'revealed',
     'openAction' => null,
     'accent' => 'var(--fq-gold)',
     'wash' => 'var(--fq-wash-gold)',
+    'kicker',
     'closedTitle',
     'closedText',
     'openingText' => 'The chest is rattling...',
+    'cta' => 'Open',
     'prizeLabel',
     'prizeSub',
     'celebrateMessage' => null,
     'prizeProperty' => null,
 ])
 
-{{--
-    prizeProperty names a Livewire property to read the prize from once the
-    open action has run. Chests whose prize is known up front (the streak
-    chest) don't need it — but one that's only decided on opening does,
-    because the reveal card below sits inside an <template x-if> and gets
-    cloned from markup Blade rendered before the prize existed.
---}}
 <div
     wire:key="{{ $wireKey }}"
     x-data="{
@@ -51,71 +58,75 @@
         },
     }"
 >
+    {{-- Closed and opening are the same panel with the chest behaving
+         differently, so the copy underneath doesn't jump between them. --}}
     <div
-        x-show="phase === 'closed'"
+        x-show="phase !== 'revealed'"
         x-transition
-        class="flex flex-col items-center rounded-[24px] border p-8 text-center"
+        {{-- Clipped so the halo can only ever light the panel from inside it.
+             The glow is round and the panel is a short wide row, so without
+             this it reads as a lamp behind the card rather than as a chest
+             about to open. --}}
+        class="flex flex-col items-center gap-[14px] overflow-hidden rounded-[24px] border p-5 text-center sm:flex-row sm:gap-[18px] sm:p-5 sm:text-left"
         style="animation: fq-pop .3s ease both; background: {{ $wash }}; border-color: {{ $accent }}"
     >
-        <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: {{ $accent }}">{{ $closedTitle }}</p>
+        <div class="relative flex shrink-0 items-center justify-center">
+            {{-- Centred by inset/margin rather than by a transform, because
+                 fq-glow-breathe animates scale and a transform-based centring
+                 would compose with it — see .fq-glow in app.css.
 
-        <button type="button" @click="open()" class="mt-5 cursor-pointer" aria-label="Open the chest">
-            <x-chest-icon class="h-24 w-24" :accent="$accent" style="animation: fq-float 3s ease-in-out infinite" />
-        </button>
-
-        <p class="mt-5 max-w-[320px] text-sm text-fq-text-2">{{ $closedText }}</p>
-    </div>
-
-    <div
-        x-show="phase === 'opening'"
-        x-transition
-        class="flex flex-col items-center rounded-[24px] border p-8 text-center"
-        style="background: {{ $wash }}; border-color: {{ $accent }}"
-    >
-        <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: {{ $accent }}; animation: fq-pulse 1s ease-in-out infinite">Opening&hellip;</p>
-
-        <div class="relative mt-5 flex h-24 w-24 items-center justify-center">
+                 The layout is inline rather than left to that class on purpose:
+                 taken out of position this is a 150px block *in* the row, and it
+                 shoulders the chest sideways. A glow that doesn't pulse because
+                 a stylesheet is stale is a missing animation; one that isn't
+                 positioned is a broken card. --}}
             <div
-                class="absolute"
-                style="top:50%; left:50%; width:150px; height:150px; border-radius:50%; background: radial-gradient(circle, {{ $accent }} 0%, transparent 70%); opacity:.4; animation: fq-glow-pulse 1s ease-in-out infinite"
+                x-show="phase === 'opening'"
+                x-cloak
+                class="fq-glow h-[120px] w-[120px]"
+                style="position:absolute; inset:0; margin:auto; border-radius:50%; pointer-events:none; background: radial-gradient(circle, {{ $accent }} 0%, transparent 70%)"
             ></div>
-            <x-chest-icon class="relative h-24 w-24" :accent="$accent" style="animation: fq-chest-jiggle 4.5s ease-in-out both" />
+
+            {{-- :class, never :style — the chest carries its body colour in
+                 the style attribute, and an Alpine style binding owns that
+                 attribute outright. See .fq-chest-opening in app.css. --}}
+            <x-chest-block
+                fill="linear-gradient(180deg, #ffe98a, #e0b312)"
+                band="#5c4506"
+                lock="#3c2c04"
+                radius="12px"
+                class="relative h-[68px] w-[88px] sm:h-[60px] sm:w-[76px]"
+                x-bind:class="phase === 'opening' ? 'fq-chest-opening' : 'fq-chest-idle'"
+            />
         </div>
 
-        <p class="mt-5 text-sm text-fq-text-2">{{ $openingText }}</p>
+        <div class="min-w-0 flex-1 sm:min-w-[260px]">
+            <p
+                class="font-mono-fq text-[10px] tracking-[0.24em] uppercase"
+                style="color: {{ $accent }}"
+                :class="phase === 'opening' ? 'fq-pulsing' : ''"
+            >{{ $kicker }}</p>
+
+            <h2 class="mt-[6px] font-baloo text-[22px] leading-[1.1] font-extrabold sm:text-[26px]">{{ $closedTitle }}</h2>
+
+            <p class="mt-[6px] text-[13.5px] text-fq-text-2 sm:text-sm">
+                <span x-show="phase === 'closed'">{{ $closedText }}</span>
+                <span x-show="phase === 'opening'" x-cloak>{{ $openingText }}</span>
+            </p>
+        </div>
+
+        <button
+            type="button"
+            x-show="phase === 'closed'"
+            @click="open()"
+            class="w-full shrink-0 cursor-pointer rounded-[16px] px-[26px] py-4 font-baloo text-[18px] font-extrabold transition hover:brightness-110 sm:w-auto"
+            style="background: {{ $accent }}; color: var(--fq-bg)"
+        >{{ $cta }}</button>
     </div>
 
     <div x-show="phase === 'revealed'">
         {{ $slot }}
     </div>
 
-    <template x-if="phase === 'revealed' && justOpened">
-        <div
-            x-data="{ show: true }"
-            x-init="setTimeout(() => show = false, 2800)"
-            x-show="show"
-            x-transition:enter="transition duration-300 ease-out"
-            x-transition:enter-start="opacity-0"
-            x-transition:enter-end="opacity-100"
-            x-transition:leave="transition duration-500 ease-in"
-            x-transition:leave-start="opacity-100"
-            x-transition:leave-end="opacity-0"
-            class="pointer-events-none fixed inset-0 z-[58] flex items-center justify-center px-4"
-        >
-            <div class="relative flex flex-col items-center">
-                <div
-                    class="absolute"
-                    style="top:50%; left:50%; width:420px; height:420px; border-radius:50%; transform:translate(-50%,-50%); background: radial-gradient(circle, {{ $accent }} 0%, transparent 70%); opacity:.45; filter:blur(4px); animation: fq-glow-pulse 1.6s ease-in-out infinite"
-                ></div>
-
-                <div
-                    class="relative rounded-[22px] border px-10 py-8 text-center"
-                    style="animation: fq-pop .4s ease both; background: var(--fq-sunk); border-color: {{ $accent }}; box-shadow: 0 26px 60px -20px #000"
-                >
-                    <p class="font-mono-fq text-[11px] tracking-[0.2em] uppercase" style="color: {{ $accent }}">{{ $prizeSub }}</p>
-                    <p class="mt-2 max-w-[70vw] font-baloo text-[28px] leading-tight font-extrabold" x-text="label"></p>
-                </div>
-            </div>
-        </div>
-    </template>
+    <x-prize-overlay :accent="$accent" :sub="$prizeSub" />
 </div>

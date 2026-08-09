@@ -99,9 +99,12 @@ class DailyChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
+        // Both chests are permanent slots in the loot tray now, so "shown" is
+        // about them being openable rather than present — which is exactly what
+        // their tap targets say.
         Volt::test('kid.quests')
-            ->assertSee('Daily Chest')
-            ->assertSee('Streak Chest');
+            ->assertSee("Open today's bonus chest")
+            ->assertSee('Open your streak chest');
     }
 
     public function test_the_chest_records_whether_the_quest_was_done(): void
@@ -174,7 +177,7 @@ class DailyChestTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         Volt::test('kid.quests')
-            ->assertSee('Daily Chest')
+            ->assertSee("Open today's bonus chest")
             ->call('openDailyChest')
             ->assertSuccessful();
 
@@ -183,15 +186,16 @@ class DailyChestTest extends TestCase
 
     public function test_the_milestone_track_survives_alongside_the_chest(): void
     {
-        // The chest is its own block, not an alternative to the streak panel —
-        // the milestone track is useful every day.
+        // The chest sits in the tray while the track sits in the streak card —
+        // the track is useful every day, not only when a chest is waiting.
         $kid = $this->kid(['streak' => 1]);
 
         Auth::guard('profile')->login($kid);
 
         Volt::test('kid.quests')
-            ->assertSee('Daily Chest')
-            ->assertSee('D3 · 100', false);
+            ->assertSee("Open today's bonus chest")
+            ->assertSee('Day 3')
+            ->assertSee('100 pts');
     }
 
     public function test_opening_from_the_page_exposes_the_prize_for_the_reveal(): void
@@ -246,7 +250,7 @@ class DailyChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        $component = Volt::test('kid.quests')->assertSee('Daily Chest');
+        $component = Volt::test('kid.quests')->assertSee("Open today's bonus chest");
 
         $kid->update(['pending_streak_chest' => 3]);
 
@@ -266,7 +270,7 @@ class DailyChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        $component = Volt::test('kid.quests')->assertSee('Daily Chest');
+        $component = Volt::test('kid.quests')->assertSee("Open today's bonus chest");
 
         // A second tab (or a back-button visit) gets there first.
         $this->chests()->open($kid->refresh());
@@ -277,10 +281,13 @@ class DailyChestTest extends TestCase
         $this->assertFalse($component->get('dailyChestAvailable'));
         $this->assertSame(1, DailyChest::where('profile_id', $kid->id)->count());
 
-        $component->assertDontSee('Daily Chest');
+        // The slot stays — it's a fixture of the tray — but it stops offering.
+        $component
+            ->assertSee('Bonus chest')
+            ->assertDontSee("Open today's bonus chest");
     }
 
-    public function test_the_quests_page_hides_the_chest_once_opened(): void
+    public function test_the_quests_page_stops_offering_the_chest_once_opened(): void
     {
         $kid = $this->kid();
 
@@ -288,6 +295,9 @@ class DailyChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.quests')->assertDontSee('Daily Chest');
+        Volt::test('kid.quests')
+            ->assertSee('Bonus chest')
+            ->assertSee('Back tomorrow')
+            ->assertDontSee("Open today's bonus chest");
     }
 }

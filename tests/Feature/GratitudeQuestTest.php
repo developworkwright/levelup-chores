@@ -178,13 +178,16 @@ class GratitudeQuestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
+        // The card keeps one title in both states now, so the button is what
+        // says whether there is still something to fill in.
         Volt::test('kid.quests')
-            ->assertSee('Name three good things')
+            ->assertSee('Hand it in')
             ->set('gratitude', $this->threeThings())
             ->call('logGratitude')
             ->assertDispatched('celebrate')
             ->assertSee('Today you were grateful for')
             ->assertSee('Pancakes')
+            ->assertDontSee('Hand it in')
             // Boxes emptied, so a re-render doesn't hand back a filled-in form
             // for a quest that's finished.
             ->assertSet('gratitude', ['', '', ''])
@@ -205,7 +208,7 @@ class GratitudeQuestTest extends TestCase
             ->assertNotDispatched('celebrate')
             ->assertSet('gratitudeMessage', 'Fill in all three before you hand it in.')
             // Still fillable — a refusal must not eat what they already typed.
-            ->assertSee('Name three good things');
+            ->assertSee('Hand it in');
 
         $this->assertSame(0, $kid->refresh()->bonus_tickets);
     }

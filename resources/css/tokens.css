@@ -100,6 +100,34 @@
     --fq-ticket-label: #a3934f;
 
     /*
+     * The badges tile beside it — same shape, violet instead of gold, because
+     * it's the other header tile that's a door rather than a readout.
+     */
+    --fq-badge-line: rgba(201, 160, 255, 0.5);
+    --fq-badge-bg: linear-gradient(180deg, #2a1150, #150c26);
+
+    /*
+     * The loot tray's three slots. Each gets its own colour so the row reads as
+     * three different things at a glance rather than as one repeated tile: the
+     * bonus chest is the only cold colour on the page, the streak chest borrows
+     * the streak's ruby, and the wheel keeps its violet.
+     */
+    --fq-chest-blue: #5cc8ff;
+    --fq-chest-blue-line: #2f6f9e;
+    --fq-chest-blue-bg: linear-gradient(180deg, #0a2436, #0e0719);
+    --fq-chest-blue-fill: linear-gradient(180deg, #8fe0ff, #2f6f9e);
+    --fq-chest-streak-fill: linear-gradient(180deg, #7a3346, #3b0c1d);
+    /*
+     * The streak track draws its milestones as chests rather than numbered
+     * circles, so the payout curve is legible before the numbers are. Three
+     * states: one you've opened, the one you're working towards — lit, because
+     * it's the prize in front of you — and the ones still locked away.
+     */
+    --fq-chest-streak-next: linear-gradient(180deg, #a8455f, #5c1b30);
+    --fq-chest-locked-fill: linear-gradient(180deg, #2f2740, #1b1130);
+    --fq-tray-bg: linear-gradient(180deg, #1a1030, #0e0719);
+
+    /*
      * Perks and the streak track read as pressed metal — deliberately outside
      * the purple so a ticket never looks like a point.
      */
@@ -247,6 +275,9 @@
     --color-fq-track: var(--fq-track);
     --color-fq-ticket-line: var(--fq-ticket-line);
     --color-fq-ticket-label: var(--fq-ticket-label);
+    --color-fq-badge-line: var(--fq-badge-line);
+    --color-fq-chest-blue: var(--fq-chest-blue);
+    --color-fq-chest-blue-line: var(--fq-chest-blue-line);
     --color-fq-steel-line: var(--fq-steel-line);
     --color-fq-steel-panel: var(--fq-steel-panel);
     --color-fq-steel-text: var(--fq-steel-text);

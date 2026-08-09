@@ -19,19 +19,33 @@ Covers daily-quest streak counting and milestone bonuses, owned by `app/Services
 
 Logic: look up whether *yesterday's* `DailyQuest` (by `quest_date`) for this profile has `completed_at` set. If so, `streak = streak + 1`; otherwise the streak resets to `1` (not `0` — completing today's quest always counts as at least a 1-day streak).
 
-`ChoreService::STREAK_BONUSES` maps milestone day → dollar bonus:
+`ChoreService::STREAK_BONUSES` maps milestone day → dollar bonus for **one lap** of the track:
 
 ```php
 3 => 1, 5 => 3, 7 => 5, 14 => 15, 30 => 40
 ```
 
-If the new streak value is an exact key in that array, the dollar amount is converted to points (`$bonusDollars * $household->points_per_dollar`) and credited **immediately** via `LedgerService::record()` (see [[points-ledger]]) — the points land in the balance right away, they are not held back pending the chest animation.
+### The track laps — never price a day off STREAK_BONUSES directly
+
+The chests repeat every `STREAK_CYCLE_DAYS` (30) rather than stopping at the last key. Day 30 used to be a dead end, which is the worst possible moment for the app to go quiet on a kid.
+
+**`streakBonusOn(int $day): ?int` is the only correct way to price a milestone day.** `STREAK_BONUSES[$day]` is right only on the first lap and silently misses after it — that bug pays a day-33 chest nothing.
+
+Every lap after the first pays `STREAK_REPEAT_MULTIPLIER` (2) times the base, **flat, not compounding**: day 33, day 63 and day 333 all pay $2; day 60, day 90 and day 360 all pay $80. Compounding is the obvious reading of "bigger each lap" and it is a money bug — points are backed by `points_per_dollar`, so doubling per lap reaches $81,920 on a single chest inside a year.
+
+A day landing exactly on a boundary belongs to the lap *behind* it: day 30 closes lap 1 and pays the base $40, not $80.
+
+Milestone days stay absolute across laps (33, 35, 60…). That is what lets `streak_milestone_paid_through` stay a plain high-water mark, and why `refreshStreak()` walks day by day up from that mark instead of iterating a fixed map.
+
+`streakTrackFor(Profile)` returns `['lap' => int, 'milestones' => [['day', 'dollars', 'points', 'reached'], …]]` — the five chests of the lap the kid is on, which is all the Quests page ever draws. The lap turns over when the closing chest is **opened**, not when the streak ticks past the boundary: swapping the track to days 33-60 while the day-30 chest sits unopened would replace the reward out from under the moment that earned it.
+
+If a day is a milestone, the dollar amount is converted to points (`$bonusDollars * $household->points_per_dollar`) and credited **immediately** via `LedgerService::record()` (see [[points-ledger]]) — the points land in the balance right away, they are not held back pending the chest animation.
 
 ## The chest is a reveal gate, not a payment gate
 
 Only the *visual reveal* is deferred: `pending_streak_chest` is set to the milestone day, and stays set until the kid calls `openStreakChest()` client-side, which clears the flag and returns `['day' => ..., 'dollars' => ...]` for the celebration UI. The points were already spent into the ledger the moment the milestone was hit — `openStreakChest()` never touches points, only the reveal flag. If a kid never opens the chest, the points are still theirs; only the animation is pending.
 
-`nextStreakMilestone(Profile)` returns the smallest key in `STREAK_BONUSES` still greater than the profile's current streak, or `null` past day 30 — used for "X days to your next bonus" UI copy. There's no interpolation between milestones; days between keys (e.g. day 4, day 10) earn no bonus.
+`nextStreakMilestone(Profile): int` returns the smallest milestone day still ahead of the profile's current streak — used for "X days to your next bonus" UI copy. It is **non-nullable**: the track laps, so there is always another chest within 30 days. It used to return null past day 30, and the UI still carries the shape of that (an "all unlocked" branch would now be dead code — don't add one back). There's no interpolation between milestones; days between keys (e.g. day 4, day 10) earn no bonus.
 
 ## The cached streak expires on its own
 

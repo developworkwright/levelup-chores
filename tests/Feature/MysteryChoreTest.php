@@ -492,9 +492,9 @@ class MysteryChoreTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         Volt::test('kid.quests')
-            ->assertSee('Still not completed')
+            ->assertSee("One of today's chores is worth a bonus", false)
             ->assertSee('Sweep the porch')
-            ->assertSeeInOrder(['Sweep the porch', '+100 pts'])
+            ->assertSeeInOrder(['Sweep the porch', '+100'])
             ->assertSee('+'.ChoreService::MYSTERY_BONUS_POINTS.' pts');
     }
 
@@ -528,9 +528,9 @@ class MysteryChoreTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         Volt::test('kid.quests')
-            ->assertSee('Still not completed')
+            ->assertSee("One of today's chores is worth a bonus", false)
             ->assertDontSee('You found it')
-            ->assertDontSee('Scrub the tub!', escape: false);
+            ->assertDontSee('found it — Scrub the tub', escape: false);
     }
 
     public function test_the_quests_page_reveals_who_completed_it_once_it_is_approved(): void
@@ -545,7 +545,7 @@ class MysteryChoreTest extends TestCase
 
         // The secret is spent once it's found, so the losers are told which
         // chore it was too.
-        Volt::test('kid.quests')->assertSee('Completed by Winner Kid — Scrub the tub!', escape: false);
+        Volt::test('kid.quests')->assertSee('Winner Kid found it — Scrub the tub', escape: false);
     }
 
     public function test_the_winner_sees_their_own_congratulations_not_better_luck_next_time(): void
@@ -574,7 +574,7 @@ class MysteryChoreTest extends TestCase
 
         // A kid with several claims waiting on a parent can't otherwise tell
         // which one carried the bonus.
-        Volt::test('kid.quests')->assertSee('You found it — Scrub the tub!', escape: false);
+        Volt::test('kid.quests')->assertSee('You found it — Scrub the tub', escape: false);
     }
 
     public function test_the_win_is_celebrated_on_the_kids_screen_the_next_time_they_look(): void

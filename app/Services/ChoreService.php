@@ -21,12 +21,20 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
+use LogicException;
 use RuntimeException;
 use Throwable;
 
 class ChoreService
 {
-    /** Streak-day milestone => dollar bonus, credited the moment a kid hits it. */
+    /**
+     * Streak-day milestone => dollar bonus, credited the moment a kid hits it.
+     *
+     * This is one lap. The chests repeat every {@see self::STREAK_CYCLE_DAYS}
+     * days rather than stopping at the last one — a kid who reached day 30 used
+     * to find the track had simply run out, which is the worst possible moment
+     * to stop paying attention to them.
+     */
     public const STREAK_BONUSES = [
         3 => 1,
         5 => 3,
@@ -34,6 +42,20 @@ class ChoreService
         14 => 15,
         30 => 40,
     ];
+
+    /** Length of one lap of the chest track — the last milestone in the map. */
+    public const STREAK_CYCLE_DAYS = 30;
+
+    /**
+     * What every lap after the first pays, against the base map above.
+     *
+     * Flat rather than compounding, deliberately. Doubling per lap is the
+     * obvious reading of "the chests get bigger each time round" and it is a
+     * money bug: points are backed by `points_per_dollar`, so a year-long
+     * streak would reach five figures on a single chest. One step up, held
+     * there, keeps the day-33 "it got bigger" moment without the tail.
+     */
+    public const STREAK_REPEAT_MULTIPLIER = 2;
 
     /** Bonus paid on top of whatever chore gets picked as the day's mystery. */
     public const MYSTERY_BONUS_POINTS = 500;
@@ -362,7 +384,17 @@ class ChoreService
      */
     public function mysteryFinderFor(Household $household): ?Profile
     {
-        return $this->mysteryOn($household, HouseholdClock::for($household)->today())?->foundBy;
+        return $this->mysteryTodayFor($household)?->foundBy;
+    }
+
+    /**
+     * Today's draw itself, for callers that need more than who won it — the
+     * quest page stamps the card with the moment it was found. Never draws one:
+     * see mysteryOn(). A page that wants the chore calls mysteryChoreFor().
+     */
+    public function mysteryTodayFor(Household $household): ?DailyMystery
+    {
+        return $this->mysteryOn($household, HouseholdClock::for($household)->today());
     }
 
     /**
@@ -961,10 +993,14 @@ class ChoreService
 
         $reached = null;
 
-        foreach (self::STREAK_BONUSES as $day => $bonusDollars) {
-            // Only milestones never paid before pay out, so recomputing — or
-            // repairing — can never double-credit one already banked.
-            if ($day <= $paidThrough || $day > $profile->streak) {
+        // Walked day by day rather than over a fixed map, because the track
+        // repeats and the milestone days are unbounded. The high-water mark is
+        // still what gates a payout, so recomputing — or repairing — can never
+        // double-credit one already banked.
+        for ($day = $paidThrough + 1; $day <= $profile->streak; $day++) {
+            $bonusDollars = $this->streakBonusOn($day);
+
+            if ($bonusDollars === null) {
                 continue;
             }
 
@@ -1082,19 +1118,105 @@ class ChoreService
         $profile->pending_streak_chest = null;
         $profile->save();
 
-        return ['day' => $day, 'dollars' => self::STREAK_BONUSES[$day] ?? 0];
+        return ['day' => $day, 'dollars' => $this->streakBonusOn($day) ?? 0];
     }
 
-    /** Smallest streak-bonus milestone day still ahead of the profile's current streak. */
-    public function nextStreakMilestone(Profile $profile): ?int
+    /**
+     * The dollar bonus paid for reaching exactly this streak day, or null on a
+     * day that isn't a milestone.
+     *
+     * Days are absolute across every lap — day 33 is the second lap's first
+     * chest — which is what lets `streak_milestone_paid_through` stay a plain
+     * high-water mark and keep doing its job unchanged.
+     */
+    public function streakBonusOn(int $day): ?int
     {
-        foreach (array_keys(self::STREAK_BONUSES) as $day) {
-            if ($day > $profile->streak) {
+        if ($day < 1) {
+            return null;
+        }
+
+        // Day 30 closes the first lap rather than opening the second, so a day
+        // landing exactly on the boundary belongs to the lap behind it.
+        $offset = $day % self::STREAK_CYCLE_DAYS;
+        $lap = $offset === 0
+            ? intdiv($day, self::STREAK_CYCLE_DAYS)
+            : intdiv($day, self::STREAK_CYCLE_DAYS) + 1;
+
+        $offset = $offset === 0 ? self::STREAK_CYCLE_DAYS : $offset;
+
+        $base = self::STREAK_BONUSES[$offset] ?? null;
+
+        if ($base === null) {
+            return null;
+        }
+
+        return $lap === 1 ? $base : $base * self::STREAK_REPEAT_MULTIPLIER;
+    }
+
+    /**
+     * Smallest streak-bonus milestone day still ahead of the profile's current
+     * streak. Never null now that the track repeats — there is always another
+     * chest inside the next lap.
+     */
+    public function nextStreakMilestone(Profile $profile): int
+    {
+        $streak = max(0, $profile->streak);
+
+        for ($day = $streak + 1; $day <= $streak + self::STREAK_CYCLE_DAYS; $day++) {
+            if ($this->streakBonusOn($day) !== null) {
                 return $day;
             }
         }
 
-        return null;
+        // Unreachable while the base map has any entry in it, but a silent
+        // wrong answer here would show up as a nonsense number on the track.
+        throw new LogicException('No streak milestone found within a full cycle.');
+    }
+
+    /**
+     * The lap of the chest track this kid is currently working through, and the
+     * five milestones on it.
+     *
+     * Only the current lap is ever shown. The track is otherwise endless, and a
+     * rail of fifteen chests says far less about "keep going" than five chests
+     * with the next one lit.
+     *
+     * The lap turns over when the *chest* is opened rather than when the streak
+     * ticks past the boundary: hitting day 30 and finding the track already
+     * showing days 33-60 would swap the reward out from under the moment that
+     * earned it.
+     *
+     * @return array{lap: int, milestones: array<int, array{day: int, dollars: int, points: int, reached: bool}>}
+     */
+    public function streakTrackFor(Profile $profile): array
+    {
+        $streak = max(0, $profile->streak);
+        $lap = intdiv($streak, self::STREAK_CYCLE_DAYS) + 1;
+
+        $closingDay = ($lap - 1) * self::STREAK_CYCLE_DAYS;
+
+        if ($lap > 1 && $profile->pending_streak_chest === $closingDay) {
+            $lap--;
+        }
+
+        $pointsPerDollar = $profile->household->points_per_dollar;
+        $offsetToDay = ($lap - 1) * self::STREAK_CYCLE_DAYS;
+
+        $milestones = [];
+
+        foreach (array_keys(self::STREAK_BONUSES) as $offset) {
+            $day = $offsetToDay + $offset;
+            $dollars = (int) $this->streakBonusOn($day);
+
+            $milestones[] = [
+                'day' => $day,
+                'dollars' => $dollars,
+                'points' => $dollars * $pointsPerDollar,
+                'reached' => $streak >= $day,
+            ];
+        }
+
+        return ['lap' => $lap, 'milestones' => $milestones];
     }
 
     /**

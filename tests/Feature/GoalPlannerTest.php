@@ -315,14 +315,19 @@ class GoalPlannerTest extends TestCase
         $this->assertSame([0], $contributors->pluck('percent')->all());
     }
 
-    public function test_the_quests_page_shows_who_is_pulling_hardest(): void
+    /**
+     * The standings moved here with the Loot Tray redesign: the Quests page now
+     * carries the goal as a boss strip and nothing else, so the breakdown of who
+     * put what in belongs to the page built for planning it.
+     */
+    public function test_the_goal_page_shows_who_is_pulling_hardest(): void
     {
         $household = Household::factory()->create(['goal_target' => 1000, 'goal_now' => 400]);
         Profile::factory()->for($household)->create(['name' => 'Nova', 'goal_contribution' => 300]);
         $this->loginKid($household, ['name' => 'Rex', 'goal_contribution' => 100]);
         Chore::factory()->for($household)->create();
 
-        $html = Volt::test('kid.quests')->assertOk()->assertSee('75%')->assertSee('25%')->html();
+        $html = Volt::test('kid.goal')->assertOk()->assertSee('75%')->assertSee('25%')->html();
 
         $this->assertStringContainsString('pulling hardest', $html);
         $this->assertLessThan(
@@ -352,7 +357,7 @@ class GoalPlannerTest extends TestCase
             ->assertOk()
             ->assertSee('Target')
             ->assertSee('100 / 300 PTS')
-            ->assertSee('200 more points to hit');
+            ->assertSee('200 TO GO');
     }
 
     public function test_a_rejected_chore_drops_back_out_of_todays_progress(): void

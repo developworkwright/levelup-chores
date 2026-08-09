@@ -19,6 +19,7 @@ use App\Models\ChoreCompletion;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Notifications\BountyUpdate;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
@@ -156,6 +157,68 @@ class BountyService
         $this->announce($bounty);
 
         return $bounty;
+    }
+
+    /**
+     * Jobs stuck behind this kid: work they took and haven't reported, and work
+     * reported to them that they haven't paid for.
+     *
+     * Counted rather than merely "jobs I'm in", because the number is a nudge
+     * and a deal waiting on the *other* kid is not something this one can act
+     * on. Both sides come off the kind rather than a column — see
+     * {@see BountyKind} — so a wanted job counts its taker and an offered one
+     * counts its poster.
+     *
+     * Lives here rather than in the shell that first needed it, because the
+     * Quests page shows the same number on its bounty board and two copies of
+     * this would be two chances to disagree about what "waiting" means.
+     */
+    public function waitingOn(Profile $profile): int
+    {
+        return Bounty::where('household_id', $profile->household_id)
+            ->where(fn ($query) => $query
+                ->where(fn ($q) => $q
+                    ->where('status', BountyStatus::Claimed)
+                    ->where(fn ($w) => $w
+                        ->where(fn ($wanted) => $wanted
+                            ->where('kind', BountyKind::Wanted)
+                            ->where('claimed_by_profile_id', $profile->id))
+                        ->orWhere(fn ($offered) => $offered
+                            ->where('kind', BountyKind::Offered)
+                            ->where('poster_profile_id', $profile->id))))
+                ->orWhere(fn ($q) => $q
+                    ->where('status', BountyStatus::Done)
+                    ->where(fn ($p) => $p
+                        ->where(fn ($wanted) => $wanted
+                            ->where('kind', BountyKind::Wanted)
+                            ->where('poster_profile_id', $profile->id))
+                        ->orWhere(fn ($offered) => $offered
+                            ->where('kind', BountyKind::Offered)
+                            ->where('claimed_by_profile_id', $profile->id)))))
+            ->count();
+    }
+
+    /**
+     * Jobs this kid could take on right now — open, in time, and not aimed at
+     * somebody else.
+     *
+     * No sweep first, deliberately: `takeable()` already excludes anything past
+     * its deadline, so a lapsed job can't render here whether or not the sweep
+     * has reached it. The Trades page owns the settling, because that is where
+     * a kid goes when they care what happened to a deal.
+     *
+     * @return Collection<int, Bounty>
+     */
+    public function boardFor(Profile $profile, int $limit = 3): Collection
+    {
+        return Bounty::where('household_id', $profile->household_id)
+            ->takeable()
+            ->with(['poster', 'target'])
+            ->oldest('expires_at')
+            ->get()
+            ->filter(fn (Bounty $job) => $job->isOpenTo($profile) && $job->isVisibleTo($profile))
+            ->take($limit)
+            ->values();
     }
 
     /**

@@ -1,5 +1,5 @@
-{{-- Who's put the most into the family goal. Shared by the Quests sidebar and
-     the Goal Planner so the two can't drift into telling different stories
+{{-- Who's put the most into the family goal. Shared by the Goal Planner and the
+     parent standings so the two can't drift into telling different stories
      about the same numbers.
 
      `contributors` is what ChoreService::goalContributors() returns. --}}

@@ -34,6 +34,9 @@ class DailyChestRewardTest extends TestCase
 
     private int $ticketsBeforeWin = 0;
 
+    /** Watermark for telling the winning open's credits from everything before. */
+    private int $lastEntryIdBeforeWin = 0;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -54,7 +57,20 @@ class DailyChestRewardTest extends TestCase
     {
         $chest = $this->openUntilTickets();
 
-        $this->assertSame($this->ticketsBeforeWin + $chest->reward_amount, $this->kid->refresh()->bonus_tickets);
+        // Everything the winning open credited that wasn't the chest itself.
+        // A week of opening chests unlocks a badge, and a badge mints a ticket
+        // of its own — so on the run where the badge and the ticket roll land
+        // together, "before + reward" is short by the badge's ticket and the
+        // test failed on a chest that had paid out perfectly correctly.
+        $alongside = BonusTicketEntry::where('profile_id', $this->kid->id)
+            ->where('id', '>', $this->lastEntryIdBeforeWin)
+            ->where('description', '!=', 'Daily chest')
+            ->sum('amount');
+
+        $this->assertSame(
+            $this->ticketsBeforeWin + $chest->reward_amount + $alongside,
+            $this->kid->refresh()->bonus_tickets,
+        );
     }
 
     public function test_a_ticket_chest_writes_a_matching_ledger_entry(): void
@@ -103,15 +119,20 @@ class DailyChestRewardTest extends TestCase
     }
 
     /**
-     * Opens one chest a day until the roll lands on tickets, recording the
-     * balance the winning open started from. Read rather than assumed to be
-     * zero, because a week of opening chests unlocks a badge, and a badge
-     * mints a ticket of its own.
+     * Opens one chest a day until the roll lands on tickets, recording both the
+     * balance the winning open started from and the last ticket entry that
+     * existed before it.
+     *
+     * Neither is assumed: a week of opening chests unlocks a badge, and a badge
+     * mints a ticket of its own — which can land on the same open as the ticket
+     * roll. The balance covers every earlier day's badges, the watermark covers
+     * one landing on this one.
      */
     private function openUntilTickets(): DailyChest
     {
         foreach (range(1, self::MAX_DAYS) as $ignored) {
             $this->ticketsBeforeWin = $this->kid->refresh()->bonus_tickets;
+            $this->lastEntryIdBeforeWin = (int) BonusTicketEntry::where('profile_id', $this->kid->id)->max('id');
             $chest = app(ChestService::class)->open($this->kid);
 
             if ($chest?->reward_kind === ChestService::KIND_TICKETS) {

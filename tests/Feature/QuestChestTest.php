@@ -47,9 +47,12 @@ class QuestChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
+        // The streak chest lives in the loot tray now, so "ready" is the slot's
+        // status line rather than a card of its own — see the Loot Tray handoff
+        // for why the extras were collected into one row.
         Volt::test('kid.quests')
-            ->assertSee('Streak Chest')
-            ->assertSee('Your streak paid off');
+            ->assertSee('Streak chest')
+            ->assertSee('Ready to open');
     }
 
     public function test_the_streak_chest_shows_the_bonus_in_points_not_dollars(): void
@@ -77,9 +80,12 @@ class QuestChestTest extends TestCase
 
         // Day 3 pays $1 → 100 pts, day 30 pays $40 → 4000 pts.
         Volt::test('kid.quests')
-            ->assertSee('D3 · 100', false)
-            ->assertSee('D30 · 4000', false)
-            ->assertDontSee('D3 · $1', false);
+            ->assertSee('Day 3')
+            ->assertSee('100 pts')
+            ->assertSee('Day 30')
+            ->assertSee('4,000 pts')
+            ->assertDontSee('$1 ')
+            ->assertDontSee('$40 ');
     }
 
     public function test_opening_the_streak_chest_from_the_quests_page_clears_it(): void
@@ -141,7 +147,7 @@ class QuestChestTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         Volt::test('kid.quests')
-            ->assertSee('Tap the chest to reveal', false)
+            ->assertSee("Today's main quest is inside")
             ->assertDontSee('Cleared');
     }
 
