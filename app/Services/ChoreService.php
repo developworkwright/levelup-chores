@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\ChoreCadence;
 use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
+use App\Enums\MonsterTier;
 use App\Enums\ProfileRole;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
@@ -82,7 +83,7 @@ class ChoreService
         private SpinService $spin,
         private BadgeService $badges,
         private TicketService $tickets,
-        private BossService $boss,
+        private MonsterService $monsters,
     ) {}
 
     public function questFor(Profile $profile): DailyQuest
@@ -789,9 +790,14 @@ class ChoreService
      * points_awarded is what the kid has earned so far, and until a parent has
      * signed the work off that is the chore's own points and nothing more.
      */
-    public function claim(Profile $profile, Chore $chore): ChoreCompletion
+    /**
+     * @param  ?MonsterTier  $target  which of the three monsters this is aimed at,
+     *                                or null to let the arena pick the obvious one
+     */
+    public function claim(Profile $profile, Chore $chore, ?MonsterTier $target = null): ChoreCompletion
     {
         $multiplier = $this->spin->multiplierFor($profile, $chore);
+        $aim = $this->aimFor($profile->household, $chore, $target);
 
         // Not for the bonus — for the assignment. The draw excludes chores that
         // already have a claimant, so a day whose first mystery lookup happened
@@ -806,6 +812,7 @@ class ChoreService
             'status' => CompletionStatus::Pending,
             'points_awarded' => $chore->points * $multiplier,
             'submitted_at' => now(),
+            ...$aim,
         ]);
 
         // First come, first served: the chore is spoken for the moment it's
@@ -846,11 +853,42 @@ class ChoreService
     }
 
     /**
+     * What this claim is aiming at, settled here at the moment the kid commits
+     * rather than later when a parent gets round to it.
+     *
+     * Both halves are deliberately frozen. The tier is the kid's answer to
+     * "which of the three", and the weak point is the reason they may have
+     * picked it — so a monster beaten by a sibling this afternoon, or a weak
+     * chore a parent swaps this evening, must not reach back and change what
+     * this was worth when it was chosen. Same rule {@see self::awardMysteryBonus()}
+     * follows for the same reason.
+     *
+     * @return array{target_tier: ?MonsterTier, struck_weak_point: bool}
+     */
+    private function aimFor(Household $household, Chore $chore, ?MonsterTier $target): array
+    {
+        // Rolls this week's weak points if nobody has looked yet, so the first
+        // kid through the door plays by the same board as the last.
+        $live = $this->monsters->rotateWeaknesses($household);
+
+        $tier = $target ?? $this->monsters->defaultTier($household);
+        $monster = $tier !== null ? $live->get($tier->value) : null;
+
+        return [
+            // Kept even when that tier is standing empty: approval spills the
+            // hit up to whatever *is* alive, and the kid's choice is a better
+            // record of intent than the tier we'd substitute for it here.
+            'target_tier' => $tier,
+            'struck_weak_point' => $monster !== null && $this->monsters->isWeakPoint($monster, $chore),
+        ];
+    }
+
+    /**
      * Claiming (not approval) is what unlocks the rest of the board —
      * deliberate, so a kid isn't blocked by a parent's response time. The
      * streak is not touched here; it only moves once a parent approves.
      */
-    public function claimQuest(Profile $profile): DailyQuest
+    public function claimQuest(Profile $profile, ?MonsterTier $target = null): DailyQuest
     {
         $quest = $this->questFor($profile);
 
@@ -858,7 +896,7 @@ class ChoreService
             $quest->completed_at = now();
             $quest->save();
 
-            $this->claim($profile, $quest->chore);
+            $this->claim($profile, $quest->chore, $target);
         }
 
         return $quest;
@@ -1283,37 +1321,6 @@ class ChoreService
         return $points / $days;
     }
 
-    /**
-     * Who has put what into the current family goal, biggest first.
-     *
-     * Shares are of what the kids have banked between them rather than of
-     * goal_target, so a parent nudging goal_now by hand can't hand everyone a
-     * smaller slice than they earned. Kids who haven't contributed yet stay on
-     * the board at zero — the point of showing this is that it's a race.
-     *
-     * @return Collection<int, array{profile: Profile, points: int, percent: int, isLeader: bool}>
-     */
-    public function goalContributors(Household $household): Collection
-    {
-        $kids = $household->profiles()
-            ->where('role', ProfileRole::Kid)
-            ->orderByDesc('goal_contribution')
-            ->orderBy('name')
-            ->get();
-
-        $total = (int) $kids->sum('goal_contribution');
-        $best = (int) $kids->max('goal_contribution');
-
-        return $kids->map(fn (Profile $kid) => [
-            'profile' => $kid,
-            'points' => (int) $kid->goal_contribution,
-            'percent' => $total > 0 ? (int) round($kid->goal_contribution / $total * 100) : 0,
-            // Ties share the crown rather than letting the sort order pick a
-            // winner out of two identical numbers.
-            'isLeader' => $best > 0 && $kid->goal_contribution === $best,
-        ]);
-    }
-
     public function approve(ChoreCompletion $completion, Profile $approver): void
     {
         // The approvals screen only ever lists pending items, so this is a
@@ -1345,30 +1352,14 @@ class ChoreService
             $completion,
         );
 
-        // Only what actually lands on the family goal is credited to the kid,
-        // so the contributions always add back up to goal_now — a leaderboard
-        // totalling more than the bar it sits under reads as a bug.
-        $credited = max(0, min(
-            $completion->points_awarded,
-            $household->goal_target - $household->goal_now,
-        ));
-
         $profile->xp += self::XP_PER_CHORE;
-        $profile->goal_contribution += $credited;
         $profile->save();
 
-        $wasReached = $this->goalIsReached($household);
-        $household->goal_now = min($household->goal_target, $household->goal_now + $credited);
-        $household->save();
-
-        if (! $wasReached && $this->goalIsReached($household)) {
-            // Banked before the celebration is queued: the trophy row is the
-            // record of the battle, and the celebration is only the telling of
-            // it. The snapshot it takes also has to happen while every kid's
-            // goal_contribution is still standing.
-            $this->boss->recordDefeat($household, $profile);
-            $this->flagGoalCelebration($household, $profile);
-        }
+        // The whole of the family-goal side of an approval. Damage, the
+        // leaderboard under each bar, the kill and the cards announcing it all
+        // come out of this one call — there is no second tally kept alongside
+        // it, which is the point.
+        $this->monsters->strike($household, $completion);
 
         // Before badges, not after — the streak_3/7/14 badges read the
         // profile's streak, so it has to be current by the time they run.
@@ -1428,48 +1419,6 @@ class ChoreService
         // until they next open the app. Saved by approve() along with the XP
         // and goal contribution it's about to write.
         $profile->pending_mystery_celebration = $completion->chore->name;
-    }
-
-    private function goalIsReached(Household $household): bool
-    {
-        return $household->goal_target > 0 && $household->goal_now >= $household->goal_target;
-    }
-
-    /**
-     * Queues the family-goal celebration for every kid in the household.
-     *
-     * The goal is crossed by a parent tapping approve, which is a screen no kid
-     * is looking at — so the moment has to wait on the profile until each of
-     * them next opens the app. Signing out must not lose it, which is why this
-     * is a column and not the session.
-     *
-     * The goal's name is stored rather than a flag: a parent who resets and
-     * renames the goal before a kid logs in shouldn't have the new one
-     * announced as already finished. The monster's name is stored for the same
-     * reason — a rotated skin must not rename a kill that already happened.
-     *
-     * The finisher is stored as the word the kid reading it should see — "You"
-     * on the profile that landed the blow, their name on everyone else's. Both
-     * read the same sentence ("... landed the final blow"), which is cheaper
-     * and more honest than storing an id and having the view work out whether
-     * it is looking at itself: two kids can share a name, ids can be deleted,
-     * and neither problem exists if the row already says what to print.
-     */
-    private function flagGoalCelebration(Household $household, Profile $finisher): void
-    {
-        $shared = [
-            'pending_goal_celebration' => $household->goal_name ?: 'Goal reached!',
-            'pending_boss_name' => $this->boss->skinFor($household)->label(),
-        ];
-
-        $kids = fn () => Profile::where('household_id', $household->id)
-            ->where('role', ProfileRole::Kid);
-
-        $kids()->whereKeyNot($finisher->id)
-            ->update([...$shared, 'pending_goal_finisher' => $finisher->name]);
-
-        $kids()->whereKey($finisher->id)
-            ->update([...$shared, 'pending_goal_finisher' => 'You']);
     }
 
     public function sendBack(ChoreCompletion $completion, Profile $approver): void

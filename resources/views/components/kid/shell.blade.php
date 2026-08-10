@@ -153,56 +153,56 @@
         $markers['pending_mystery_celebration'] = null;
     }
 
-    // Queued by ChoreService the moment a parent's approval crossed the goal —
-    // which is why it survives the kid being signed out at the time.
+    // Every monster that has fallen since this kid last looked. A list, because
+    // one chore can finish two off at once — its overkill rolling up onto the
+    // tier above and killing that too — and because a kid can be days late to
+    // any of it.
     //
-    // The boss name and the finisher were stamped alongside it, so a parent who
-    // starts the next goal (rotating the monster and zeroing the bar) before a
-    // kid logs in can't rewrite whose kill this was. Both are null on anything
-    // queued before the boss battle existed, which is why the card still knows
-    // how to announce a plain family goal.
-    if ($profile->pending_goal_celebration !== null) {
-        $boss = $profile->pending_boss_name;
-        $finisher = $profile->pending_goal_finisher;
+    // Everything the card says was stamped at the kill, not looked up now: by
+    // the time a kid reads this a parent has very likely stood the next monster
+    // up at that tier, and asking the arena who died would name the wrong one.
+    foreach ($profile->pending_monster_kills ?? [] as $kill) {
+        $blow = $kill['finisher'] ? $kill['finisher'].' landed the final blow' : 'Everyone pulled together';
 
-        // The monster is the headline, but the goal is the reason anyone was
-        // fighting it — the card names both, or beating Gnash reads as its own
-        // reward rather than as pizza night.
-        $blow = $finisher ? $finisher.' landed the final blow' : 'Everyone pulled together';
+        // What this kid personally walked away with, and why. Named rather than
+        // just totalled: "+5 tickets" alone reads as a number the app decided
+        // on, while "final blow · most damage" is the reason they earned it and
+        // the thing worth telling a sibling about.
+        $why = collect([
+            ($kill['finisherBonus'] ?? false) ? 'final blow' : null,
+            ($kill['topDamageBonus'] ?? false) ? 'most damage' : null,
+        ])->filter();
 
-        // Recovered from the name rather than read off the household, which has
-        // very likely rotated to the next monster by now. The knockout is gated
-        // on it rather than on the name: a monster renamed since the defeat was
-        // queued has no artwork to find, and the set piece is mostly artwork —
-        // without it the card would open on an empty gap where a body should
-        // be. It falls back to the plain goal celebration, which still says
-        // everything true.
-        $skin = App\Enums\BossSkin::fromLabel($boss);
+        $payout = ($kill['tickets'] ?? 0) > 0
+            ? $tickets($kill['tickets']).($why->isNotEmpty() ? ' · '.$why->implode(' · ') : '')
+            : null;
 
         $quietRewards->push([
-            'message' => $boss ? $boss.' is down!' : 'Family goal reached!',
+            'message' => $kill['name'].' is down!',
             // The rarest thing that happens in the app, and the only one the
             // whole household worked on — so it gets the tier nothing else
             // uses, and shells going off across the screen rather than one
             // burst.
             'tier' => 'epic',
             'motion' => 'fireworks',
-            'sound' => $boss ? 'impact' : 'chime',
-            'hero' => $skin ? 'boss' : null,
+            'sound' => 'impact',
+            'hero' => 'boss',
             'card' => [
                 'accent' => 'var(--fq-lime)',
-                'sub' => $boss ? 'Boss Defeated' : 'Family Goal',
-                'label' => $boss ?: $profile->pending_goal_celebration,
-                'note' => $boss
-                    ? $blow.' · '.$profile->pending_goal_celebration
-                    : $blow,
-                'skin' => $skin?->value,
+                'sub' => $kill['tier'].' Defeated',
+                'label' => $kill['name'],
+                // The monster is the headline, the reward is why anyone was
+                // fighting it, and the tickets are what this particular kid got
+                // out of it — beating Gnash otherwise reads as its own prize
+                // rather than as ice cream.
+                'note' => collect([$blow, $kill['reward'], $payout])->filter()->implode(' · '),
+                'skin' => $kill['skin'],
             ],
         ]);
+    }
 
-        $markers['pending_goal_celebration'] = null;
-        $markers['pending_goal_finisher'] = null;
-        $markers['pending_boss_name'] = null;
+    if ($profile->pending_monster_kills) {
+        $markers['pending_monster_kills'] = null;
     }
 
     // One write, and only when something actually moved — the shell renders on
@@ -212,7 +212,9 @@
     }
 @endphp
 
-<div class="mx-auto max-w-[1080px] px-[14px] pb-10">
+{{-- `isolate` so the watching monster's negative z-index puts it behind the
+     page's content without dropping it behind the page background entirely. --}}
+<div class="relative isolate mx-auto max-w-[1080px] px-[14px] pb-10">
     {{-- Keyed on what it's announcing, so Livewire tears the element down and
          builds a new one whenever the news changes — which is what re-runs
          x-init. A re-render carrying nothing new renders nothing at all. --}}

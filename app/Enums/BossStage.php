@@ -3,9 +3,9 @@
 namespace App\Enums;
 
 /**
- * How beaten up the boss looks. Derived entirely from the health left on the
- * family goal — the stage is a way of drawing `goal_now`, never a thing that
- * gets stored, so it can't drift from the bar it sits under.
+ * How beaten up a monster looks. Derived entirely from the health it has left
+ * — the stage is a way of drawing damage taken, never a thing that gets
+ * stored, so it can't drift from the bar it sits under.
  *
  * The *visual* side of a stage — how far the grin opens, pupil size, tilt,
  * wear, breathing rate — belongs to `resources/js/monsters.js`, which draws

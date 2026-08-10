@@ -319,6 +319,73 @@ body {
 }
 
 /*
+ * The frame a level 3 monster's card wears — an inner rule and four corner
+ * marks, so the biggest fight is legible as the biggest fight before anyone has
+ * read a word on it.
+ *
+ * Drawn with insets rather than extra elements: the card is already a stack of
+ * absolutely positioned artwork, and a border that needs markup would have to
+ * be threaded through every use of it.
+ */
+.fq-frame-ornate {
+    box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--fq-gold) 22%, transparent),
+        inset 0 0 24px color-mix(in srgb, var(--fq-streak) 14%, transparent);
+    position: relative;
+}
+
+.fq-frame-ornate::before,
+.fq-frame-ornate::after {
+    content: '';
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border-color: color-mix(in srgb, var(--fq-gold) 55%, transparent);
+    pointer-events: none;
+}
+
+.fq-frame-ornate::before {
+    top: 7px;
+    left: 7px;
+    border-top: 2px solid;
+    border-left: 2px solid;
+    border-top-left-radius: 6px;
+}
+
+.fq-frame-ornate::after {
+    right: 7px;
+    bottom: 7px;
+    border-right: 2px solid;
+    border-bottom: 2px solid;
+    border-bottom-right-radius: 6px;
+}
+
+/*
+ * The level 3 monster, watching from the edge of the page it is not on.
+ *
+ * Behind everything and untouchable — the shell isolates its own stacking
+ * context, so the negative z-index puts this under the content without letting
+ * it fall behind the page background entirely.
+ */
+.fq-watcher {
+    position: fixed;
+    right: -40px;
+    bottom: -30px;
+    z-index: -1;
+    width: 380px;
+    height: 380px;
+    opacity: 0.09;
+    pointer-events: none;
+    filter: grayscale(0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fq-watcher {
+        display: none;
+    }
+}
+
+/*
  * Fired by the arena when a fresh hit lands. One shot: the class is bound to
  * the step now showing, so it replays only when the monster actually takes one.
  */

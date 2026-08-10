@@ -5,8 +5,8 @@ namespace App\Enums;
 /**
  * The monsters the family goal can wear.
  *
- * A skin is art and copy only — every number behind the battle is the goal's
- * (`goal_target` as max health, `goal_now` as damage dealt).
+ * A skin is art and copy only — every number behind a fight belongs to the
+ * `Monster` wearing it (`max_health`, and the damage summed from its hits).
  *
  * **The artwork lives in `resources/js/monsters.js`**, shipped verbatim from the
  * design bundle, and so do the palettes. This enum holds only what the server

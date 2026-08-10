@@ -1,11 +1,13 @@
 <?php
 
 use App\Enums\CompletionStatus;
+use App\Enums\MonsterTier;
 use App\Enums\ProfileRole;
 use App\Models\ChoreCompletion;
 use App\Models\Profile;
 use App\Services\ChoreService;
 use App\Services\HouseholdClock;
+use App\Services\MonsterService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
@@ -154,20 +156,28 @@ new class extends Component
         $choresThisWeek = fn (Profile $kid) => (int) ($week->get($kid->id)?->chores_done ?? 0);
         $pointsThisWeek = fn (Profile $kid) => (int) ($week->get($kid->id)?->points_earned ?? 0);
 
+        // The long game is what the standings are about — a table planning
+        // against three goals at once would be planning against a number
+        // nobody is working toward.
+        $arena = app(MonsterService::class);
+        $longGame = $arena->at($household, MonsterTier::Three);
+        $longGameState = $longGame ? $arena->stateFor($longGame) : null;
+        $contributors = $longGame ? $arena->contributionsFor($longGame) : collect();
+        $intoTheGoal = $contributors->pluck('points', 'profile_id');
+
         return [
             'household' => $household,
             'kids' => $kids,
-            'goalPercent' => $household->goal_target > 0
-                ? min(100, (int) round($household->goal_now / $household->goal_target * 100))
-                : 0,
-            'goalRemaining' => max(0, $household->goal_target - $household->goal_now),
+            'longGame' => $longGameState,
+            'goalPercent' => $longGameState['damagePercent'] ?? 0,
+            'goalRemaining' => $longGameState['health'] ?? 0,
             'familyPace' => $chores->householdDailyPace($household),
-            'contributors' => $chores->goalContributors($household),
+            'contributors' => $contributors,
             'boards' => [
                 $this->board(
-                    'Into the family goal', 'var(--fq-lime)', $kids,
-                    fn (Profile $kid) => $kid->goal_contribution,
-                    fn (Profile $kid) => number_format($kid->goal_contribution).' PTS',
+                    'Into the long game', 'var(--fq-lime)', $kids,
+                    fn (Profile $kid) => (int) ($intoTheGoal[$kid->id] ?? 0),
+                    fn (Profile $kid) => number_format($intoTheGoal[$kid->id] ?? 0).' PTS',
                 ),
                 $this->board(
                     'Level', 'var(--fq-violet)', $kids,
@@ -207,27 +217,36 @@ new class extends Component
         </div>
 
         <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
-            <div class="flex flex-wrap items-baseline justify-between gap-2">
-                <h3 class="font-baloo text-xl font-bold">{{ $household->goal_name }}</h3>
-                <span class="font-mono-fq text-[10px] text-fq-lime">{{ $goalPercent }}%</span>
-            </div>
+            @if (! $longGame)
+                <h3 class="font-baloo text-xl font-bold">No long game standing</h3>
+                <p class="mt-2 text-sm text-fq-text-2">
+                    Line up a Level 3 monster on the
+                    <a href="{{ route('parent.monsters') }}" wire:navigate class="text-fq-lime underline">Monster Deck</a>
+                    and this fills in.
+                </p>
+            @else
+                <div class="flex flex-wrap items-baseline justify-between gap-2">
+                    <h3 class="font-baloo text-xl font-bold">{{ $longGame['reward'] }}</h3>
+                    <span class="font-mono-fq text-[10px] text-fq-lime">{{ $goalPercent }}%</span>
+                </div>
 
-            <div class="mt-3 h-4 overflow-hidden rounded-full border border-fq-line bg-fq-track">
-                <div
-                    class="h-full rounded-full transition-[width] duration-500"
-                    style="width:{{ $goalPercent }}%;background:linear-gradient(90deg, var(--fq-cyan), var(--fq-lime), var(--fq-gold))"
-                ></div>
-            </div>
+                <div class="mt-3 h-4 overflow-hidden rounded-full border border-fq-line bg-fq-track">
+                    <div
+                        class="h-full rounded-full transition-[width] duration-500"
+                        style="width:{{ $goalPercent }}%;background:linear-gradient(90deg, var(--fq-cyan), var(--fq-lime), var(--fq-gold))"
+                    ></div>
+                </div>
 
-            <p class="mt-2 font-mono-fq text-[11px] text-fq-text-4">
-                {{ number_format($household->goal_now) }} / {{ number_format($household->goal_target) }} PTS ·
-                {{ number_format($goalRemaining) }} TO GO ·
-                {{ number_format($familyPace, 0) }} PTS/DAY BETWEEN THEM
-            </p>
+                <p class="mt-2 font-mono-fq text-[11px] text-fq-text-4">
+                    {{ number_format($longGame['damage']) }} / {{ number_format($longGame['maxHealth']) }} PTS ·
+                    {{ number_format($goalRemaining) }} TO GO ·
+                    {{ number_format($familyPace, 0) }} PTS/DAY BETWEEN THEM
+                </p>
 
-            <div class="mt-4 border-t border-fq-divider pt-[14px]">
-                <x-goal-mvp :contributors="$contributors" />
-            </div>
+                <div class="mt-4 border-t border-fq-divider pt-[14px]">
+                    <x-goal-mvp :contributors="$contributors" />
+                </div>
+            @endif
         </div>
 
         @if ($kids->isEmpty())

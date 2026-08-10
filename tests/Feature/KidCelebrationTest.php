@@ -3,12 +3,13 @@
 namespace Tests\Feature;
 
 use App\Enums\BossSkin;
+use App\Enums\MonsterTier;
 use App\Models\Badge;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\Profile;
-use App\Services\BossService;
 use App\Services\ChoreService;
+use App\Services\MonsterService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Volt;
@@ -31,7 +32,7 @@ class KidCelebrationTest extends TestCase
     {
         parent::setUp();
 
-        $this->household = Household::factory()->create(['goal_target' => 1000, 'goal_now' => 0]);
+        $this->household = Household::factory()->create();
         $this->kid = Profile::factory()->for($this->household)->create();
         Chore::factory()->for($this->household)->create();
 
@@ -213,10 +214,21 @@ class KidCelebrationTest extends TestCase
             ->assertSee($this->asRendered('"hero":"level"'), false);
     }
 
-    /** Approves a chore worth enough to finish the family goal off. */
+    /**
+     * Approves a chore worth enough to finish the Level 3 monster off.
+     *
+     * The family goal is a monster now, so the moment these cards are about is
+     * a monster falling rather than a counter crossing a target.
+     */
     private function crossTheGoal(): void
     {
-        $this->household->update(['goal_name' => 'Pizza night']);
+        app(MonsterService::class)->spawn(
+            $this->household,
+            MonsterTier::Three,
+            'Pizza night',
+            1000,
+            skin: BossSkin::default(),
+        );
 
         $parent = Profile::factory()->parent()->for($this->household)->create();
         $chore = Chore::factory()->for($this->household)->create(['points' => 1000]);
@@ -234,8 +246,8 @@ class KidCelebrationTest extends TestCase
 
         $this->crossTheGoal();
 
-        $this->assertSame('Pizza night', $this->kid->fresh()->pending_goal_celebration);
-        $this->assertSame('Pizza night', $sibling->fresh()->pending_goal_celebration);
+        $this->assertSame('Pizza night', $this->kid->fresh()->pending_monster_kills[0]['reward']);
+        $this->assertSame('Pizza night', $sibling->fresh()->pending_monster_kills[0]['reward']);
     }
 
     /**
@@ -322,12 +334,18 @@ class KidCelebrationTest extends TestCase
 
         $this->crossTheGoal();
 
-        // The household moves on the moment the goal is reset, which is
-        // exactly the gap this has to survive.
-        $beaten = $this->kid->fresh()->pending_boss_name;
-        $this->assertSame(BossSkin::Gnash->label(), $beaten);
+        $this->assertSame(BossSkin::Gnash->value, $this->kid->fresh()->pending_monster_kills[0]['skin']);
 
-        $this->household->update(['boss_skin' => BossSkin::Gnash->next()->value]);
+        // A parent stands the next monster up at that tier before the kid ever
+        // logs in, which is exactly the gap this has to survive: reading the
+        // arena now would stage the wrong monster falling over.
+        app(MonsterService::class)->spawn(
+            $this->household,
+            MonsterTier::Three,
+            'Trip to the zoo',
+            2000,
+            skin: BossSkin::Gnash->next(),
+        );
         $this->reload();
 
         Volt::test('kid.quests')
@@ -335,54 +353,14 @@ class KidCelebrationTest extends TestCase
             ->assertSee($this->asRendered('"skin":"gnash"'), false);
     }
 
-    /**
-     * A defeat queued before the boss battle existed has no name to work
-     * back from, and a renamed monster has one that no longer matches. Both
-     * lose the picture, neither loses the celebration.
-     */
-    public function test_a_defeat_with_no_recognisable_name_still_celebrates(): void
-    {
-        Volt::test('kid.quests')->assertOk();
-
-        $this->crossTheGoal();
-        $this->kid->forceFill(['pending_boss_name' => null])->save();
-        $this->reload();
-
-        Volt::test('kid.quests')
-            ->assertOk()
-            ->assertSee('rewards-earned')
-            ->assertSee('Pizza night', false)
-            ->assertDontSee($this->asRendered('"hero":"boss"'), false);
-    }
-
-    /**
-     * A name that no longer matches a case — a monster renamed since the defeat
-     * was queued — drops the set piece rather than opening it on an empty gap
-     * where the body should be. The knockout is mostly artwork; without the
-     * artwork there is nothing to stage.
-     */
-    public function test_a_renamed_monster_falls_back_to_the_plain_goal_card(): void
-    {
-        Volt::test('kid.quests')->assertOk();
-
-        $this->crossTheGoal();
-        $this->kid->forceFill(['pending_boss_name' => 'Gnashh'])->save();
-        $this->reload();
-
-        Volt::test('kid.quests')
-            ->assertOk()
-            ->assertSee('rewards-earned')
-            // Still announced, still named, still epic — just not staged.
-            ->assertSee('Gnashh is down!', false)
-            ->assertSee($this->asRendered('"tier":"epic"'), false)
-            ->assertDontSee($this->asRendered('"hero":"boss"'), false);
-    }
-
     public function test_a_goal_already_met_on_arrival_is_not_announced(): void
     {
         // Nothing queued it, so there is nothing owed — a kid joining a
-        // household that finished its goal last month hears nothing.
-        $this->household->update(['goal_now' => 1000]);
+        // household that beat its monster last month hears nothing.
+        app(MonsterService::class)
+            ->spawn($this->household, MonsterTier::Three, 'Pizza night', 1000)
+            ->forceFill(['defeated_at' => now()])
+            ->save();
 
         Volt::test('kid.quests')
             ->assertOk()
@@ -395,12 +373,13 @@ class KidCelebrationTest extends TestCase
     {
         $this->crossTheGoal();
 
-        // A parent resets and repoints the goal before the kid ever logs in.
-        $this->household->update(['goal_now' => 0, 'goal_name' => 'Trip to the zoo']);
+        // A parent lines up the next reward at that tier before the kid ever
+        // logs in.
+        app(MonsterService::class)->spawn($this->household, MonsterTier::Three, 'Trip to the zoo', 2000);
         $this->reload();
 
-        // The goal panel on the page now reads "Trip to the zoo", so the only
-        // thing that can still be naming the old one is the card.
+        // The arena on the page now reads "Trip to the zoo", so the only thing
+        // that can still be naming the old one is the card.
         Volt::test('kid.quests')
             ->assertOk()
             ->assertSee('landed the final blow', false)
@@ -411,19 +390,25 @@ class KidCelebrationTest extends TestCase
     {
         $this->crossTheGoal();
 
-        // A parent starting the next goal rotates the skin. The card has to
-        // keep naming the one that actually died, for the same reason it keeps
-        // naming the goal that was actually reached.
-        app(BossService::class)->startNewBattle($this->household);
+        // A parent lining up the next monster puts a new face in the arena. The
+        // card has to keep naming the one that actually died, for the same
+        // reason it keeps naming the goal that was actually reached.
+        app(MonsterService::class)->spawn(
+            $this->household,
+            MonsterTier::Three,
+            'Weekend away',
+            2000,
+            skin: BossSkin::default()->next(),
+        );
         $this->reload();
 
         Volt::test('kid.quests')
             ->assertOk()
             // The card still names the monster that actually died...
             ->assertSee(BossSkin::default()->label(), false)
-            // ...while the sidebar has already moved on to the one now
-            // standing. Both on the same page at once is the point: the kill
-            // is history, the arena is live.
+            // ...while the strip has already moved on to the one now standing.
+            // Both on the same page at once is the point: the kill is history,
+            // the arena is live.
             ->assertSee(BossSkin::default()->next()->label(), false);
     }
 }

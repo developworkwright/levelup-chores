@@ -3,7 +3,8 @@
 use App\Enums\ProfileRole;
 use App\Models\Chore;
 use App\Models\Profile;
-use App\Services\BossService;
+use App\Enums\MonsterTier;
+use App\Services\MonsterService;
 use App\Services\ChoreService;
 use App\Services\HouseholdClock;
 use Illuminate\Support\Carbon;
@@ -32,7 +33,13 @@ new class extends Component
     /** Rungs to keep even once they've stopped changing the answer. */
     private const MIN_ROWS = 3;
 
+    /** Must match BOSS_STEP_MS in resources/js/app.js — the two queue together. */
+    private const REPLAY_STEP_MS = 1500;
+
     public Profile $profile;
+
+    /** @var ?array<int, array<string, mixed>> */
+    private ?array $arenaStates = null;
 
     public function mount(): void
     {
@@ -131,37 +138,60 @@ new class extends Component
     }
 
     /**
-     * The boss, and any stages of the fight this kid hasn't watched yet.
+     * The arena: the three monsters as the cards want them, keyed by tier, each
+     * carrying any stages of its fight this kid has not watched yet.
      *
-     * Built in `with()` rather than `mount()`, which is the opposite of the
-     * rule the chest animations follow — and deliberately so. Those have to
-     * survive a refresh; this must not outlive one. The replay is defined as
-     * "damage dealt since this kid last looked", and `markSeen()` immediately
-     * afterwards is what makes looking count: the first render plays what was
-     * missed, and every render after it has nothing left to play.
+     * The weekly weak-point draw is rolled here as well as on the board, so a
+     * kid who comes straight to this page sees the same three flinches as one
+     * who went to Quests first.
      *
-     * Marking has to come *after* the replay is built, or it would erase the
-     * very gap it is meant to describe.
+     * Built in `with()` rather than `mount()`, which is the opposite of the rule
+     * the chest animations follow — and deliberately so. Those have to survive a
+     * refresh; this must not outlive one. A replay is defined as "damage dealt
+     * since this kid last looked", and `markSeen()` immediately afterwards is
+     * what makes looking count: the first render plays what was missed, and
+     * every render after it has nothing left to play.
      *
-     * @return array{bossState: ?array, bossSteps: array, bossHits: ?Collection}
+     * Marking has to come *after* every replay is built, or it would erase the
+     * very gap it exists to describe.
+     *
+     * The three do not play at once. Three monsters getting beaten up
+     * simultaneously is noise rather than a set piece, so each waits out the one
+     * before it — `startDelay` is that queue, worked out here because the server
+     * is the only place that knows how long the whole sequence runs.
+     *
+     * @return array<int, array<string, mixed>>
      */
-    private function boss(\App\Models\Household $household): array
+    private function arena(\App\Models\Household $household): array
     {
-        $boss = app(BossService::class);
-        $state = $boss->stateFor($household);
-
-        if ($state === null) {
-            return ['bossState' => null, 'bossSteps' => [], 'bossHits' => null];
+        // Memoised for the life of the request, and it has to be: this both
+        // reads the marker and moves it, so a second render inside one request
+        // would find the gap it just closed and play nothing. Private, so
+        // Livewire doesn't carry it into the next round trip — a replay must not
+        // survive one.
+        if ($this->arenaStates !== null) {
+            return $this->arenaStates;
         }
 
-        $steps = $boss->replayFor($household, $this->profile);
-        $boss->markSeen($household, $this->profile);
+        $arena = app(MonsterService::class);
+        $states = [];
+        $delay = 0;
 
-        return [
-            'bossState' => $state,
-            'bossSteps' => $steps,
-            'bossHits' => $boss->hits($household),
-        ];
+        foreach ($arena->rotateWeaknesses($household) as $tierValue => $monster) {
+            $steps = $arena->replayFor($monster, $this->profile);
+
+            $states[$tierValue] = [
+                ...$arena->stateFor($monster),
+                'steps' => $steps,
+                'startDelay' => $delay,
+            ];
+
+            $delay += (count($steps) - 1) * self::REPLAY_STEP_MS;
+        }
+
+        $arena->markSeen($household, $this->profile);
+
+        return $this->arenaStates = $states;
     }
 
     public function with(): array
@@ -187,8 +217,18 @@ new class extends Component
         $chosenPlan = $dailyGoal ? $this->forecast($remaining, $dailyGoal, $today, $step) : null;
 
         $kidCount = max(1, (int) $household->profiles()->where('role', ProfileRole::Kid)->count());
-        $familyRemaining = max(0, $household->goal_target - $household->goal_now);
         $familyPace = $chores->householdDailyPace($household);
+
+        // The family plan is about the long game, so it reads off the Level 3
+        // monster rather than the sum of all three. Planning a date against
+        // three goals at once would be planning against a number nobody is
+        // actually working toward.
+        $arena = app(MonsterService::class);
+        $states = $this->arena($household);
+        $longGame = $states[MonsterTier::Three->value] ?? null;
+        $longGameMonster = $longGame['monster'] ?? null;
+
+        $familyRemaining = $longGame['health'] ?? 0;
 
         return [
             'saving' => $saving,
@@ -223,9 +263,8 @@ new class extends Component
             'household' => $household,
             'kidCount' => $kidCount,
             'familyRemaining' => $familyRemaining,
-            'familyPercent' => $household->goal_target > 0
-                ? min(100, (int) round($household->goal_now / $household->goal_target * 100))
-                : 0,
+            'familyPercent' => $longGame['damagePercent'] ?? 0,
+            'longGame' => $longGame,
             // Same ladder, read as "if each of us did this much" — the number a
             // kid can actually commit to is their own, not the family total.
             'familyPlans' => $this->informativeRows(
@@ -248,8 +287,12 @@ new class extends Component
             'familyPacePlan' => $familyPace >= 1
                 ? $this->forecast($familyRemaining, (int) floor($familyPace), $today, $step)
                 : null,
-            'contributors' => $chores->goalContributors($household),
-            ...$this->boss($household),
+            // Per-monster now: who has put what into the long game specifically,
+            // rather than into the family's work in general.
+            'contributors' => $longGameMonster
+                ? $arena->contributionsFor($longGameMonster)
+                : collect(),
+            'monsterStates' => $states,
         ];
     }
 }; ?>
@@ -285,12 +328,10 @@ new class extends Component
             </div>
         @endif
 
-        {{-- Full width and above the split: the monster is the family goal, and
-             the two planning columns below it are how you work out what it
-             takes to finish the thing off. --}}
-        @if ($bossState)
-            <x-boss-arena :state="$bossState" :steps="$bossSteps" :hits="$bossHits" />
-        @endif
+        {{-- Full width and above the split: the monsters *are* the family goals,
+             and the two planning columns below are how you work out what it
+             takes to finish one off. --}}
+        <x-monster-arena :states="$monsterStates" />
 
         {{-- My plan on the left, ours on the right: the two halves are read
              against each other, and stacking them buried the family goal under
@@ -492,19 +533,27 @@ new class extends Component
             <div class="flex min-w-0 flex-[1_1_360px] flex-col gap-[14px]">
                 <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
                     <div class="flex flex-wrap items-center justify-between gap-2">
-                        <h3 class="font-baloo text-xl font-bold">Family Goal plan</h3>
+                        <h3 class="font-baloo text-xl font-bold">The long game</h3>
                         <span class="font-mono-fq text-[10px] text-fq-lime">{{ $familyPercent }}%</span>
                     </div>
-                    <p class="mt-1 text-sm text-fq-text-2">{{ $household->goal_name }}</p>
 
-                    {{-- No bar here: the arena above is the same number, drawn
-                         far better. Saying it twice on one page just invites
-                         the two to disagree. --}}
-                    <p class="mt-3 font-mono-fq text-[11px] text-fq-text-4">
-                        {{ number_format($household->goal_now) }} / {{ number_format($household->goal_target) }} PTS ·
-                        {{ number_format($familyRemaining) }} TO GO ·
-                        {{ $kidCount }} {{ Str::plural('KID', $kidCount) }} EARNING
-                    </p>
+                    @if (! $longGame)
+                        <p class="mt-2 text-sm text-fq-text-2">
+                            No Level 3 monster standing. Ask a parent to line up the big one &mdash;
+                            that's the one worth planning around.
+                        </p>
+                    @else
+                        <p class="mt-1 text-sm text-fq-text-2">{{ $longGame['reward'] }}</p>
+
+                        {{-- No bar here: the arena above is the same number,
+                             drawn far better. Saying it twice on one page just
+                             invites the two to disagree. --}}
+                        <p class="mt-3 font-mono-fq text-[11px] text-fq-text-4">
+                            {{ number_format($longGame['damage']) }} / {{ number_format($longGame['maxHealth']) }} PTS ·
+                            {{ number_format($familyRemaining) }} TO GO ·
+                            {{ $kidCount }} {{ Str::plural('KID', $kidCount) }} EARNING
+                        </p>
+                    @endif
 
                     {{-- The family goal answered with the kid's own number, so the two
                          plans on this page are tied to the same commitment. --}}

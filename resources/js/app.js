@@ -435,6 +435,107 @@ document.addEventListener('alpine:init', () => {
     }));
 });
 
+/**
+ * One monster's card in the three-monster arena, and the catch-up walk through
+ * whatever damage this kid missed on it.
+ *
+ * The same idea as fqBossReplay above, with one addition that matters: three
+ * cards sit side by side, and three monsters being beaten up at once is noise
+ * rather than a set piece. So each card is handed a `startDelay` — the running
+ * time of the replays queued ahead of it — and holds on its first stage until
+ * its turn comes round. The server works the queue out, because it is the only
+ * place that knows how long the whole sequence runs.
+ *
+ * Tapping any card ends every replay on it immediately; patience is not
+ * universal.
+ */
+document.addEventListener('alpine:init', () => {
+    window.Alpine.data('fqMonsterReplay', (steps, skin, startDelay = 0, dread = BOSS_DREAD) => ({
+        steps,
+        skin,
+        dread,
+        index: 0,
+        hit: false,
+        timer: null,
+        hitTimer: null,
+
+        init() {
+            if (this.steps.length < 2) {
+                return;
+            }
+
+            // Someone who has asked the OS for less movement gets the outcome
+            // without the show — and without waiting out a queue for it.
+            if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                this.finish();
+
+                return;
+            }
+
+            this.queue(startDelay + BOSS_STEP_MS);
+        },
+
+        destroy() {
+            clearTimeout(this.timer);
+            clearTimeout(this.hitTimer);
+        },
+
+        queue(after = BOSS_STEP_MS) {
+            this.timer = setTimeout(() => this.advance(), after);
+        },
+
+        advance() {
+            if (! this.replaying) {
+                return;
+            }
+
+            this.index++;
+            this.hit = true;
+            clearTimeout(this.hitTimer);
+            this.hitTimer = setTimeout(() => (this.hit = false), BOSS_HIT_MS);
+
+            if (this.replaying) {
+                this.queue();
+            }
+        },
+
+        finish() {
+            clearTimeout(this.timer);
+            clearTimeout(this.hitTimer);
+            this.index = this.steps.length - 1;
+            this.hit = false;
+        },
+
+        get current() {
+            return this.steps[this.index];
+        },
+
+        get replaying() {
+            return this.index < this.steps.length - 1;
+        },
+
+        /**
+         * The artwork for one step of the replay, at this tier's weather. The
+         * dread is the difference between a level 1 monster and a level 3 one
+         * wearing the same face: the floor glow, the motes, the breathing.
+         */
+        monster(stage) {
+            return monsterSvg(this.skin, stage, this.dread);
+        },
+
+        get cardBg() {
+            return monsterCardBg(this.skin, this.dread);
+        },
+
+        /** The blow that got us to the step now showing, as a "-320" chip. */
+        get hitLabel() {
+            const landed = this.current.landed;
+
+            return landed > 0 ? `-${landed.toLocaleString()}` : '';
+        },
+    }));
+});
+
 document.addEventListener('alpine:init', () => {
     window.Alpine.data('fqCelebrations', () => ({
         toast: null,

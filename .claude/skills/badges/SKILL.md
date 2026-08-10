@@ -27,7 +27,7 @@ Tiered sets go through `awardMilestones($profile, MAP, $measure)`, which takes *
 
 **This is the important operational rule:** `evaluate()` is not run on a schedule — it must be called explicitly after any event that could satisfy a condition. Current call sites: `ChoreService::approve()`, `StoreService::redeem()`, `SiblingOfferService::accept()`, `SpinService::spin()`, `ChestService::open()` and `PerkInventoryService::use()`. **When adding a new point-affecting or activity-affecting flow, call `$this->badges->evaluate($profile)` at the end of it, or the badges tied to that flow will never unlock.**
 
-`evaluateHouseholdGoal(Household)` is separate and household-scoped: once `goal_now >= goal_target` (and `goal_target > 0`), it awards `team_effort` to **every kid profile in the household**, not just whoever's action crossed the finish line. Call this wherever `goal_now` is incremented (currently only inside `ChoreService::approve()`).
+`evaluateHouseholdGoal(Household)` is separate and household-scoped: once the household has any beaten `Monster`, it awards `team_effort` to **every kid profile in the household**, not just whoever landed the killing blow. Called from `ChoreService::approve()`. It fires on the *first* kill at any tier — `maybeAward` is idempotent per key, so the ice cream monster counts as much as the weekend away.
 
 ## Current badge keys and conditions
 
@@ -43,7 +43,7 @@ Tiered sets go through `awardMilestones($profile, MAP, $measure)`, which takes *
 | `early_bird` | any approved completion submitted before `EARLY_BIRD_HOUR` (7) local household time | checked against `submitted_at`, not `decided_at` |
 | `night_owl` | any approved completion submitted at/after `NIGHT_OWL_HOUR` (22) local household time | |
 | `speed_runner` | today's quest claimed within `SPEED_RUNNER_SECONDS` (300) of its reveal | needs both `revealed_at` and `completed_at` set |
-| `team_effort` | household `goal_now >= goal_target` | awarded household-wide via `evaluateHouseholdGoal()`, not `evaluate()` |
+| `team_effort` | household has beaten any `Monster` | awarded household-wide via `evaluateHouseholdGoal()`, not `evaluate()` |
 | `chores_10` / `_50` / `_100` / `_365` | approved completions, all time | `CHORE_MILESTONES` |
 | `quest_10` / `quest_50` | `DailyQuest` rows with `completed_at` | `QUEST_MILESTONES` |
 | `streak_30` | `profile->streak >= 30` | `STREAK_MILESTONES` alongside 3/7/14 |

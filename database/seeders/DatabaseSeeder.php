@@ -2,12 +2,14 @@
 
 namespace Database\Seeders;
 
+use App\Enums\MonsterTier;
 use App\Enums\PerkEffect;
 use App\Models\BonusPerk;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Models\StoreItem;
+use App\Services\MonsterService;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -23,18 +25,28 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        $household = Household::create([
-            'name' => 'Home Base',
-            'goal_name' => 'Pizza + movie night, everyone picks a snack',
-            'goal_target' => 4000,
-            'goal_now' => 0,
-        ]);
+        $household = Household::create(['name' => 'Home Base']);
 
         $this->seedProfiles($household);
         $this->seedChores($household);
         $this->seedStoreItems($household);
         $this->seedBonusPerks($household);
         $this->seedSavingGoals($household);
+        $this->seedMonsters($household);
+    }
+
+    /**
+     * One monster per tier, priced so the three cost about the same per point
+     * of work — which is the only thing stopping the cheap tier from being the
+     * clever way to earn.
+     */
+    private function seedMonsters(Household $household): void
+    {
+        $arena = app(MonsterService::class);
+
+        $arena->spawn($household, MonsterTier::One, 'Ice cream outing', 500, 1500);
+        $arena->spawn($household, MonsterTier::Two, 'Pizza + movie night, everyone picks a snack', 1300, 4000);
+        $arena->spawn($household, MonsterTier::Three, 'A weekend away', 4000, 12000);
     }
 
     /**

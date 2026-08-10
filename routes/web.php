@@ -57,6 +57,7 @@ Route::middleware(['auth:profile', 'role:parent'])->prefix('parent')->group(func
     Volt::route('/approvals', 'parent.approvals')->name('parent.approvals');
     Volt::route('/chores', 'parent.chores')->name('parent.chores');
     Volt::route('/loot', 'parent.loot')->name('parent.loot');
+    Volt::route('/monsters', 'parent.monsters')->name('parent.monsters');
     Volt::route('/kids', 'parent.kids')->name('parent.kids');
     Volt::route('/standings', 'parent.standings')->name('parent.standings');
     Volt::route('/activity', 'parent.activity')->name('parent.activity');

@@ -11,6 +11,7 @@ use App\Models\ChoreCompletion;
 use App\Models\DailyChest;
 use App\Models\DailyQuest;
 use App\Models\Household;
+use App\Models\Monster;
 use App\Models\OwnedPerk;
 use App\Models\Profile;
 use App\Models\Redemption;
@@ -164,12 +165,18 @@ class BadgeService
 
     /**
      * "Team Effort" is household-wide, not tied to whichever kid's action
-     * happened to cross the finish line — award it to every kid once the
-     * family goal is reached.
+     * happened to land the killing blow — award it to every kid once the family
+     * has put a monster down.
+     *
+     * Any monster, at any tier, and only ever once: `maybeAward` is idempotent
+     * per badge key, so the first kill is the one that pays and the ice cream
+     * monster counts every bit as much as the weekend away.
      */
     public function evaluateHouseholdGoal(Household $household): void
     {
-        if ($household->goal_target <= 0 || $household->goal_now < $household->goal_target) {
+        $beaten = Monster::where('household_id', $household->id)->beaten()->exists();
+
+        if (! $beaten) {
             return;
         }
 

@@ -3,12 +3,15 @@
 namespace Tests\Feature;
 
 use App\Enums\CompletionStatus;
+use App\Enums\MonsterTier;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\Household;
+use App\Models\Monster;
 use App\Models\Profile;
 use App\Models\StoreItem;
 use App\Services\ChoreService;
+use App\Services\MonsterService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -31,6 +34,18 @@ class GoalPlannerTest extends TestCase
     private function freezeMay(Household $household): void
     {
         $this->travelTo(Carbon::parse('2026-05-01 12:00', $household->timezone));
+    }
+
+    /**
+     * The long game, standing.
+     *
+     * The family plan reads off the Level 3 monster rather than the household's
+     * goal columns, so a page with nothing standing has no plan to draw — which
+     * is the honest answer, and not what these tests are about.
+     */
+    private function longGame(Household $household, int $health, string $reward = 'Family goal'): Monster
+    {
+        return app(MonsterService::class)->spawn($household, MonsterTier::Three, $reward, $health);
     }
 
     private function service(): ChoreService
@@ -189,7 +204,8 @@ class GoalPlannerTest extends TestCase
 
     public function test_the_family_goal_is_answered_with_the_kids_own_target(): void
     {
-        $household = Household::factory()->create(['goal_target' => 1200, 'goal_now' => 0]);
+        $household = Household::factory()->create();
+        $this->longGame($household, 1200);
         Profile::factory()->for($household)->create();
         $this->loginKid($household, ['daily_points_goal' => 200]);
         Chore::factory()->for($household)->create(['points' => 100]);
@@ -202,20 +218,22 @@ class GoalPlannerTest extends TestCase
 
     public function test_a_kid_with_no_saving_goal_still_gets_the_family_plan(): void
     {
-        $household = Household::factory()->create(['goal_target' => 1200, 'goal_now' => 0]);
+        $household = Household::factory()->create();
+        $this->longGame($household, 1200);
         $this->loginKid($household);
         Chore::factory()->for($household)->create();
 
         Volt::test('kid.goal')
             ->assertOk()
             ->assertSee('Nothing picked yet')
-            ->assertSee('Family Goal plan')
+            ->assertSee('The long game')
             ->assertSee('1,200 TO GO');
     }
 
     public function test_the_family_plan_multiplies_each_kids_number_by_the_kid_count(): void
     {
-        $household = Household::factory()->create(['goal_target' => 1200, 'goal_now' => 0]);
+        $household = Household::factory()->create();
+        $this->longGame($household, 1200);
         $this->freezeMay($household);
 
         Profile::factory()->for($household)->create();
@@ -236,7 +254,8 @@ class GoalPlannerTest extends TestCase
 
     public function test_approving_a_chore_credits_the_kid_on_the_family_goal(): void
     {
-        $household = Household::factory()->create(['goal_target' => 1000, 'goal_now' => 0]);
+        $household = Household::factory()->create();
+        $monster = $this->longGame($household, 1000);
         $kid = Profile::factory()->for($household)->create();
         $parent = Profile::factory()->parent()->for($household)->create();
         $chore = Chore::factory()->for($household)->create(['points' => 250]);
@@ -251,18 +270,25 @@ class GoalPlannerTest extends TestCase
 
         $this->service()->approve($completion, $parent);
 
-        $this->assertSame(250, $household->fresh()->goal_now);
-        $this->assertSame(250, $kid->fresh()->goal_contribution);
+        $this->assertSame(250, $monster->fresh()->damage());
+        $this->assertSame(
+            250,
+            app(MonsterService::class)->contributionsFor($monster->fresh())->firstWhere('profile_id', $kid->id)['points'],
+        );
     }
 
-    public function test_a_kid_is_only_credited_for_what_the_goal_had_room_for(): void
+    public function test_a_kid_is_only_credited_for_what_the_monster_had_health_for(): void
     {
-        // The goal caps at its target, so crediting the full payout would leave
-        // the contributions totalling more than the bar they sit under.
-        $household = Household::factory()->create(['goal_target' => 300, 'goal_now' => 200]);
+        // Damage is capped at what the monster has left, so crediting the full
+        // payout would leave the contributions totalling more than the bar they
+        // sit under. Nothing above it, so the overkill has nowhere to spill.
+        $household = Household::factory()->create();
+        $monster = $this->longGame($household, 300);
         $kid = Profile::factory()->for($household)->create();
         $parent = Profile::factory()->parent()->for($household)->create();
         $chore = Chore::factory()->for($household)->create(['points' => 250]);
+
+        app(MonsterService::class)->land($monster, 200, $kid);
 
         $completion = ChoreCompletion::create([
             'chore_id' => $chore->id,
@@ -274,20 +300,24 @@ class GoalPlannerTest extends TestCase
 
         $this->service()->approve($completion, $parent);
 
-        $this->assertSame(300, $household->fresh()->goal_now);
-        $this->assertSame(100, $kid->fresh()->goal_contribution);
+        $this->assertSame(300, $monster->fresh()->damage());
     }
 
     public function test_contributors_are_ranked_with_the_leader_crowned(): void
     {
-        $household = Household::factory()->create(['goal_target' => 1000, 'goal_now' => 400]);
-        Profile::factory()->for($household)->create(['name' => 'Nova', 'goal_contribution' => 300]);
-        Profile::factory()->for($household)->create(['name' => 'Rex', 'goal_contribution' => 100]);
+        $household = Household::factory()->create();
+        $monster = $this->longGame($household, 1000);
+        $nova = Profile::factory()->for($household)->create(['name' => 'Nova']);
+        $rex = Profile::factory()->for($household)->create(['name' => 'Rex']);
         Profile::factory()->parent()->for($household)->create(['name' => 'Mum']);
 
-        $contributors = $this->service()->goalContributors($household);
+        $arena = app(MonsterService::class);
+        $arena->land($monster, 300, $nova);
+        $arena->land($monster, 100, $rex);
 
-        $this->assertSame(['Nova', 'Rex'], $contributors->pluck('profile.name')->all());
+        $contributors = $arena->contributionsFor($monster->fresh());
+
+        $this->assertSame(['Nova', 'Rex'], $contributors->pluck('name')->all());
         $this->assertSame([75, 25], $contributors->pluck('percent')->all());
         $this->assertSame([true, false], $contributors->pluck('isLeader')->all());
     }
@@ -295,21 +325,27 @@ class GoalPlannerTest extends TestCase
     public function test_a_tie_shares_the_crown(): void
     {
         $household = Household::factory()->create();
-        Profile::factory()->for($household)->create(['name' => 'Nova', 'goal_contribution' => 200]);
-        Profile::factory()->for($household)->create(['name' => 'Rex', 'goal_contribution' => 200]);
+        $monster = $this->longGame($household, 1000);
+        $nova = Profile::factory()->for($household)->create(['name' => 'Nova']);
+        $rex = Profile::factory()->for($household)->create(['name' => 'Rex']);
+
+        $arena = app(MonsterService::class);
+        $arena->land($monster, 200, $nova);
+        $arena->land($monster, 200, $rex);
 
         $this->assertSame(
             [true, true],
-            $this->service()->goalContributors($household)->pluck('isLeader')->all()
+            $arena->contributionsFor($monster->fresh())->pluck('isLeader')->all()
         );
     }
 
     public function test_nobody_is_crowned_before_anyone_has_contributed(): void
     {
         $household = Household::factory()->create();
+        $monster = $this->longGame($household, 1000);
         Profile::factory()->for($household)->create(['name' => 'Nova']);
 
-        $contributors = $this->service()->goalContributors($household);
+        $contributors = app(MonsterService::class)->contributionsFor($monster);
 
         $this->assertSame([false], $contributors->pluck('isLeader')->all());
         $this->assertSame([0], $contributors->pluck('percent')->all());
@@ -322,10 +358,16 @@ class GoalPlannerTest extends TestCase
      */
     public function test_the_goal_page_shows_who_is_pulling_hardest(): void
     {
-        $household = Household::factory()->create(['goal_target' => 1000, 'goal_now' => 400]);
-        Profile::factory()->for($household)->create(['name' => 'Nova', 'goal_contribution' => 300]);
-        $this->loginKid($household, ['name' => 'Rex', 'goal_contribution' => 100]);
+        $household = Household::factory()->create();
+        $monster = $this->longGame($household, 1000);
+        $nova = Profile::factory()->for($household)->create(['name' => 'Nova']);
+        $rex = $this->loginKid($household, ['name' => 'Rex']);
         Chore::factory()->for($household)->create();
+
+        // The board is summed from what each of them landed on this monster, so
+        // the damage has to be on it rather than on the old goal counter.
+        app(MonsterService::class)->land($monster, 300, $nova);
+        app(MonsterService::class)->land($monster, 100, $rex);
 
         $html = Volt::test('kid.goal')->assertOk()->assertSee('75%')->assertSee('25%')->html();
 
@@ -459,93 +501,34 @@ class GoalPlannerTest extends TestCase
         $this->assertSame(200.0, $this->service()->householdDailyPace($household));
     }
 
-    public function test_resetting_the_family_goal_wipes_every_contribution(): void
-    {
-        $household = Household::factory()->create(['goal_target' => 1000, 'goal_now' => 600]);
-        $nova = Profile::factory()->for($household)->create(['goal_contribution' => 400]);
-        $rex = Profile::factory()->for($household)->create(['goal_contribution' => 200]);
-        $parent = Profile::factory()->parent()->for($household)->create();
-        Chore::factory()->for($household)->create();
-
-        Auth::guard('profile')->login($parent);
-
-        Volt::test('parent.kids')->call('resetGoalProgress');
-
-        $this->assertSame(0, $household->fresh()->goal_now);
-        $this->assertSame(0, $nova->fresh()->goal_contribution);
-        $this->assertSame(0, $rex->fresh()->goal_contribution);
-    }
-
     /**
-     * The backfill runs on an already-migrated database, so it can't be
-     * exercised by the suite's own migrate step — it's invoked directly.
+     * What "reset the goal and wipe every contribution" turned into.
+     *
+     * There is nothing to reset any more: a beaten monster is history and the
+     * next one at that tier is a new row, so its leaderboard starts empty on
+     * its own rather than needing a counter zeroed. Whoever won the last fight
+     * gets no head start on the next, which is the whole point the old reset
+     * was serving.
      */
-    private function runBackfill(): void
+    public function test_the_next_monster_at_a_tier_starts_everyone_level(): void
     {
-        (require database_path('migrations/2026_08_02_233631_backfill_goal_contributions.php'))->up();
-    }
-
-    public function test_the_backfill_splits_existing_progress_by_who_did_the_work(): void
-    {
-        // 900 points of progress banked before contributions were tracked, and
-        // approved chores running 2:1 between the two kids.
-        $household = Household::factory()->create(['goal_target' => 1000, 'goal_now' => 900]);
+        $household = Household::factory()->create();
         $nova = Profile::factory()->for($household)->create(['name' => 'Nova']);
         $rex = Profile::factory()->for($household)->create(['name' => 'Rex']);
-        $chore = Chore::factory()->for($household)->create();
 
-        foreach ([[$nova, 400], [$nova, 400], [$rex, 400]] as [$kid, $points]) {
-            ChoreCompletion::create([
-                'chore_id' => $chore->id,
-                'profile_id' => $kid->id,
-                'status' => CompletionStatus::Approved,
-                'points_awarded' => $points,
-                'submitted_at' => now(),
-            ]);
-        }
+        $arena = app(MonsterService::class);
+        $first = $this->longGame($household, 600);
 
-        $this->runBackfill();
+        $arena->land($first, 400, $nova);
+        $arena->land($first, 200, $rex);
+        $arena->settle($first, $rex);
 
-        $this->assertSame(600, $nova->fresh()->goal_contribution);
-        $this->assertSame(300, $rex->fresh()->goal_contribution);
-    }
+        $next = $arena->spawn($household, MonsterTier::Three, 'Trip to the zoo', 1000);
 
-    public function test_the_backfill_hands_the_rounding_remainder_to_the_top_earner(): void
-    {
-        // 100 across three equal kids doesn't divide, and the leftovers have to
-        // land somewhere or the board totals less than the bar above it.
-        $household = Household::factory()->create(['goal_target' => 1000, 'goal_now' => 100]);
-        $chore = Chore::factory()->for($household)->create();
+        $this->assertSame([0, 0], $arena->contributionsFor($next)->pluck('points')->all());
 
-        foreach ([300, 200, 100] as $points) {
-            $kid = Profile::factory()->for($household)->create();
-
-            ChoreCompletion::create([
-                'chore_id' => $chore->id,
-                'profile_id' => $kid->id,
-                'status' => CompletionStatus::Approved,
-                'points_awarded' => $points,
-                'submitted_at' => now(),
-            ]);
-        }
-
-        $this->runBackfill();
-
-        // 50 + 33 + 16 leaves one point over, which the top earner takes.
-        $this->assertSame(100, (int) $household->profiles()->sum('goal_contribution'));
-        $this->assertSame(51, (int) $household->profiles()->max('goal_contribution'));
-    }
-
-    public function test_the_backfill_leaves_hand_typed_progress_unattributed(): void
-    {
-        // Progress with no approved chores behind it came from a parent nudging
-        // the number. Splitting it would invent a race nobody ran.
-        $household = Household::factory()->create(['goal_target' => 1000, 'goal_now' => 500]);
-        $kid = Profile::factory()->for($household)->create();
-
-        $this->runBackfill();
-
-        $this->assertSame(0, $kid->fresh()->goal_contribution);
+        // ...while the fight they just won keeps its names on it.
+        $this->assertSame([400, 200], $arena->contributionsFor($first->fresh())->pluck('points')->all());
     }
 
     public function test_a_parent_cannot_open_the_goal_planner(): void

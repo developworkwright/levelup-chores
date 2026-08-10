@@ -1,16 +1,16 @@
 <?php
 
-use App\Enums\BossSkin;
 use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
 use App\Enums\ProfileRole;
 use App\Enums\TicketKind;
 use App\Models\ChoreCompletion;
+use App\Models\Monster;
 use App\Models\Profile;
 use App\Services\BadgeService;
-use App\Services\BossService;
 use App\Services\ChoreService;
 use App\Services\LedgerService;
+use App\Services\MonsterService;
 use App\Services\SpinService;
 use App\Services\TicketService;
 use Illuminate\Support\Facades\Auth;
@@ -162,63 +162,6 @@ new class extends Component
             : 'Nothing to swap — the quest is already cleared, or there is no other eligible chore.';
     }
 
-    public function updateGoalName(string $value): void
-    {
-        $value = trim($value);
-
-        if ($value === '') {
-            return;
-        }
-
-        $household = $this->profile->household;
-        $household->goal_name = $value;
-        $household->save();
-    }
-
-    public function adjustGoalTarget(int $delta): void
-    {
-        $household = $this->profile->household;
-        $household->goal_target = max(250, $household->goal_target + $delta);
-        // Never let the target drop below progress already made.
-        $household->goal_now = min($household->goal_now, $household->goal_target);
-        $household->save();
-    }
-
-    public function adjustGoalNow(int $delta): void
-    {
-        $household = $this->profile->household;
-        $household->goal_now = max(0, min($household->goal_target, $household->goal_now + $delta));
-        $household->save();
-    }
-
-    public function resetGoalProgress(): void
-    {
-        $household = $this->profile->household;
-        $household->goal_now = 0;
-        $household->save();
-
-        // The MVP board on the kids' Quests page is scored out of these, so a
-        // new goal starts everyone level rather than handing whoever won the
-        // last one an unbeatable head start.
-        $household->profiles()->update(['goal_contribution' => 0]);
-
-        // A new goal is a new monster. This is the only place the skin rotates:
-        // the defeated one stays standing (KO'd) until a parent is ready to
-        // start the next fight, so the kids get to keep the win on screen.
-        app(BossService::class)->startNewBattle($household);
-    }
-
-    public function setBossSkin(string $key): void
-    {
-        $skin = BossSkin::tryFrom($key);
-
-        if ($skin === null) {
-            return;
-        }
-
-        app(BossService::class)->setSkin($this->profile->household, $skin);
-    }
-
     public function changePin(int $profileId): void
     {
         $kid = $this->ownedKid($profileId) ?? ($profileId === $this->profile->id ? $this->profile : null);
@@ -292,117 +235,66 @@ new class extends Component
                 : null,
             'mysteryClaimant' => $mysteryClaimant,
             'household' => $household,
-            'bossSkin' => app(BossService::class)->skinFor($household),
-            'bossDefeats' => app(BossService::class)->defeats($household, 6),
+            // A glance only — naming rewards, pricing them and setting health
+            // all live on the Monster Deck, which is where the per-tier
+            // dollars-per-point readout can sit beside them.
+            'arenaStates' => app(MonsterService::class)
+                ->live($household)
+                ->map(fn (Monster $monster) => app(MonsterService::class)->stateFor($monster))
+                ->all(),
         ];
     }
 }; ?>
 
 <x-parent.shell :profile="$profile" active="kids">
-    @php
-        $goalPercent = $household->goal_target > 0
-            ? min(100, round($household->goal_now / $household->goal_target * 100))
-            : 0;
-    @endphp
-
+    {{-- The family goal is three monsters now, each with its own reward and its
+         own health, so it has a page of its own. What is left here is the
+         glance: how the arena stands, and the way through to change it. --}}
     <div class="mb-[14px] rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
-        <div class="flex items-center justify-between">
-            <h3 class="font-baloo text-lg font-bold">Family Goal</h3>
-            <span class="font-mono-fq text-[10px] text-fq-lime">{{ $goalPercent }}%</span>
-        </div>
-
-        <input
-            type="text" value="{{ $household->goal_name }}"
-            wire:blur="updateGoalName($event.target.value)"
-            placeholder="What are you all working toward?"
-            class="mt-3 w-full border-0 border-b border-fq-line-2 bg-transparent py-[3px] text-[15px] font-semibold outline-none focus:border-fq-cyan"
-        >
-
-        <div class="mt-3 h-4 overflow-hidden rounded-full border border-fq-line bg-fq-track">
-            <div
-                class="h-full rounded-full transition-[width] duration-500"
-                style="width:{{ $goalPercent }}%;background:linear-gradient(90deg, var(--fq-cyan), var(--fq-lime), var(--fq-gold))"
-            ></div>
-        </div>
-
-        <div class="mt-3 flex flex-wrap items-center gap-6">
-            <div>
-                <p class="mb-1 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Progress</p>
-                <div class="flex items-center gap-2">
-                    <button type="button" wire:click="adjustGoalNow(-100)" class="h-8 w-8 rounded-[10px] border border-fq-line-3 bg-fq-sunk text-lg">&minus;</button>
-                    <span class="w-16 text-center font-baloo text-[17px] font-extrabold text-fq-lime">{{ $household->goal_now }}</span>
-                    <button type="button" wire:click="adjustGoalNow(100)" class="h-8 w-8 rounded-[10px] border border-fq-line-3 bg-fq-sunk text-lg">+</button>
-                </div>
-            </div>
-
-            <div>
-                <p class="mb-1 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Target</p>
-                <div class="flex items-center gap-2">
-                    <button type="button" wire:click="adjustGoalTarget(-250)" class="h-8 w-8 rounded-[10px] border border-fq-line-3 bg-fq-sunk text-lg">&minus;</button>
-                    <span class="w-16 text-center font-baloo text-[17px] font-extrabold text-fq-gold">{{ $household->goal_target }}</span>
-                    <button type="button" wire:click="adjustGoalTarget(250)" class="h-8 w-8 rounded-[10px] border border-fq-line-3 bg-fq-sunk text-lg">+</button>
-                </div>
-            </div>
-
-            <button
-                type="button"
-                wire:click="resetGoalProgress"
-                wire:confirm="Reset progress back to 0 and send in the next monster? Good for starting a new goal once this one's done."
-                class="ml-auto rounded-[12px] border border-dashed border-fq-line-4 bg-fq-sunk px-3 py-2 text-xs text-fq-text-3"
-            >Start a new goal</button>
-        </div>
-
-        {{-- The kids see this goal as a monster with the target for health.
-             Starting a new goal sends in the next one on its own; this is here
-             for the child who has a favourite. --}}
-        <div class="mt-4 border-t border-fq-divider pt-[14px]">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-                <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
-                    Monster &middot; {{ $bossSkin->label() }}
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="min-w-0">
+                <h3 class="font-baloo text-lg font-bold">Family Goals</h3>
+                <p class="mt-1 text-[13px] text-fq-text-3">
+                    @if ($arenaStates)
+                        What the kids are fighting for right now.
+                    @else
+                        Nothing standing, so the kids have nothing to aim at.
+                    @endif
                 </p>
-                @if ($bossDefeats->isNotEmpty())
-                    <p class="font-mono-fq text-[10px] text-fq-lime">
-                        {{ $bossDefeats->count() }} BEATEN
-                    </p>
-                @endif
             </div>
 
-            <p class="mt-1 text-[13px] text-fq-text-3">{{ $bossSkin->tagline() }}</p>
+            <a
+                href="{{ route('parent.monsters') }}"
+                wire:navigate
+                class="rounded-[12px] border border-fq-line-3 bg-fq-sunk px-4 py-2 text-xs text-fq-text-3 transition hover:border-fq-lime hover:text-fq-text"
+            >Open the Monster Deck</a>
+        </div>
 
-            <div class="mt-3 flex flex-wrap gap-2">
-                @foreach (App\Enums\BossSkin::cases() as $skin)
-                    <button
-                        type="button"
-                        wire:key="boss-skin-{{ $skin->value }}"
-                        wire:click="setBossSkin('{{ $skin->value }}')"
-                        @disabled($skin === $bossSkin)
-                        class="rounded-[12px] border px-3 py-2 text-xs transition {{ $skin === $bossSkin ? 'border-fq-lime text-fq-lime' : 'border-fq-line-3 bg-fq-sunk text-fq-text-3 hover:border-fq-line-focus' }}"
-                    >{{ $skin->label() }}</button>
-                @endforeach
-            </div>
-
-            @if ($bossDefeats->isNotEmpty())
-                <div class="mt-4 flex flex-col gap-[6px]">
-                    @foreach ($bossDefeats as $defeat)
-                        <div
-                            wire:key="boss-defeat-{{ $defeat->id }}"
-                            class="flex flex-wrap items-center gap-2 rounded-[12px] border border-fq-line-2 bg-fq-sunk px-3 py-2"
-                        >
-                            <span class="text-[13px] font-semibold">{{ $defeat->boss_name }}</span>
-                            <span class="font-mono-fq text-[10px] text-fq-text-4">
-                                {{ number_format($defeat->health) }} HP
-                                @if ($defeat->finisher)
-                                    &middot; FINISHED BY {{ Str::upper($defeat->finisher->name) }}
-                                @endif
+        @if ($arenaStates)
+            <div class="mt-3 flex flex-col gap-[10px]">
+                @foreach ($arenaStates as $tierValue => $state)
+                    <div wire:key="goal-tier-{{ $tierValue }}">
+                        <div class="flex flex-wrap items-baseline justify-between gap-2">
+                            <span class="text-[13px] font-semibold">
+                                {{ $state['tier']->label() }} &middot; {{ $state['reward'] }}
                             </span>
-                            <span class="ml-auto font-mono-fq text-[10px] text-fq-text-5">
-                                {{ $defeat->defeated_at->toFormattedDateString() }}
+                            <span class="font-mono-fq text-[10px] text-fq-text-4">
+                                {{ number_format($state['damage']) }} / {{ number_format($state['maxHealth']) }} PTS
+                                &middot; {{ $state['damagePercent'] }}%
                             </span>
                         </div>
-                    @endforeach
-                </div>
-            @endif
-        </div>
+
+                        <div class="mt-[6px] h-[10px] overflow-hidden rounded-full border border-fq-line bg-fq-track">
+                            <div
+                                class="h-full rounded-full transition-[width] duration-500"
+                                style="width:{{ $state['damagePercent'] }}%;background:linear-gradient(90deg, var(--fq-cyan), var(--fq-lime), var(--fq-gold))"
+                            ></div>
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+        @endif
+
     </div>
 
     <div

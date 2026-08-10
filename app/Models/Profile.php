@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\AccentColor;
+use App\Enums\MonsterTier;
 use App\Enums\ProfileRole;
 use App\Enums\TradeAsset;
 use Illuminate\Auth\Authenticatable as AuthenticatableTrait;
@@ -49,15 +50,12 @@ class Profile extends Model implements Authenticatable
         'pending_streak_chest',
         'badges_seen_at',
         'level_seen',
-        'pending_goal_celebration',
-        'pending_goal_finisher',
-        'pending_boss_name',
         'pending_mystery_celebration',
-        'boss_damage_seen',
-        'boss_battle_seen',
         'saving_for_store_item_id',
         'daily_points_goal',
-        'goal_contribution',
+        'last_monster_tier',
+        'monsters_seen',
+        'pending_monster_kills',
     ];
 
     protected $hidden = [
@@ -69,6 +67,9 @@ class Profile extends Model implements Authenticatable
         return [
             'role' => ProfileRole::class,
             'color' => AccentColor::class,
+            'last_monster_tier' => MonsterTier::class,
+            'monsters_seen' => 'array',
+            'pending_monster_kills' => 'array',
             'locked_until' => 'datetime',
             'badges_seen_at' => 'datetime',
         ];

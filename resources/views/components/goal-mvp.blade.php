@@ -2,7 +2,8 @@
      parent standings so the two can't drift into telling different stories
      about the same numbers.
 
-     `contributors` is what ChoreService::goalContributors() returns. --}}
+     `contributors` is what MonsterService::contributionsFor() returns — one
+     monster's board, live while it stands and frozen once it falls. --}}
 @props(['contributors', 'label' => "Who's pulling hardest"])
 
 @php

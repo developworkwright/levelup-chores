@@ -20,9 +20,6 @@ class HouseholdFactory extends Factory
             'points_per_dollar' => 100,
             'require_quest_first' => true,
             'spin_enabled' => true,
-            'goal_name' => 'Family goal',
-            'goal_target' => 1000,
-            'goal_now' => 0,
         ];
     }
 

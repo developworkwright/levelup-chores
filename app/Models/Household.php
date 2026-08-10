@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Enums\BossSkin;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -18,12 +17,6 @@ class Household extends Model
         'points_per_dollar',
         'require_quest_first',
         'spin_enabled',
-        'goal_name',
-        'goal_target',
-        'goal_now',
-        'boss_key',
-        'boss_started_at',
-        'boss_battle',
     ];
 
     protected function casts(): array
@@ -31,8 +24,6 @@ class Household extends Model
         return [
             'require_quest_first' => 'boolean',
             'spin_enabled' => 'boolean',
-            'boss_key' => BossSkin::class,
-            'boss_started_at' => 'datetime',
         ];
     }
 
@@ -56,9 +47,9 @@ class Household extends Model
         return $this->hasMany(LedgerEntry::class);
     }
 
-    /** The trophy shelf: every monster this family has already put down. */
-    public function bossDefeats(): HasMany
+    /** The arena: every monster this family has faced, living or beaten. */
+    public function monsters(): HasMany
     {
-        return $this->hasMany(BossDefeat::class);
+        return $this->hasMany(Monster::class);
     }
 }

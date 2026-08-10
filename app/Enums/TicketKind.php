@@ -15,6 +15,9 @@ enum TicketKind: string
     /** Paid for naming three things you're grateful for. */
     case Gratitude = 'gratitude';
 
+    /** Paid out to the whole household when a monster goes down. */
+    case BossDefeat = 'boss_defeat';
+
     public function label(): string
     {
         return match ($this) {
@@ -24,6 +27,7 @@ enum TicketKind: string
             self::Adjustment => 'Adjustment',
             self::Trade => 'Trade',
             self::Gratitude => 'Gratitude',
+            self::BossDefeat => 'Boss defeated',
         };
     }
 }

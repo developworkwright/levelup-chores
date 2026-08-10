@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Enums\MonsterTier;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Models\StoreItem;
 use App\Services\ChoreService;
+use App\Services\MonsterService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Volt;
@@ -31,20 +33,26 @@ class ParentStandingsPageTest extends TestCase
 
     public function test_it_ranks_the_kids_on_the_family_goal(): void
     {
-        $household = Household::factory()->create(['goal_target' => 1000, 'goal_now' => 300]);
+        $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
-        Profile::factory()->for($household)->create(['name' => 'Nova', 'goal_contribution' => 200]);
-        Profile::factory()->for($household)->create(['name' => 'Rue', 'goal_contribution' => 100]);
+        $nova = Profile::factory()->for($household)->create(['name' => 'Nova']);
+        $rue = Profile::factory()->for($household)->create(['name' => 'Rue']);
+
+        // The standings read the long game, so the damage has to be on it.
+        $arena = app(MonsterService::class);
+        $monster = $arena->spawn($household, MonsterTier::Three, 'Weekend away', 1000);
+        $arena->land($monster, 200, $nova);
+        $arena->land($monster, 100, $rue);
 
         Auth::guard('profile')->login($parent);
 
         $boards = Volt::test('parent.standings')
-            ->assertSee('Into the family goal')
+            ->assertSee('Into the long game')
             ->assertSee('Nova')
             ->assertSee('Rue')
             ->viewData('boards');
 
-        $goalBoard = collect($boards)->firstWhere('label', 'Into the family goal');
+        $goalBoard = collect($boards)->firstWhere('label', 'Into the long game');
 
         $this->assertSame('Nova', $goalBoard['rows'][0]['profile']->name);
         $this->assertTrue($goalBoard['rows'][0]['isLeader']);

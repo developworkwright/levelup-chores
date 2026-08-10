@@ -7,6 +7,7 @@ use App\Enums\ProfileRole;
 use App\Models\ChoreCompletion;
 use App\Models\DailyQuest;
 use App\Models\LedgerEntry;
+use App\Models\MonsterHit;
 use App\Models\Profile;
 use App\Models\Redemption;
 use App\Models\Spin;
@@ -80,10 +81,10 @@ class ResetTodayCommand extends Command
                 if ($completion->status === CompletionStatus::Approved) {
                     $pointsDelta -= $completion->points_awarded;
                     $xpDelta -= ChoreService::XP_PER_CHORE;
-                    $household->goal_now = max(0, $household->goal_now - $completion->points_awarded);
-                    // Rolled back with goal_now, or the kid keeps credit on the
-                    // family goal for a day that no longer happened.
-                    $kid->goal_contribution = max(0, $kid->goal_contribution - $completion->points_awarded);
+                    // The damage this did to the monsters goes with the hits
+                    // themselves, below — health and the leaderboard are both
+                    // summed from those, so there is no separate counter here
+                    // left to wind back.
                 }
             }
 
@@ -117,6 +118,13 @@ class ResetTodayCommand extends Command
                     ->where('created_at', '>=', $startOfToday)
                     ->delete();
 
+                // Before the completions themselves, which is what these are
+                // keyed to. Undoing a day has to take the damage back off the
+                // monsters as well, or the arena keeps credit for chores that
+                // no longer happened. A monster already beaten stays beaten —
+                // the reward was promised out loud.
+                MonsterHit::whereIn('chore_completion_id', $completions->pluck('id'))->delete();
+
                 ChoreCompletion::where('profile_id', $kid->id)
                     ->where('submitted_at', '>=', $startOfToday)
                     ->delete();
@@ -137,7 +145,6 @@ class ResetTodayCommand extends Command
                 $quest?->delete();
 
                 $kid->save();
-                $household->save();
             }
 
             if ($dryRun) {

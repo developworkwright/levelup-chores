@@ -6,6 +6,7 @@ use App\Enums\BountyKind;
 use App\Enums\BountyStatus;
 use App\Enums\ChoreCadence;
 use App\Enums\CompletionStatus;
+use App\Enums\MonsterTier;
 use App\Enums\TradeAsset;
 use App\Exceptions\BountyUnavailableException;
 use App\Exceptions\InsufficientPointsException;
@@ -15,6 +16,7 @@ use App\Models\Household;
 use App\Models\Profile;
 use App\Services\BountyService;
 use App\Services\ChoreService;
+use App\Services\MonsterService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Tests\TestCase;
@@ -367,7 +369,7 @@ class BountyBoardTest extends TestCase
     public function test_a_hired_job_earns_xp_and_moves_the_family_goal_like_any_chore(): void
     {
         $parent = Profile::factory()->for($this->household)->parent()->create();
-        $this->household->update(['goal_target' => 1000, 'goal_now' => 0]);
+        $monster = app(MonsterService::class)->spawn($this->household, MonsterTier::Three, 'Weekend away', 1000);
 
         // Starts at nothing, so the 200 points this earns stay under the
         // `big_saver` threshold and no badge XP lands on top of the chore's.
@@ -382,7 +384,7 @@ class BountyBoardTest extends TestCase
         // The whole reason hiring makes a chore rather than paying directly:
         // there is only one way to earn, and everything hangs off it.
         $this->assertSame(ChoreService::XP_PER_CHORE, $this->poster->fresh()->xp);
-        $this->assertSame(200, $this->household->fresh()->goal_now);
+        $this->assertSame(200, $monster->fresh()->damage());
     }
 
     public function test_a_parent_can_hire_at_their_own_price(): void

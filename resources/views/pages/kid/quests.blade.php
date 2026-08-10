@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\CompletionStatus;
+use App\Enums\MonsterTier;
 use App\Enums\PerkEffect;
 use App\Exceptions\BountyUnavailableException;
 use App\Exceptions\InsufficientPointsException;
@@ -10,12 +11,12 @@ use App\Models\Bounty;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\Profile;
-use App\Services\BossService;
 use App\Services\BountyService;
 use App\Services\ChestService;
 use App\Services\ChoreService;
 use App\Services\GratitudeService;
 use App\Services\HouseholdClock;
+use App\Services\MonsterService;
 use App\Services\PerkInventoryService;
 use App\Services\SpinService;
 use Illuminate\Support\Facades\Auth;
@@ -213,9 +214,24 @@ new class extends Component
 
     public function claimQuest(): void
     {
+        // The chest has to be opened before the quest can be claimed.
+        if (! app(ChoreService::class)->isQuestRevealedToday($this->profile)) {
+            return;
+        }
+
+        if ($this->shouldAim()) {
+            $this->targetingQuest = true;
+
+            return;
+        }
+
+        $this->completeQuest(null);
+    }
+
+    private function completeQuest(?MonsterTier $target): void
+    {
         $service = app(ChoreService::class);
 
-        // The chest has to be opened before the quest can be claimed.
         if (! $service->isQuestRevealedToday($this->profile)) {
             return;
         }
@@ -224,7 +240,7 @@ new class extends Component
         $wasDone = $service->isQuestDoneToday($this->profile);
         $boosted = app(SpinService::class)->multiplierFor($this->profile, $quest->chore) > 1;
 
-        $service->claimQuest($this->profile);
+        $service->claimQuest($this->profile, $target);
 
         // The streak (and any milestone bonus) now moves on a parent's
         // approval, so don't quote a day count here that hasn't been earned
@@ -311,21 +327,105 @@ new class extends Component
         app(ChoreService::class)->openStreakChest($this->profile);
     }
 
+    /**
+     * The chore waiting on the kid to say which monster it hits, or null when
+     * nothing is mid-choice.
+     *
+     * Held on the component rather than in the session: it exists for the two
+     * seconds between "done" and picking a target, and a refresh in the middle
+     * should drop the whole thing rather than resurrect a half-finished tap.
+     */
+    public ?int $targetingChoreId = null;
+
+    /** True for the quest, which goes through its own claim path. */
+    public bool $targetingQuest = false;
+
+    /**
+     * Whether finishing something should stop and ask which monster it hits.
+     *
+     * One monster standing is not a decision, and a picker with one answer on
+     * it is how a good idea turns into an extra tap. None standing goes
+     * straight through as well — the work still earns its points, it just has
+     * nothing to land on.
+     */
+    private function shouldAim(): bool
+    {
+        return app(MonsterService::class)->live($this->profile->household)->count() > 1;
+    }
+
+    /** The kid choosing which monster the thing they just finished lands on. */
+    public function aimAt(int $tier): void
+    {
+        $target = MonsterTier::tryFrom($tier);
+        $choreId = $this->targetingChoreId;
+        $wasQuest = $this->targetingQuest;
+
+        $this->cancelAim();
+
+        // A tier that emptied while the picker was open: a sibling can finish
+        // the last monster off between the question and the answer.
+        if ($target === null || app(MonsterService::class)->at($this->profile->household, $target) === null) {
+            $this->boardMessage = 'That one just went down! Pick another and try again.';
+
+            return;
+        }
+
+        // Remembered so the picker opens on it next time. A preference, not a
+        // commitment — every claim still asks.
+        $this->profile->last_monster_tier = $target;
+        $this->profile->save();
+
+        if ($wasQuest) {
+            $this->completeQuest($target);
+        } elseif ($choreId !== null) {
+            $this->completeChore($choreId, $target);
+        }
+    }
+
+    public function cancelAim(): void
+    {
+        $this->targetingChoreId = null;
+        $this->targetingQuest = false;
+    }
+
     public function claimChore(int $choreId): void
     {
         $this->boardMessage = null;
 
+        if (! $this->choreIsClaimable($choreId)) {
+            return;
+        }
+
+        if ($this->shouldAim()) {
+            $this->targetingChoreId = $choreId;
+
+            return;
+        }
+
+        $this->completeChore($choreId, null);
+    }
+
+    /**
+     * Everything that has to be true before a chore can be claimed, re-checked
+     * server-side — never trust a disabled button in the browser.
+     *
+     * Runs twice on a targeted claim: once to decide whether to open the
+     * picker, and again when the kid answers. The window between the two is
+     * small but it is exactly the window a sibling tapping the same chore lives
+     * in, so the second pass is the one that matters.
+     */
+    private function choreIsClaimable(int $choreId): bool
+    {
         $chore = Chore::find($choreId);
 
         if (! $chore || $chore->household_id !== $this->profile->household_id) {
-            return;
+            return false;
         }
 
         $service = app(ChoreService::class);
         $quest = $service->questFor($this->profile);
         $gated = $this->profile->household->require_quest_first && $quest->completed_at === null;
 
-        // Re-check server-side — never trust a disabled button in the browser.
         // stateFor() already accounts for the mystery chore's household-wide
         // (not per-kid) exclusivity, so no special-casing is needed here.
         if (
@@ -333,7 +433,7 @@ new class extends Component
             || $chore->id === $quest->chore_id
             || ! $chore->isAppropriateFor($this->profile)
         ) {
-            return;
+            return false;
         }
 
         // The one rejection worth explaining: nothing about this kid changed,
@@ -351,23 +451,51 @@ new class extends Component
                 default => "{$chore->name} isn't available right now.",
             };
 
+            return false;
+        }
+
+        return true;
+    }
+
+    private function completeChore(int $choreId, ?MonsterTier $target): void
+    {
+        if (! $this->choreIsClaimable($choreId)) {
             return;
         }
 
+        $chore = Chore::findOrFail($choreId);
         $boosted = app(SpinService::class)->multiplierFor($this->profile, $chore) > 1;
+        $monster = $target ? app(MonsterService::class)->at($this->profile->household, $target) : null;
 
         // Nothing here says anything about the mystery chore, deliberately.
         // Announcing the find on the tap told a kid which chore carried the
         // bonus for the price of submitting it, so submitting everything on the
         // board was a way to be told the answer. It's announced when a parent
         // approves the work, by the card the kid shell queues.
+        $aimed = $monster ? " Aimed at {$monster->skin->label()}." : '';
+
         if ($boosted) {
-            $this->dispatch('celebrate', message: "{$chore->name} claimed! Bonus wheel treat earned.", treat: 'cookie', motion: 'burst', origin: 'tap');
+            $this->dispatch('celebrate', message: "{$chore->name} claimed! Bonus wheel treat earned.{$aimed}", treat: 'cookie', motion: 'burst', origin: 'tap');
         } else {
-            $this->dispatch('celebrate', message: "{$chore->name} claimed! Waiting on parent.", motion: 'burst', origin: 'tap');
+            $this->dispatch('celebrate', message: "{$chore->name} claimed! Waiting on parent.{$aimed}", motion: 'burst', origin: 'tap');
         }
 
-        $service->claim($this->profile, $chore);
+        app(ChoreService::class)->claim($this->profile, $chore, $target);
+    }
+
+    /**
+     * The three monsters as the picker and the strip both want them, keyed by
+     * tier.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function monsterStates(): array
+    {
+        $arena = app(MonsterService::class);
+
+        return $arena->rotateWeaknesses($this->profile->household)
+            ->map(fn ($monster) => $arena->stateFor($monster))
+            ->all();
     }
 
     public function with(): array
@@ -489,12 +617,9 @@ new class extends Component
                 ->where('status', CompletionStatus::Pending)
                 ->count(),
             'household' => $household,
-            'goalPercent' => $household->goal_target > 0
-                ? min(100, round($household->goal_now / $household->goal_target * 100))
-                : 0,
             // Status only — no replay, and nothing marked seen. See
-            // <x-boss-mini> for why the catch-up belongs to the Goal page.
-            'bossState' => app(BossService::class)->stateFor($household),
+            // <x-monster-mini> for why the catch-up belongs to the Goal page.
+            'monsterStates' => $this->monsterStates(),
             // A window onto Trades & Jobs: only what this kid could take right
             // now, with the link carrying everything else.
             'bountyBoard' => app(BountyService::class)->boardFor($this->profile),
@@ -513,6 +638,58 @@ new class extends Component
 }; ?>
 
 <x-kid.shell :profile="$profile" active="quests" refresh-action="refreshBoard">
+    {{-- The long game, watching the board being cleared. --}}
+    @if ($monsterStates[App\Enums\MonsterTier::Three->value] ?? null)
+        <x-monster-watcher :state="$monsterStates[App\Enums\MonsterTier::Three->value]" />
+    @endif
+
+    {{-- The one question the board stops to ask: which of the three does this
+         one land on?
+
+         A full-screen overlay rather than something inline, because it is the
+         moment the work turns into a choice — and because the cards have to be
+         big enough to compare a reward against a health bar on a phone. It only
+         ever opens when more than one monster is standing; see shouldAim(). --}}
+    @if ($targetingChoreId !== null || $targetingQuest)
+        <div
+            class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto overscroll-contain p-4 sm:items-center"
+            style="background: rgba(8, 4, 16, 0.82)"
+            wire:key="monster-picker"
+        >
+            <div class="w-full max-w-[880px] rounded-[24px] border border-fq-line-2 bg-fq-panel p-5 sm:p-6">
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-coral uppercase">Nice work</p>
+                        <h2 class="mt-1 font-baloo text-2xl font-extrabold">Who takes the hit?</h2>
+                        <p class="mt-1 max-w-[420px] text-[13px] text-fq-text-4">
+                            All your points from this one go to the monster you pick.
+                        </p>
+                    </div>
+
+                    <button
+                        type="button"
+                        wire:click="cancelAim"
+                        class="rounded-[12px] border border-fq-line-3 bg-fq-sunk px-4 py-[9px] text-[13px] text-fq-text-2-b transition hover:text-fq-text"
+                    >Not yet</button>
+                </div>
+
+                <div class="mt-4 flex flex-wrap items-stretch gap-[14px]">
+                    @foreach ($monsterStates as $tierValue => $state)
+                        <x-monster-card
+                            :state="$state"
+                            :selected="$profile->last_monster_tier?->value === $tierValue"
+                            wire:key="pick-{{ $tierValue }}"
+                            wire:click="aimAt({{ $tierValue }})"
+                            class="h-full min-w-0 flex-[1_1_240px] cursor-pointer hover:border-fq-lime"
+                            role="button"
+                            tabindex="0"
+                        />
+                    @endforeach
+                </div>
+            </div>
+        </div>
+    @endif
+
     {{-- One column, in the order the handoff fixes: what you owe today, what's
          going spare, the quest that gates everything, the fight it feeds, and
          only then the board itself. --}}
@@ -790,25 +967,8 @@ new class extends Component
         {{-- 4. Boss fight, promoted out of the old sidebar to sit directly
              under the quest that feeds it. --}}
         <div wire:key="family-goal">
-            @if ($bossState)
-                <x-boss-mini :state="$bossState" :pending="$pendingCount" wire:key="family-boss" />
-            @elseif ($household->goal_target > 0)
-                <div class="rounded-[18px] border border-fq-line-2 px-4 py-3" style="background: linear-gradient(90deg, #1d0b2f, var(--fq-panel))">
-                    <div class="flex items-baseline justify-between gap-[10px]">
-                        <span class="font-mono-fq text-[10px] tracking-[0.24em] whitespace-nowrap text-fq-coral uppercase">Family Goal</span>
-                        <span class="font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4">{{ $goalPercent }}%</span>
-                    </div>
-                    <p class="mt-[3px] font-baloo text-[17px] font-extrabold sm:text-[20px]">{{ $household->goal_name }}</p>
-                    <div class="mt-2 h-[12px] overflow-hidden rounded-full border border-fq-line-3 bg-fq-sunk sm:h-[14px]">
-                        <div
-                            class="h-full rounded-full transition-[width] duration-700"
-                            style="width:{{ $goalPercent }}%;background:linear-gradient(90deg, var(--fq-cyan), var(--fq-lime), var(--fq-gold))"
-                        ></div>
-                    </div>
-                    <p class="mt-[7px] font-mono-fq text-[10px] text-fq-text-4">
-                        {{ number_format($household->goal_now) }} / {{ number_format($household->goal_target) }} PTS · EVERYONE'S POINTS COUNT
-                    </p>
-                </div>
+            @if ($monsterStates)
+                <x-monster-mini :states="$monsterStates" :pending="$pendingCount" wire:key="family-boss" />
             @endif
         </div>
 

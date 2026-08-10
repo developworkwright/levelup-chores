@@ -5,6 +5,7 @@
         'approvals' => ['label' => 'Approvals', 'route' => 'parent.approvals'],
         'chores' => ['label' => 'Quests', 'route' => 'parent.chores'],
         'loot' => ['label' => 'Loot Shop', 'route' => 'parent.loot'],
+        'monsters' => ['label' => 'Monsters', 'route' => 'parent.monsters'],
         'kids' => ['label' => 'Kids & Points', 'route' => 'parent.kids'],
         'standings' => ['label' => 'Standings', 'route' => 'parent.standings'],
         'activity' => ['label' => 'Activity', 'route' => 'parent.activity'],

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\BountyKind;
 use App\Enums\BountyStatus;
 use App\Enums\CompletionStatus;
+use App\Enums\MonsterTier;
 use App\Enums\TradeAsset;
 use App\Models\Badge;
 use App\Models\Bounty;
@@ -15,6 +16,7 @@ use App\Models\Household;
 use App\Models\Profile;
 use App\Services\BountyService;
 use App\Services\ChoreService;
+use App\Services\MonsterService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -210,9 +212,15 @@ class QuestPageLayoutTest extends TestCase
             ->assertDontSee('animation: fq-glow-pulse 1s', escape: false);
     }
 
+    /** A monster standing at the long-game tier, which is what draws the strip. */
+    private function standUpBoss(string $reward = 'Pizza night', int $health = 1000): void
+    {
+        app(MonsterService::class)->spawn($this->household, MonsterTier::Three, $reward, $health);
+    }
+
     public function test_the_sections_come_in_the_order_the_handoff_fixes(): void
     {
-        $this->household->update(['goal_target' => 1000, 'goal_now' => 400, 'goal_name' => 'Pizza night']);
+        $this->standUpBoss();
 
         Volt::test('kid.quests')
             ->assertOk()
@@ -383,7 +391,7 @@ class QuestPageLayoutTest extends TestCase
 
     public function test_the_boss_caption_carries_the_pending_count(): void
     {
-        $this->household->update(['goal_target' => 1000, 'goal_now' => 400]);
+        $this->standUpBoss();
 
         $service = app(ChoreService::class);
         $service->claim($this->kid, Chore::where('household_id', $this->household->id)->first());
@@ -394,10 +402,9 @@ class QuestPageLayoutTest extends TestCase
             ->assertSee('1 PENDING');
     }
 
-    public function test_a_household_with_no_goal_draws_no_boss(): void
+    public function test_a_household_with_nothing_standing_draws_no_boss(): void
     {
-        $this->household->update(['goal_target' => 0]);
-
+        // Nothing spawned, so there is no arena to draw and no strip for it.
         Volt::test('kid.quests')
             ->assertOk()
             ->assertDontSee('Boss Fight')

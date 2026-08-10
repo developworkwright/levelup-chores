@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\MonsterTier;
 use App\Models\Chore;
 use App\Models\DailyQuest;
 use App\Models\Household;
@@ -9,6 +10,7 @@ use App\Models\Profile;
 use App\Models\Spin;
 use App\Services\BadgeService;
 use App\Services\ChoreService;
+use App\Services\MonsterService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Tests\TestCase;
@@ -95,9 +97,10 @@ class BadgeTest extends TestCase
         $this->assertFalse($kid->badges()->where('key', 'wheel_winner')->exists());
     }
 
-    public function test_team_effort_awarded_to_every_kid_when_family_goal_is_reached(): void
+    public function test_team_effort_awarded_to_every_kid_when_a_monster_goes_down(): void
     {
-        $household = Household::factory()->create(['goal_target' => 100, 'goal_now' => 0]);
+        $household = Household::factory()->create();
+        app(MonsterService::class)->spawn($household, MonsterTier::One, 'Ice cream', 100);
         $parent = Profile::factory()->parent()->for($household)->create();
         $kidA = Profile::factory()->for($household)->create();
         $kidB = Profile::factory()->for($household)->create();

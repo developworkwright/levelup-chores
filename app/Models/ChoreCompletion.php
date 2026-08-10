@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\CompletionStatus;
+use App\Enums\MonsterTier;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -16,6 +17,8 @@ class ChoreCompletion extends Model
         'profile_id',
         'status',
         'points_awarded',
+        'target_tier',
+        'struck_weak_point',
         'submitted_at',
         'decided_at',
         'decided_by_profile_id',
@@ -25,6 +28,8 @@ class ChoreCompletion extends Model
     {
         return [
             'status' => CompletionStatus::class,
+            'target_tier' => MonsterTier::class,
+            'struck_weak_point' => 'boolean',
             'submitted_at' => 'datetime',
             'decided_at' => 'datetime',
         ];
