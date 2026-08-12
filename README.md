@@ -27,11 +27,15 @@ Everything is scoped to one household. There's no public sign-up, no email/passw
 ---
 
 ## Screenshots that are more than likely out of date, but it looked like this at one point
+<img width="2533" height="1599" alt="KidsQuestPage" src="https://github.com/user-attachments/assets/c4916384-46c5-443a-9b1f-3549713ddb98" />
+<img width="2523" height="1599" alt="LootShop" src="https://github.com/user-attachments/assets/8c8e3f35-233b-437f-8ec4-5718833e5c01" />
+<img width="2534" height="1596" alt="Stats" src="https://github.com/user-attachments/assets/d806200f-9571-4396-bc0d-c8c20df14276" />
+<img width="2531" height="1599" alt="Parents" src="https://github.com/user-attachments/assets/0345e05f-6ffc-4682-ae5c-02a6b15580a5" />
+<img width="2537" height="1599" alt="ParentsChoreView" src="https://github.com/user-attachments/assets/a3fb2e38-7c22-40d2-8b32-c7fcff49247a" />
 
-<img width="1267" height="671" alt="KidQuests" src="https://github.com/user-attachments/assets/31943b84-30d9-43a0-9e0d-257570f620bb" />
-<img width="1278" height="673" alt="BonusWheel" src="https://github.com/user-attachments/assets/9fc37cac-46b8-4a15-bfb5-985be0cb5c1a" />
-<img width="1271" height="671" alt="Loot Management" src="https://github.com/user-attachments/assets/7e7d4ea2-705e-4220-9e6f-c908116b82a6" />
-<img width="1268" height="672" alt="KidsManagement" src="https://github.com/user-attachments/assets/58eb0126-a96e-418e-9667-84489061c8c9" />
+
+
+
 
 
 
@@ -414,5 +418,5 @@ It comes with no warranty. If your kid games the streak system, that's between t
 ---
 
 <div align="center">
-<sub>Built for one family's kitchen wall. Fork it for yours.</sub>
+<sub>Built by and for our family with many features being designed by my kids themselves. Fork it for yours and make it your own.</sub>
 </div>
