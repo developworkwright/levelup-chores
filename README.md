@@ -22,7 +22,7 @@ A self-hosted, gamified chore and allowance tracker for households — daily que
 
 Chore charts fail because they're a list of obligations with a delayed, abstract payoff. This one borrows from games instead: a surprise assignment each morning, a secret chore worth a jackpot, a wheel that multiplies your take, streaks that compound, and a shop where points become real things.
 
-Everything is scoped to one household. There's no public sign-up, no email/password, and no kid-vs-kid leaderboard — just a profile picker, a 4-digit PIN, and a shared family goal everyone's points feed into.
+Everything is scoped to one household. There's no public sign-up, no email/password, and no kid-vs-kid leaderboard — just a profile picker, a 4-digit PIN, and three shared family goals, each drawn as a monster the kids gang up on.
 
 ---
 
@@ -42,17 +42,21 @@ flowchart LR
     A["🎁 Open the chest<br/><i>reveals today's quest</i>"] --> B["✅ Clear the quest"]
     B --> C["🔓 Side quests unlock<br/><i>instantly, no waiting</i>"]
     C --> D["🎯 Claim chores<br/><i>one is secretly the Mystery</i>"]
-    D --> E["🧑‍⚖️ Parent approves"]
+    D --> M["👹 Pick a monster<br/><i>which reward this feeds</i>"]
+    M --> E["🧑‍⚖️ Parent approves"]
     E --> F["💰 Points · XP · Streak"]
+    E --> H["⚔️ Damage lands<br/><i>double on a weak point</i>"]
     F --> G["🛒 Cash out in the Loot Shop"]
 
     style A fill:#2a1f4d,stroke:#8b5cf6,color:#fff
     style D fill:#4d3a1f,stroke:#f59e0b,color:#fff
+    style M fill:#4d1f2a,stroke:#ec4899,color:#fff
     style E fill:#1f3a4d,stroke:#06b6d4,color:#fff
     style F fill:#1f4d2a,stroke:#22c55e,color:#fff
+    style H fill:#4d1f2a,stroke:#ec4899,color:#fff
 ```
 
-The board **unlocks on the claim, not the approval** — deliberately. A kid should never be blocked waiting on a parent to check their phone. Points and streaks, however, only land once a parent signs off.
+The board **unlocks on the claim, not the approval** — deliberately. A kid should never be blocked waiting on a parent to check their phone. Points, streaks and monster damage, however, only land once a parent signs off.
 
 ---
 
@@ -68,8 +72,8 @@ The board **unlocks on the claim, not the approval** — deliberately. A kid sho
 | 🔥 | **Streak Chest** | Consecutive days of approved quests build a streak. Milestones pay real money and unlock a chest with a reveal animation. |
 | 🛒 | **Loot Shop** | Spend points on rewards the parent defines — screen time, Robux, dessert pick, a family outing. |
 | 🏅 | **Badges** | 13 achievements on their own tab, each with what unlocks it and the XP it pays. 5 are secret — name and description stay hidden until earned. |
-| 🎟️ | **Bonus Shop** | Levelling up and earning badges mint **tickets**. Spend them on wheel respins, quest rerolls, streak repairs, and hints about the Mystery Chore. Spending never costs XP — your level is permanent. |
-| 🎯 | **Family Goal** | A shared thermometer every kid's points feed. No rankings, no sibling competition — by design. |
+| 🎟️ | **Bonus Shop** | Levelling up, earning badges and beating monsters mint **tickets**. Spend them on wheel respins, quest rerolls, streak repairs, Mystery Chore hints, a once-a-week day off, or the right to name a monster. Spending never costs XP — your level is permanent. |
+| 👹 | **The Arena** | Three family goals stand at once as three monsters — something small, something bigger, and one worth saving for. After every chore you choose which one takes the hit. |
 
 ### For parents
 
@@ -78,6 +82,7 @@ The board **unlocks on the claim, not the approval** — deliberately. A kid sho
 | ✅ | **Approvals** | One queue for chore completions *and* reward redemptions. Approve or send back. |
 | 📋 | **Quests** | Search, add and edit chores — points, cadence, minimum age, quest eligibility, and the mystery hint. |
 | 🎁 | **Loot Shop** | Manage the reward catalog and pricing, plus perk pricing and which perks are switched on. |
+| 👹 | **Monsters** | Name what each of the three tiers is guarding, price it, set its health, swap its face or its weak chore — and fix a mis-tapped chore by moving the hit to the monster the kid meant. |
 | 👨‍👩‍👧 | **Kids & Points** | Balances, tickets, levels, manual adjustments, cash-in/payout, PIN resets, per-kid spin reset, quest swap, and today's Mystery Chore. |
 | 📜 | **Activity** | The full append-only points ledger, plus a separate card for ticket activity. |
 
@@ -86,6 +91,33 @@ Parents can opt into **web push notifications**, so a claim buzzes their phone i
 ---
 
 ## 🧠 The systems, in detail
+
+<details>
+<summary><b>The Arena — three family goals, drawn as monsters</b></summary>
+
+<br>
+
+The family goal used to be one thermometer. It's now three monsters standing at once, each guarding a reward at its own scale — an ice cream outing, a family prize, a weekend away. Every approved chore damages **one** of them, and the kid picks which as they submit.
+
+That choice is the whole feature. It's zero-sum between the three but costs the kid nothing: monster damage is a *shadow* of the same points, not a spend, so their own balance is untouched. What they're really choosing is which reward the household gets next — which means siblings have to negotiate.
+
+| | Guards | Health | Reads as |
+|---|---|---|---|
+| **Level 1** | something small | ~500 | small and quick |
+| **Level 2** | something bigger | ~2,000 | worth a few weeks |
+| **Level 3** | the long game | ~8,000 | the one worth waiting for |
+
+**The one number that keeps it honest:** price the tiers so **dollars-per-point is roughly level** across all three. Get that right and you're financially indifferent to which one they farm; get it wrong and the cheap tier becomes an arbitrage the kids *will* find. The Monsters tab shows `$ per 100 pts` live per tier so the three can be seen to agree.
+
+A few mechanics on top:
+
+- **Weak points.** Each monster flinches at one chore, drawn weekly, for double damage. Parents can swap a silly draw; the swap covers that week only and next week rolls on as normal. Resolved at *submit*, so swapping it can't halve a hit a kid already aimed.
+- **Overkill spills upward.** The last blow on Level 1 usually overpays, and the excess rolls onto Level 2 — where it can kill again, and spill again. One chore taking down two monsters is the best thing that happens in here.
+- **Catch-up replay.** Chores get approved all day on a screen no kid is looking at, so the arena replays every stage of damage missed since a kid last looked. The three don't play at once — each waits out the one before it.
+- **Health is never stored.** A monster's damage is summed from its hits, which is the same table its leaderboard is grouped from, so the bar and the names under it can't tell different stories.
+- **Beating one pays out.** Everyone in the house gets a ticket, the finisher gets two more, and the biggest damage dealer gets two more again — so one kid can take five.
+
+</details>
 
 <details>
 <summary><b>Mystery Chore — fair by construction</b></summary>
@@ -144,9 +176,11 @@ Three currencies, doing three different jobs:
 |---|---|---|
 | **Points** | Approved chores | Loot Shop — real-world rewards a parent hands over |
 | **XP** | Chores (+25) and badges (50–400) | **Nothing.** It only ever goes up, and it drives your level |
-| **Tickets** | 1 per level crossed, 1 per badge | Bonus Shop — perks that bend the game's own rules |
+| **Tickets** | 1 per level crossed, 1 per badge, and a payout every time a monster falls | Bonus Shop — perks that bend the game's own rules |
 
 The point of the split: a kid should never have to choose between keeping their progress and buying something. XP *mints* tickets, it isn't *converted* into them, so a level once reached is permanent no matter how much gets spent.
+
+With three monsters in rotation, defeats are now the fastest ticket source in the app — worth remembering if perks ever start feeling cheap. Two of the perks are capped rather than priced: **Day Off** skips a main quest and keeps the streak, once per week, because streak milestones pay real money and an uncapped skip would let a kid climb that ladder having done nothing.
 
 Both minting paths are guarded by high-water marks — `tickets_granted_through_level` and `streak_milestone_paid_through`. XP can fall (`quest:reset-today` claws back 25 per undone approval) and a streak can lapse and be repaired, so without them the same threshold could pay out twice.
 
@@ -247,7 +281,8 @@ Per-household settings live in the `households` row rather than in config:
 | `points_per_dollar` | `100` | Conversion rate for cash-out |
 | `require_quest_first` | `true` | Gate side quests behind the daily quest |
 | `spin_enabled` | `true` | Bonus wheel on/off |
-| `goal_name` / `goal_target` | — | The shared family goal |
+
+The family goals themselves live in the `monsters` table rather than on the household — one row per monster ever faced, living or beaten — and are edited from the **Monsters** tab.
 
 ### Push notifications (optional)
 
@@ -357,7 +392,7 @@ Moving the boundary **earlier** is safe. Moving it **later** starts today later,
 
 | Command | Purpose |
 |---|---|
-| `php artisan quest:reset-today` | Undo today's quest/spin/chore/loot activity. Leaves accounts, chores, PINs, and prior days untouched. |
+| `php artisan quest:reset-today` | Undo today's quest/spin/chore/loot activity, including the damage it did to the monsters. Leaves accounts, chores, PINs, and prior days untouched — and a monster already beaten stays beaten, since its reward was promised out loud. |
 | `php artisan wheel:reset-spin` | Clear today's spin so a kid can spin again. |
 
 Both accept `--kid=Name` to scope to one profile and `--dry-run` to preview without writing.

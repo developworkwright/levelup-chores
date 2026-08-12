@@ -27,6 +27,7 @@ class Monster extends Model
         'tier',
         'battle',
         'skin',
+        'nickname',
         'reward_name',
         'reward_cost_cents',
         'max_health',
@@ -69,6 +70,19 @@ class Monster extends Model
     public function finisher(): BelongsTo
     {
         return $this->belongsTo(Profile::class, 'finisher_profile_id');
+    }
+
+    /**
+     * What everyone calls it: the name a kid bought and gave it, or the skin's
+     * own if nobody has.
+     *
+     * One method rather than a check at each of the eight places a monster is
+     * named, because the eighth is the one that gets missed and shows "Gnash"
+     * on a card everywhere else calls Barry.
+     */
+    public function displayName(): string
+    {
+        return $this->nickname ?: $this->skin->label();
     }
 
     /** Still standing. */

@@ -4,8 +4,10 @@ namespace Tests\Feature;
 
 use App\Enums\MonsterTier;
 use App\Models\Chore;
+use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\Profile;
+use App\Services\HouseholdClock;
 use App\Services\MonsterService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -103,6 +105,43 @@ class MonsterPresenceTest extends TestCase
         $html = Volt::test('kid.quests')->assertOk()->html();
 
         $this->assertStringNotContainsString('scale('.MonsterTier::Three->artZoom().')', $html);
+    }
+
+    public function test_the_picker_fits_a_phone_and_can_be_scrolled_if_it_does_not(): void
+    {
+        $this->spawnAll();
+
+        // The gate and the quest both have to be out of the way, or the tap
+        // never reaches the picker. The quest is pinned rather than left to
+        // draw itself: it picks at random, and a day it lands on the chore
+        // under test is a day this fails for nothing to do with layout.
+        $this->household->update(['require_quest_first' => false]);
+        $chore = Chore::factory()->for($this->household)->create(['name' => 'Vacuum', 'points' => 100, 'min_age' => null]);
+
+        DailyQuest::create([
+            'household_id' => $this->household->id,
+            'profile_id' => Auth::guard('profile')->id(),
+            'chore_id' => Chore::where('household_id', $this->household->id)->where('id', '!=', $chore->id)->first()->id,
+            'quest_date' => HouseholdClock::for($this->household)->today()->toDateString(),
+            'revealed_at' => now(),
+        ]);
+
+        $html = Volt::test('kid.quests')
+            ->call('claimChore', $chore->id)
+            ->assertSee('Who takes the hit?')
+            ->html();
+
+        // Compact cards, so three of them stack inside a phone screen rather
+        // than overflowing it.
+        $this->assertStringContainsString('w-[74px]', $html);
+
+        // And when they do overflow — a small screen, a long reward name — the
+        // scroller is the plain fixed block, not the flex container. A `fixed`
+        // element that both centres and scrolls strands whatever `align-items`
+        // pushes past its top edge, which is exactly how this opened showing
+        // the last card with the heading unreachable above it.
+        $this->assertStringNotContainsString('fixed inset-0 z-50 flex', $html);
+        $this->assertStringContainsString('flex min-h-full items-end justify-center', $html);
     }
 
     public function test_the_strip_names_the_level_of_every_monster(): void

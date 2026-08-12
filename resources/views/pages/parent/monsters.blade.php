@@ -152,6 +152,20 @@ new class extends Component
         }
     }
 
+    /**
+     * Takes a kid's name back off a monster, which is the veto that makes the
+     * naming perk safe to sell — a name sits on the family's screen for a
+     * fortnight, and somebody has to be able to end that.
+     */
+    public function clearNickname(int $tier): void
+    {
+        $monster = $this->monsterAt($tier);
+
+        if ($monster) {
+            $this->arena()->clearNickname($monster);
+        }
+    }
+
     public function setSkin(int $tier, string $key): void
     {
         $monster = $this->monsterAt($tier);
@@ -317,13 +331,24 @@ new class extends Component
                             </div>
 
                             <p class="mt-2 font-mono-fq text-[10px] text-fq-text-4">
-                                {{ $monster->skin->label() }} &middot;
+                                {{ $monster->displayName() }} &middot;
                                 {{ number_format($state['damage']) }} / {{ number_format($state['maxHealth']) }} PTS &middot;
                                 {{ $state['damagePercent'] }}%
                                 @if ($state['defeated'])
                                     &middot; <span class="text-fq-lime">BEATEN</span>
                                 @endif
                             </p>
+
+                            @if ($monster->nickname)
+                                <p class="mt-1 font-mono-fq text-[10px] text-fq-text-5">
+                                    Named by a kid &middot; really {{ $monster->skin->label() }}
+                                    <button
+                                        type="button"
+                                        wire:click="clearNickname({{ $tier->value }})"
+                                        class="ml-1 underline transition hover:text-fq-text"
+                                    >Take the name off</button>
+                                </p>
+                            @endif
 
                             <div class="mt-3 flex flex-wrap items-center gap-6">
                                 <div>
@@ -435,7 +460,7 @@ new class extends Component
                         </span>
 
                         <span class="font-mono-fq text-[10px] text-fq-text-4">
-                            &rarr; {{ $hit->monster?->skin->label() }}
+                            &rarr; {{ $hit->monster?->displayName() }}
                             &middot; {{ $hit->monster?->tier->label() }}
                             &middot; {{ number_format($hit->damage) }} PTS
                             @if ($hit->kind !== App\Enums\MonsterHitKind::Hit)
@@ -473,7 +498,7 @@ new class extends Component
                         wire:key="shelf-{{ $beaten->id }}"
                         class="flex flex-wrap items-center gap-2 rounded-[12px] border border-fq-line-2 bg-fq-sunk px-3 py-2"
                     >
-                        <span class="text-[13px] font-semibold">{{ $beaten->skin->label() }}</span>
+                        <span class="text-[13px] font-semibold">{{ $beaten->displayName() }}</span>
                         <span class="font-mono-fq text-[10px] text-fq-text-4">
                             {{ $beaten->tier->label() }}
                             &middot; {{ number_format($beaten->max_health) }} HP

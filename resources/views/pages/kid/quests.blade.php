@@ -316,7 +316,16 @@ new class extends Component
         try {
             $outcome = app(PerkInventoryService::class)->use($this->profile, $case);
             $this->perkMessage = null;
-            $this->dispatch('celebrate', message: $outcome, motion: 'burst', origin: 'tap');
+            // Same styles as the Bonus Shop's own copy of this — a Streak
+            // Restore used from the board and one used from the shop are the
+            // same moment and must not celebrate differently.
+            $this->dispatch(
+                'celebrate',
+                message: $outcome,
+                style: $case->celebrationStyle(),
+                motion: 'burst',
+                origin: 'tap',
+            );
         } catch (PerkUnavailableException $e) {
             $this->perkMessage = $e->getMessage();
         }
@@ -424,12 +433,11 @@ new class extends Component
 
         $service = app(ChoreService::class);
         $quest = $service->questFor($this->profile);
-        $gated = $this->profile->household->require_quest_first && $quest->completed_at === null;
 
         // stateFor() already accounts for the mystery chore's household-wide
         // (not per-kid) exclusivity, so no special-casing is needed here.
         if (
-            $gated
+            $service->boardIsGated($this->profile)
             || $chore->id === $quest->chore_id
             || ! $chore->isAppropriateFor($this->profile)
         ) {
@@ -472,7 +480,7 @@ new class extends Component
         // bonus for the price of submitting it, so submitting everything on the
         // board was a way to be told the answer. It's announced when a parent
         // approves the work, by the card the kid shell queues.
-        $aimed = $monster ? " Aimed at {$monster->skin->label()}." : '';
+        $aimed = $monster ? " Aimed at {$monster->displayName()}." : '';
 
         if ($boosted) {
             $this->dispatch('celebrate', message: "{$chore->name} claimed! Bonus wheel treat earned.{$aimed}", treat: 'cookie', motion: 'burst', origin: 'tap');
@@ -632,7 +640,8 @@ new class extends Component
             'dailyGoalPercent' => $this->profile->daily_points_goal > 0
                 ? min(100, (int) round($earnedToday / $this->profile->daily_points_goal * 100))
                 : 0,
-            'allUnlocked' => ! $household->require_quest_first || $questDone,
+            'allUnlocked' => ! $service->boardIsGated($this->profile),
+            'questSkipped' => $service->hasSkippedQuestToday($this->profile),
         ];
     }
 }; ?>
@@ -651,40 +660,56 @@ new class extends Component
          big enough to compare a reward against a health bar on a phone. It only
          ever opens when more than one monster is standing; see shouldAim(). --}}
     @if ($targetingChoreId !== null || $targetingQuest)
+        {{-- The scroller is this plain block, and the centring happens on the
+             wrapper inside it. A `fixed` element that is both the flex
+             container *and* the thing that scrolls loses whatever overflows
+             past its top edge: the browser will not scroll back to content
+             pushed out by `align-items`, so on a phone the picker opened
+             showing the last card with the heading unreachable above it.
+             `min-h-full` on the wrapper is what lets a short panel sit centred
+             while a tall one simply grows and scrolls. --}}
         <div
-            class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto overscroll-contain p-4 sm:items-center"
+            class="fixed inset-0 z-50 overflow-y-auto overscroll-contain"
             style="background: rgba(8, 4, 16, 0.82)"
             wire:key="monster-picker"
         >
-            <div class="w-full max-w-[880px] rounded-[24px] border border-fq-line-2 bg-fq-panel p-5 sm:p-6">
-                <div class="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                        <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-coral uppercase">Nice work</p>
-                        <h2 class="mt-1 font-baloo text-2xl font-extrabold">Who takes the hit?</h2>
-                        <p class="mt-1 max-w-[420px] text-[13px] text-fq-text-4">
-                            All your points from this one go to the monster you pick.
-                        </p>
+            <div class="flex min-h-full items-end justify-center p-4 sm:items-center">
+                <div class="w-full max-w-[880px] rounded-[24px] border border-fq-line-2 bg-fq-panel p-5 sm:p-6">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-coral uppercase">Nice work</p>
+                            <h2 class="mt-1 font-baloo text-2xl font-extrabold">Who takes the hit?</h2>
+                            <p class="mt-1 max-w-[420px] text-[13px] text-fq-text-4">
+                                All your points from this one go to the monster you pick.
+                            </p>
+                        </div>
+
+                        <button
+                            type="button"
+                            wire:click="cancelAim"
+                            class="rounded-[12px] border border-fq-line-3 bg-fq-sunk px-4 py-[9px] text-[13px] text-fq-text-2-b transition hover:text-fq-text"
+                        >Not yet</button>
                     </div>
 
-                    <button
-                        type="button"
-                        wire:click="cancelAim"
-                        class="rounded-[12px] border border-fq-line-3 bg-fq-sunk px-4 py-[9px] text-[13px] text-fq-text-2-b transition hover:text-fq-text"
-                    >Not yet</button>
-                </div>
-
-                <div class="mt-4 flex flex-wrap items-stretch gap-[14px]">
-                    @foreach ($monsterStates as $tierValue => $state)
-                        <x-monster-card
-                            :state="$state"
-                            :selected="$profile->last_monster_tier?->value === $tierValue"
-                            wire:key="pick-{{ $tierValue }}"
-                            wire:click="aimAt({{ $tierValue }})"
-                            class="h-full min-w-0 flex-[1_1_240px] cursor-pointer hover:border-fq-lime"
-                            role="button"
-                            tabindex="0"
-                        />
-                    @endforeach
+                    {{-- Compact cards, not the arena's. Three full cards stack
+                         to well over a phone screen, which is what made the
+                         overflow above matter in the first place — and this is
+                         a decision to make in one glance, not a gallery. The
+                         big artwork lives on the Goal page. --}}
+                    <div class="mt-4 flex flex-wrap items-stretch gap-[14px]">
+                        @foreach ($monsterStates as $tierValue => $state)
+                            <x-monster-card
+                                :state="$state"
+                                :compact="true"
+                                :selected="$profile->last_monster_tier?->value === $tierValue"
+                                wire:key="pick-{{ $tierValue }}"
+                                wire:click="aimAt({{ $tierValue }})"
+                                class="min-w-0 flex-[1_1_260px] cursor-pointer hover:border-fq-lime"
+                                role="button"
+                                tabindex="0"
+                            />
+                        @endforeach
+                    </div>
                 </div>
             </div>
         </div>
@@ -1041,8 +1066,15 @@ new class extends Component
         {{-- 6. Side quests --}}
         <div class="flex flex-wrap items-center justify-between gap-2">
             <h3 class="font-baloo text-xl font-bold">Side Quests</h3>
+            {{-- A bought day says so rather than reading as "All Unlocked":
+                 the kid spent eight tickets on it and should see where the
+                 open board came from. --}}
             <span class="font-mono-fq text-[10px] tracking-[0.14em] uppercase" style="color: {{ $allUnlocked ? 'var(--fq-lime)' : 'var(--fq-gold)' }}">
-                {{ $allUnlocked ? 'All Unlocked' : 'Locked Until Quest Is Done' }}
+                @if ($questSkipped)
+                    Day Off &middot; Board Open
+                @else
+                    {{ $allUnlocked ? 'All Unlocked' : 'Locked Until Quest Is Done' }}
+                @endif
             </span>
         </div>
 

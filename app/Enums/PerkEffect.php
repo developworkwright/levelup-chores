@@ -15,6 +15,29 @@ enum PerkEffect: string
     case QuestReroll = 'quest_reroll';
     case StreakRestore = 'streak_restore';
     case MysteryHint = 'mystery_hint';
+    case QuestSkip = 'quest_skip';
+    case NameMonster = 'name_monster';
+
+    /**
+     * How using this perk should celebrate — one of the styles in
+     * `fqCelebrations` (`shapeStyle()`), which also picks the sound.
+     *
+     * Money is the default over there and it is wrong for every perk: nothing
+     * is bought at the moment one is *used*, the tickets went days ago, and
+     * coins raining down for naming a monster is the app cheering about a
+     * transaction that didn't happen.
+     */
+    public function celebrationStyle(): string
+    {
+        return match ($this) {
+            // Soft, and the only celebration in the app that is meant to be —
+            // it matches the perk's own ♡ and the relief of a rescued streak.
+            self::StreakRestore => 'heart',
+            // A clue is a small bright thing, not a party.
+            self::MysteryHint => 'star',
+            default => 'confetti',
+        };
+    }
 
     /**
      * Starting catalogue values for a household that doesn't have this perk
@@ -48,6 +71,22 @@ enum PerkEffect: string
                 'description' => "Get a clue about which chore is today's Mystery Chore.",
                 'cost' => 6,
                 'glyph' => '?',
+            ],
+            // The dearest thing in the shop, and deliberately dearer than
+            // Streak Restore: a restore buys back one day you already lost,
+            // while this keeps the chain *and* opens the board without the
+            // quest being done at all.
+            self::QuestSkip => [
+                'name' => 'Day Off',
+                'description' => "Skip today's main quest — the board opens and your streak survives. Once a week, and you earn nothing for it.",
+                'cost' => 8,
+                'glyph' => '»',
+            ],
+            self::NameMonster => [
+                'name' => 'Name a Monster',
+                'description' => 'Give one of the monsters a name of your own. It keeps it until the day it goes down.',
+                'cost' => 4,
+                'glyph' => '✎',
             ],
         };
     }

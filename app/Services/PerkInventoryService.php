@@ -22,6 +22,7 @@ class PerkInventoryService
         private SpinService $spins,
         private ChoreService $chores,
         private BadgeService $badges,
+        private MonsterService $monsters,
     ) {}
 
     public function grant(Profile $profile, PerkEffect $effect, string $source): OwnedPerk
@@ -60,9 +61,16 @@ class PerkInventoryService
     /**
      * Spends the oldest unused copy of a perk and applies it.
      *
+     * `$input` is for the one perk that needs the kid to say something as well
+     * as tap: naming a monster wants a target and a name. Every other effect
+     * ignores it, which is why it is an optional bag rather than a signature
+     * every caller has to satisfy.
+     *
+     * @param  array<string, mixed>  $input
+     *
      * @throws PerkUnavailableException
      */
-    public function use(Profile $profile, PerkEffect $effect): string
+    public function use(Profile $profile, PerkEffect $effect, array $input = []): string
     {
         $owned = OwnedPerk::where('profile_id', $profile->id)
             ->unused()
@@ -80,7 +88,7 @@ class PerkInventoryService
 
         // Apply first, mark spent second. A perk that couldn't be applied
         // stays in the pocket.
-        $outcome = $this->apply($profile, $effect);
+        $outcome = $this->apply($profile, $effect, $input);
 
         $owned->consumed_at = now();
         $owned->save();
@@ -104,17 +112,46 @@ class PerkInventoryService
                 : null,
             PerkEffect::StreakRestore => $this->streakRestoreReason($profile),
             PerkEffect::MysteryHint => $this->mysteryHintReason($profile),
+            PerkEffect::QuestSkip => $this->questSkipReason($profile),
+            PerkEffect::NameMonster => $this->monsters->nameable($profile->household)->isEmpty()
+                ? 'Nothing left to name'
+                : null,
         };
     }
 
-    private function apply(Profile $profile, PerkEffect $effect): string
+    /**
+     * @param  array<string, mixed>  $input
+     */
+    private function apply(Profile $profile, PerkEffect $effect, array $input = []): string
     {
         return match ($effect) {
             PerkEffect::WheelRespin => $this->applyWheelRespin($profile),
             PerkEffect::QuestReroll => $this->applyQuestReroll($profile),
             PerkEffect::StreakRestore => $this->applyStreakRestore($profile),
             PerkEffect::MysteryHint => $this->applyMysteryHint($profile),
+            PerkEffect::QuestSkip => $this->applyQuestSkip($profile),
+            PerkEffect::NameMonster => $this->applyNameMonster($profile, $input),
         };
+    }
+
+    /**
+     * @param  array<string, mixed>  $input
+     */
+    private function applyNameMonster(Profile $profile, array $input): string
+    {
+        try {
+            $name = $this->monsters->nameMonster(
+                $profile->household,
+                (int) ($input['monster_id'] ?? 0),
+                (string) ($input['name'] ?? ''),
+            );
+        } catch (\RuntimeException $e) {
+            // Rethrown as the shop's own exception so the perk stays in the
+            // pocket and the kid gets the sentence rather than a stack trace.
+            throw new PerkUnavailableException($e->getMessage());
+        }
+
+        return "Say hello to {$name}.";
     }
 
     private function applyWheelRespin(Profile $profile): string
@@ -155,6 +192,34 @@ class PerkInventoryService
         }
 
         return "Hint unlocked: {$hint}";
+    }
+
+    private function applyQuestSkip(Profile $profile): string
+    {
+        if (! $this->chores->skipQuestToday($profile)) {
+            throw new PerkUnavailableException('There is nothing to skip today.');
+        }
+
+        return 'Day off — the board is open and your streak is safe.';
+    }
+
+    /**
+     * One day off a week, and the refusal says when the next one is rather than
+     * just "no".
+     *
+     * A date is the difference between a rule and a wall: a kid who can read
+     * "Back on Mon 18 Aug" knows to save it for the day they actually need it,
+     * where "already used" only tells them they've lost something.
+     */
+    private function questSkipReason(Profile $profile): ?string
+    {
+        if ($next = $this->chores->nextQuestSkipDate($profile)) {
+            return 'Back on '.$next->format('D j M');
+        }
+
+        return $this->chores->isQuestDoneToday($profile)
+            ? "Today's quest is already cleared"
+            : null;
     }
 
     /**

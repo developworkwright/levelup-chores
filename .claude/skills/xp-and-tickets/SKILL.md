@@ -25,7 +25,9 @@ Covers the progression economy: XP, levels, the ticket currency, and the Bonus S
 |---|---|---|
 | Points | Approved chores | Loot Shop (real rewards, parent fulfils) |
 | **XP** | Chores (+25), badges (`badges.xp_reward`, 50–400) | **Nothing** |
-| Tickets | 1 per level crossed, 1 per badge | Bonus Shop perks |
+| Tickets | 1 per level crossed, 1 per badge, and a **boss defeat** payout | Bonus Shop perks |
+
+A monster falling pays every kid in the household 1, the finisher 2 more, and the biggest damage dealer 2 more again — see `MonsterService::TICKETS_FOR_*`. With three tiers in rotation this is now the fastest ticket source in the app, so it's the lever to reach for if perks start feeling cheap.
 
 **XP is never spent.** Tickets are *minted by* XP, not converted from it — that's the whole design. Any change that makes XP decrease as a result of a purchase breaks the premise.
 
@@ -78,5 +80,13 @@ Rewards are tickets, points, XP, or a perk straight into the inventory. A perk r
 | Quest reroll | Reassigns `DailyQuest` and clears `revealed_at` so the chest replays — see [[chores-and-quests]] |
 | Streak restore | Writes `streak_repairs` for the missed day — see [[streaks]] |
 | Mystery hint | Reveals the chore's parent-written `hint`, per-kid via `mystery_hint_purchases` |
+| Day Off | Writes `quest_skips` for today: the board opens without the quest, and the streak counts the day as kept. **Once per household week** |
+| Name a Monster | Sets `monsters.nickname` on a live monster nobody has named yet — shown everywhere via `Monster::displayName()` |
 
 Hints are deliberately per-kid: one sibling paying must not clue in the rest. Note the mystery chore's own selection now favours chores that *have* a hint, so this perk always has something to sell.
+
+**Day Off is the dearest perk (8) on purpose**, and dearer than Streak Restore (5): a restore buys back one day already lost, while this keeps the chain *and* opens the board with no work done. It pays nothing — skipping the quest skips its points — and it is capped at **one per household week**, because streak milestones pay real money (up to $40 at day 30, doubled on later laps) and an uncapped skip lets a kid climb that ladder having done nothing. `questApprovedOn()` reads `quest_skips` alongside `streak_repairs`, since both answer "does this day count without the quest being done".
+
+The cap lives in **both** `ChoreService::nextQuestSkipDate()` (enforced inside `skipQuestToday()`) and `blockedReason()`. The refusal is a date — "Back on Mon 17 Aug" — not a flat no: a kid who can read when it returns saves it for a day they need.
+
+**`PerkInventoryService::use()` takes an optional `array $input`.** Only Name a Monster reads it (`monster_id`, `name`); every other effect ignores it. That perk is also the one whose tap on the Bonus page opens a form rather than spending immediately — nothing is consumed until a name is submitted, since a half-typed name is a failure to apply and a failed perk stays in the pocket. A parent can strip a name from the Monster Deck, which is the veto that makes it safe to sell.

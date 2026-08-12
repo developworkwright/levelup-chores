@@ -6,6 +6,7 @@ use App\Exceptions\PerkUnavailableException;
 use App\Models\BonusPerk;
 use App\Models\Profile;
 use App\Services\BonusShopService;
+use App\Services\MonsterService;
 use App\Services\PerkInventoryService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
@@ -39,6 +40,11 @@ new class extends Component
         }
     }
 
+    /** The monster a kid is part-way through naming, and what they've typed. */
+    public ?int $namingMonsterId = null;
+
+    public string $monsterName = '';
+
     public function usePerk(string $effect): void
     {
         $case = PerkEffect::tryFrom($effect);
@@ -47,10 +53,51 @@ new class extends Component
             return;
         }
 
-        try {
-            $outcome = app(PerkInventoryService::class)->use($this->profile, $case);
+        // Naming needs a target and a word, so the tap opens the form instead
+        // of spending the perk. Everything else fires on the tap.
+        if ($case === PerkEffect::NameMonster) {
+            $this->namingMonsterId = app(MonsterService::class)
+                ->nameable($this->profile->household)
+                ->first()?->id;
+            $this->monsterName = '';
             $this->flashMessage = null;
-            $this->dispatch('celebrate', message: $outcome, motion: 'burst', origin: 'tap');
+
+            return;
+        }
+
+        $this->spendPerk($case);
+    }
+
+    public function nameMonster(): void
+    {
+        $this->spendPerk(PerkEffect::NameMonster, [
+            'monster_id' => $this->namingMonsterId,
+            'name' => $this->monsterName,
+        ]);
+    }
+
+    public function cancelNaming(): void
+    {
+        $this->namingMonsterId = null;
+        $this->monsterName = '';
+    }
+
+    /**
+     * @param  array<string, mixed>  $input
+     */
+    private function spendPerk(PerkEffect $case, array $input = []): void
+    {
+        try {
+            $outcome = app(PerkInventoryService::class)->use($this->profile, $case, $input);
+            $this->flashMessage = null;
+            $this->cancelNaming();
+            $this->dispatch(
+                'celebrate',
+                message: $outcome,
+                style: $case->celebrationStyle(),
+                motion: 'burst',
+                origin: 'tap',
+            );
         } catch (PerkUnavailableException $e) {
             $this->flashMessage = $e->getMessage();
         }
@@ -71,6 +118,7 @@ new class extends Component
                     'blocked' => $inventory->blockedReason($this->profile, $group->first()->effect),
                 ])
                 ->values(),
+            'nameable' => app(MonsterService::class)->nameable($this->profile->household),
         ];
     }
 }; ?>
@@ -158,6 +206,63 @@ new class extends Component
                 @endfor
             </div>
         </div>
+
+        {{-- Naming is the one perk that needs the kid to say something, so its
+             tap opens this instead of spending the perk outright. Nothing is
+             spent until "Name it" — a perk that failed to apply stays in the
+             pocket, and a half-typed name is a failure to apply. --}}
+        @if ($namingMonsterId !== null && $nameable->isNotEmpty())
+            <div class="rounded-[18px] border p-4" style="border-color: var(--fq-steel-edge); background: var(--fq-steel-panel)">
+                <p class="font-mono-fq text-[10px] tracking-[0.2em] uppercase" style="color: var(--fq-steel-text)">Name a monster</p>
+                <h3 class="mt-1 font-baloo text-xl font-extrabold" style="color: var(--fq-steel-name)">
+                    What should it be called?
+                </h3>
+                <p class="mt-1 text-[13px]" style="color: var(--fq-steel-text)">
+                    It keeps the name until the day it goes down.
+                </p>
+
+                <div class="mt-3 flex flex-wrap gap-2">
+                    @foreach ($nameable as $monster)
+                        <button
+                            type="button"
+                            wire:key="nameable-{{ $monster->id }}"
+                            wire:click="$set('namingMonsterId', {{ $monster->id }})"
+                            class="rounded-[12px] border px-3 py-2 text-xs font-semibold transition"
+                            style="
+                                border-color: {{ $namingMonsterId === $monster->id ? 'var(--fq-lime)' : 'var(--fq-steel-edge)' }};
+                                color: {{ $namingMonsterId === $monster->id ? 'var(--fq-lime)' : 'var(--fq-steel-text)' }};
+                            "
+                        >{{ $monster->tier->label() }} &middot; {{ $monster->skin->label() }}</button>
+                    @endforeach
+                </div>
+
+                <div class="mt-3 flex flex-wrap items-center gap-2">
+                    <input
+                        type="text"
+                        wire:model="monsterName"
+                        wire:keydown.enter="nameMonster"
+                        maxlength="{{ App\Services\MonsterService::NICKNAME_LIMIT }}"
+                        placeholder="Barry"
+                        aria-label="Monster name"
+                        class="min-w-[160px] flex-1 rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[13px] py-[11px] text-sm outline-none focus:border-fq-lime"
+                    >
+
+                    <button
+                        type="button"
+                        wire:click="nameMonster"
+                        class="rounded-[12px] px-4 py-[11px] font-baloo text-sm font-extrabold transition hover:brightness-115"
+                        style="background: var(--fq-fill-steel); color: var(--fq-ink-steel)"
+                    >Name it</button>
+
+                    <button
+                        type="button"
+                        wire:click="cancelNaming"
+                        class="rounded-[12px] border px-4 py-[11px] text-xs"
+                        style="border-color: var(--fq-steel-edge); color: var(--fq-steel-text)"
+                    >Not now</button>
+                </div>
+            </div>
+        @endif
 
         <div class="grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] gap-[10px]">
             @foreach ($catalog as $entry)

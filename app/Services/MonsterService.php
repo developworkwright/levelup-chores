@@ -137,7 +137,7 @@ class MonsterService
             'tier' => $monster->tier,
             'skin' => $monster->skin,
             'stage' => $stage,
-            'name' => $monster->skin->label(),
+            'name' => $monster->displayName(),
             'tagline' => $monster->skin->tagline(),
             'reward' => $monster->reward_name,
             'health' => max(0, $maxHealth - $damage),
@@ -516,6 +516,57 @@ class MonsterService
             ->get();
     }
 
+    /** The longest a kid's name for a monster may be. */
+    public const NICKNAME_LIMIT = 24;
+
+    /**
+     * The monsters standing that nobody has named yet.
+     *
+     * @return Collection<int, Monster>
+     */
+    public function nameable(Household $household): Collection
+    {
+        return $this->live($household)->filter(fn (Monster $monster) => $monster->nickname === null);
+    }
+
+    /**
+     * A kid naming a monster. Returns the name that stuck.
+     *
+     * First come, first served: a monster already carrying a name keeps it
+     * until the day it goes down, so the perk is worth using the moment a new
+     * one turns up rather than sitting in a pocket. Nothing is validated about
+     * *taste* here — a parent can clear a name from the Monster Deck, which is
+     * the right place for that judgement.
+     *
+     * @throws \RuntimeException when there is nothing to name or the name is unusable
+     */
+    public function nameMonster(Household $household, int $monsterId, string $name): string
+    {
+        $name = trim(preg_replace('/\s+/', ' ', $name) ?? '');
+
+        if ($name === '') {
+            throw new \RuntimeException('Give it a name first.');
+        }
+
+        $monster = $this->nameable($household)->firstWhere('id', $monsterId);
+
+        if ($monster === null) {
+            throw new \RuntimeException('That one has a name already.');
+        }
+
+        $name = mb_substr($name, 0, self::NICKNAME_LIMIT);
+
+        $monster->forceFill(['nickname' => $name])->save();
+
+        return $name;
+    }
+
+    /** A parent taking a name back off. The monster returns to its own. */
+    public function clearNickname(Monster $monster): void
+    {
+        $monster->forceFill(['nickname' => null])->save();
+    }
+
     /**
      * The chores a parent may put this monster's weak point on: the draw's own
      * pool, minus anything another monster is already flinching at.
@@ -678,14 +729,14 @@ class MonsterService
                 $kid,
                 TicketKind::BossDefeat,
                 $earned['total'],
-                "{$monster->skin->label()} defeated",
+                "{$monster->displayName()} defeated",
                 $monster,
             );
 
             $queue = $kid->pending_monster_kills ?? [];
 
             $queue[] = [
-                'name' => $monster->skin->label(),
+                'name' => $monster->displayName(),
                 'skin' => $monster->skin->value,
                 'reward' => $monster->reward_name,
                 'tier' => $monster->tier->label(),

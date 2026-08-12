@@ -131,7 +131,7 @@ new class extends Component
             $this->revealed = false;
             $this->spinning = false;
             $this->wheelDeg = 0;
-            $this->dispatch('celebrate', message: 'Wheel reset — take another spin!');
+            $this->dispatch('celebrate', message: 'Wheel reset — take another spin!', style: $case->celebrationStyle());
         } catch (PerkUnavailableException $e) {
             $this->perkMessage = $e->getMessage();
         }
