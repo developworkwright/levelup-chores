@@ -8,7 +8,9 @@ use App\Models\ChoreCompletion;
 use App\Models\Monster;
 use App\Models\Profile;
 use App\Services\BadgeService;
+use App\Services\ChestService;
 use App\Services\ChoreService;
+use App\Services\HouseholdClock;
 use App\Services\LedgerService;
 use App\Services\MonsterService;
 use App\Services\SpinService;
@@ -185,21 +187,52 @@ new class extends Component
      * What's assigned today, and how far the kid has gotten on it — lets a
      * parent see today's main quest for each kid without waiting for an
      * approval request to show up.
+     *
+     * Opening the chest and clearing the quest are two different moments:
+     * `revealed_at` is the kid tapping the chest, `completed_at` is them
+     * marking the chore done. Reading only the second one meant the chest read
+     * as unopened right up until the quest was claimed — and a sent-back quest,
+     * which clears `completed_at` on purpose, fell all the way back to
+     * "not opened" as well.
+     *
+     * A bought day off gets its own state for the same reason: the kid's page
+     * says "Day Off · Board Open" and the parent's said "Not opened yet", which
+     * reads as a kid who has done nothing rather than one who spent tickets on
+     * a rest day.
      */
     private function questSummaryFor(Profile $kid): array
     {
-        $quest = app(ChoreService::class)->questFor($kid);
+        $chores = app(ChoreService::class);
+        $quest = $chores->questFor($kid);
 
-        if ($quest->completed_at === null) {
-            return ['chore' => $quest->chore, 'status' => 'not_started'];
-        }
+        // Scoped to today's household day: the same chore may well have been
+        // done last week, and that attempt says nothing about today's quest.
+        // Clocked off the parent's own household rather than the kid's, which
+        // is the same household and one relation load per card cheaper.
+        $clock = HouseholdClock::for($this->profile->household);
 
         $completion = ChoreCompletion::where('profile_id', $kid->id)
             ->where('chore_id', $quest->chore_id)
+            ->where('submitted_at', '>=', $clock->startOf($clock->today()))
             ->latest('submitted_at')
             ->first();
 
-        return ['chore' => $quest->chore, 'status' => $completion?->status->value ?? 'pending'];
+        $status = match (true) {
+            $completion !== null => $completion->status->value,
+            $quest->completed_at !== null => 'pending',
+            $chores->hasSkippedQuestToday($kid) => 'skipped',
+            $quest->revealed_at !== null => 'opened',
+            default => 'not_started',
+        };
+
+        return [
+            'chore' => $quest->chore,
+            'status' => $status,
+            // Mirrors what rerollQuest() will actually do, so the button isn't
+            // dead on a quest that is still swappable — opened and sent-back
+            // quests both still are.
+            'canReroll' => $quest->completed_at === null,
+        ];
     }
 
     public function with(): array
@@ -210,6 +243,14 @@ new class extends Component
             ->get();
 
         $chores = app(ChoreService::class);
+
+        // `profiles.streak` is a cache, and the SyncStreak middleware only
+        // expires it for the kid who is signed in — so a run that died
+        // overnight kept reading as live here until that kid next opened the
+        // app, and the parent was looking at a different number from the one on
+        // their kid's own header. O(1) per kid, which is what makes it fine on
+        // a page that lists the household.
+        $kids->each(fn (Profile $kid) => $chores->syncStreak($kid));
         $household = $this->profile->household;
         $mysteryChore = $chores->mysteryChoreFor($household);
         $mysteryClaimant = $mysteryChore ? $chores->claimantFor($mysteryChore) : null;
@@ -221,6 +262,21 @@ new class extends Component
                 $spin = app(SpinService::class)->today($kid);
 
                 return [$kid->id => $spin?->loadMissing('chore')];
+            }),
+            // Read-only on purpose, unlike the wheel beside it. The wheel can be
+            // reset because a spin only picks a chore to be worth more; a chest
+            // has already paid tickets, points or a perk out, so "open it again"
+            // would mean paying twice.
+            'chests' => $kids->mapWithKeys(function (Profile $kid) {
+                $chest = app(ChestService::class)->openedToday($kid);
+
+                return [$kid->id => $chest ? [
+                    'prize' => app(ChestService::class)->describe($chest),
+                    'openedAt' => $chest->created_at,
+                    // Whether it rolled on the boosted table — the honest answer
+                    // to "why did they get a perk and mine got 50 points".
+                    'questWasDone' => $chest->quest_was_done,
+                ] : null];
             }),
             'mysteryChore' => $mysteryChore,
             // Who won it, settled by an approval.
@@ -363,8 +419,11 @@ new class extends Component
                 $dollars = number_format($kid->points / $profile->household->points_per_dollar, 2);
                 $quest = $questSummaries[$kid->id];
                 $spin = $spins[$kid->id];
+                $chest = $chests[$kid->id];
                 $questLabels = [
                     'not_started' => ['label' => 'Not opened yet', 'color' => 'var(--fq-text-4)'],
+                    'opened' => ['label' => 'Opened, not done', 'color' => 'var(--fq-cyan)'],
+                    'skipped' => ['label' => 'Day off — bought', 'color' => 'var(--fq-violet)'],
                     'pending' => ['label' => 'Waiting on you', 'color' => 'var(--fq-gold)'],
                     'approved' => ['label' => 'Cleared', 'color' => 'var(--fq-lime)'],
                     'rejected' => ['label' => 'Sent back', 'color' => 'var(--fq-danger)'],
@@ -391,7 +450,7 @@ new class extends Component
                     <button
                         type="button"
                         wire:click="rerollQuest({{ $kid->id }})"
-                        @disabled($quest['status'] !== 'not_started')
+                        @disabled(! $quest['canReroll'])
                         class="mt-2 w-full rounded-[10px] border border-fq-line-3 bg-fq-panel py-[6px] text-xs text-fq-text-3 disabled:opacity-40"
                     >Swap for a different chore</button>
                     @if (! empty($questMessages[$kid->id]))
@@ -476,6 +535,32 @@ new class extends Component
                         @disabled(! $spin)
                         class="flex-shrink-0 rounded-[12px] border border-fq-line-3 bg-fq-panel px-3 py-[6px] text-xs text-fq-text-3 disabled:opacity-40"
                     >Reset</button>
+                </div>
+
+                {{-- What the day's bonus chest paid. Everyone gets one whether
+                     or not they've done anything, so an unopened one is a kid
+                     who hasn't been in today rather than a kid who missed out. --}}
+                <div
+                    class="flex items-center justify-between gap-2 rounded-[14px] border px-3 py-[10px]"
+                    style="border-color: {{ $chest ? 'var(--fq-chest-blue-line)' : 'var(--fq-line-2)' }}; background: var(--fq-sunk)"
+                >
+                    <div class="min-w-0 flex-1">
+                        <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Daily Chest</p>
+                        @if ($chest)
+                            <p class="mt-[2px] truncate text-sm font-semibold" style="color: var(--fq-chest-blue)">{{ $chest['prize'] }}</p>
+                            <p class="font-mono-fq text-[10px] text-fq-text-5 uppercase">
+                                Opened {{ $chest['openedAt']->diffForHumans() }}
+                                · {{ $chest['questWasDone'] ? 'quest was cleared first' : 'quest was still open' }}
+                            </p>
+                        @else
+                            <p class="mt-[2px] text-sm text-fq-text-4">Not opened today</p>
+                        @endif
+                    </div>
+
+                    <span
+                        class="flex-shrink-0 font-mono-fq text-[11px] font-semibold whitespace-nowrap"
+                        style="color: {{ $chest ? 'var(--fq-chest-blue)' : 'var(--fq-text-4)' }}"
+                    >{{ $chest ? 'CLAIMED' : 'WAITING' }}</span>
                 </div>
 
                 <div class="border-t border-fq-divider pt-3">

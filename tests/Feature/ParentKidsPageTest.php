@@ -5,10 +5,13 @@ namespace Tests\Feature;
 use App\Enums\TicketKind;
 use App\Models\BonusTicketEntry;
 use App\Models\Chore;
+use App\Models\ChoreCompletion;
+use App\Models\DailyChest;
 use App\Models\DailyMystery;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Models\Spin;
+use App\Services\ChestService;
 use App\Services\ChoreService;
 use App\Services\HouseholdClock;
 use App\Services\TicketService;
@@ -251,6 +254,178 @@ class ParentKidsPageTest extends TestCase
         // refused — it must never reach for the gated or unlimited ones.
         $after = app(ChoreService::class)->mysteryChoreFor($household);
         $this->assertContains($after->id, [$before->id, $eligible->id]);
+    }
+
+    public function test_an_unopened_quest_chest_reads_as_unopened(): void
+    {
+        $household = Household::factory()->create();
+        Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
+        $this->actingAsParent($household);
+
+        Volt::test('parent.kids')->assertSee('Not opened yet');
+    }
+
+    public function test_an_opened_quest_chest_stops_reading_as_unopened(): void
+    {
+        // The chest is `revealed_at`; the quest being done is `completed_at`.
+        // Reading only the second one left the parent console insisting the
+        // chest was shut for the whole stretch between opening it and clearing
+        // the chore.
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
+        $this->actingAsParent($household);
+
+        app(ChoreService::class)->revealQuest($kid);
+
+        Volt::test('parent.kids')
+            ->assertSee('Opened, not done')
+            ->assertDontSee('Not opened yet');
+    }
+
+    public function test_a_sent_back_quest_reads_as_sent_back_rather_than_unopened(): void
+    {
+        // sendBack() clears completed_at so the kid can have another go, which
+        // used to drop the parent's view all the way back to "not opened".
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
+        $parent = $this->actingAsParent($household);
+
+        $chores = app(ChoreService::class);
+        $chores->revealQuest($kid);
+        $quest = $chores->claimQuest($kid);
+        $chores->sendBack(
+            ChoreCompletion::where('profile_id', $kid->id)->where('chore_id', $quest->chore_id)->latest('submitted_at')->firstOrFail(),
+            $parent,
+        );
+
+        Volt::test('parent.kids')
+            ->assertSee('Sent back')
+            ->assertDontSee('Not opened yet');
+    }
+
+    public function test_a_claimed_quest_waits_on_the_parent(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
+        $this->actingAsParent($household);
+
+        app(ChoreService::class)->claimQuest($kid);
+
+        Volt::test('parent.kids')
+            ->assertSee('Waiting on you')
+            ->assertDontSee('Not opened yet');
+    }
+
+    public function test_a_bought_day_off_is_shown_as_one(): void
+    {
+        // The kid's own page says "Day Off · Board Open". The parent's said
+        // "Not opened yet", which reads as a kid who has done nothing rather
+        // than one who spent tickets on a rest day.
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
+        $this->actingAsParent($household);
+
+        $this->assertTrue(app(ChoreService::class)->skipQuestToday($kid));
+
+        Volt::test('parent.kids')
+            ->assertSee('Day off — bought', escape: false)
+            ->assertDontSee('Not opened yet');
+    }
+
+    public function test_an_opened_quest_can_still_be_swapped(): void
+    {
+        // Opening the chest doesn't commit the kid to anything, so the parent's
+        // override has to survive it.
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->count(4)->create();
+        $this->actingAsParent($household);
+
+        app(ChoreService::class)->revealQuest($kid);
+        $before = app(ChoreService::class)->questFor($kid)->chore_id;
+
+        Volt::test('parent.kids')->call('rerollQuest', $kid->id);
+
+        $this->assertNotSame($before, app(ChoreService::class)->questFor($kid->refresh())->chore_id);
+    }
+
+    public function test_an_unopened_daily_chest_says_so(): void
+    {
+        $household = Household::factory()->create();
+        Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
+        $this->actingAsParent($household);
+
+        Volt::test('parent.kids')
+            ->assertSee('Daily Chest')
+            ->assertSee('Not opened today')
+            ->assertSee('WAITING');
+    }
+
+    public function test_an_opened_daily_chest_names_what_it_paid(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
+        $this->actingAsParent($household);
+
+        // Forced rather than rolled: the loot table is weighted, and a test
+        // that reruns the roll until it likes the answer is a slow test.
+        $chest = DailyChest::create([
+            'profile_id' => $kid->id,
+            'chest_date' => HouseholdClock::for($household)->today(),
+            'reward_kind' => ChestService::KIND_POINTS,
+            'reward_amount' => 150,
+            'quest_was_done' => true,
+        ]);
+
+        Volt::test('parent.kids')
+            ->assertSee(app(ChestService::class)->describe($chest))
+            ->assertSee('quest was cleared first')
+            ->assertSee('CLAIMED')
+            ->assertDontSee('Not opened today');
+    }
+
+    public function test_a_chest_opened_on_a_worse_roll_says_the_quest_was_open(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
+        $this->actingAsParent($household);
+
+        DailyChest::create([
+            'profile_id' => $kid->id,
+            'chest_date' => HouseholdClock::for($household)->today(),
+            'reward_kind' => ChestService::KIND_TICKETS,
+            'reward_amount' => 1,
+            'quest_was_done' => false,
+        ]);
+
+        Volt::test('parent.kids')
+            ->assertSee('1 ticket')
+            ->assertSee('quest was still open');
+    }
+
+    public function test_yesterdays_chest_does_not_count_as_todays(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
+        $this->actingAsParent($household);
+
+        DailyChest::create([
+            'profile_id' => $kid->id,
+            'chest_date' => HouseholdClock::for($household)->today()->subDay(),
+            'reward_kind' => ChestService::KIND_POINTS,
+            'reward_amount' => 50,
+        ]);
+
+        Volt::test('parent.kids')->assertSee('Not opened today');
     }
 
     public function test_a_parent_can_swap_a_kids_quest_for_free(): void

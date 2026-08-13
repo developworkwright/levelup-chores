@@ -193,6 +193,46 @@ class StreakDecayTest extends TestCase
         $this->assertSame(4, $this->kid->refresh()->streak);
     }
 
+    public function test_the_parent_kids_page_expires_a_dead_streak(): void
+    {
+        // The SyncStreak middleware only runs for the kid who is signed in, so
+        // the parent console was quoting a run that had already died — a
+        // different number from the one on the kid's own header.
+        foreach (['2026-03-01', '2026-03-02', '2026-03-03'] as $day) {
+            $this->clearQuestOn($day);
+        }
+
+        $this->kid->update(['streak' => 3]);
+        $this->onDay('2026-03-05');
+
+        Auth::guard('profile')->login($this->parent);
+
+        Volt::test('parent.kids')
+            ->assertOk()
+            ->assertSee('0D STREAK')
+            ->assertDontSee('3D STREAK');
+
+        $this->assertSame(0, $this->kid->refresh()->streak);
+    }
+
+    public function test_the_parent_standings_page_expires_a_dead_streak(): void
+    {
+        foreach (['2026-03-01', '2026-03-02', '2026-03-03'] as $day) {
+            $this->clearQuestOn($day);
+        }
+
+        $this->kid->update(['streak' => 3]);
+        $this->onDay('2026-03-05');
+
+        Auth::guard('profile')->login($this->parent);
+
+        Volt::test('parent.standings')
+            ->assertOk()
+            ->assertDontSee('3D');
+
+        $this->assertSame(0, $this->kid->refresh()->streak);
+    }
+
     public function test_the_quests_page_shows_the_rescue_offer_and_what_it_restores(): void
     {
         foreach (['2026-03-01', '2026-03-02', '2026-03-03'] as $day) {

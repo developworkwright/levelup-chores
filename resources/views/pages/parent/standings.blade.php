@@ -142,6 +142,11 @@ new class extends Component
             ->orderBy('name')
             ->get();
 
+        // Same reason the Kids page does it: the SyncStreak middleware only
+        // expires the signed-in kid's cached streak, so a dead run would sit on
+        // the Streak leaderboard — and rank a kid above one who is still going.
+        $kids->each(fn (Profile $kid) => $chores->syncStreak($kid));
+
         // One grouped query rather than a pair per kid — this page exists to be
         // glanced at, and every kid is on it at once.
         $since = $clock->startOf($clock->today()->copy()->subDays(self::WEEK_DAYS - 1));
