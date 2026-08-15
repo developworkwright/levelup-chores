@@ -148,7 +148,7 @@ class BountyService
             ]);
 
             if ($kind->posterPays()) {
-                $this->hold($bounty, $poster, 'posted');
+                $this->hold($bounty, $poster, 'on the board');
             }
 
             return $bounty;
@@ -175,25 +175,33 @@ class BountyService
      */
     public function waitingOn(Profile $profile): int
     {
+        // Grouped by role rather than by naming the cases: whoever delivers is
+        // waiting while it is Claimed, whoever pays is waiting once it is Done,
+        // and which end that lands on is the kind's business alone.
+        $pays = BountyKind::posterPaysCases();
+        $delivers = BountyKind::posterDeliversCases();
+
         return Bounty::where('household_id', $profile->household_id)
             ->where(fn ($query) => $query
+                // The deliverer still owes the work, or the item.
                 ->where(fn ($q) => $q
                     ->where('status', BountyStatus::Claimed)
                     ->where(fn ($w) => $w
-                        ->where(fn ($wanted) => $wanted
-                            ->where('kind', BountyKind::Wanted)
+                        ->where(fn ($taker) => $taker
+                            ->whereIn('kind', $pays)
                             ->where('claimed_by_profile_id', $profile->id))
-                        ->orWhere(fn ($offered) => $offered
-                            ->where('kind', BountyKind::Offered)
+                        ->orWhere(fn ($poster) => $poster
+                            ->whereIn('kind', $delivers)
                             ->where('poster_profile_id', $profile->id))))
+                // Delivered, and the payer hasn't answered.
                 ->orWhere(fn ($q) => $q
                     ->where('status', BountyStatus::Done)
                     ->where(fn ($p) => $p
-                        ->where(fn ($wanted) => $wanted
-                            ->where('kind', BountyKind::Wanted)
+                        ->where(fn ($poster) => $poster
+                            ->whereIn('kind', $pays)
                             ->where('poster_profile_id', $profile->id))
-                        ->orWhere(fn ($offered) => $offered
-                            ->where('kind', BountyKind::Offered)
+                        ->orWhere(fn ($taker) => $taker
+                            ->whereIn('kind', $delivers)
                             ->where('claimed_by_profile_id', $profile->id)))))
             ->count();
     }
@@ -264,7 +272,7 @@ class BountyService
             $bounty->save();
 
             if (! $bounty->kind->posterPays()) {
-                $this->hold($bounty->refresh(), $taker, 'taken');
+                $this->hold($bounty->refresh(), $taker, 'agreed');
             }
         });
 
@@ -530,10 +538,21 @@ class BountyService
             throw new LogicException('A bounty cannot settle without both sides.');
         }
 
-        DB::transaction(function () use ($bounty, $worker) {
+        DB::transaction(function () use ($bounty, $worker, $payer) {
             // The payer's side is already out of their balance, so this is the
             // release half of the escrow rather than a second charge.
-            $this->move($bounty, $worker, $bounty->reward_amount, "{$bounty->summary()} (settled)");
+            // Named payer → receiver, the same shape a sibling trade writes, so
+            // a parent scrolling the feed can see which way the points went
+            // without opening anything. The one-sided label this replaced said
+            // only who the row belonged to, which read as points appearing from
+            // nowhere and vanishing somewhere else.
+            $this->move(
+                $bounty,
+                $worker,
+                $bounty->reward_amount,
+                "{$payer->name} → {$worker->name}: {$bounty->rewardText()} for \"{$bounty->description}\"".
+                    ($bounty->kind === BountyKind::Selling ? ' (sold)' : ' (job done)'),
+            );
 
             $bounty->status = BountyStatus::Paid;
             $bounty->settled_at = now();
@@ -587,7 +606,12 @@ class BountyService
     /** Take the reward out of the payer's balance and hold it. */
     private function hold(Bounty $bounty, Profile $payer, string $reason): void
     {
-        $this->move($bounty, $payer, -$bounty->reward_amount, "{$bounty->summary()} ({$reason})");
+        $this->move(
+            $bounty,
+            $payer,
+            -$bounty->reward_amount,
+            "{$payer->name} put up {$bounty->rewardText()} for \"{$bounty->description}\" ({$reason})",
+        );
     }
 
     /**
@@ -604,7 +628,12 @@ class BountyService
             return;
         }
 
-        $this->move($bounty, $holder, $bounty->reward_amount, "{$bounty->summary()} ({$reason})");
+        $this->move(
+            $bounty,
+            $holder,
+            $bounty->reward_amount,
+            "{$holder->name} got {$bounty->rewardText()} back — \"{$bounty->description}\" {$reason}",
+        );
     }
 
     /**
@@ -617,8 +646,6 @@ class BountyService
         if ($amount === 0) {
             return;
         }
-
-        $label = "{$profile->name}: {$label}";
 
         match ($bounty->reward_asset) {
             TradeAsset::Points => $this->ledger->record(
@@ -680,7 +707,7 @@ class BountyService
             )
             ->get();
 
-        $title = $bounty->kind->posterPays() ? 'New job on the board' : 'Someone is offering to work';
+        $title = $bounty->kind->announceTitle();
         $body = "{$bounty->poster->name}: {$bounty->summary()}";
 
         foreach ($audience as $profile) {

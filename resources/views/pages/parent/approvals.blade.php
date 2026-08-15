@@ -114,7 +114,10 @@ new class extends Component
     public function with(): array
     {
         $jobOffers = Bounty::where('household_id', $this->profile->household_id)
-            ->where('kind', BountyKind::Offered)
+            // Offers of work only. A sale runs the same machinery but can't be
+            // hired — turning "my blue Lego set" into a one-time chore would
+            // mint a chore named after the thing being sold.
+            ->whereIn('kind', BountyKind::hireableCases())
             // Aimed at a sibling, so it is theirs to answer — a grown-up
             // taking it would be hijacking a deal between two kids.
             ->whereNull('target_profile_id')

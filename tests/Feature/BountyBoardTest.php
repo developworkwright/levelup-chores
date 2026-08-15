@@ -324,6 +324,92 @@ class BountyBoardTest extends TestCase
         $this->service()->post($this->poster, BountyKind::Wanted, TradeAsset::Points, 100, '   ');
     }
 
+    // --- Selling something ------------------------------------------------
+
+    public function test_selling_runs_the_same_deal_as_offering_work(): void
+    {
+        // A sale is the same shape: the poster hands something over, the taker
+        // pays on delivery. Nothing about the machinery changes.
+        $bounty = $this->service()->post(
+            $this->poster, BountyKind::Selling, TradeAsset::Points, 200, 'My blue Lego set',
+        );
+
+        $this->assertSame(500, $this->poster->fresh()->points, 'A seller has nothing to escrow.');
+
+        $this->service()->claim($bounty, $this->sibling);
+        $this->assertSame(300, $this->sibling->fresh()->points, "The buyer's points are held on claim.");
+
+        $this->service()->markDone($bounty->fresh(), $this->poster);
+        $this->service()->confirm($bounty->fresh(), $this->sibling);
+
+        $this->assertSame(700, $this->poster->fresh()->points);
+        $this->assertSame(300, $this->sibling->fresh()->points);
+        $this->assertSame(BountyStatus::Paid, $bounty->fresh()->status);
+    }
+
+    public function test_a_buyer_who_never_answers_still_pays(): void
+    {
+        $bounty = $this->service()->post(
+            $this->poster, BountyKind::Selling, TradeAsset::Points, 200, 'My blue Lego set',
+        );
+
+        $this->service()->claim($bounty, $this->sibling);
+        $this->service()->markDone($bounty->fresh(), $this->poster);
+
+        $this->travel(Bounty::CONFIRM_HOURS + 1)->hours();
+        $this->service()->sweep($this->household);
+
+        $this->assertSame(700, $this->poster->fresh()->points);
+    }
+
+    public function test_a_parent_cannot_hire_something_that_is_for_sale(): void
+    {
+        $parent = Profile::factory()->for($this->household)->parent()->create();
+        $bounty = $this->service()->post(
+            $this->poster, BountyKind::Selling, TradeAsset::Points, 200, 'My blue Lego set',
+        );
+
+        // Hiring creates a one-time chore named after the deal. Doing that to a
+        // sale would put "My blue Lego set" on the chore board worth 200 pts.
+        $this->expectException(BountyUnavailableException::class);
+
+        $this->service()->hire($bounty, $parent);
+    }
+
+    public function test_a_sale_is_counted_as_waiting_on_the_right_kid(): void
+    {
+        $bounty = $this->service()->post(
+            $this->poster, BountyKind::Selling, TradeAsset::Points, 200, 'My blue Lego set',
+        );
+
+        $this->service()->claim($bounty, $this->sibling);
+
+        // The seller owes the item; the buyer is waiting on them.
+        $this->assertSame(1, $this->service()->waitingOn($this->poster->fresh()));
+        $this->assertSame(0, $this->service()->waitingOn($this->sibling->fresh()));
+
+        $this->service()->markDone($bounty->fresh(), $this->poster);
+
+        // Handed over, so now it is the buyer's move.
+        $this->assertSame(0, $this->service()->waitingOn($this->poster->fresh()));
+        $this->assertSame(1, $this->service()->waitingOn($this->sibling->fresh()));
+    }
+
+    public function test_every_kind_carries_a_full_set_of_words(): void
+    {
+        // A kind added without its copy renders blank labels and an empty
+        // button, which is the kind of thing nobody notices until it ships.
+        foreach (BountyKind::cases() as $kind) {
+            foreach ([
+                'label', 'headline', 'takeLabel', 'composeTitle', 'composeBlurb',
+                'subjectPrompt', 'subjectPlaceholder', 'priceLabel', 'workerRole',
+                'deliverLabel', 'announceTitle',
+            ] as $method) {
+                $this->assertNotSame('', trim($kind->{$method}()), "{$kind->value} has no {$method}.");
+            }
+        }
+    }
+
     // --- A parent hiring an offer of work ---------------------------------
 
     public function test_a_parent_hiring_creates_a_one_time_chore_already_claimed(): void

@@ -203,6 +203,54 @@ class BountyPagesTest extends TestCase
         $this->assertSame(CompletionStatus::Pending, $completion->status);
     }
 
+    public function test_a_kid_can_put_something_up_for_sale(): void
+    {
+        $this->loginKid($this->kid);
+
+        Volt::test('kid.trades')
+            ->assertOk()
+            ->assertSee('Sell something')
+            ->call('choose', 'selling')
+            ->assertSee('What are you selling?')
+            ->set('jobDescription', 'My blue Lego set')
+            ->set('jobAmount', '200')
+            ->call('postJob')
+            ->assertSee('Posted to the board!');
+
+        $bounty = Bounty::firstOrFail();
+
+        $this->assertSame(BountyKind::Selling, $bounty->kind);
+        $this->assertSame('My blue Lego set', $bounty->description);
+    }
+
+    public function test_the_board_offers_a_sale_as_something_to_buy(): void
+    {
+        $this->postJob(BountyKind::Selling, 'My blue Lego set', 200);
+
+        $this->loginKid($this->sibling);
+
+        Volt::test('kid.trades')
+            ->assertOk()
+            ->assertSee('Is selling')
+            ->assertSee('Buy it')
+            // The buyer is the one paying, so the card prices it against them.
+            ->assertSee('You pay');
+    }
+
+    public function test_a_parent_is_not_offered_a_sale_to_hire(): void
+    {
+        $parent = Profile::factory()->for($this->household)->parent()->create();
+        $this->postJob(BountyKind::Selling, 'My blue Lego set', 200);
+
+        Auth::guard('profile')->login($parent);
+
+        // Hiring it would put "My blue Lego set" on the chore board.
+        Volt::test('parent.approvals')
+            ->assertOk()
+            ->assertDontSee('Jobs On Offer')
+            ->assertDontSee('My blue Lego set');
+    }
+
     public function test_a_parent_is_not_offered_a_job_aimed_at_a_sibling(): void
     {
         $parent = Profile::factory()->for($this->household)->parent()->create();

@@ -2,14 +2,17 @@
 
 namespace Tests\Feature;
 
+use App\Enums\BountyKind;
 use App\Enums\LedgerKind;
 use App\Enums\TicketKind;
 use App\Enums\TradeAsset;
 use App\Models\BonusTicketEntry;
+use App\Models\Bounty;
 use App\Models\Household;
 use App\Models\LedgerEntry;
 use App\Models\Profile;
 use App\Models\SiblingOffer;
+use App\Services\BountyService;
 use App\Services\LedgerService;
 use App\Services\SiblingOfferService;
 use App\Services\TicketService;
@@ -69,6 +72,65 @@ class ParentActivityPageTest extends TestCase
             ->assertSee('Alex → Sam: 1 ticket for 100 pts', false)
             ->assertSee('-100')
             ->assertSee('+100');
+    }
+
+    public function test_a_settled_job_names_both_sides_in_the_feed(): void
+    {
+        $household = Household::factory()->create();
+        $nova = Profile::factory()->for($household)->create(['name' => 'Nova', 'points' => 400]);
+        $scout = Profile::factory()->for($household)->create(['name' => 'Scout', 'points' => 0]);
+        $this->actingAsParent($household);
+
+        $bounties = app(BountyService::class);
+        $bounty = $bounties->post($nova, BountyKind::Wanted, TradeAsset::Points, 100, 'Vacuum the car');
+        $bounties->claim($bounty, $scout);
+        $bounties->markDone($bounty->fresh(), $scout);
+        $bounties->confirm($bounty->fresh(), $nova);
+
+        // Both halves on one row. The old label named only whoever the row
+        // belonged to, so the feed read as points appearing from nowhere for
+        // one kid and vanishing for another.
+        Volt::test('parent.activity')
+            ->assertOk()
+            ->assertSee('Nova put up 100 pts for "Vacuum the car"')
+            ->assertSee('Nova → Scout: 100 pts for "Vacuum the car" (job done)');
+    }
+
+    public function test_a_sale_reads_as_a_sale_not_as_work(): void
+    {
+        $household = Household::factory()->create();
+        $nova = Profile::factory()->for($household)->create(['name' => 'Nova', 'points' => 0]);
+        $scout = Profile::factory()->for($household)->create(['name' => 'Scout', 'points' => 400]);
+        $this->actingAsParent($household);
+
+        $bounties = app(BountyService::class);
+        $bounty = $bounties->post($nova, BountyKind::Selling, TradeAsset::Points, 200, 'My blue Lego set');
+        $bounties->claim($bounty, $scout);
+        $bounties->markDone($bounty->fresh(), $nova);
+        $bounties->confirm($bounty->fresh(), $scout);
+
+        Volt::test('parent.activity')
+            ->assertOk()
+            ->assertSee('Scout → Nova: 200 pts for "My blue Lego set" (sold)');
+    }
+
+    public function test_a_lapsed_job_says_who_got_their_points_back(): void
+    {
+        $household = Household::factory()->create();
+        $nova = Profile::factory()->for($household)->create(['name' => 'Nova', 'points' => 400]);
+        Profile::factory()->for($household)->create(['name' => 'Scout']);
+        $this->actingAsParent($household);
+
+        $bounties = app(BountyService::class);
+        $bounties->post($nova, BountyKind::Wanted, TradeAsset::Points, 100, 'Vacuum the car');
+
+        $this->travel(Bounty::OPEN_HOURS + 1)->hours();
+        $bounties->sweep($household);
+
+        // A refund with no explanation is the row a parent stops on.
+        Volt::test('parent.activity')
+            ->assertOk()
+            ->assertSee('Nova got 100 pts back — "Vacuum the car" ran out of time');
     }
 
     public function test_a_trade_paid_in_tickets_lands_in_the_ticket_feed_not_the_ledger(): void

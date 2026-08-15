@@ -23,10 +23,14 @@ use Livewire\Volt\Component;
  * "bounty" for the job half — that is {@see BountyService}'s vocabulary and it
  * is not worth a rename across a service, a model and a table for a label.
  *
- * A kid has two questions: what is the deal, and who is it for. The first has
- * three answers — swap currency, pay for a job, offer to do a job — and only a
- * job has a second answer worth asking about, since a swap is inherently
- * between two people while a job can go to the whole household.
+ * A kid has two questions: what is the deal, and who is it for. The first is
+ * answered by a swap or by one of {@see BountyKind}'s cases — pay for a job,
+ * offer to do one, sell something — and only the bounty kinds have a second
+ * answer worth asking about, since a swap is inherently between two people
+ * while a job or a sale can go to the whole household.
+ *
+ * Everything that differs in wording between those kinds lives on the enum, so
+ * adding a fourth is a case and its words rather than a branch in here.
  *
  * The two engines behind it stay separate on purpose. A swap settles the
  * instant it is accepted because there is no work in it; a job is claimed,
@@ -42,7 +46,7 @@ new class extends Component
 
     public ?string $errorMessage = null;
 
-    /** null, or one of swap|wanted|offered. Transient — this visit only. */
+    /** null, or one of {@see self::composeModes()}. Transient — this visit only. */
     public ?string $mode = null;
 
     public string $giveAsset = 'points';
@@ -71,9 +75,22 @@ new class extends Component
         abort_unless($this->profile->isKid(), 403);
     }
 
+    /**
+     * What the compose form can be set to: a swap, or any kind of bounty.
+     * Read off the enum rather than listed, so a new kind is offerable the
+     * moment it exists — a method rather than a const because a constant
+     * expression can't call one.
+     *
+     * @return array<int, string>
+     */
+    private function composeModes(): array
+    {
+        return ['swap', ...array_column(BountyKind::cases(), 'value')];
+    }
+
     public function choose(?string $mode): void
     {
-        $this->mode = in_array($mode, ['swap', 'wanted', 'offered'], true) ? $mode : null;
+        $this->mode = in_array($mode, $this->composeModes(), true) ? $mode : null;
         $this->clearMessages();
     }
 
@@ -348,7 +365,7 @@ new class extends Component
             // is public and arrives as whatever was sent, and the template
             // looks a heading up by it. An unknown value was an undefined array
             // key — a 500 on render, before any action had even been called.
-            'composeMode' => in_array($this->mode, ['swap', 'wanted', 'offered'], true)
+            'composeMode' => in_array($this->mode, $this->composeModes(), true)
                 ? $this->mode
                 : null,
             'siblings' => $this->profile->siblings(),
@@ -422,7 +439,11 @@ new class extends Component
             <p class="text-center text-sm text-fq-text-4">Deals need a sibling to make them with.</p>
         @elseif (! $composeMode)
             <h3 class="font-baloo text-[19px] font-extrabold">Start a deal</h3>
-            <div class="mt-3 grid gap-2 sm:grid-cols-3">
+
+            {{-- Two across on a phone rather than four in a squeezed row: the
+                 kinds carry a line of explanation each, and at a quarter width
+                 that wraps to four lines. --}}
+            <div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                 <button
                     type="button"
                     wire:click="choose('swap')"
@@ -431,27 +452,29 @@ new class extends Component
                     <p class="font-baloo text-[16px] font-bold">Swap</p>
                     <p class="mt-1 text-[13px] text-fq-text-4">Points for tickets with one sibling.</p>
                 </button>
-                <button
-                    type="button"
-                    wire:click="choose('wanted')"
-                    class="rounded-[16px] border border-fq-line-2 bg-fq-sunk p-4 text-left transition hover:border-fq-lime"
-                >
-                    <p class="font-baloo text-[16px] font-bold">Pay for a job</p>
-                    <p class="mt-1 text-[13px] text-fq-text-4">Get something done for you.</p>
-                </button>
-                <button
-                    type="button"
-                    wire:click="choose('offered')"
-                    class="rounded-[16px] border border-fq-line-2 bg-fq-sunk p-4 text-left transition hover:border-fq-lime"
-                >
-                    <p class="font-baloo text-[16px] font-bold">Do a job</p>
-                    <p class="mt-1 text-[13px] text-fq-text-4">Offer to work for points.</p>
-                </button>
+
+                {{-- Driven off the enum so a new kind arrives here with its own
+                     words rather than needing a branch adding. --}}
+                @foreach (BountyKind::cases() as $kind)
+                    <button
+                        type="button"
+                        wire:key="kind-{{ $kind->value }}"
+                        wire:click="choose('{{ $kind->value }}')"
+                        class="rounded-[16px] border border-fq-line-2 bg-fq-sunk p-4 text-left transition hover:border-fq-lime"
+                    >
+                        <p class="font-baloo text-[16px] font-bold">{{ $kind->composeTitle() }}</p>
+                        <p class="mt-1 text-[13px] text-fq-text-4">{{ $kind->composeBlurb() }}</p>
+                    </button>
+                @endforeach
             </div>
         @else
+            {{-- Null on the swap branch, which has no kind of its own. Every
+                 word below that differs between kinds comes off it. --}}
+            @php $kind = BountyKind::tryFrom($composeMode); @endphp
+
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <h3 class="font-baloo text-[19px] font-extrabold">
-                    {{ ['swap' => 'Swap', 'wanted' => 'Pay for a job', 'offered' => 'Do a job'][$composeMode] }}
+                    {{ $kind?->composeTitle() ?? 'Swap' }}
                 </h3>
                 <button
                     type="button"
@@ -488,18 +511,18 @@ new class extends Component
                 </div>
             @else
                 <p class="mt-4 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
-                    {{ $composeMode === 'wanted' ? 'What do you want done?' : 'What will you do?' }}
+                    {{ $kind->subjectPrompt() }}
                 </p>
                 <input
                     type="text"
                     wire:model="jobDescription"
                     maxlength="{{ App\Models\Bounty::MAX_DESCRIPTION }}"
-                    placeholder="{{ $composeMode === 'wanted' ? 'Make my bed' : 'Wash the car' }}"
+                    placeholder="{{ $kind->subjectPlaceholder() }}"
                     class="mt-2 w-full rounded-[14px] border border-fq-line-2 bg-fq-sunk px-4 py-[10px] text-sm outline-none focus:border-fq-cyan"
                 >
 
                 <p class="mt-4 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
-                    {{ $composeMode === 'wanted' ? "You'll pay" : 'You want paid' }}
+                    {{ $kind->priceLabel() }}
                 </p>
                 <div class="mt-2 flex flex-wrap items-center gap-2">
                     @foreach ($assets as $asset)
@@ -629,7 +652,7 @@ new class extends Component
                     <div wire:key="job-{{ $job->id }}" class="rounded-[18px] border border-fq-line bg-fq-sunk p-4">
                         <div class="flex flex-wrap items-center gap-2">
                             <span class="rounded-full border border-fq-line-2 px-[11px] py-[5px] font-mono-fq text-[10px] tracking-[0.1em] text-fq-text-4 uppercase">
-                                {{ $isWorker ? 'You do it' : 'You pay' }}
+                                {{ $isWorker ? $job->kind->workerRole() : 'You pay' }}
                             </span>
                             <span class="font-mono-fq text-[10px] text-fq-text-5">{{ $job->status->label() }}</span>
                             @if ($other)
@@ -651,7 +674,7 @@ new class extends Component
                                         wire:click="markJobDone({{ $job->id }})"
                                         class="rounded-[13px] px-4 py-[10px] text-[13px] font-semibold text-fq-bg transition hover:brightness-110"
                                         style="background: var(--fq-lime)"
-                                    >I've done it</button>
+                                    >{{ $job->kind->deliverLabel() }}</button>
                                 @elseif ($isPayer && $job->status === BountyStatus::Done)
                                     <button
                                         type="button"
