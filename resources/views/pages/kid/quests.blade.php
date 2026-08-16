@@ -3,6 +3,7 @@
 use App\Enums\CompletionStatus;
 use App\Enums\MonsterTier;
 use App\Enums\PerkEffect;
+use App\Enums\SleepOutcome;
 use App\Exceptions\BountyUnavailableException;
 use App\Exceptions\InsufficientPointsException;
 use App\Exceptions\InsufficientTicketsException;
@@ -18,6 +19,7 @@ use App\Services\GratitudeService;
 use App\Services\HouseholdClock;
 use App\Services\MonsterService;
 use App\Services\PerkInventoryService;
+use App\Services\SleepService;
 use App\Services\SpinService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
@@ -278,6 +280,69 @@ new class extends Component
      * "you missed a box", the other is "you already did this today", and a
      * button that silently does nothing explains neither.
      */
+    /**
+     * Answer last night's own-bed card.
+     *
+     * Every outcome celebrates, including the two that don't light a star —
+     * with hearts rather than coins, because a kid who came in at 3am and said
+     * so honestly has done the thing this card is actually for.
+     */
+    public function answerSleep(string $outcome): void
+    {
+        $choice = SleepOutcome::tryFrom($outcome);
+
+        if (! $choice) {
+            return;
+        }
+
+        try {
+            $result = app(SleepService::class)->record($this->profile, $choice);
+        } catch (RuntimeException) {
+            // Already answered, or switched off mid-visit. The card re-renders
+            // showing what they said, which explains it better than a message.
+            return;
+        }
+
+        $this->profile->refresh();
+
+        $this->dispatch(
+            'celebrate',
+            // Finishing a picture is the bigger news and wins the headline; a
+            // plain good night still says what it paid, because that is the
+            // reward for pressing the button at all. A tapered-out household
+            // pays nothing, and "+0 pts" would read as being shortchanged.
+            message: match (true) {
+                $result['constellation'] && $result['constellationPoints'] > 0 => $result['constellation']->label()
+                    .' complete! +'.number_format($result['constellationPoints'] + $result['nightPoints']).' pts',
+                (bool) $result['constellation'] => $result['constellation']->label().' complete!',
+                $result['nightPoints'] > 0 => 'A night in your own bed! +'.number_format($result['nightPoints']).' pts',
+                default => $choice->response(),
+            },
+            style: $result['constellation'] || $result['nightPoints'] > 0 ? 'money' : 'heart',
+            motion: 'burst',
+            origin: 'tap',
+        );
+    }
+
+    public function openSleepChest(): void
+    {
+        $opened = app(SleepService::class)->openChest($this->profile);
+
+        if (! $opened) {
+            return;
+        }
+
+        $this->profile->refresh();
+
+        $this->dispatch(
+            'celebrate',
+            message: $opened['nights'].' nights in a row! +'.$opened['tickets'].' tickets',
+            style: 'star',
+            motion: 'burst',
+            origin: 'tap',
+        );
+    }
+
     public function logGratitude(): void
     {
         $service = app(GratitudeService::class);
@@ -601,6 +666,9 @@ new class extends Component
             // Today's only. Everything older lives on the Journal tab — this
             // page is about the day in front of you.
             'gratitudeToday' => $gratitude->todayFor($this->profile),
+            // Null unless both the household and this kid have it switched on,
+            // which is what keeps the card off every other kid's page.
+            'sleepCard' => app(SleepService::class)->cardFor($this->profile),
             // Contextual "use it here" buttons for the perks that act on this
             // page, so a kid doesn't have to go hunting in the shop.
             'heldPerks' => collect([PerkEffect::QuestReroll, PerkEffect::MysteryHint, PerkEffect::StreakRestore])
@@ -996,6 +1064,28 @@ new class extends Component
                 <x-monster-mini :states="$monsterStates" :pending="$pendingCount" wire:key="family-boss" />
             @endif
         </div>
+
+        {{-- The own-bed card, above gratitude because it asks about last night
+             and the morning is when it makes sense to answer. Absent entirely
+             unless a parent has switched it on for this kid. --}}
+        @if ($sleepCard)
+            <x-sleep-card :card="$sleepCard" />
+
+            @if ($sleepCard['pendingChest'])
+                <button
+                    type="button"
+                    wire:key="sleep-chest"
+                    wire:click="openSleepChest"
+                    class="rounded-[24px] border px-5 py-4 text-left transition hover:brightness-110"
+                    style="background: var(--fq-wash-blue); border-color: var(--fq-cyan)"
+                >
+                    <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: var(--fq-cyan)">Night Chest</p>
+                    <p class="mt-1 font-baloo text-xl font-bold">
+                        {{ $sleepCard['pendingChest'] }} nights in a row — tap to open
+                    </p>
+                </button>
+            @endif
+        @endif
 
         {{-- 5. Gratitude quest. The one quest that isn't work — nothing for a
              parent to approve, so the tickets land on hand-in. --}}

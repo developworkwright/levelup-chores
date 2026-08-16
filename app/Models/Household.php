@@ -17,6 +17,9 @@ class Household extends Model
         'points_per_dollar',
         'require_quest_first',
         'spin_enabled',
+        'sleep_card_enabled',
+        'sleep_constellation_points',
+        'sleep_night_points',
     ];
 
     protected function casts(): array
@@ -24,6 +27,7 @@ class Household extends Model
         return [
             'require_quest_first' => 'boolean',
             'spin_enabled' => 'boolean',
+            'sleep_card_enabled' => 'boolean',
         ];
     }
 

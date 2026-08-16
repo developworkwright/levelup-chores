@@ -15,6 +15,9 @@ enum TicketKind: string
     /** Paid for naming three things you're grateful for. */
     case Gratitude = 'gratitude';
 
+    /** Paid for a run of nights in their own bed. */
+    case Sleep = 'sleep';
+
     /** Paid out to the whole household when a monster goes down. */
     case BossDefeat = 'boss_defeat';
 
@@ -27,6 +30,7 @@ enum TicketKind: string
             self::Adjustment => 'Adjustment',
             self::Trade => 'Trade',
             self::Gratitude => 'Gratitude',
+            self::Sleep => 'Own bed',
             self::BossDefeat => 'Boss defeated',
         };
     }

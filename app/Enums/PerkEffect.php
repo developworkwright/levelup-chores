@@ -17,6 +17,7 @@ enum PerkEffect: string
     case MysteryHint = 'mystery_hint';
     case QuestSkip = 'quest_skip';
     case NameMonster = 'name_monster';
+    case NightSaver = 'night_saver';
 
     /**
      * How using this perk should celebrate — one of the styles in
@@ -30,9 +31,9 @@ enum PerkEffect: string
     public function celebrationStyle(): string
     {
         return match ($this) {
-            // Soft, and the only celebration in the app that is meant to be —
-            // it matches the perk's own ♡ and the relief of a rescued streak.
-            self::StreakRestore => 'heart',
+            // Soft, and the only celebrations in the app that are meant to be —
+            // they match the perks' own ♡ and the relief of a rescued run.
+            self::StreakRestore, self::NightSaver => 'heart',
             // A clue is a small bright thing, not a party.
             self::MysteryHint => 'star',
             default => 'confetti',
@@ -87,6 +88,16 @@ enum PerkEffect: string
                 'description' => 'Give one of the monsters a name of your own. It keeps it until the day it goes down.',
                 'cost' => 4,
                 'glyph' => '✎',
+            ],
+            // Cheap on purpose. The tickets to buy it come from the run it
+            // protects, so pricing it high would mean a kid who has a bad night
+            // early — before any milestone has paid — can never afford the
+            // thing that exists to help them.
+            self::NightSaver => [
+                'name' => 'Night Saver',
+                'description' => 'Had a night out of your own bed? Buy it back and keep your run going.',
+                'cost' => 2,
+                'glyph' => '☾',
             ],
         };
     }

@@ -53,6 +53,13 @@ class Profile extends Model implements Authenticatable
         'pending_mystery_celebration',
         'saving_for_store_item_id',
         'daily_points_goal',
+        'sleep_card_enabled',
+        'sleep_nights',
+        'sleep_run',
+        'sleep_best_run',
+        'sleep_constellations_paid',
+        'sleep_run_paid_through',
+        'pending_sleep_chest',
         'last_monster_tier',
         'monsters_seen',
         'pending_monster_kills',
@@ -72,6 +79,7 @@ class Profile extends Model implements Authenticatable
             'pending_monster_kills' => 'array',
             'locked_until' => 'datetime',
             'badges_seen_at' => 'datetime',
+            'sleep_card_enabled' => 'boolean',
         ];
     }
 

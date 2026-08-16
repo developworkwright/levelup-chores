@@ -23,6 +23,7 @@ class PerkInventoryService
         private ChoreService $chores,
         private BadgeService $badges,
         private MonsterService $monsters,
+        private SleepService $sleep,
     ) {}
 
     public function grant(Profile $profile, PerkEffect $effect, string $source): OwnedPerk
@@ -116,6 +117,7 @@ class PerkInventoryService
             PerkEffect::NameMonster => $this->monsters->nameable($profile->household)->isEmpty()
                 ? 'Nothing left to name'
                 : null,
+            PerkEffect::NightSaver => $this->sleep->saveReason($profile),
         };
     }
 
@@ -131,7 +133,20 @@ class PerkInventoryService
             PerkEffect::MysteryHint => $this->applyMysteryHint($profile),
             PerkEffect::QuestSkip => $this->applyQuestSkip($profile),
             PerkEffect::NameMonster => $this->applyNameMonster($profile, $input),
+            PerkEffect::NightSaver => $this->applyNightSaver($profile),
         };
+    }
+
+    private function applyNightSaver(Profile $profile): string
+    {
+        // blockedReason() has already said there is a night to buy back, and a
+        // perk that fails to apply is not consumed — so a false here would mean
+        // the two disagreed.
+        if (! $this->sleep->saveNight($profile)) {
+            throw new PerkUnavailableException('There is no night to buy back.');
+        }
+
+        return 'Night bought back — your run is safe.';
     }
 
     /**

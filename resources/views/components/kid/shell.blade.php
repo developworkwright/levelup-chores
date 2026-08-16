@@ -210,11 +210,21 @@
     if ($markers !== []) {
         $profile->forceFill($markers)->save();
     }
+
+    // The constellations this kid has earned, behind every page of theirs. Only
+    // for a kid the own-bed card is switched on for — nobody else has a sky,
+    // and an empty one renders nothing at all.
+    $sleep = app(App\Services\SleepService::class);
+    $sky = $sleep->isEnabledFor($profile) ? $sleep->earnedConstellations($profile) : [];
 @endphp
 
 {{-- `isolate` so the watching monster's negative z-index puts it behind the
      page's content without dropping it behind the page background entirely. --}}
 <div class="relative isolate mx-auto max-w-[1080px] px-[14px] pb-10">
+    {{-- Inside the isolate, like the watching monster: a negative z-index puts
+         it behind the page's content without dropping it behind the page
+         background entirely. --}}
+    <x-kid.sky :constellations="$sky" />
     {{-- Keyed on what it's announcing, so Livewire tears the element down and
          builds a new one whenever the news changes — which is what re-runs
          x-init. A re-render carrying nothing new renders nothing at all. --}}

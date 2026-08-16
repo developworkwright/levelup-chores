@@ -13,6 +13,7 @@ use App\Services\ChoreService;
 use App\Services\HouseholdClock;
 use App\Services\LedgerService;
 use App\Services\MonsterService;
+use App\Services\SleepService;
 use App\Services\SpinService;
 use App\Services\TicketService;
 use Illuminate\Support\Facades\Auth;
@@ -134,6 +135,72 @@ new class extends Component
         if ($kid) {
             app(SpinService::class)->clearToday($kid);
         }
+    }
+
+    /** The household switch. Off, every per-kid switch is moot. */
+    public function toggleHouseholdSleepCard(): void
+    {
+        $household = $this->profile->household;
+        $household->update(['sleep_card_enabled' => ! $household->sleep_card_enabled]);
+    }
+
+    /**
+     * Taper what a constellation pays. Nothing already earned moves — see
+     * SleepService::setConstellationPoints().
+     */
+    public function adjustConstellationPayout(int $delta): void
+    {
+        $sleep = app(SleepService::class);
+        $household = $this->profile->household;
+
+        $sleep->setConstellationPoints(
+            $household,
+            $sleep->constellationPoints($household) + $delta,
+        );
+    }
+
+    /** Taper what a single night pays. Same reasoning as the constellation. */
+    public function adjustNightPayout(int $delta): void
+    {
+        $sleep = app(SleepService::class);
+        $household = $this->profile->household;
+
+        $sleep->setNightPoints($household, $sleep->nightPoints($household) + $delta);
+    }
+
+    /**
+     * Switch the own-bed card on or off for one kid.
+     *
+     * Per kid rather than by age: a parent knows who is working on this, and a
+     * birthday is a poor proxy either way round.
+     */
+    public function toggleSleepCard(int $profileId): void
+    {
+        $kid = $this->ownedKid($profileId);
+
+        if ($kid) {
+            $kid->update(['sleep_card_enabled' => ! $kid->sleep_card_enabled]);
+        }
+    }
+
+    /**
+     * Nudge a kid's own-bed numbers. The card is answered by a small child and
+     * sometimes the answer is wrong — but the paid marks never move down with
+     * it, so correcting a number can't re-pay a constellation.
+     */
+    public function adjustSleep(int $profileId, int $nights = 0, int $run = 0): void
+    {
+        $kid = $this->ownedKid($profileId);
+
+        if (! $kid) {
+            return;
+        }
+
+        app(SleepService::class)->adjust(
+            $kid,
+            nights: $nights !== 0 ? max(0, $kid->sleep_nights + $nights) : null,
+            run: $run !== 0 ? max(0, $kid->sleep_run + $run) : null,
+        );
     }
 
     public function rerollMystery(): void
@@ -413,6 +480,91 @@ new class extends Component
         </p>
     </div>
 
+    {{-- The own-bed feature, off for the whole household until switched on
+         here. Two switches on purpose: this one decides whether the family uses
+         it at all, and the per-kid one below decides who is asked. --}}
+    <div class="mb-[14px] rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="min-w-[240px] flex-1">
+                <h3 class="font-baloo text-lg font-bold">Own Bed Card</h3>
+                <p class="mt-1 text-sm text-fq-text-2">
+                    A morning check-in for a kid working on sleeping in their own bed. Three
+                    honest answers, and a bad night never takes anything away — it just
+                    doesn't light a star. Seven stars finishes a constellation; nights in a
+                    row pay tickets.
+                </p>
+            </div>
+
+            <button
+                type="button"
+                wire:click="toggleHouseholdSleepCard"
+                class="rounded-[12px] border px-4 py-2 text-sm font-semibold {{ $household->sleep_card_enabled ? 'border-fq-lime text-fq-lime' : 'border-fq-line-3 bg-fq-sunk text-fq-text-3' }}"
+            >{{ $household->sleep_card_enabled ? 'On' : 'Off' }}</button>
+        </div>
+
+        @if ($household->sleep_card_enabled)
+            @php
+                $sleep = app(\App\Services\SleepService::class);
+                $perNight = $sleep->nightPoints($household);
+                $perPicture = $sleep->constellationPoints($household);
+                $rate = max(1, (int) $household->points_per_dollar);
+                // What a perfect week actually costs, which is the number worth
+                // watching while calibrating — neither dial says it alone.
+                $weekly = ($perNight * 7) + $perPicture;
+            @endphp
+
+            {{-- Two dials, because they do different jobs: the night is what
+                 gets a reluctant kid through the hard part, and the picture is
+                 what makes a week mean something. Tapering is the expected
+                 path — the money is there to start a habit, not to run
+                 forever — and nothing already earned changes when either
+                 moves. --}}
+            <div class="mt-4 grid gap-4 border-t border-fq-divider pt-3 sm:grid-cols-2">
+                @foreach ([
+                    ['Per night', $perNight, 'adjustNightPayout', \App\Services\SleepService::NIGHT_STEP],
+                    ['Per constellation · '.\App\Enums\Constellation::NIGHTS.' nights', $perPicture, 'adjustConstellationPayout', \App\Services\SleepService::PAYOUT_STEP],
+                ] as [$label, $value, $action, $step])
+                    <div wire:key="sleep-dial-{{ $action }}">
+                        <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">{{ $label }}</p>
+
+                        <div class="mt-1 flex items-center gap-2">
+                            <button
+                                type="button"
+                                wire:click="{{ $action }}(-{{ $step }})"
+                                @disabled($value === 0)
+                                class="h-8 w-8 rounded-[10px] border border-fq-line-3 bg-fq-sunk text-lg disabled:opacity-40"
+                            >&minus;</button>
+
+                            <span class="w-20 text-center font-baloo text-[17px] font-extrabold text-fq-lime">
+                                {{ number_format($value) }}
+                            </span>
+
+                            <button
+                                type="button"
+                                wire:click="{{ $action }}({{ $step }})"
+                                class="h-8 w-8 rounded-[10px] border border-fq-line-3 bg-fq-sunk text-lg"
+                            >+</button>
+
+                            <span class="font-mono-fq text-[11px] text-fq-text-4">
+                                {{ $value === 0 ? 'nothing' : '$'.number_format($value / $rate, 2) }}
+                            </span>
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+
+            <p class="mt-3 font-mono-fq text-[11px] text-fq-text-4">
+                A perfect week is
+                <span class="text-fq-gold">${{ number_format($weekly / $rate, 2) }}</span>
+                per kid &middot; about ${{ number_format($weekly / $rate / 7, 2) }} a night
+            </p>
+
+            <p class="mt-3 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                Now switch it on for whoever needs it, below
+            </p>
+        @endif
+    </div>
+
     <div class="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-[14px]">
         @foreach ($kids as $kid)
             @php
@@ -536,6 +688,52 @@ new class extends Component
                         class="flex-shrink-0 rounded-[12px] border border-fq-line-3 bg-fq-panel px-3 py-[6px] text-xs text-fq-text-3 disabled:opacity-40"
                     >Reset</button>
                 </div>
+
+                {{-- The own-bed card. Off unless a parent switches it on here,
+                     and the whole block only appears once the household switch
+                     is on — a family not using this shouldn't have to read
+                     about it on every kid. --}}
+                @if ($household->sleep_card_enabled)
+                    <div
+                        class="rounded-[14px] border px-3 py-[10px]"
+                        style="border-color: {{ $kid->sleep_card_enabled ? 'var(--fq-line-cool)' : 'var(--fq-line-2)' }}; background: var(--fq-sunk)"
+                    >
+                        <div class="flex items-center justify-between gap-2">
+                            <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Own Bed Card</p>
+                            <button
+                                type="button"
+                                wire:click="toggleSleepCard({{ $kid->id }})"
+                                class="rounded-[12px] border px-3 py-[6px] text-xs {{ $kid->sleep_card_enabled ? 'border-fq-lime text-fq-lime' : 'border-fq-line-3 bg-fq-panel text-fq-text-3' }}"
+                            >{{ $kid->sleep_card_enabled ? 'On' : 'Off' }}</button>
+                        </div>
+
+                        @if ($kid->sleep_card_enabled)
+                            <p class="mt-[6px] font-mono-fq text-[11px] text-fq-text-2">
+                                {{ $kid->sleep_nights }} nights ·
+                                {{ $kid->sleep_run }} in a row ·
+                                best {{ $kid->sleep_best_run }}
+                            </p>
+
+                            <div class="mt-2 flex flex-wrap items-center gap-4">
+                                @foreach ([['Nights', 'nights'], ['Run', 'run']] as [$label, $field])
+                                    <div wire:key="sleep-{{ $field }}-{{ $kid->id }}" class="flex items-center gap-2">
+                                        <span class="font-mono-fq text-[10px] text-fq-text-4 uppercase">{{ $label }}</span>
+                                        <button
+                                            type="button"
+                                            wire:click="adjustSleep({{ $kid->id }}, {{ $field === 'nights' ? '-1, 0' : '0, -1' }})"
+                                            class="h-7 w-7 rounded-[9px] border border-fq-line-3 bg-fq-panel text-sm"
+                                        >&minus;</button>
+                                        <button
+                                            type="button"
+                                            wire:click="adjustSleep({{ $kid->id }}, {{ $field === 'nights' ? '1, 0' : '0, 1' }})"
+                                            class="h-7 w-7 rounded-[9px] border border-fq-line-3 bg-fq-panel text-sm"
+                                        >+</button>
+                                    </div>
+                                @endforeach
+                            </div>
+                        @endif
+                    </div>
+                @endif
 
                 {{-- What the day's bonus chest paid. Everyone gets one whether
                      or not they've done anything, so an unopened one is a kid

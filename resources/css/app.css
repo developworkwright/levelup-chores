@@ -430,3 +430,67 @@ body {
         animation: none;
     }
 }
+
+/*
+ * The star that landed this morning.
+ *
+ * A star that is simply *there* on the next render is not a reward — the whole
+ * point of the tap is that something happens. The halo blooms once and fades;
+ * the star itself lands with a small overshoot.
+ */
+.fq-star-land {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: fq-star-land 0.7s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+.fq-star-halo {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: fq-star-halo 1.6s ease-out both;
+}
+
+@keyframes fq-star-land {
+    0% {
+        transform: scale(0);
+        opacity: 0;
+    }
+    60% {
+        transform: scale(1.6);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 0.95;
+    }
+}
+
+@keyframes fq-star-halo {
+    0% {
+        transform: scale(0.2);
+        opacity: 0.7;
+    }
+    100% {
+        transform: scale(2.2);
+        opacity: 0;
+    }
+}
+
+/*
+ * The sky a kid keeps. Fixed behind everything, low enough not to compete with
+ * the page — it is meant to be noticed on the second look, not the first.
+ */
+.fq-sky {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fq-star-land,
+    .fq-star-halo {
+        animation: none;
+    }
+}
