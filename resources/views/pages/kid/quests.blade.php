@@ -8,10 +8,12 @@ use App\Exceptions\BountyUnavailableException;
 use App\Exceptions\InsufficientPointsException;
 use App\Exceptions\InsufficientTicketsException;
 use App\Exceptions\PerkUnavailableException;
+use App\Models\BonusPerk;
 use App\Models\Bounty;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\Profile;
+use App\Services\BonusShopService;
 use App\Services\BountyService;
 use App\Services\ChestService;
 use App\Services\ChoreService;
@@ -234,9 +236,6 @@ new class extends Component
         $this->questCardMessage = null;
 
         $service = app(ChoreService::class);
-        $hand = $service->offeredChoresFor($this->profile);
-        $bold = $service->boldChoreIn($hand);
-
         $quest = $service->chooseQuest($this->profile, $choreId);
 
         if (! $quest) {
@@ -248,7 +247,10 @@ new class extends Component
             return;
         }
 
-        $bonus = $service->boldBonusFor($quest->chore, $bold);
+        // The charm's hand-in roll is deliberately not part of this number:
+        // it hasn't happened yet, and quoting a total that later grows is a
+        // better surprise than one that appears to shrink.
+        $bonus = $service->cardBonusesFor($this->profile)[$quest->chore_id] ?? 0;
         $points = $quest->chore->points * app(SpinService::class)->multiplierFor($this->profile, $quest->chore) + $bonus;
 
         // Dispatched from the server rather than from the card, so it can only
@@ -308,6 +310,11 @@ new class extends Component
 
         $service->claimQuest($this->profile, $target);
 
+        // Read after the claim, which is what settles it. This is the charm's
+        // second chance and the reason it can't really be wasted — a hand that
+        // looked ordinary can still pay here.
+        $charmPayout = $service->charmPayoutFor($this->profile);
+
         // The streak (and any milestone bonus) now moves on a parent's
         // approval, so don't quote a day count here that hasn't been earned
         // yet — and when it is earned, the chest still does the reveal. A quest
@@ -318,6 +325,18 @@ new class extends Component
                 $this->dispatch('celebrate', message: 'Quest cleared! Bonus wheel treat earned.', treat: 'cookie', motion: 'burst', origin: 'tap');
             } else {
                 $this->dispatch('celebrate', message: 'Quest cleared! Your streak grows once a parent approves.', motion: 'burst', origin: 'tap');
+            }
+
+            // Queued behind the clear rather than folded into it: it's a second
+            // piece of news, and it is the whole reason the charm was bought.
+            if ($charmPayout > 0) {
+                $this->dispatch(
+                    'celebrate',
+                    message: 'The charm paid out — +'.number_format($charmPayout).' bonus points!',
+                    style: 'star',
+                    motion: 'burst',
+                    origin: 'tap',
+                );
             }
         }
     }
@@ -460,6 +479,40 @@ new class extends Component
                 origin: 'tap',
             );
         } catch (PerkUnavailableException $e) {
+            $this->perkMessage = $e->getMessage();
+        }
+    }
+
+    /**
+     * Buys a Quest Charm without leaving the page.
+     *
+     * The charm is the one perk whose whole value is spent in a window that
+     * closes: it can only be cast on a chest that is still shut, and a kid who
+     * has to go to the Bonus Shop to buy one comes back to a page they have
+     * usually opened by then. Every other perk keeps until you need it, which
+     * is why this shortcut exists here and not on all of them.
+     *
+     * Goes through BonusShopService like the shop does, so the ticket spend,
+     * the refusals and the ledger entry are the same on both routes.
+     */
+    public function buyQuestCharm(): void
+    {
+        $perk = BonusPerk::where('household_id', $this->profile->household_id)
+            ->enabled()
+            ->where('effect', PerkEffect::QuestCharm)
+            ->first();
+
+        // A parent can switch the charm off from the console, in which case the
+        // button isn't rendered and this is a stale tab.
+        if (! $perk) {
+            return;
+        }
+
+        try {
+            app(BonusShopService::class)->purchase($this->profile, $perk);
+            $this->perkMessage = null;
+            $this->dispatch('celebrate', message: "{$perk->name} bought — cast it before you open the chest!", style: 'ticket', motion: 'burst', origin: 'tap');
+        } catch (InsufficientTicketsException|PerkUnavailableException $e) {
             $this->perkMessage = $e->getMessage();
         }
     }
@@ -665,13 +718,13 @@ new class extends Component
         // component so the card can name a claimant the same way the board
         // does — this is the one page that already has that lookup to hand.
         $hand = $service->offeredChoresFor($this->profile);
-        $boldChore = $service->boldChoreIn($hand);
+        $cardBonuses = $service->cardBonusesFor($this->profile);
 
         $questCards = $hand->map(fn (Chore $chore) => [
             'chore' => $chore,
             'points' => $chore->points,
-            'bonus' => $service->boldBonusFor($chore, $boldChore),
-            'bold' => $boldChore?->id === $chore->id,
+            'bonus' => $cardBonuses[$chore->id] ?? 0,
+            'bold' => isset($cardBonuses[$chore->id]),
             'takenBy' => $service->claimantOtherThan($chore, $this->profile)?->profile,
             'expired' => $service->isExpired($chore),
         ]);
@@ -730,7 +783,13 @@ new class extends Component
             // stops the 2.6s rattle replaying every time they look at the page.
             'handDealt' => $quest->dealt_at !== null,
             'questCards' => $questCards,
-            'questBoldBonus' => $service->boldBonusFor($quest->chore, $boldChore),
+            'questBoldBonus' => $cardBonuses[$quest->chore_id] ?? 0,
+            // Null until the charm is cast, and its effect stays null until the
+            // chest is opened — the two together are what the cards' charm
+            // strip reads.
+            'questCharm' => $quest->isCharmed() ? $quest->charm_effect : null,
+            'questCharmed' => $quest->isCharmed(),
+            'questCharmPayout' => $service->charmPayoutFor($this->profile),
             'questDone' => $questDone,
             'questApproved' => $questApproved,
             'questPending' => $questPending,
@@ -740,7 +799,8 @@ new class extends Component
             // The bold card's bonus rides on top of any wheel multiplier
             // rather than being multiplied by it — see BOLD_CARD_BONUS_PERCENT.
             'questPoints' => $quest->chore->points * ($questBoosted ? $boost->multiplier : 1)
-                + $service->boldBonusFor($quest->chore, $boldChore),
+                + ($cardBonuses[$quest->chore_id] ?? 0)
+                + $service->charmPayoutFor($this->profile),
             // Filtered in PHP rather than re-queried — the board is already
             // loaded, and Chore::matches() is the in-memory twin of the
             // scope the parent admin searches with.
@@ -763,13 +823,22 @@ new class extends Component
             'sleepCard' => app(SleepService::class)->cardFor($this->profile),
             // Contextual "use it here" buttons for the perks that act on this
             // page, so a kid doesn't have to go hunting in the shop.
-            'heldPerks' => collect([PerkEffect::QuestReroll, PerkEffect::MysteryHint, PerkEffect::StreakRestore])
+            'heldPerks' => collect([PerkEffect::QuestReroll, PerkEffect::MysteryHint, PerkEffect::StreakRestore, PerkEffect::QuestCharm])
                 ->filter(fn (PerkEffect $effect) => $inventory->holds($this->profile, $effect))
                 ->mapWithKeys(fn (PerkEffect $effect) => [$effect->value => [
                     'effect' => $effect,
                     'count' => $inventory->countOf($this->profile, $effect),
                     'blocked' => $inventory->blockedReason($this->profile, $effect),
                 ]]),
+            // The catalogue row, only when they're holding none — that's the
+            // whole condition for offering to sell one. Null when a parent has
+            // switched the charm off, which takes the button with it.
+            'charmForSale' => $inventory->holds($this->profile, PerkEffect::QuestCharm)
+                ? null
+                : BonusPerk::where('household_id', $household->id)
+                    ->enabled()
+                    ->where('effect', PerkEffect::QuestCharm)
+                    ->first(),
             'nextMilestone' => $nextMilestone,
             'streakBonuses' => collect($streakTrack['milestones']),
             'streakLap' => $streakTrack['lap'],
@@ -1064,6 +1133,76 @@ new class extends Component
                 >{{ $stripLabel }}</span>
             </div>
         @else
+            {{-- Sits above the chest and only while it is shut, because that is
+                 the only moment a charm can be cast — see
+                 PerkInventoryService::questCharmReason(). Once one is on, the
+                 button gives way to the mark, so a kid can't be left wondering
+                 whether the tickets took. --}}
+            @php
+                // A charm can only be cast on a shut chest, so everything in
+                // this block is meaningless the instant one starts opening —
+                // and the server doesn't find out until the animation ends.
+                // See <x-chest>'s begin(), which announces it immediately.
+                $charmable = ! $handDealt && ! $questCharmed;
+                $holdsUsableCharm = isset($heldPerks['quest_charm']) && ! $heldPerks['quest_charm']['blocked'];
+            @endphp
+
+            @if ($charmable && isset($heldPerks['quest_charm']))
+                <div
+                    x-data="{ opening: false }"
+                    x-on:chest-opening.window="opening = true"
+                    x-show="! opening"
+                    class="flex justify-end"
+                >
+                    <x-perk-button :entry="$heldPerks['quest_charm']" />
+                </div>
+            @elseif ($charmable && $charmForSale)
+                {{-- Sold from here rather than only from the shop because the
+                     window to use one closes the moment the chest opens — see
+                     buyQuestCharm(). Same brushed steel as the use button, so
+                     the two read as the same control at different stages. --}}
+                @php
+                    $canAffordCharm = $profile->bonus_tickets >= $charmForSale->cost;
+                @endphp
+
+                <div
+                    x-data="{ opening: false }"
+                    x-on:chest-opening.window="opening = true"
+                    x-show="! opening"
+                    class="flex items-center justify-end gap-2"
+                >
+                    <button
+                        type="button"
+                        wire:click="buyQuestCharm"
+                        @disabled(! $canAffordCharm)
+                        title="{{ $charmForSale->description }}"
+                        class="inline-flex h-[42px] items-center gap-2 rounded-[12px] border px-[14px] text-xs font-semibold whitespace-nowrap transition hover:brightness-125 disabled:opacity-40"
+                        style="border-color: var(--fq-steel-edge); color: var(--fq-steel-text); background: var(--fq-steel-panel)"
+                    >
+                        <span class="font-baloo text-sm">{{ $charmForSale->glyph }}</span>
+                        <span>Buy a {{ $charmForSale->name }}</span>
+                        <span class="font-mono-fq text-[10px]" style="color: {{ $canAffordCharm ? 'var(--fq-lime)' : 'var(--fq-text-5)' }}">
+                            {{ $charmForSale->cost }}&#127903;
+                        </span>
+                    </button>
+
+                    {{-- A disabled button with no reason on it is the thing the
+                         board messages exist to stop. --}}
+                    @if (! $canAffordCharm)
+                        <span class="font-mono-fq text-[10px] text-fq-text-5">
+                            {{ $charmForSale->cost - $profile->bonus_tickets }} more
+                        </span>
+                    @endif
+                </div>
+            @elseif ($questCharmed && ! $questRevealed)
+                <div class="flex items-center justify-end gap-2">
+                    <span class="font-baloo text-[15px]" style="color: var(--fq-violet)">✧</span>
+                    <span class="font-mono-fq text-[10px] tracking-[0.18em] uppercase" style="color: var(--fq-violet)">
+                        {{ $questCharm?->label() ?? 'Charmed · Open the chest to see' }}
+                    </span>
+                </div>
+            @endif
+
             {{-- The chest deals rather than reveals: it bursts open onto three
                  cards and the kid takes one. Its own celebration is off,
                  because "here are some cards" is not news — the pick is, and
@@ -1082,12 +1221,45 @@ new class extends Component
                     .($household->require_quest_first ? ' Side quests unlock the moment it\'s cleared.' : '')"
                 opening-text="The chest is rattling..."
                 cta="Open"
+                {{-- Only when a charm is sitting unused. Buying one changes a
+                     button's label and nothing else, which is very easy to read
+                     as "bought it, so it's on" — this is the stop that catches
+                     that before the chest opens and the chance is gone. --}}
+                :confirm="$charmable && $holdsUsableCharm"
             >
+                @if ($charmable && $holdsUsableCharm)
+                    <x-slot:confirm-panel>
+                        <p class="mb-2 font-mono-fq text-[10px] tracking-[0.16em] uppercase" style="color: var(--fq-violet)">
+                            ✧ You have a charm
+                        </p>
+                        <div class="flex flex-col gap-2 sm:flex-row">
+                            {{-- Charms and opens in one tap. The perk call
+                                 finishes before begin() starts the 2.6s
+                                 animation, and dealHand() lands at the end of
+                                 it — so the effect is rolled on a chest that
+                                 was already charmed. --}}
+                            <button
+                                type="button"
+                                @click="$wire.usePerk('quest_charm').then(() => begin())"
+                                class="cursor-pointer rounded-[16px] px-[20px] py-[13px] font-baloo text-[16px] font-extrabold transition hover:brightness-110"
+                                style="background: var(--fq-violet); color: var(--fq-bg)"
+                            >Charm it first</button>
+
+                            <button
+                                type="button"
+                                @click="begin()"
+                                class="cursor-pointer rounded-[16px] border px-[20px] py-[13px] font-baloo text-[16px] font-bold transition hover:brightness-125"
+                                style="border-color: var(--fq-line-3); color: var(--fq-text-3)"
+                            >Open without it</button>
+                        </div>
+                    </x-slot:confirm-panel>
+                @endif
+
             @if (! $questRevealed)
                 <x-quest-cards
                     :cards="$questCards"
                     choose-action="chooseQuest"
-                    :bold-percent="\App\Services\ChoreService::BOLD_CARD_BONUS_PERCENT"
+                    :charm="$questCharm"
                     :message="$questCardMessage"
                 />
             @else
@@ -1154,6 +1326,16 @@ new class extends Component
                                 class="rounded-full px-[7px] py-[2px] font-mono-fq text-[9px] leading-none tracking-[0.16em] uppercase"
                                 style="background: var(--fq-gold); color: var(--fq-bg)"
                             >Bold +{{ number_format($questBoldBonus) }}</span>
+                        @endif
+
+                        {{-- Only ever present after the claim, which is what
+                             rolls it. Its own chip rather than folded into the
+                             bold one: they are two different bets. --}}
+                        @if ($questCharmPayout)
+                            <span
+                                class="rounded-full px-[7px] py-[2px] font-mono-fq text-[9px] leading-none tracking-[0.16em] uppercase"
+                                style="background: var(--fq-violet); color: var(--fq-bg)"
+                            >✧ Charm +{{ number_format($questCharmPayout) }}</span>
                         @endif
 
                         {{-- Pushed to the far edge — it's an escape hatch, not

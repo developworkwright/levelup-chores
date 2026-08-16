@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\QuestCharmEffect;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -15,6 +16,9 @@ class DailyQuest extends Model
         'profile_id',
         'chore_id',
         'offered_chore_ids',
+        'charmed_at',
+        'charm_effect',
+        'charm_payout_percent',
         'quest_date',
         'dealt_at',
         'revealed_at',
@@ -25,11 +29,19 @@ class DailyQuest extends Model
     {
         return [
             'offered_chore_ids' => 'array',
+            'charmed_at' => 'datetime',
+            'charm_effect' => QuestCharmEffect::class,
             'quest_date' => 'date',
             'dealt_at' => 'datetime',
             'revealed_at' => 'datetime',
             'completed_at' => 'datetime',
         ];
+    }
+
+    /** Whether a charm was spent on today's quest, whatever it has done so far. */
+    public function isCharmed(): bool
+    {
+        return $this->charmed_at !== null;
     }
 
     /**

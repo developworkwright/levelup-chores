@@ -46,8 +46,23 @@ Two stamps rather than one because there is a refresh-shaped gap between opening
 The top card is the **bold card** and pays `BOLD_CARD_BONUS_PERCENT` (50%) of its own points on top. Without it the rational move is to take the cheap card every morning, and a choice with one right answer stops being a choice by about day three. Three things about the bonus:
 
 - It is computed off **base** points and added *after* any wheel multiplier, never multiplied by it — a 3x spin on a bold card would otherwise pay 4.5x face value.
-- `boldChoreIn(hand)` returns **null when every card pays the same**, which is the common case in a household whose chores are flat-rated. It degrades to a plain three-way choice rather than paying a bonus for a coin flip.
-- It rides through `claim()`'s new `$bonusPoints` parameter, resolved by `claimQuest()` **before** it stamps `completed_at` — `boldBonusForQuest()` goes back through `questFor()`, and a completed quest is one `rerollIfUnavailable()` stops rescuing.
+- `cardBonusesFor(Profile)` returns an **empty map when every card pays the same**, which is the common case in a household whose chores are flat-rated. It degrades to a plain three-way choice rather than paying a bonus for a coin flip. A charm overrides that.
+- It rides through `claim()`'s `$bonusPoints` parameter, resolved by `claimQuest()` **before** it stamps `completed_at` — `questBonusFor()` goes back through `questFor()`, and a completed quest is one `rerollIfUnavailable()` stops rescuing.
+
+### The Quest Charm
+
+`PerkEffect::QuestCharm` is a bet on the chest, cast **before** it opens (`questCharmReason()` refuses once `dealt_at` is set — charming cards you have already read is shopping, not gambling). It resolves in **two** places, which is the whole design: a charm that only rolled up front would be a coin flip a kid watches themselves lose.
+
+1. **On the cards**, when the chest opens. `dealQuestHand()` rolls a `QuestCharmEffect` into `charm_effect` — SecondCard (40), AllCards (30), DoubledBonus (20), Unchanged (10). `cardBonusesFor()` reads it to decide how many cards go bold and at what rate.
+2. **At hand-in.** `rollCharmPayout()` settles `charm_payout_percent` to `CHARM_PAYOUT_PERCENT` (25) or 0, at `CHARM_PAYOUT_ODDS_PLAIN` (60) or `CHARM_PAYOUT_ODDS_BOLD` (30) depending on whether the card they took was already bold. Longer odds on a bold card stop the two bonuses stacking into a routine double payout; the incentive to be brave survives easily (+50% certain beats a 60% shot at +25%).
+
+**Why the weights lean toward more bold cards — this inverts the usual balance instinct.** The hand already makes its dearest card bold, so lighting up a *second or third* card mostly makes the cheaper cards more attractive. A kid who takes a charmed 100-point card over a bold 200-point one costs the household less and does less work. The generous-looking outcomes are the cheap ones. `DoubledBonus` is the only case that genuinely raises the ceiling, which is why it is the rarest of the three that do something.
+
+Three invariants worth not breaking:
+
+- **`charm_payout_percent` stores 0, never null, on a miss.** Null means "not rolled yet"; collapsing them would re-roll on every read and the number a kid was shown would stop being the number that reached the ledger.
+- **A charm survives a re-deal, but its effect is not rolled again.** `assignDifferentChore()` leaves the charm columns alone; `dealQuestHand()` only rolls into a *null* effect. Without that, a kid holding rerolls could spin the charm until it came up AllCards.
+- **Nothing announces the outcome at cast time.** `applyQuestCharm()` returns "open it and see" on purpose — naming the effect would spend the reveal a beat before the animation that carries it.
 
 ### Picking, and the two cards that burn
 

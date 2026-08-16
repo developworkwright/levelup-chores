@@ -118,6 +118,27 @@ class PerkInventoryService
                 ? 'Nothing left to name'
                 : null,
             PerkEffect::NightSaver => $this->sleep->saveReason($profile),
+            PerkEffect::QuestCharm => $this->questCharmReason($profile),
+        };
+    }
+
+    /**
+     * A charm has to be cast at a chest that is still shut.
+     *
+     * Charming cards the kid has already read isn't a gamble, it's shopping —
+     * they would only ever buy it on a hand worth improving. The wording says
+     * "before you open it" rather than "too late" because on most days the
+     * refusal is a timing mistake they can avoid tomorrow.
+     */
+    private function questCharmReason(Profile $profile): ?string
+    {
+        $quest = $this->chores->questFor($profile);
+
+        return match (true) {
+            $quest->completed_at !== null => "Today's quest is already cleared",
+            $quest->isCharmed() => "Today's quest is already charmed",
+            $quest->dealt_at !== null => 'Charm the chest before you open it',
+            default => null,
         };
     }
 
@@ -134,7 +155,20 @@ class PerkInventoryService
             PerkEffect::QuestSkip => $this->applyQuestSkip($profile),
             PerkEffect::NameMonster => $this->applyNameMonster($profile, $input),
             PerkEffect::NightSaver => $this->applyNightSaver($profile),
+            PerkEffect::QuestCharm => $this->applyQuestCharm($profile),
         };
+    }
+
+    private function applyQuestCharm(Profile $profile): string
+    {
+        if (! $this->chores->charmQuest($profile)) {
+            throw new PerkUnavailableException('There is no chest left to charm today.');
+        }
+
+        // Deliberately promises nothing specific. What the charm did isn't
+        // decided until the lid comes up, and naming an outcome here would
+        // spend the reveal a beat before the animation that carries it.
+        return 'The chest is charmed — open it and see.';
     }
 
     private function applyNightSaver(Profile $profile): string

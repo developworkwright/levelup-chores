@@ -235,20 +235,17 @@ class QuestCardPickTest extends TestCase
         [, $kid] = $this->householdWithChores([10, 100, 1000]);
 
         $hand = $this->service()->offeredChoresFor($kid);
-        $bold = $this->service()->boldChoreIn($hand);
+        $bonuses = $this->service()->cardBonusesFor($kid);
 
-        $this->assertSame(1000, $bold->points);
-        $this->assertSame(500, $this->service()->boldBonusFor($bold, $bold));
-        $this->assertSame(0, $this->service()->boldBonusFor($hand->first(), $bold));
+        // Only the dearest card carries one, at half its own points.
+        $this->assertSame([$hand->last()->id => 500], $bonuses);
     }
 
     public function test_a_hand_whose_cards_all_pay_the_same_has_no_bold_card(): void
     {
         [, $kid] = $this->householdWithChores([50, 50, 50]);
 
-        $hand = $this->service()->offeredChoresFor($kid);
-
-        $this->assertNull($this->service()->boldChoreIn($hand));
+        $this->assertSame([], $this->service()->cardBonusesFor($kid));
     }
 
     public function test_taking_the_bold_card_pays_the_bonus_on_top(): void
@@ -385,7 +382,7 @@ class QuestCardPickTest extends TestCase
         // bonus on a day that was never dealt with one.
         $this->assertSame($chore->id, $quest->chore_id);
         $this->assertSame([$chore->id], $quest->offeredChoreIds());
-        $this->assertSame(0, $this->service()->boldBonusForQuest($kid));
+        $this->assertSame(0, $this->service()->questBonusFor($kid));
     }
 
     public function test_a_legacy_quest_already_cleared_is_left_alone(): void

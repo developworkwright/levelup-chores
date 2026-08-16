@@ -25,7 +25,7 @@
 @props([
     'cards',
     'chooseAction',
-    'boldPercent',
+    'charm' => null,
     'message' => null,
 ])
 
@@ -61,6 +61,17 @@
         @endif
     </p>
 
+    {{-- What the charm did, said plainly over the hand it did it to. The
+         Unchanged case says so rather than staying quiet: a kid who spent
+         tickets and sees an ordinary hand needs telling the charm is still
+         live, or the perk reads as broken. --}}
+    @if ($charm)
+        <p class="mt-2 inline-flex items-center gap-2 rounded-full px-[10px] py-[3px] font-mono-fq text-[10px] tracking-[0.16em] uppercase"
+           style="background: color-mix(in srgb, var(--fq-violet) 18%, transparent); color: var(--fq-violet)">
+            <span class="font-baloo text-[12px]">✧</span>{{ $charm->announcement() }}
+        </p>
+    @endif
+
     {{-- The perspective lives here rather than on the cards: a rotateY needs a
          parent with depth or it flattens into a horizontal squash. --}}
     <div class="mt-4 grid grid-cols-3 gap-2 sm:gap-3" style="perspective: 900px">
@@ -87,10 +98,16 @@
                 x-bind:class="taken === null ? '' : (taken === {{ $chore->id }} ? 'fq-card-chosen' : 'fq-card-burn')"
             >
                 @if ($card['bold'])
+                    @php
+                        // Read off the card rather than passed in: a charm can
+                        // double the rate, and a chip saying 50% over a card
+                        // paying 100% is the one thing worse than no chip.
+                        $bonusPercent = (int) round($card['bonus'] / max(1, $card['points']) * 100);
+                    @endphp
                     <span
                         class="mb-[6px] rounded-full px-[7px] py-[2px] font-mono-fq text-[8px] leading-none tracking-[0.16em] uppercase"
                         style="background: {{ $accent }}; color: var(--fq-bg)"
-                    >Bold +{{ $boldPercent }}%</span>
+                    >Bold +{{ $bonusPercent }}%</span>
                 @else
                     {{-- Holds the same vertical space, so the three names start
                          on one line and the row reads as a set. --}}

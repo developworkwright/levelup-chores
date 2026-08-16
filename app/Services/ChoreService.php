@@ -7,6 +7,7 @@ use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
 use App\Enums\MonsterTier;
 use App\Enums\ProfileRole;
+use App\Enums\QuestCharmEffect;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyMystery;
@@ -88,6 +89,24 @@ class ChoreService
      * pay four and a half times a chore's face value.
      */
     public const BOLD_CARD_BONUS_PERCENT = 50;
+
+    /** What a charm's hand-in roll adds, as a percentage of the chore's points. */
+    public const CHARM_PAYOUT_PERCENT = 25;
+
+    /**
+     * Odds the charm pays out at hand-in, per hundred, by whether the card
+     * they took was already bold.
+     *
+     * Longer odds on a bold card, and that ordering is doing real work. It
+     * consoles the kid who took a plain card — the case the charm most needs
+     * to cover — while stopping the two bonuses stacking into a routine
+     * double payout on the dearest chore in the hand. The incentive to be
+     * brave survives it comfortably: a bold card pays +50% for certain
+     * against a plain card's 60% shot at +25%.
+     */
+    private const CHARM_PAYOUT_ODDS_PLAIN = 60;
+
+    private const CHARM_PAYOUT_ODDS_BOLD = 30;
 
     /**
      * XP for one approved chore, flat regardless of what the chore pays — a
@@ -282,48 +301,81 @@ class ChoreService
     }
 
     /**
-     * The card in a hand that carries {@see self::BOLD_CARD_BONUS_PERCENT}, or
-     * null when there isn't one.
+     * What each card in today's hand pays on top of its own points.
      *
-     * A hand whose cards all pay the same has no bold card — nothing in it is
-     * braver than anything else, and paying a bonus for a coin flip would just
-     * be a bonus. That is the common case in a household whose chores are all
-     * worth the same, and it degrades to a plain three-way choice.
+     * One card is bold by default — the dearest — at
+     * {@see self::BOLD_CARD_BONUS_PERCENT}. A charm can widen that to two
+     * cards or the whole hand, or double what the one bold card pays; see
+     * {@see QuestCharmEffect}.
      *
-     * @param  Collection<int, Chore>  $hand
+     * A hand whose cards all pay the same has no bold card *by default*:
+     * nothing in it is braver than anything else, and a bonus nobody chose is
+     * just a bonus. A charm overrides that — the tickets were spent, and an
+     * arbitrary bold card beats a fizzle a kid paid for.
+     *
+     * @return array<int, int> chore id => bonus points
      */
-    public function boldChoreIn(Collection $hand): ?Chore
+    public function cardBonusesFor(Profile $profile): array
     {
-        if ($hand->count() < 2) {
-            return null;
+        $quest = $this->questFor($profile);
+        $hand = $this->handFor($profile, $quest);
+
+        if ($hand->isEmpty()) {
+            return [];
         }
 
-        $top = $hand->sortByDesc('points')->first();
+        $charm = $quest->charm_effect;
+        $flat = $hand->min('points') === $hand->max('points');
 
-        return $top->points > $hand->min('points') ? $top : null;
-    }
+        $boldCards = match (true) {
+            $charm !== null => $charm->boldCards() ?? $hand->count(),
+            $hand->count() < 2, $flat => 0,
+            default => 1,
+        };
 
-    /** What the bold card pays on top, in points. Zero for every other card. */
-    public function boldBonusFor(Chore $chore, ?Chore $bold): int
-    {
-        return $bold && $bold->id === $chore->id
-            ? (int) round($chore->points * self::BOLD_CARD_BONUS_PERCENT / 100)
-            : 0;
+        if ($boldCards < 1) {
+            return [];
+        }
+
+        $percent = self::BOLD_CARD_BONUS_PERCENT * ($charm?->bonusMultiplier() ?? 1);
+
+        // The hand is already sorted cheapest-first, so reversing gives
+        // dearest-first without a second sort deciding ties differently.
+        return $hand
+            ->reverse()
+            ->take($boldCards)
+            ->mapWithKeys(fn (Chore $chore) => [
+                $chore->id => (int) round($chore->points * $percent / 100),
+            ])
+            ->all();
     }
 
     /**
-     * The bonus riding on the card this kid actually took, in points.
+     * The bonus riding on the card this kid actually took, in points — the
+     * card's own bold bonus plus whatever the charm settled at hand-in.
      *
      * Resolved from the hand rather than stored on the quest so that a parent
      * editing a chore's points mid-morning can't leave a bonus behind that no
      * longer matches anything on screen.
      */
-    public function boldBonusForQuest(Profile $profile): int
+    public function questBonusFor(Profile $profile): int
     {
         $quest = $this->questFor($profile);
-        $hand = $this->handFor($profile, $quest);
 
-        return $this->boldBonusFor($quest->chore, $this->boldChoreIn($hand));
+        return ($this->cardBonusesFor($profile)[$quest->chore_id] ?? 0)
+            + $this->charmPayoutFor($profile);
+    }
+
+    /** The charm's hand-in bonus on the chosen card, in points. */
+    public function charmPayoutFor(Profile $profile): int
+    {
+        $quest = $this->questFor($profile);
+
+        if (! $quest->charm_payout_percent) {
+            return 0;
+        }
+
+        return (int) round($quest->chore->points * $quest->charm_payout_percent / 100);
     }
 
     /**
@@ -340,10 +392,59 @@ class ChoreService
 
         if ($quest->dealt_at === null) {
             $quest->dealt_at = now();
+            // The charm resolves as the lid comes up, not when it was cast —
+            // the cards flipping over is the moment it has to be visible in.
+            if ($quest->isCharmed() && $quest->charm_effect === null) {
+                $quest->charm_effect = QuestCharmEffect::roll();
+            }
+
             $quest->save();
         }
 
         return $quest;
+    }
+
+    /**
+     * Puts a charm on today's quest. Null when there is nothing to charm.
+     *
+     * Refuses once the chest is open: a charm bought against cards the kid has
+     * already read is not a gamble, it is a purchase. The effect itself is
+     * rolled later, by {@see self::dealQuestHand()}.
+     */
+    public function charmQuest(Profile $profile): ?DailyQuest
+    {
+        $quest = $this->questFor($profile);
+
+        if ($quest->isCharmed() || $quest->dealt_at !== null || $quest->completed_at !== null) {
+            return null;
+        }
+
+        $quest->charmed_at = now();
+        $quest->save();
+
+        return $quest->refresh();
+    }
+
+    /**
+     * Settles the charm's second roll, once, as the quest is handed in.
+     *
+     * Stored rather than recomputed because it is a coin toss: asking twice
+     * would give two different answers, and the number a kid was shown on the
+     * hero has to be the number that reaches the ledger.
+     */
+    private function rollCharmPayout(Profile $profile, DailyQuest $quest): void
+    {
+        if (! $quest->isCharmed() || $quest->charm_payout_percent !== null) {
+            return;
+        }
+
+        $wasBold = isset($this->cardBonusesFor($profile)[$quest->chore_id]);
+        $odds = $wasBold ? self::CHARM_PAYOUT_ODDS_BOLD : self::CHARM_PAYOUT_ODDS_PLAIN;
+
+        // Zero rather than null on a miss: null means "not rolled yet", and
+        // the two have to stay tellable apart or a refresh would re-roll it.
+        $quest->charm_payout_percent = random_int(1, 100) <= $odds ? self::CHARM_PAYOUT_PERCENT : 0;
+        $quest->save();
     }
 
     /**
@@ -527,6 +628,13 @@ class ChoreService
         // Both stamps cleared on purpose — a new hand deserves the chest
         // animation again, so the re-deal lands as a fresh reveal rather than
         // a silent relabel. Also means the board stays gated until they pick.
+        //
+        // The charm columns are deliberately left alone. A charm survives a
+        // re-deal, since it was paid for and the reroll isn't its fault — but
+        // an effect already rolled is *not* rolled again, or a kid holding
+        // rerolls could spin the charm until it came up "every card bold".
+        // dealQuestHand() only rolls into a null effect, so that falls out
+        // without a guard here.
         $quest->dealt_at = null;
         $quest->revealed_at = null;
         $quest->save();
@@ -1355,11 +1463,15 @@ class ChoreService
         $quest = $this->questFor($profile);
 
         if ($quest->completed_at === null) {
-            // Read before the stamp: boldBonusForQuest() goes back through
-            // questFor(), and a completed quest is one rerollIfUnavailable()
-            // stops rescuing — so asking afterwards would be asking about a
-            // different quest than the one being claimed.
-            $bonus = $this->boldBonusForQuest($profile);
+            // Settled before the stamp, in this order: the payout roll reads
+            // the card bonuses to know whether the chosen card was bold, and
+            // questBonusFor() then has to see the number it wrote. Both go
+            // back through questFor(), and a completed quest is one
+            // rerollIfUnavailable() stops rescuing — so asking afterwards
+            // would be asking about a different quest than the one claimed.
+            $this->rollCharmPayout($profile, $quest);
+
+            $bonus = $this->questBonusFor($profile);
 
             $quest->completed_at = now();
             $quest->save();

@@ -31,6 +31,8 @@
     'celebrateMessage' => null,
     'prizeProperty' => null,
     'celebrateOnOpen' => true,
+    'confirm' => false,
+    'confirmPanel' => null,
 ])
 
 <div
@@ -52,9 +54,28 @@
         {{-- 100ms past the 2.5s .fq-chest-opening jiggle in app.css, so the
              chest has stopped shaking before the prize lands. Change one and
              change the other. --}}
+        {{-- A chest that has something to ask first stops at 'confirming'
+             instead of opening. The panel that renders there decides what
+             happens next: it either calls begin() itself or does something
+             else and then calls it. --}}
         async open() {
             if (this.phase !== 'closed') return;
+            @if ($confirm)
+                this.phase = 'confirming';
+
+                return;
+            @endif
+            await this.begin();
+        },
+        async begin() {
+            if (this.phase === 'opening' || this.phase === 'revealed') return;
             this.phase = 'opening';
+            {{-- Announced so anything sitting *outside* this component that
+                 only makes sense on a shut chest can take itself off screen
+                 now, rather than waiting for the server round-trip at the end
+                 of the animation and leaving 2.6 seconds in which a stale
+                 control is still tappable. --}}
+            this.$dispatch('chest-opening');
             await new Promise(resolve => setTimeout(resolve, 2600));
             @if ($openAction) await $wire.{{ $openAction }}(); @endif
             @if ($prizeProperty) this.label = $wire.{{ $prizeProperty }} ?? this.label; @endif
@@ -120,7 +141,10 @@
             <h2 class="mt-[6px] font-baloo text-[22px] leading-[1.1] font-extrabold sm:text-[26px]">{{ $closedTitle }}</h2>
 
             <p class="mt-[6px] text-[13.5px] text-fq-text-2 sm:text-sm">
-                <span x-show="phase === 'closed'">{{ $closedText }}</span>
+                {{-- The closed copy stays up through 'confirming': the question
+                     being asked replaces the button, not the whole card, and
+                     blanking this line would leave a hole above it. --}}
+                <span x-show="phase === 'closed' || phase === 'confirming'">{{ $closedText }}</span>
                 <span x-show="phase === 'opening'" x-cloak>{{ $openingText }}</span>
             </p>
         </div>
@@ -132,6 +156,12 @@
             class="w-full shrink-0 cursor-pointer rounded-[16px] px-[26px] py-4 font-baloo text-[18px] font-extrabold transition hover:brightness-110 sm:w-auto"
             style="background: {{ $accent }}; color: var(--fq-bg)"
         >{{ $cta }}</button>
+
+        @if ($confirm)
+            <div x-show="phase === 'confirming'" x-cloak class="w-full shrink-0 sm:w-auto">
+                {{ $confirmPanel }}
+            </div>
+        @endif
     </div>
 
     <div x-show="phase === 'revealed'">

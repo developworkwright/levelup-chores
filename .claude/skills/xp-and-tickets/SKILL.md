@@ -1,6 +1,6 @@
 ---
 name: xp-and-tickets
-description: This skill should be used when the user asks to change XP awards, the level curve, bonus tickets, the Bonus Shop, or perks like wheel respin, quest reroll, streak restore, or mystery hint — or mentions "TicketService", "BonusShopService", "PerkEffect", "bonus_perks", "bonus_ticket_entries", or "XP_PER_LEVEL".
+description: This skill should be used when the user asks to change XP awards, the level curve, bonus tickets, the Bonus Shop, or perks like wheel respin, quest reroll, streak restore, mystery hint, or quest charm — or mentions "TicketService", "BonusShopService", "PerkEffect", "bonus_perks", "bonus_ticket_entries", or "XP_PER_LEVEL".
 ---
 
 # XP, levels and bonus tickets

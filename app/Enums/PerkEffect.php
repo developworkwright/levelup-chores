@@ -18,6 +18,7 @@ enum PerkEffect: string
     case QuestSkip = 'quest_skip';
     case NameMonster = 'name_monster';
     case NightSaver = 'night_saver';
+    case QuestCharm = 'quest_charm';
 
     /**
      * How using this perk should celebrate — one of the styles in
@@ -36,6 +37,9 @@ enum PerkEffect: string
             self::StreakRestore, self::NightSaver => 'heart',
             // A clue is a small bright thing, not a party.
             self::MysteryHint => 'star',
+            // The charm is cast now and lands when the chest opens, so this is
+            // the sparkle of it taking hold rather than the payoff.
+            self::QuestCharm => 'star',
             default => 'confetti',
         };
     }
@@ -98,6 +102,16 @@ enum PerkEffect: string
                 'description' => 'Had a night out of your own bed? Buy it back and keep your run going.',
                 'cost' => 2,
                 'glyph' => '☾',
+            ],
+            // Priced with Wheel Respin and Quest Reroll rather than with the
+            // rescues above it: like them it is a good day made better, not a
+            // bad one bought back, and a kid should be able to afford one most
+            // days they feel like a gamble.
+            self::QuestCharm => [
+                'name' => 'Quest Charm',
+                'description' => 'Charm the quest chest before you open it. More cards go bold, or the bold bonus grows — and if nothing shows on the cards, the charm pays out when you hand the quest in.',
+                'cost' => 3,
+                'glyph' => '✧',
             ],
         };
     }
