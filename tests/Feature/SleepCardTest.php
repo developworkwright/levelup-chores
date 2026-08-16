@@ -258,6 +258,36 @@ class SleepCardTest extends TestCase
         $this->assertSame($paid, (int) BonusTicketEntry::where('kind', TicketKind::Sleep)->sum('amount'));
     }
 
+    public function test_the_card_only_ever_names_a_chest_that_will_actually_pay(): void
+    {
+        // Reach seven, bank it, then break the run.
+        $this->nights(7);
+        $this->service()->openChest($this->kid->fresh());
+        $this->nights(1, SleepOutcome::Visited);
+
+        // Three and seven can never pay again — payRunMilestones() only pays
+        // above the mark. Naming either of them would promise a chest that
+        // never arrives, every morning, for as long as it took to say it.
+        $card = $this->service()->cardFor($this->kid->fresh());
+
+        $this->assertSame(0, $card['run']);
+        $this->assertSame(14, $card['nextMilestone']);
+    }
+
+    public function test_the_chest_the_card_named_is_the_one_that_lands(): void
+    {
+        $this->nights(7);
+        $this->service()->openChest($this->kid->fresh());
+        $this->nights(1, SleepOutcome::Visited);
+
+        $promised = $this->service()->cardFor($this->kid->fresh())['nextMilestone'];
+
+        // Climb back to exactly what the card promised.
+        $this->nights($promised);
+
+        $this->assertSame($promised, $this->kid->fresh()->pending_sleep_chest);
+    }
+
     public function test_a_run_that_climbs_past_several_milestones_pays_all_of_them(): void
     {
         $this->service()->adjust($this->kid, run: 30);

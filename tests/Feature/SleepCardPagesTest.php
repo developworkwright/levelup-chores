@@ -136,11 +136,52 @@ class SleepCardPagesTest extends TestCase
 
         Volt::test('kid.quests')
             ->assertOk()
-            ->assertSee('3 nights in a row — tap to open')
+            // The chest lives in the card's own rail now, not in a flat panel
+            // below it, and the ready state is the loudest thing on the card.
+            // Asserted without the separators, which are HTML entities in the
+            // markup rather than the characters they render as.
+            ->assertSee('Night chest', false)
+            ->assertSee('Open it', false)
+            ->assertSee('3 nights in a row', false)
             ->call('openSleepChest')
-            ->assertDontSee('tap to open');
+            ->assertDontSee('Open it', false);
 
         $this->assertNull($this->kid->fresh()->pending_sleep_chest);
+    }
+
+    public function test_no_chest_is_drawn_until_the_first_one_has_been_opened(): void
+    {
+        $this->loginKid();
+
+        // A chest a kid has never opened reads as a prize being withheld. The
+        // first leg promises it in words instead.
+        Volt::test('kid.quests')
+            ->assertOk()
+            ->assertSee('First chest at 3 in a row', false)
+            ->assertDontSee('Night chest', false);
+    }
+
+    public function test_no_chest_is_drawn_between_legs_either(): void
+    {
+        $service = app(SleepService::class);
+
+        for ($i = 0; $i < 3; $i++) {
+            $service->record($this->kid->refresh(), SleepOutcome::OwnBed);
+            $this->travel(1)->days();
+        }
+
+        $service->openChest($this->kid->refresh());
+
+        $this->loginKid();
+
+        // A chest on this card always means "open me". Between legs the strip
+        // takes over, now reading "Next" rather than "First", and it measures
+        // the 3 → 7 leg rather than starting again from zero.
+        Volt::test('kid.quests')
+            ->assertOk()
+            ->assertSee('Next chest at 7 in a row', false)
+            ->assertDontSee('Night chest', false)
+            ->assertDontSee('First chest at', false);
     }
 
     // --- Parent console ----------------------------------------------------

@@ -13,6 +13,8 @@
 @props(['card', 'answerAction' => 'answerSleep'])
 
 @php
+    use App\Services\SleepService;
+
     $drawing = $card['drawing'];
     $stars = $drawing->stars();
     $lit = $card['starsLit'];
@@ -21,6 +23,31 @@
     $rate = max(1, $card['pointsPerDollar']);
 
     $money = fn (int $points) => '$'.number_format($points / $rate, 2);
+
+    /*
+     * A chest on this card always means "open me".
+     *
+     * The handoff also specced a dim in-between chest for a kid who had opened
+     * one before, on the grounds that they would recognise the object. In use
+     * it read as a chest that was there but wouldn't open — so the rail is now
+     * drawn only when there is genuinely one waiting, and every other leg gets
+     * the strip that promises the next one in words.
+     */
+    $next = $card['nextMilestone'];
+    $previous = $card['previousMilestone'];
+    $waiting = $card['pendingChest'];
+    $everOpened = $card['runPaidThrough'] > 0;
+
+    $showRail = $waiting !== null;
+    $showStrip = $waiting === null && $next !== null;
+
+    // The leg runs previous → next, not zero → next: on night eight you are
+    // one night into the seven that lead to fourteen.
+    $legLength = $next ? $next - $previous : 0;
+    $legDone = $next ? max(0, $card['run'] - $previous) : 0;
+    $legPercent = $legLength > 0 ? min(100, round($legDone / $legLength * 100, 1)) : 0;
+    // Above eight the pips stop counting as a glance and become a texture.
+    $showPips = $legLength > 0 && $legLength <= 8;
 @endphp
 
 <div
@@ -143,7 +170,10 @@
                  before, which made a week of nights feel like it led nowhere. --}}
             <div class="mt-4 flex flex-col gap-1 border-t border-fq-divider pt-3 font-mono-fq text-[11px]">
                 <div class="flex flex-wrap items-center gap-x-5 gap-y-1">
-                    <span class="text-fq-text-2"><span class="text-fq-lime">{{ $card['nights'] }}</span> NIGHTS</span>
+                    <span class="text-fq-text-2">
+                        <span class="text-fq-lime">{{ $card['nights'] }}</span>
+                        {{ Str::plural('NIGHT', $card['nights']) }}
+                    </span>
                     <span class="text-fq-text-2"><span class="text-fq-cyan">{{ $card['run'] }}</span> IN A ROW</span>
                     @if ($card['completed'] > 0)
                         <span class="text-fq-text-2">
@@ -166,15 +196,109 @@
                     </span>
                 @endif
 
-                @if ($card['nextMilestone'])
+                {{-- Shown beside a waiting chest, which is how the design has
+                     it: the rail talks about the chest in hand, this line is
+                     what is still ahead. Dropped whenever the strip is up,
+                     since the strip says the same thing in more words. --}}
+                @if ($next && ! $showStrip)
                     <span class="text-fq-text-4">
-                        {{ $card['nextMilestone'] - $card['run'] }} more in a row &rarr;
-                        <span class="text-fq-cyan">{{ App\Services\SleepService::RUN_MILESTONES[$card['nextMilestone']] }} tickets</span>
+                        {{ $next - $card['run'] }} more in a row &rarr;
+                        <span class="text-fq-cyan">{{ SleepService::RUN_MILESTONES[$next] }} tickets</span>
                     </span>
                 @endif
             </div>
         </div>
+
+        {{-- The chest rail, and it only ever draws a chest that is ready to
+             open. Dressed in the ticket palette rather than the points one,
+             because a chest pays tickets and the header's ticket tile already
+             reads this way. --}}
+        @if ($showRail)
+            <div
+                class="flex w-full shrink-0 flex-col items-center gap-[13px] rounded-[20px] border p-[16px_14px] sm:w-[236px]"
+                style="border-color: var(--fq-lime); background: var(--fq-ticket-bg); box-shadow: var(--fq-shadow-ticket)"
+            >
+                <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: var(--fq-lime)">
+                    Night chest &middot; ready
+                </p>
+
+                <div class="relative w-[120px]">
+                    <div
+                        class="absolute rounded-full"
+                        style="left:50%; top:50%; width:150px; height:150px; margin:-75px 0 0 -75px; background: radial-gradient(circle, rgba(255,225,77,.3), rgba(255,225,77,0) 65%); animation: fq-glow-pulse 2.4s ease-in-out infinite"
+                    ></div>
+
+                    {{-- The shipped mark, not a new one: this is the same chest
+                         as the quest chest, the loot tray and the app icon. --}}
+                    <x-chest-icon
+                        class="fq-chest-waiting relative block h-[100px] w-[120px]"
+                        accent="var(--fq-lime)"
+                    />
+
+                    <span class="absolute rounded-full" style="left:0; top:2px; width:8px; height:8px; background:#fff6b0; animation: fq-sparkle 1.8s ease-in-out infinite"></span>
+                    <span class="absolute rounded-full" style="right:2px; top:14px; width:6px; height:6px; background: var(--fq-lime); animation: fq-sparkle 2.3s ease-in-out .5s infinite"></span>
+                    <span class="absolute rounded-full" style="left:22px; top:-6px; width:5px; height:5px; background: var(--fq-lime); animation: fq-sparkle 2.9s ease-in-out .9s infinite"></span>
+                </div>
+
+                <p class="font-mono-fq text-[10px] tracking-[0.12em] uppercase" style="color: var(--fq-ticket-label)">
+                    {{ $waiting }} nights in a row
+                </p>
+
+                {{-- The only filled control on the card. --}}
+                <button
+                    type="button"
+                    wire:click="openSleepChest"
+                    class="w-full rounded-[14px] border p-[11px_14px] font-baloo text-[16px] font-extrabold transition hover:brightness-110"
+                    style="border-color: var(--fq-lime); background: var(--fq-fill-gold); color: var(--fq-ink)"
+                >Open it &middot; {{ SleepService::RUN_MILESTONES[$waiting] ?? 0 }} tickets</button>
+            </div>
+        @endif
     </div>
+
+    {{-- Every leg with no chest waiting. Words rather than an object — a chest
+         drawn here would be one the kid can't open, which is exactly what this
+         replaced. --}}
+    @if ($showStrip)
+        {{-- Stacks below 420px rather than wrapping: left to `flex-wrap` the
+             four children broke wherever they ran out of room, which stranded
+             the bar on a line of its own or squeezed it to its minimum beside
+             the payout. The label goes above, and the three measuring parts
+             stay together on one line at every width. --}}
+        <div
+            class="mt-4 flex flex-col gap-2 rounded-[16px] border p-[11px_14px] min-[420px]:flex-row min-[420px]:items-center min-[420px]:gap-3"
+            style="border-color: var(--fq-ticket-line); background: var(--fq-ticket-bg)"
+        >
+            {{-- "First" only while it genuinely is one; after that the strip
+                 is counting to the next of many. --}}
+            <span class="font-mono-fq text-[10px] tracking-[0.16em] whitespace-nowrap uppercase" style="color: var(--fq-ticket-label)">
+                {{ $everOpened ? 'Next' : 'First' }} chest at {{ $next }} in a row
+            </span>
+
+            <span class="flex flex-1 items-center gap-3">
+                @if ($showPips)
+                    <span class="flex shrink-0 gap-[5px]">
+                        @for ($pip = 1; $pip <= $legLength; $pip++)
+                            <span
+                                class="h-[15px] w-[15px]"
+                                style="clip-path: var(--fq-star); background: {{ $pip <= $legDone ? 'var(--fq-lime)' : 'var(--fq-badge-empty)' }}"
+                            ></span>
+                        @endfor
+                    </span>
+                @endif
+
+                <span class="h-[5px] min-w-[40px] flex-1 overflow-hidden rounded-full" style="background: var(--fq-track)">
+                    <span class="block h-full rounded-full" style="width: {{ $legPercent }}%; background: var(--fq-fill-gold)"></span>
+                </span>
+
+                <span class="font-mono-fq text-[10px] tracking-[0.12em] whitespace-nowrap uppercase" style="color: var(--fq-ticket-label)">
+                    {{ $next - $card['run'] }} more &rarr;
+                    <span style="color: var(--fq-gold)">
+                        {{ SleepService::RUN_MILESTONES[$next] }} {{ Str::plural('ticket', SleepService::RUN_MILESTONES[$next]) }}
+                    </span>
+                </span>
+            </span>
+        </div>
+    @endif
 
     {{-- The shelf. Finishing a picture used to produce a toast and nothing
          else — no evidence a week later that it had ever happened. --}}

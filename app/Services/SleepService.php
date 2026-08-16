@@ -115,7 +115,9 @@ class SleepService
      *
      * @return array{answered: ?SleepNight, nights: int, run: int, bestRun: int,
      *               completed: int, starsLit: int, drawing: Constellation,
-     *               nextMilestone: ?int, pendingChest: ?int}|null
+     *               nextMilestone: ?int, previousMilestone: int, pendingChest: ?int,
+     *               runPaidThrough: int, prizes: array{night: int, constellation: int, toGo: int},
+     *               pointsPerDollar: int, earned: array<int, Constellation>}|null
      */
     public function cardFor(Profile $profile): ?array
     {
@@ -135,8 +137,20 @@ class SleepService
             // The picture currently being drawn — the next one up, not the last
             // one finished, so a kid mid-week sees where tonight's star lands.
             'drawing' => Constellation::number(Constellation::completedFrom($nights) + 1),
-            'nextMilestone' => $this->nextRunMilestone((int) $profile->sleep_run),
+            'nextMilestone' => $this->nextRunMilestone(
+                (int) $profile->sleep_run,
+                (int) $profile->sleep_run_paid_through,
+            ),
+            // The leg the chest rail draws: from the last milestone banked to
+            // the next one, rather than from zero. A kid on night eight is
+            // one-seventh of the way to fourteen, not eight-fourteenths.
+            'previousMilestone' => $this->previousRunMilestone((int) $profile->sleep_run),
             'pendingChest' => $profile->pending_sleep_chest,
+            // Whether a chest has ever been opened. The card draws a chest only
+            // when one is actually waiting, so this decides nothing about the
+            // artwork — it picks the word: "First chest at 3 in a row" for a
+            // kid who has never had one, "Next chest at 3" for everyone else.
+            'runPaidThrough' => (int) $profile->sleep_run_paid_through,
             'prizes' => $this->prizesFor($profile->household, $nights),
             'pointsPerDollar' => (int) $profile->household->points_per_dollar,
             // Every picture already finished, for the shelf on the card and the
@@ -435,15 +449,45 @@ class SleepService
         );
     }
 
-    public function nextRunMilestone(int $run): ?int
+    /**
+     * The next milestone that will actually pay, or null past the last one.
+     *
+     * Both the run *and* the paid mark have to be cleared, and forgetting the
+     * second was a card that lied. {@see self::payRunMilestones()} only pays a
+     * milestone above `sleep_run_paid_through`, so after a run breaks the ones
+     * already banked can never pay again — a kid who reached seven and then
+     * missed a night was being promised a chest at three, then at seven, and
+     * got neither. Nothing arrives until the run passes the highest already
+     * paid, and that is what this has to name.
+     */
+    public function nextRunMilestone(int $run, int $paidThrough = 0): ?int
     {
+        $cleared = max($run, $paidThrough);
+
         foreach (array_keys(self::RUN_MILESTONES) as $milestone) {
-            if ($milestone > $run) {
+            if ($milestone > $cleared) {
                 return $milestone;
             }
         }
 
         return null;
+    }
+
+    /**
+     * The milestone most recently passed, or zero at the start. The floor of
+     * the leg the chest rail measures progress across.
+     */
+    public function previousRunMilestone(int $run): int
+    {
+        $previous = 0;
+
+        foreach (array_keys(self::RUN_MILESTONES) as $milestone) {
+            if ($milestone <= $run) {
+                $previous = $milestone;
+            }
+        }
+
+        return $previous;
     }
 
     /**

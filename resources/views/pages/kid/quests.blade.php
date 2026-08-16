@@ -1068,23 +1068,11 @@ new class extends Component
         {{-- The own-bed card, above gratitude because it asks about last night
              and the morning is when it makes sense to answer. Absent entirely
              unless a parent has switched it on for this kid. --}}
+        {{-- The Night Chest used to sit here as a flat rectangle of its own,
+             separated from the run that earns it. It is a rail inside the card
+             now, drawn as the actual chest mark. --}}
         @if ($sleepCard)
             <x-sleep-card :card="$sleepCard" />
-
-            @if ($sleepCard['pendingChest'])
-                <button
-                    type="button"
-                    wire:key="sleep-chest"
-                    wire:click="openSleepChest"
-                    class="rounded-[24px] border px-5 py-4 text-left transition hover:brightness-110"
-                    style="background: var(--fq-wash-blue); border-color: var(--fq-cyan)"
-                >
-                    <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: var(--fq-cyan)">Night Chest</p>
-                    <p class="mt-1 font-baloo text-xl font-bold">
-                        {{ $sleepCard['pendingChest'] }} nights in a row — tap to open
-                    </p>
-                </button>
-            @endif
         @endif
 
         {{-- 5. Gratitude quest. The one quest that isn't work — nothing for a

@@ -226,9 +226,14 @@ class StreakDecayTest extends TestCase
 
         Auth::guard('profile')->login($this->parent);
 
+        // Matched with the label attached, like the kids-page test above.
+        // A bare "3D" is two characters against a page that also carries a
+        // random 40-character CSRF token, and it collides — this failed once
+        // on a token ending "3U3G8G3D".
         Volt::test('parent.standings')
             ->assertOk()
-            ->assertDontSee('3D');
+            ->assertSee('0D STREAK')
+            ->assertDontSee('3D STREAK');
 
         $this->assertSame(0, $this->kid->refresh()->streak);
     }

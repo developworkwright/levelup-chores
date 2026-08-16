@@ -494,3 +494,41 @@ body {
         animation: none;
     }
 }
+
+/*
+ * A chest that is waiting to be opened, rather than one being opened.
+ *
+ * `fq-chest-jiggle` escalates to ±14° because it is the rattle *before* a lid
+ * gives in — running that on a loop would have the thing thrashing on the page
+ * all morning. This is the same idea capped low enough to live in the corner of
+ * a card indefinitely.
+ */
+.fq-chest-waiting {
+    transform-origin: 50% 100%;
+    animation: fq-chest-waiting 2.6s ease-in-out infinite;
+}
+
+@keyframes fq-chest-waiting {
+    0%,
+    100% {
+        transform: rotate(0deg) scale(1);
+    }
+    20% {
+        transform: rotate(-4deg) scale(1.02);
+    }
+    40% {
+        transform: rotate(4deg) scale(1.02);
+    }
+    60% {
+        transform: rotate(-7deg) scale(1.05);
+    }
+    80% {
+        transform: rotate(7deg) scale(1.05);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fq-chest-waiting {
+        animation: none;
+    }
+}
