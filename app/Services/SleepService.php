@@ -57,18 +57,15 @@ class SleepService
     public const CONSTELLATION_DOLLARS = 5;
 
     /**
-     * What a single night pays when a household has never said otherwise.
+     * The step the console's ± buttons move the payouts by. The nightly rates
+     * get the finer one — they are smaller numbers and land every day, so an
+     * adjustment there is felt seven times a week.
      *
-     * The night is the hard part, so it is the part that pays — a picture seven
-     * days out is not a reward a small child can feel tonight. Tapered from the
-     * console once the habit is established, exactly like the constellation.
+     * What a night itself pays lives on {@see SleepOutcome::defaultDollars()},
+     * one rate per answer, each tapered independently from the console.
      */
-    public const NIGHT_DOLLARS = 1;
-
-    /** The step the console's ± buttons move the payouts by. */
     public const PAYOUT_STEP = 50;
 
-    /** The finer step for the nightly figure, which is a smaller number. */
     public const NIGHT_STEP = 25;
 
     /**
@@ -116,7 +113,8 @@ class SleepService
      * @return array{answered: ?SleepNight, nights: int, run: int, bestRun: int,
      *               completed: int, starsLit: int, drawing: Constellation,
      *               nextMilestone: ?int, previousMilestone: int, pendingChest: ?int,
-     *               runPaidThrough: int, prizes: array{night: int, constellation: int, toGo: int},
+     *               runPaidThrough: int,
+     *               prizes: array{night: int, nights: array<string, int>, constellation: int, toGo: int},
      *               pointsPerDollar: int, earned: array<int, Constellation>}|null
      */
     public function cardFor(Profile $profile): ?array
@@ -191,26 +189,13 @@ class SleepService
                 'outcome' => $outcome,
             ]);
 
-            if (! $outcome->countsAsOwnBed()) {
-                // The whole of the "no punishment" rule, in one line: the run
-                // stops, and not a single other number moves.
-                $profile->sleep_run = 0;
-                $profile->save();
-
-                return ['constellation' => null, 'nightPoints' => 0, 'chest' => null];
-            }
-
-            $profile->sleep_nights++;
-            $profile->sleep_run++;
-            $profile->sleep_best_run = max((int) $profile->sleep_best_run, (int) $profile->sleep_run);
-            $profile->save();
-
-            // Paid per night rather than per counter, which is what makes it
-            // safe without a high-water mark: the unique (profile, night_date)
-            // row above is the guard, so a parent nudging `sleep_nights` later
-            // moves the picture along without paying a second time for a night
-            // that was never slept.
-            $nightPoints = $this->nightPoints($household);
+            // Every answer is paid at its own rate, including the ones that
+            // don't light a star — a cuddle at 3am is not nothing. Paid per
+            // night rather than per counter, which is what makes it safe
+            // without a high-water mark: the unique (profile, night_date) row
+            // above is the guard, so a parent nudging `sleep_nights` later
+            // moves the picture along without paying for a night nobody slept.
+            $nightPoints = $this->pointsFor($household, $outcome);
 
             if ($nightPoints > 0) {
                 $this->ledger->record(
@@ -218,9 +203,24 @@ class SleepService
                     $profile,
                     LedgerKind::Earn,
                     $nightPoints,
-                    "{$profile->name} slept in their own bed",
+                    "{$profile->name} — {$outcome->shortLabel()}",
                 );
             }
+
+            if (! $outcome->countsAsOwnBed()) {
+                // The whole of the "no punishment" rule, in one line: the run
+                // stops, and not a single other number moves. The night still
+                // paid; what it doesn't do is advance anything.
+                $profile->sleep_run = 0;
+                $profile->save();
+
+                return ['constellation' => null, 'nightPoints' => $nightPoints, 'chest' => null];
+            }
+
+            $profile->sleep_nights++;
+            $profile->sleep_run++;
+            $profile->sleep_best_run = max((int) $profile->sleep_best_run, (int) $profile->sleep_run);
+            $profile->save();
 
             return [
                 'constellation' => $this->payConstellations($profile, $household),
@@ -522,15 +522,19 @@ class SleepService
      * What one night pays right now. Null-coalesced for the same reason
      * {@see self::constellationPoints()} is.
      */
-    public function nightPoints(Household $household): int
+    /**
+     * What answering this way pays right now. Null-coalesced for the same
+     * reason {@see self::constellationPoints()} is.
+     */
+    public function pointsFor(Household $household, SleepOutcome $outcome): int
     {
-        return (int) ($household->sleep_night_points
-            ?? self::NIGHT_DOLLARS * (int) $household->points_per_dollar);
+        return (int) ($household->{$outcome->pointsColumn()}
+            ?? $outcome->defaultDollars() * (int) $household->points_per_dollar);
     }
 
-    public function setNightPoints(Household $household, int $points): void
+    public function setPointsFor(Household $household, SleepOutcome $outcome, int $points): void
     {
-        $household->update(['sleep_night_points' => max(0, $points)]);
+        $household->update([$outcome->pointsColumn() => max(0, $points)]);
     }
 
     /**
@@ -540,12 +544,23 @@ class SleepService
      * money landed silently a week later. A reward nobody knows about isn't
      * one.
      *
-     * @return array{night: int, constellation: int, toGo: int}
+     * `nights` is keyed by outcome value, so the card can price each answer
+     * button without knowing which outcomes exist.
+     *
+     * @return array{night: int, nights: array<string, int>, constellation: int, toGo: int}
      */
     public function prizesFor(Household $household, int $nights): array
     {
+        $perOutcome = [];
+
+        foreach (SleepOutcome::cases() as $outcome) {
+            $perOutcome[$outcome->value] = $this->pointsFor($household, $outcome);
+        }
+
         return [
-            'night' => $this->nightPoints($household),
+            // The headline rate, which is the one the card leads with.
+            'night' => $perOutcome[SleepOutcome::OwnBed->value],
+            'nights' => $perOutcome,
             'constellation' => $this->constellationPoints($household),
             'toGo' => Constellation::NIGHTS - Constellation::starsInProgress($nights),
         ];

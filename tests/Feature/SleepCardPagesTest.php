@@ -225,10 +225,44 @@ class SleepCardPagesTest extends TestCase
 
         Volt::test('parent.kids')
             ->assertOk()
-            ->assertSee('Per constellation')
+            // One dial per answer, plus the picture.
+            ->assertSee('Own bed')
+            ->assertSee('Came in')
+            ->assertSee('Rough night')
+            ->assertSee('Constellation')
             ->call('adjustConstellationPayout', -SleepService::PAYOUT_STEP);
 
         $this->assertSame(450, $this->household->fresh()->sleep_constellation_points);
+    }
+
+    public function test_a_parent_can_taper_one_answer_without_touching_the_others(): void
+    {
+        $this->loginParent();
+
+        Volt::test('parent.kids')
+            ->assertOk()
+            // The button's own markup, not just the method behind it: the call
+            // is built as a string with quoted arguments, and Blade escaping
+            // could mangle it into something Livewire won't parse.
+            ->assertSee("adjustNightPayout(&#039;visited&#039;, -".SleepService::NIGHT_STEP.')', false)
+            ->call('adjustNightPayout', SleepOutcome::Visited->value, -SleepService::NIGHT_STEP);
+
+        $sleep = app(SleepService::class);
+        $household = $this->household->fresh();
+
+        $this->assertSame(75, $sleep->pointsFor($household, SleepOutcome::Visited));
+        $this->assertSame(200, $sleep->pointsFor($household, SleepOutcome::OwnBed));
+    }
+
+    public function test_a_nonsense_outcome_moves_no_dial(): void
+    {
+        $this->loginParent();
+
+        Volt::test('parent.kids')
+            ->call('adjustNightPayout', 'slept-on-the-roof', -SleepService::NIGHT_STEP)
+            ->assertOk();
+
+        $this->assertSame(200, app(SleepService::class)->pointsFor($this->household->fresh(), SleepOutcome::OwnBed));
     }
 
     public function test_the_payout_cannot_be_tapered_below_nothing(): void

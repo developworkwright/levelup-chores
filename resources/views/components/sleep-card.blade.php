@@ -124,9 +124,11 @@
                         style="color: {{ $answered->outcome->cssVar() }}"
                     >{{ $answered->outcome->glyph() }} {{ $answered->outcome->shortLabel() }}</span>
 
-                    @if ($answered->outcome->countsAsOwnBed() && $prizes['night'] > 0)
+                    @php $paid = $prizes['nights'][$answered->outcome->value] ?? 0; @endphp
+
+                    @if ($paid > 0)
                         <span class="font-baloo text-[17px] font-extrabold text-fq-lime">
-                            +{{ $money($prizes['night']) }}
+                            +{{ $money($paid) }}
                         </span>
                     @endif
 
@@ -151,8 +153,14 @@
                     </p>
                 @endif
 
+                {{-- Each answer is priced on its own button. The honest answer
+                     has to be the easy one to press, and a kid who can see that
+                     owning up to a cuddle still pays something is a kid with no
+                     reason to claim a night they didn't have. --}}
                 <div class="mt-3 flex flex-col gap-2">
                     @foreach (App\Enums\SleepOutcome::cases() as $outcome)
+                        @php $pays = $prizes['nights'][$outcome->value] ?? 0; @endphp
+
                         <button
                             type="button"
                             wire:key="sleep-{{ $outcome->value }}"
@@ -160,7 +168,16 @@
                             class="flex items-center gap-3 rounded-[16px] border border-fq-line-2 bg-fq-sunk px-4 py-[12px] text-left text-[14px] font-semibold transition hover:border-fq-cyan"
                         >
                             <span class="text-[17px]" style="color: {{ $outcome->cssVar() }}">{{ $outcome->glyph() }}</span>
-                            {{ $outcome->label() }}
+                            <span class="min-w-0 flex-1">{{ $outcome->label() }}</span>
+
+                            @if ($pays > 0)
+                                {{-- The top rung is the loud one; the rest are
+                                     stated without being sold. --}}
+                                <span
+                                    class="font-baloo text-[15px] font-extrabold whitespace-nowrap"
+                                    style="color: {{ $outcome->countsAsOwnBed() ? 'var(--fq-lime)' : 'var(--fq-text-4)' }}"
+                                >{{ $money($pays) }}</span>
+                            @endif
                         </button>
                     @endforeach
                 </div>

@@ -315,7 +315,11 @@ new class extends Component
                 $result['constellation'] && $result['constellationPoints'] > 0 => $result['constellation']->label()
                     .' complete! +'.number_format($result['constellationPoints'] + $result['nightPoints']).' pts',
                 (bool) $result['constellation'] => $result['constellation']->label().' complete!',
-                $result['nightPoints'] > 0 => 'A night in your own bed! +'.number_format($result['nightPoints']).' pts',
+                // Every answer can pay now, so the headline follows the answer
+                // rather than assuming a perfect night.
+                $result['nightPoints'] > 0 => $choice->countsAsOwnBed()
+                    ? 'A night in your own bed! +'.number_format($result['nightPoints']).' pts'
+                    : $choice->response().' +'.number_format($result['nightPoints']).' pts',
                 default => $choice->response(),
             },
             style: $result['constellation'] || $result['nightPoints'] > 0 ? 'money' : 'heart',
@@ -1067,10 +1071,11 @@ new class extends Component
 
         {{-- The own-bed card, above gratitude because it asks about last night
              and the morning is when it makes sense to answer. Absent entirely
-             unless a parent has switched it on for this kid. --}}
-        {{-- The Night Chest used to sit here as a flat rectangle of its own,
-             separated from the run that earns it. It is a rail inside the card
-             now, drawn as the actual chest mark. --}}
+             unless a parent has switched it on for this kid.
+
+             The Night Chest used to sit below it as a flat rectangle of its
+             own, separated from the run that earns it. It is a rail inside the
+             card now, drawn as the actual chest mark. --}}
         @if ($sleepCard)
             <x-sleep-card :card="$sleepCard" />
         @endif
@@ -1697,5 +1702,6 @@ new class extends Component
                 @endforeach
             </div>
         </div>
+
     </div>
 </x-kid.shell>

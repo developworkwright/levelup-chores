@@ -19,7 +19,9 @@ class Household extends Model
         'spin_enabled',
         'sleep_card_enabled',
         'sleep_constellation_points',
-        'sleep_night_points',
+        'sleep_points_own_bed',
+        'sleep_points_visited',
+        'sleep_points_rough',
     ];
 
     protected function casts(): array

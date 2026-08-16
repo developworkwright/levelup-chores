@@ -71,4 +71,31 @@ enum SleepOutcome: string
     {
         return $this === self::OwnBed;
     }
+
+    /**
+     * What answering this way pays when a household hasn't said otherwise, in
+     * dollars at that household's own rate.
+     *
+     * A cuddle pays too, and less. A kid who got most of the way there has done
+     * something worth more than nothing, and the ladder is what makes the top
+     * rung worth reaching for — a single flat reward for the perfect night
+     * leaves a hard night paying exactly the same as never trying.
+     *
+     * Nothing here changes the run or the stars: only {@see self::OwnBed}
+     * advances those, whatever any of them pay.
+     */
+    public function defaultDollars(): int
+    {
+        return match ($this) {
+            self::OwnBed => 2,
+            self::Visited => 1,
+            self::Rough => 0,
+        };
+    }
+
+    /** The household column holding this outcome's rate. */
+    public function pointsColumn(): string
+    {
+        return 'sleep_points_'.$this->value;
+    }
 }

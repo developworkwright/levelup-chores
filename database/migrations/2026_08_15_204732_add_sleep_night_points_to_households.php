@@ -1,6 +1,5 @@
 <?php
 
-use App\Services\SleepService;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -27,7 +26,7 @@ return new class extends Migration
         });
 
         DB::table('households')->whereNull('sleep_night_points')->update([
-            'sleep_night_points' => DB::raw(SleepService::NIGHT_DOLLARS.' * points_per_dollar'),
+            'sleep_night_points' => DB::raw('1 * points_per_dollar'),
         ]);
     }
 

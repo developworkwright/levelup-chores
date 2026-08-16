@@ -3,6 +3,7 @@
 use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
 use App\Enums\ProfileRole;
+use App\Enums\SleepOutcome;
 use App\Enums\TicketKind;
 use App\Models\ChoreCompletion;
 use App\Models\Monster;
@@ -159,13 +160,22 @@ new class extends Component
         );
     }
 
-    /** Taper what a single night pays. Same reasoning as the constellation. */
-    public function adjustNightPayout(int $delta): void
+    /**
+     * Taper what one kind of answer pays. Same reasoning as the constellation,
+     * one dial per outcome.
+     */
+    public function adjustNightPayout(string $outcome, int $delta): void
     {
+        $answer = SleepOutcome::tryFrom($outcome);
+
+        if (! $answer) {
+            return;
+        }
+
         $sleep = app(SleepService::class);
         $household = $this->profile->household;
 
-        $sleep->setNightPoints($household, $sleep->nightPoints($household) + $delta);
+        $sleep->setPointsFor($household, $answer, $sleep->pointsFor($household, $answer) + $delta);
     }
 
     /**
@@ -480,91 +490,6 @@ new class extends Component
         </p>
     </div>
 
-    {{-- The own-bed feature, off for the whole household until switched on
-         here. Two switches on purpose: this one decides whether the family uses
-         it at all, and the per-kid one below decides who is asked. --}}
-    <div class="mb-[14px] rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-            <div class="min-w-[240px] flex-1">
-                <h3 class="font-baloo text-lg font-bold">Own Bed Card</h3>
-                <p class="mt-1 text-sm text-fq-text-2">
-                    A morning check-in for a kid working on sleeping in their own bed. Three
-                    honest answers, and a bad night never takes anything away — it just
-                    doesn't light a star. Seven stars finishes a constellation; nights in a
-                    row pay tickets.
-                </p>
-            </div>
-
-            <button
-                type="button"
-                wire:click="toggleHouseholdSleepCard"
-                class="rounded-[12px] border px-4 py-2 text-sm font-semibold {{ $household->sleep_card_enabled ? 'border-fq-lime text-fq-lime' : 'border-fq-line-3 bg-fq-sunk text-fq-text-3' }}"
-            >{{ $household->sleep_card_enabled ? 'On' : 'Off' }}</button>
-        </div>
-
-        @if ($household->sleep_card_enabled)
-            @php
-                $sleep = app(\App\Services\SleepService::class);
-                $perNight = $sleep->nightPoints($household);
-                $perPicture = $sleep->constellationPoints($household);
-                $rate = max(1, (int) $household->points_per_dollar);
-                // What a perfect week actually costs, which is the number worth
-                // watching while calibrating — neither dial says it alone.
-                $weekly = ($perNight * 7) + $perPicture;
-            @endphp
-
-            {{-- Two dials, because they do different jobs: the night is what
-                 gets a reluctant kid through the hard part, and the picture is
-                 what makes a week mean something. Tapering is the expected
-                 path — the money is there to start a habit, not to run
-                 forever — and nothing already earned changes when either
-                 moves. --}}
-            <div class="mt-4 grid gap-4 border-t border-fq-divider pt-3 sm:grid-cols-2">
-                @foreach ([
-                    ['Per night', $perNight, 'adjustNightPayout', \App\Services\SleepService::NIGHT_STEP],
-                    ['Per constellation · '.\App\Enums\Constellation::NIGHTS.' nights', $perPicture, 'adjustConstellationPayout', \App\Services\SleepService::PAYOUT_STEP],
-                ] as [$label, $value, $action, $step])
-                    <div wire:key="sleep-dial-{{ $action }}">
-                        <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">{{ $label }}</p>
-
-                        <div class="mt-1 flex items-center gap-2">
-                            <button
-                                type="button"
-                                wire:click="{{ $action }}(-{{ $step }})"
-                                @disabled($value === 0)
-                                class="h-8 w-8 rounded-[10px] border border-fq-line-3 bg-fq-sunk text-lg disabled:opacity-40"
-                            >&minus;</button>
-
-                            <span class="w-20 text-center font-baloo text-[17px] font-extrabold text-fq-lime">
-                                {{ number_format($value) }}
-                            </span>
-
-                            <button
-                                type="button"
-                                wire:click="{{ $action }}({{ $step }})"
-                                class="h-8 w-8 rounded-[10px] border border-fq-line-3 bg-fq-sunk text-lg"
-                            >+</button>
-
-                            <span class="font-mono-fq text-[11px] text-fq-text-4">
-                                {{ $value === 0 ? 'nothing' : '$'.number_format($value / $rate, 2) }}
-                            </span>
-                        </div>
-                    </div>
-                @endforeach
-            </div>
-
-            <p class="mt-3 font-mono-fq text-[11px] text-fq-text-4">
-                A perfect week is
-                <span class="text-fq-gold">${{ number_format($weekly / $rate, 2) }}</span>
-                per kid &middot; about ${{ number_format($weekly / $rate / 7, 2) }} a night
-            </p>
-
-            <p class="mt-3 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
-                Now switch it on for whoever needs it, below
-            </p>
-        @endif
-    </div>
-
     <div class="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-[14px]">
         @foreach ($kids as $kid)
             @php
@@ -778,6 +703,108 @@ new class extends Component
                 </div>
             </div>
         @endforeach
+    </div>
+
+    {{-- The own-bed feature, off for the whole household until switched on
+         here. Two switches on purpose: this one decides whether the family uses
+         it at all, and the per-kid one above decides who is asked. --}}
+    <div class="mt-[14px] rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="min-w-[240px] flex-1">
+                <h3 class="font-baloo text-lg font-bold">Own Bed Card</h3>
+                <p class="mt-1 text-sm text-fq-text-2">
+                    A morning check-in for a kid working on sleeping in their own bed. Three
+                    honest answers, and a bad night never takes anything away — it just
+                    doesn't light a star. Seven stars finishes a constellation; nights in a
+                    row pay tickets.
+                </p>
+            </div>
+
+            <button
+                type="button"
+                wire:click="toggleHouseholdSleepCard"
+                class="rounded-[12px] border px-4 py-2 text-sm font-semibold {{ $household->sleep_card_enabled ? 'border-fq-lime text-fq-lime' : 'border-fq-line-3 bg-fq-sunk text-fq-text-3' }}"
+            >{{ $household->sleep_card_enabled ? 'On' : 'Off' }}</button>
+        </div>
+
+        @if ($household->sleep_card_enabled)
+            @php
+                $sleep = app(\App\Services\SleepService::class);
+                $perPicture = $sleep->constellationPoints($household);
+                $rate = max(1, (int) $household->points_per_dollar);
+
+                // One dial per answer. A perfect night and a cuddle at 3am are
+                // not worth the same, and neither is worth nothing.
+                $dials = [];
+
+                foreach (SleepOutcome::cases() as $outcome) {
+                    $dials[] = [
+                        'label' => $outcome->shortLabel(),
+                        'value' => $sleep->pointsFor($household, $outcome),
+                        'action' => "adjustNightPayout('{$outcome->value}', ",
+                        'step' => \App\Services\SleepService::NIGHT_STEP,
+                    ];
+                }
+
+                $dials[] = [
+                    'label' => 'Constellation · '.\App\Enums\Constellation::NIGHTS.' nights',
+                    'value' => $perPicture,
+                    'action' => 'adjustConstellationPayout(',
+                    'step' => \App\Services\SleepService::PAYOUT_STEP,
+                ];
+
+                // What a perfect week actually costs, which is the number worth
+                // watching while calibrating — no single dial says it.
+                $weekly = ($sleep->pointsFor($household, SleepOutcome::OwnBed) * 7) + $perPicture;
+            @endphp
+
+            {{-- A dial per answer, plus the picture. They do different jobs:
+                 the nightly rates are what get a reluctant kid through the hard
+                 part, and the picture is what makes a week mean something.
+                 Tapering is the expected path — the money is there to start a
+                 habit, not to run forever — and nothing already earned changes
+                 when any of them moves. --}}
+            <div class="mt-4 grid gap-4 border-t border-fq-divider pt-3 sm:grid-cols-2">
+                @foreach ($dials as $dial)
+                    <div wire:key="sleep-dial-{{ $loop->index }}">
+                        <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">{{ $dial['label'] }}</p>
+
+                        <div class="mt-1 flex items-center gap-2">
+                            <button
+                                type="button"
+                                wire:click="{{ $dial['action'] }}-{{ $dial['step'] }})"
+                                @disabled($dial['value'] === 0)
+                                class="h-8 w-8 rounded-[10px] border border-fq-line-3 bg-fq-sunk text-lg disabled:opacity-40"
+                            >&minus;</button>
+
+                            <span class="w-20 text-center font-baloo text-[17px] font-extrabold text-fq-lime">
+                                {{ number_format($dial['value']) }}
+                            </span>
+
+                            <button
+                                type="button"
+                                wire:click="{{ $dial['action'] }}{{ $dial['step'] }})"
+                                class="h-8 w-8 rounded-[10px] border border-fq-line-3 bg-fq-sunk text-lg"
+                            >+</button>
+
+                            <span class="font-mono-fq text-[11px] text-fq-text-4">
+                                {{ $dial['value'] === 0 ? 'nothing' : '$'.number_format($dial['value'] / $rate, 2) }}
+                            </span>
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+
+            <p class="mt-3 font-mono-fq text-[11px] text-fq-text-4">
+                A perfect week is
+                <span class="text-fq-gold">${{ number_format($weekly / $rate, 2) }}</span>
+                per kid &middot; about ${{ number_format($weekly / $rate / 7, 2) }} a night
+            </p>
+
+            <p class="mt-3 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                Now switch it on for whoever needs it, above
+            </p>
+        @endif
     </div>
 
     <div class="mt-[14px] rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">

@@ -49,6 +49,17 @@ class SleepCardTest extends TestCase
         return app(SleepService::class);
     }
 
+    /**
+     * Silences every nightly rate, so a test asserting on constellation or
+     * chest money isn't reading the nights underneath it as well.
+     */
+    private function muteNightly(): void
+    {
+        foreach (SleepOutcome::cases() as $outcome) {
+            $this->service()->setPointsFor($this->household->fresh(), $outcome, 0);
+        }
+    }
+
     /** Answers a run of nights, one household day apart. */
     private function nights(int $count, SleepOutcome $outcome = SleepOutcome::OwnBed): void
     {
@@ -146,7 +157,7 @@ class SleepCardTest extends TestCase
         // Nightly payout muted so the number below is the picture's alone —
         // the two are tested together in
         // test_the_seventh_night_pays_both_the_night_and_the_picture().
-        app(SleepService::class)->setNightPoints($this->household, 0);
+        $this->muteNightly();
 
         $this->nights(Constellation::NIGHTS);
 
@@ -161,7 +172,7 @@ class SleepCardTest extends TestCase
 
     public function test_constellations_are_paid_on_total_nights_not_on_a_run(): void
     {
-        app(SleepService::class)->setNightPoints($this->household, 0);
+        $this->muteNightly();
 
         // Six good nights, a bad one, then a seventh good one. The run broke,
         // but the picture still finishes — that is the whole point of paying on
@@ -176,7 +187,7 @@ class SleepCardTest extends TestCase
 
     public function test_a_parent_nudging_nights_cannot_re_pay_a_constellation(): void
     {
-        app(SleepService::class)->setNightPoints($this->household, 0);
+        $this->muteNightly();
 
         $this->nights(Constellation::NIGHTS);
         $this->assertSame(500, $this->kid->fresh()->points);
@@ -196,24 +207,64 @@ class SleepCardTest extends TestCase
         // five-year-old. Tonight is the hard part, so tonight pays.
         $this->service()->record($this->kid, SleepOutcome::OwnBed);
 
+        $this->assertSame(200, $this->kid->fresh()->points, '$2 at 100 points to the dollar.');
+    }
+
+    public function test_a_cuddle_pays_less_and_a_rough_night_pays_nothing(): void
+    {
+        // The ladder is the point: owning up to a cuddle still pays, so a kid
+        // has no reason to claim a night they didn't have.
+        $this->service()->record($this->kid, SleepOutcome::Visited);
+        $this->assertSame(100, $this->kid->fresh()->points);
+
+        $this->travel(1)->days();
+        $this->service()->record($this->kid->refresh(), SleepOutcome::Rough);
         $this->assertSame(100, $this->kid->fresh()->points);
     }
 
-    public function test_a_bad_night_pays_nothing_and_takes_nothing(): void
+    public function test_a_paid_cuddle_still_stops_the_run(): void
     {
-        $this->nights(1);
+        $this->nights(2);
         $this->service()->record($this->kid->refresh(), SleepOutcome::Visited);
 
-        $this->assertSame(100, $this->kid->fresh()->points);
+        $fresh = $this->kid->fresh();
+
+        // Paying for it must not make it count: only an own-bed night moves the
+        // run, the total or the stars.
+        $this->assertSame(0, $fresh->sleep_run);
+        $this->assertSame(2, $fresh->sleep_nights);
+        $this->assertSame(2 * 200 + 100, $fresh->points);
+    }
+
+    public function test_each_answer_has_its_own_dial(): void
+    {
+        $sleep = app(SleepService::class);
+        $sleep->setPointsFor($this->household, SleepOutcome::Visited, 40);
+
+        $this->service()->record($this->kid->refresh(), SleepOutcome::Visited);
+
+        // Only the one that was moved changes.
+        $this->assertSame(40, $this->kid->fresh()->points);
+        $this->assertSame(200, $sleep->pointsFor($this->household->fresh(), SleepOutcome::OwnBed));
     }
 
     public function test_the_nightly_reward_is_tapered_from_the_household(): void
     {
-        app(SleepService::class)->setNightPoints($this->household, 25);
+        app(SleepService::class)->setPointsFor($this->household, SleepOutcome::OwnBed, 25);
 
         $this->nights(2);
 
         $this->assertSame(50, $this->kid->fresh()->points);
+    }
+
+    public function test_a_fully_muted_night_writes_no_ledger_row(): void
+    {
+        $this->muteNightly();
+
+        $this->nights(1);
+
+        // A zero-amount row would be noise in the parent's feed.
+        $this->assertSame(0, LedgerEntry::count());
     }
 
     public function test_a_parent_nudging_nights_does_not_pay_for_nights_never_slept(): void
@@ -307,14 +358,14 @@ class SleepCardTest extends TestCase
     {
         $this->nights(Constellation::NIGHTS);
 
-        // Seven nights at 100, plus the 500 for finishing the picture.
-        $this->assertSame(1200, $this->kid->fresh()->points);
+        // Seven nights at 200, plus the 500 for finishing the picture.
+        $this->assertSame(1900, $this->kid->fresh()->points);
     }
 
     public function test_a_household_can_taper_what_a_constellation_pays(): void
     {
         $sleep = app(SleepService::class);
-        $sleep->setNightPoints($this->household, 0);
+        $this->muteNightly();
         $sleep->setConstellationPoints($this->household->fresh(), 200);
 
         $this->nights(Constellation::NIGHTS);
@@ -324,7 +375,7 @@ class SleepCardTest extends TestCase
 
     public function test_tapering_never_touches_a_constellation_already_paid(): void
     {
-        app(SleepService::class)->setNightPoints($this->household, 0);
+        $this->muteNightly();
 
         $this->nights(Constellation::NIGHTS);
         $this->assertSame(500, $this->kid->fresh()->points);
@@ -340,7 +391,7 @@ class SleepCardTest extends TestCase
     public function test_a_fully_tapered_household_still_finishes_pictures(): void
     {
         $sleep = app(SleepService::class);
-        $sleep->setNightPoints($this->household, 0);
+        $this->muteNightly();
         $sleep->setConstellationPoints($this->household->fresh(), 0);
 
         $this->nights(Constellation::NIGHTS);
@@ -443,7 +494,7 @@ class SleepCardTest extends TestCase
     {
         // Nightly payout muted so the balance below is the picture's alone —
         // the six good nights would otherwise pay for themselves and hide it.
-        app(SleepService::class)->setNightPoints($this->household, 0);
+        $this->muteNightly();
 
         $this->nights(6);
         $this->nights(1, SleepOutcome::Visited);
