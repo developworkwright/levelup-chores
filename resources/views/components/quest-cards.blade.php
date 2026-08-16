@@ -29,11 +29,14 @@
     'message' => null,
 ])
 
-@php
-    // The bold card is last by construction (the hand is sorted by points), so
-    // the palette warms up along the row rather than being assigned per card.
-    $accents = ['var(--fq-cyan)', 'var(--fq-lime)', 'var(--fq-gold)'];
-@endphp
+{{-- Colour on these cards means one thing and only one: gold is a card
+     carrying a bonus. There is no decorative per-card palette, and there was:
+     a cyan/lime/gold ramp along the row, which was wrong twice over.
+     --fq-cyan is this palette's *lilac* (see tokens.css — the accent names
+     carried over from an earlier pass), so the first card came out purple and
+     read as charmed, violet being the charm's colour; and --fq-lime against
+     --fq-gold is two yellows nobody can tell apart. Anything added here has to
+     earn its colour the same way. --}}
 
 <div
     wire:key="quest-cards"
@@ -78,8 +81,15 @@
         @foreach ($cards as $i => $card)
             @php
                 $chore = $card['chore'];
-                $accent = $accents[$i % count($accents)];
                 $blocked = $card['takenBy'] !== null || $card['expired'];
+                $accent = $card['bold'] ? 'var(--fq-gold)' : 'var(--fq-line-3)';
+                // Not the accent: a plain card's accent is a border purple,
+                // which is most of the way to invisible as text on the panel.
+                $pointsColor = match (true) {
+                    $blocked => 'var(--fq-text-4)',
+                    $card['bold'] => 'var(--fq-gold)',
+                    default => 'var(--fq-text)',
+                };
             @endphp
 
             <button
@@ -118,7 +128,7 @@
                     {{ $chore->name }}
                 </span>
 
-                <span class="mt-auto pt-2 font-baloo text-[19px] leading-none font-extrabold sm:text-[22px]" style="color: {{ $blocked ? 'var(--fq-text-4)' : $accent }}">
+                <span class="mt-auto pt-2 font-baloo text-[19px] leading-none font-extrabold sm:text-[22px]" style="color: {{ $pointsColor }}">
                     {{ number_format($card['points'] + $card['bonus']) }}
                 </span>
                 <span class="font-mono-fq text-[8.5px] tracking-[0.16em] text-fq-text-4 uppercase">
