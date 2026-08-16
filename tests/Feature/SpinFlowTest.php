@@ -14,42 +14,47 @@ class SpinFlowTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_the_bonus_wheel_never_lands_on_the_kids_daily_quest_chore(): void
+    /**
+     * The quest is a hand of cards until one is taken, so the wheel has to
+     * clear all of them rather than the single chore the quest row points at —
+     * any of them might turn out to be the quest.
+     */
+    public function test_the_bonus_wheel_never_lands_on_a_card_in_the_kids_quest_hand(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->count(2)->create();
+        Chore::factory()->for($household)->count(6)->create();
 
-        $questChoreId = app(ChoreService::class)->questFor($kid)->chore_id;
+        $hand = app(ChoreService::class)->questFor($kid)->offeredChoreIds();
         $spin = app(SpinService::class)->spin($kid);
 
-        $this->assertNotSame($questChoreId, $spin->chore_id);
+        $this->assertNotContains($spin->chore_id, $hand);
     }
 
-    public function test_spinning_before_the_quest_is_ever_viewed_still_avoids_the_quest_chore(): void
+    public function test_spinning_before_the_quest_is_ever_viewed_still_avoids_the_hand(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->count(2)->create();
+        Chore::factory()->for($household)->count(6)->create();
 
         // No prior call to questFor() — spin() must resolve/create it itself.
         $spin = app(SpinService::class)->spin($kid);
-        $questChoreId = app(ChoreService::class)->questFor($kid)->chore_id;
+        $hand = app(ChoreService::class)->questFor($kid)->offeredChoreIds();
 
-        $this->assertNotSame($questChoreId, $spin->chore_id);
+        $this->assertNotContains($spin->chore_id, $hand);
     }
 
     public function test_eligible_chores_are_uncapped_below_the_wheel_limit(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->count(5)->create();
+        Chore::factory()->for($household)->count(8)->create();
 
-        // One of the 5 gets assigned as the day's quest — 4 left over for
+        // Three of the 8 are dealt as the day's quest hand — 5 left over for
         // the wheel, well under the cap, so nothing should be trimmed.
         $chores = app(SpinService::class)->eligibleChoresFor($kid);
 
-        $this->assertCount(4, $chores);
+        $this->assertCount(8 - ChoreService::HAND_SIZE, $chores);
     }
 
     public function test_eligible_chores_are_capped_and_stable_across_repeated_calls(): void

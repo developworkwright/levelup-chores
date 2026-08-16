@@ -263,7 +263,79 @@ class ParentKidsPageTest extends TestCase
         Chore::factory()->for($household)->create();
         $this->actingAsParent($household);
 
-        Volt::test('parent.kids')->assertSee('Not opened yet');
+        Volt::test('parent.kids')->assertSee('Chest not opened');
+    }
+
+    public function test_a_quest_nobody_has_picked_yet_names_the_hand_and_not_a_chore(): void
+    {
+        // The row's chore_id is a placeholder until a card is taken, and the
+        // console used to print it under "Today's Quest" — telling a parent
+        // their kid had been given a chore nobody had chosen, and which they
+        // might well not choose.
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+
+        foreach (['Sweep the porch', 'Fold the towels', 'Scrub the bins'] as $name) {
+            Chore::factory()->for($household)->create(['name' => $name, 'quest_eligible' => true]);
+        }
+
+        $this->actingAsParent($household);
+
+        app(ChoreService::class)->dealQuestHand($kid);
+
+        Volt::test('parent.kids')
+            ->assertSee('Choosing a card')
+            ->assertSee('3 cards dealt')
+            // The whole hand, so a parent can see what a re-deal would cost.
+            ->assertSee('Sweep the porch')
+            ->assertSee('Fold the towels')
+            ->assertSee('Scrub the bins')
+            ->assertSee('Deal a new hand')
+            ->assertDontSee('Opened, not done');
+    }
+
+    public function test_a_picked_quest_names_the_chore_and_drops_the_hand(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+
+        foreach (['Sweep the porch', 'Fold the towels', 'Scrub the bins'] as $name) {
+            Chore::factory()->for($household)->create(['name' => $name, 'quest_eligible' => true]);
+        }
+
+        $this->actingAsParent($household);
+
+        $chores = app(ChoreService::class);
+        $chores->dealQuestHand($kid);
+        $taken = $chores->offeredChoresFor($kid)->first();
+        $chores->chooseQuest($kid, $taken->id);
+
+        Volt::test('parent.kids')
+            ->assertSee($taken->name)
+            ->assertSee('Opened, not done')
+            ->assertSee('Swap for new cards')
+            ->assertDontSee('cards dealt');
+    }
+
+    public function test_swapping_a_quest_deals_a_new_hand_rather_than_naming_one_chore(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->count(8)->create(['quest_eligible' => true]);
+        $this->actingAsParent($household);
+
+        $chores = app(ChoreService::class);
+        $before = $chores->questFor($kid)->offeredChoreIds();
+
+        Volt::test('parent.kids')
+            ->call('rerollQuest', $kid->id)
+            // Never "Swapped to X" any more: X would be a placeholder card.
+            ->assertSee('Dealt a new hand');
+
+        $after = $chores->questFor($kid)->offeredChoreIds();
+
+        $this->assertNotSame($before, $after);
+        $this->assertNull($chores->questFor($kid)->dealt_at);
     }
 
     public function test_an_opened_quest_chest_stops_reading_as_unopened(): void

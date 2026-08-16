@@ -227,7 +227,11 @@ class QuestPageLayoutTest extends TestCase
             ->assertSeeInOrder([
                 "Today's Target",
                 'Loot Tray',
-                "Today's main quest is inside",
+                // The chest deals three cards rather than revealing one chore,
+                // so the hero slot is a prompt to choose. A household down to a
+                // single eligible chore still gets the old "is inside" wording,
+                // which is why this asserts the three-card copy specifically.
+                'Choose your quest',
                 'Boss Fight',
                 'Gratitude Quest',
                 'Side Quests',

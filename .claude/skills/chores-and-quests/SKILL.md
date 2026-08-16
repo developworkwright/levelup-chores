@@ -26,9 +26,38 @@ This is the rule that most invites accidental regression. Any new "has this been
 
 ## Daily quest
 
-`questFor(Profile)` lazily assigns one random `quest_eligible` chore appropriate for the profile's age, once per `HouseholdClock::for($household)->today()`, persisted in `daily_quests` keyed by `(profile_id, quest_date)`. Repeated calls the same household-day return the same row — never re-roll on refresh, **except** when the quest is blocked (below).
+**The quest is chosen, not assigned.** `questFor(Profile)` lazily deals a *hand* of up to `HAND_SIZE` (3) `quest_eligible` chores appropriate for the profile's age, once per `HouseholdClock::for($household)->today()`, persisted in `daily_quests` keyed by `(profile_id, quest_date)`. Repeated calls the same household-day return the same row — never re-deal on refresh, **except** when the whole hand is blocked (below).
 
-Quests are assigned per kid and independently, so two kids can draw the same chore. Assignment prefers chores nobody has claimed yet, but falls back to the full eligible pool rather than failing — a kid logging in after the family cleared the board still gets a quest. Only a household with zero eligible chores throws.
+Hands are dealt per kid and independently, so two kids can draw the same chore. The deal prefers chores nobody has claimed yet, but falls back to the full eligible pool rather than failing — a kid logging in after the family cleared the board still gets a quest. Only a household with zero eligible chores throws.
+
+### Three columns, three states
+
+- `offered_chore_ids` — the hand, cheapest first. Null on rows written before this existed; **always read it through `DailyQuest::offeredChoreIds()`**, which reads null as a one-card hand of `chore_id`.
+- `chore_id` — **a placeholder until the pick, the quest afterwards.** It is deliberately never null, so every existing consumer of `$quest->chore` keeps working. Before the pick it holds the first card and means nothing.
+- `dealt_at` — the chest has been opened and the cards are on the table.
+- `revealed_at` — a card has been taken. This keeps its exact old meaning of "the kid knows what their quest is": it gates the board and it starts the `speed_runner` timer. `DailyQuest::isPicked()` is the readable form.
+
+Two stamps rather than one because there is a refresh-shaped gap between opening the chest and choosing: without `dealt_at` the chest re-closes on any re-render and replays a 2.6s animation the kid already sat through.
+
+### The hand is spread, not drawn
+
+`dealHand()` sorts the candidate pool by points, `split()`s it into three bands and takes one from each. Three independent random draws routinely produce three near-identical chores, which is a choice in name only. The spread is what guarantees the row always reads left-to-right as "quick and cheap" through to "big and paid for".
+
+The top card is the **bold card** and pays `BOLD_CARD_BONUS_PERCENT` (50%) of its own points on top. Without it the rational move is to take the cheap card every morning, and a choice with one right answer stops being a choice by about day three. Three things about the bonus:
+
+- It is computed off **base** points and added *after* any wheel multiplier, never multiplied by it — a 3x spin on a bold card would otherwise pay 4.5x face value.
+- `boldChoreIn(hand)` returns **null when every card pays the same**, which is the common case in a household whose chores are flat-rated. It degrades to a plain three-way choice rather than paying a bonus for a coin flip.
+- It rides through `claim()`'s new `$bonusPoints` parameter, resolved by `claimQuest()` **before** it stamps `completed_at` — `boldBonusForQuest()` goes back through `questFor()`, and a completed quest is one `rerollIfUnavailable()` stops rescuing.
+
+### Picking, and the two cards that burn
+
+`chooseQuest(Profile, int $choreId)` validates the card is in today's hand and still takeable, then sets `chore_id` and stamps `revealed_at`. It returns **null** rather than throwing when the card isn't takeable — a stale tab, or a sibling claiming that chore between the deal and the tap — which is how the page knows to say "that one just went" instead of silently no-oping.
+
+`revealQuest(Profile)` still exists and still means "take whatever card the quest is sitting on". Kids never reach it; it is the path for a one-card hand and for tests that only need a quest decided.
+
+**The burned cards stay claimable as side quests.** The burn is drama, not a penalty — choosing costs the household nothing in available work. This is why `boardFor()` rejects `possibleQuestChoreIds()` rather than `$quest->chore_id`: the *whole hand* comes off the board while the kid is deciding (otherwise two of the three cards sit below as claimable side quests, duplicated on screen and takeable out from under them), and the two they don't take drop back in the moment the pick lands.
+
+`SpinService::eligibleChoresFor()` clears the same set for the same reason — any card might turn out to be the quest, so the wheel can't land on one. Note this makes an empty wheel more likely in a small household; `spin()` throws on an empty pool and the wheel page guards in front of the call rather than around it.
 
 If `household.require_quest_first` is true, every other chore on the board is `'locked'` until `quest.completed_at` is set (`claimQuest()`). Claiming the quest also calls `claim()` for the quest's chore, so it flows through the same points/mystery path as any other chore. The streak moves at parent approval, not here (see [[streaks]]).
 
@@ -47,7 +76,9 @@ The hero's CTA stays live and reads "Mark it done again", with a separate `Sent 
 
 Because cooldowns are household-wide, a sibling can finish the chore that was handed to you as today's quest. That would dead-end the kid's day: no quest completion, no streak day, and with `require_quest_first` on, a board that never unlocks.
 
-`questFor()` therefore runs `rerollIfUnavailable()` on every read. If the quest is uncompleted and `claimantFor()` returns a completion belonging to **someone else**, the quest silently moves to a different unclaimed chore. It's invisible to the kid beyond the chore changing — no prompt, no cost. An expired quest chore (below) rerolls the same way, and that check runs **before** the Unlimited shortcut — a deadline closes an unlimited chore just as firmly as any other.
+**Before the pick, the hand is what matters, not `chore_id`.** `rerollIfUnavailable()` branches on `isPicked()` first: an unpicked quest is only stuck when `handIsDead()` — every card claimed, expired or deleted — and re-deals then. A sibling taking the placeholder card leaves two perfectly good cards on the table, and re-dealing over a hand the kid may already be reading would be worse than the problem. Everything below applies to a quest that has been picked.
+
+`questFor()` runs `rerollIfUnavailable()` on every read. If the quest is uncompleted and `claimantFor()` returns a completion belonging to **someone else**, the quest silently moves to a different unclaimed chore. It's invisible to the kid beyond the chore changing — no prompt, no cost. An expired quest chore (below) rerolls the same way, and that check runs **before** the Unlimited shortcut — a deadline closes an unlimited chore just as firmly as any other.
 
 Four conditions guard it, each protecting something real:
 
@@ -56,7 +87,7 @@ Four conditions guard it, each protecting something real:
 - **`ChoreCadence::Unlimited` quest chores are never rerolled.** They don't lock, so a sibling doing one blocks nobody.
 - **It only swaps onto unclaimed chores.** Landing on another blocked chore leaves the kid exactly as stuck; if nothing is free, the blocked quest is kept so the page still renders.
 
-`rerollQuest()` (the ticket-priced perk and the parent's manual button) shares the same private `assignDifferentChore()`, so both paths avoid claimed chores identically and both clear `revealed_at` — a swapped quest replays the chest animation rather than silently relabelling a card the kid already opened. When nothing is free, `rerollQuest()` returns null, which is how the perk knows to refuse and keep the kid's ticket.
+`rerollQuest()` (the ticket-priced perk and the parent's manual button) shares the same private `assignDifferentChore()`, so both paths avoid claimed chores identically. **A reroll deals a whole new hand**, excluding the chore the quest was on, and clears *both* `dealt_at` and `revealed_at` — handing back a single replacement chore would make the reroll the one path that takes the choice away, which is precisely the thing being bought back. When nothing is free, `rerollQuest()` returns null, which is how the perk knows to refuse and keep the kid's ticket.
 
 ## Chore board state machine
 
@@ -174,9 +205,11 @@ Three things exist for a reason and shouldn't be simplified away:
 - **`ESCAPE` is stated explicitly** via `whereRaw`. MySQL defaults the LIKE escape character to backslash; SQLite has no default. Since tests run on SQLite and production on MySQL, relying on the default means the escaping works on one engine and silently fails on the other — searching `50%` would return every chore.
 - **Filtering the kid's board narrows what `boardFor()` already returned**, never re-queries. That matters: the board has already excluded today's quest and anything age-gated, and search must not reach past those.
 
-### Gotcha: board tests and the daily quest
+### Gotcha: board tests and the daily quest hand
 
-`boardFor()` excludes whichever chore became today's quest, so a test that creates three chores and asserts on all three will flake — one of them is randomly the quest and won't appear. Give the fixtures one `quest_eligible => true` chore to absorb the assignment and mark the rest `quest_eligible => false`.
+`boardFor()` excludes **every card in today's hand** — up to `HAND_SIZE` (3) chores, not one. A fixture with three eligible chores now yields an *empty* board, which is the trap that caught `test_board_excludes_chores_the_kid_is_too_young_for` when the hand landed. Either give the fixtures one `quest_eligible => true` chore to absorb the deal and mark the rest `quest_eligible => false`, or create `HAND_SIZE + n` of them and assert on `n`. Write the count as `ChoreService::HAND_SIZE + 1` rather than `4`, so changing the hand size doesn't silently empty someone's fixture.
+
+The same arithmetic reaches `SpinService::eligibleChoresFor()`, which clears the hand too: a wheel fixture needs more than three chores or the wheel comes back empty and `spin()` throws.
 
 ### Gotcha: `assertDontSee` on a chore name
 

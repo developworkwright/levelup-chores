@@ -236,8 +236,12 @@ new class extends Component
 
         $quest = app(ChoreService::class)->rerollQuest($kid);
 
+        // Never names a chore any more: a reroll deals a fresh hand, and the
+        // row's chore_id is a placeholder until the kid takes a card. Quoting
+        // it would tell a parent their kid's quest is something nobody has
+        // chosen — and something they may well not choose.
         $this->questMessages[$profileId] = $quest
-            ? "Swapped to \"{$quest->chore->name}\"."
+            ? 'Dealt a new hand — '.count($quest->offeredChoreIds()).' fresh cards to choose from.'
             : 'Nothing to swap — the quest is already cleared, or there is no other eligible chore.';
     }
 
@@ -282,6 +286,29 @@ new class extends Component
         $chores = app(ChoreService::class);
         $quest = $chores->questFor($kid);
 
+        // Before the pick there is no quest to name — `chore_id` holds a
+        // placeholder card, and printing it under "Today's Quest" told a
+        // parent their kid had been given a chore nobody has chosen. The hand
+        // goes out instead, which is the honest answer to what is happening
+        // and the thing a parent needs in order to judge whether to re-deal.
+        // `completed_at` is checked alongside the pick, not folded into it: a
+        // quest can be cleared without one — claimQuest() doesn't require a
+        // card to have been taken — and reporting a finished quest as "choosing
+        // a card" would hide work that is sitting waiting for approval.
+        if (! $quest->isPicked() && $quest->completed_at === null) {
+            return [
+                'chore' => null,
+                'hand' => $chores->offeredChoresFor($kid),
+                // A day off outranks the cards: it is why they aren't picking.
+                'status' => match (true) {
+                    $chores->hasSkippedQuestToday($kid) => 'skipped',
+                    $quest->dealt_at !== null => 'choosing',
+                    default => 'not_started',
+                },
+                'canReroll' => true,
+            ];
+        }
+
         // Scoped to today's household day: the same chore may well have been
         // done last week, and that attempt says nothing about today's quest.
         // Clocked off the parent's own household rather than the kid's, which
@@ -304,6 +331,7 @@ new class extends Component
 
         return [
             'chore' => $quest->chore,
+            'hand' => collect(),
             'status' => $status,
             // Mirrors what rerollQuest() will actually do, so the button isn't
             // dead on a quest that is still swappable — opened and sent-back
@@ -498,7 +526,11 @@ new class extends Component
                 $spin = $spins[$kid->id];
                 $chest = $chests[$kid->id];
                 $questLabels = [
-                    'not_started' => ['label' => 'Not opened yet', 'color' => 'var(--fq-text-4)'],
+                    'not_started' => ['label' => 'Chest not opened', 'color' => 'var(--fq-text-4)'],
+                    // The chest is open and the cards are on the table. Its own
+                    // state because "not opened" and "opened, not done" both
+                    // claim the kid has a quest, and at this point they don't.
+                    'choosing' => ['label' => 'Choosing a card', 'color' => 'var(--fq-violet)'],
                     'opened' => ['label' => 'Opened, not done', 'color' => 'var(--fq-cyan)'],
                     'skipped' => ['label' => 'Day off — bought', 'color' => 'var(--fq-violet)'],
                     'pending' => ['label' => 'Waiting on you', 'color' => 'var(--fq-gold)'],
@@ -521,15 +553,27 @@ new class extends Component
                 <div class="rounded-[14px] border border-fq-line-2 bg-fq-sunk px-3 py-[10px]">
                     <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Today's Quest</p>
                     <div class="mt-1 flex items-center justify-between gap-2">
-                        <span class="text-sm font-semibold">{{ $quest['chore']->name }}</span>
+                        <span class="text-sm font-semibold">
+                            {{-- Fully qualified: a Volt SFC template section
+                                 can't resolve a bare class name. --}}
+                            {{ $quest['chore']?->name ?? ($quest['hand']->count().' '.\Illuminate\Support\Str::plural('card', $quest['hand']->count()).' dealt') }}
+                        </span>
                         <span class="font-mono-fq text-[10px] font-semibold whitespace-nowrap" style="color: {{ $questLabels['color'] }}">{{ $questLabels['label'] }}</span>
                     </div>
+
+                    {{-- What is actually on the table. Shown rather than hidden:
+                         a parent deciding whether to re-deal needs to see what
+                         they would be taking away. --}}
+                    @if ($quest['hand']->isNotEmpty())
+                        <p class="mt-1 font-mono-fq text-[10px] leading-snug text-fq-text-4">{{ $quest['hand']->pluck('name')->join(' · ') }}</p>
+                    @endif
+
                     <button
                         type="button"
                         wire:click="rerollQuest({{ $kid->id }})"
                         @disabled(! $quest['canReroll'])
                         class="mt-2 w-full rounded-[10px] border border-fq-line-3 bg-fq-panel py-[6px] text-xs text-fq-text-3 disabled:opacity-40"
-                    >Swap for a different chore</button>
+                    >{{ $quest['chore'] ? 'Swap for new cards' : 'Deal a new hand' }}</button>
                     @if (! empty($questMessages[$kid->id]))
                         <p class="mt-1 text-[11px] text-fq-text-4">{{ $questMessages[$kid->id] }}</p>
                     @endif

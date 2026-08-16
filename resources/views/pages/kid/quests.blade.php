@@ -80,6 +80,13 @@ new class extends Component
      */
     public ?string $bountyMessage = null;
 
+    /**
+     * Why a card couldn't be taken. Same reasoning as boardMessage — the hand
+     * is dealt from chores the whole household shares, so a sibling can claim
+     * one out from under a kid who is still deciding.
+     */
+    public ?string $questCardMessage = null;
+
     public string $search = '';
 
     /**
@@ -207,10 +214,67 @@ new class extends Component
         $this->dailyChestAvailable = app(ChestService::class)->isAvailable($this->profile);
     }
 
+    /**
+     * Opens the quest chest, putting three cards on the table.
+     *
+     * No celebration here: the chest no longer reveals anything, it deals. The
+     * card that gets announced is the one they choose.
+     */
+    public function dealHand(): void
+    {
+        app(ChoreService::class)->dealQuestHand($this->profile);
+    }
+
+    /**
+     * Takes one of today's cards. The other two have already burned client-side
+     * by the time this runs — see <x-quest-cards>.
+     */
+    public function chooseQuest(int $choreId): void
+    {
+        $this->questCardMessage = null;
+
+        $service = app(ChoreService::class);
+        $hand = $service->offeredChoresFor($this->profile);
+        $bold = $service->boldChoreIn($hand);
+
+        $quest = $service->chooseQuest($this->profile, $choreId);
+
+        if (! $quest) {
+            // Almost always a sibling getting there first. The cards re-render
+            // with the claimant named on whichever one went, so the message
+            // only has to explain why the tap bounced.
+            $this->questCardMessage = "That one just went — pick another card.";
+
+            return;
+        }
+
+        $bonus = $service->boldBonusFor($quest->chore, $bold);
+        $points = $quest->chore->points * app(SpinService::class)->multiplierFor($this->profile, $quest->chore) + $bonus;
+
+        // Dispatched from the server rather than from the card, so it can only
+        // fire on a pick that actually landed.
+        $this->dispatch(
+            'celebrate',
+            style: 'confetti',
+            motion: 'burst',
+            origin: 'tap',
+            tier: 'big',
+            hold: 2600,
+            card: [
+                'accent' => $bonus > 0 ? 'var(--fq-gold)' : 'var(--fq-lime)',
+                'sub' => $bonus > 0 ? 'Bold Quest Taken' : "Today's Quest",
+                'label' => $quest->chore->name,
+                'note' => '+'.number_format($points).' PTS',
+            ],
+        );
+    }
+
+    /**
+     * Kept for the paths that need a quest simply decided rather than chosen —
+     * see ChoreService::revealQuest().
+     */
     public function revealQuest(): void
     {
-        // The celebration itself fires client-side when the chest's own
-        // suspense animation finishes — not here, before it's even started.
         app(ChoreService::class)->revealQuest($this->profile);
     }
 
@@ -597,6 +661,21 @@ new class extends Component
         $questRevealed = $quest->revealed_at !== null;
         $questDone = $quest->completed_at !== null;
 
+        // The hand, and what each card is worth. Built here rather than in the
+        // component so the card can name a claimant the same way the board
+        // does — this is the one page that already has that lookup to hand.
+        $hand = $service->offeredChoresFor($this->profile);
+        $boldChore = $service->boldChoreIn($hand);
+
+        $questCards = $hand->map(fn (Chore $chore) => [
+            'chore' => $chore,
+            'points' => $chore->points,
+            'bonus' => $service->boldBonusFor($chore, $boldChore),
+            'bold' => $boldChore?->id === $chore->id,
+            'takenBy' => $service->claimantOtherThan($chore, $this->profile)?->profile,
+            'expired' => $service->isExpired($chore),
+        ]);
+
         // Claiming the quest sets completed_at immediately, but the points
         // don't land until a parent approves — so "done" and "waiting" are
         // different things and the CTA has to say which one it is. Scoped to
@@ -646,13 +725,22 @@ new class extends Component
             // left to dead-end the day, so this is only ever a live deadline.
             'questClosesAt' => $service->deadlineFor($quest->chore),
             'questRevealed' => $questRevealed,
+            // The chest and the pick are separate stamps: the chest stays open
+            // across a refresh while the kid is still deciding, which is what
+            // stops the 2.6s rattle replaying every time they look at the page.
+            'handDealt' => $quest->dealt_at !== null,
+            'questCards' => $questCards,
+            'questBoldBonus' => $service->boldBonusFor($quest->chore, $boldChore),
             'questDone' => $questDone,
             'questApproved' => $questApproved,
             'questPending' => $questPending,
             'questSentBack' => $questSentBack,
             'boost' => $boost,
             'questBoosted' => $questBoosted,
-            'questPoints' => $quest->chore->points * ($questBoosted ? $boost->multiplier : 1),
+            // The bold card's bonus rides on top of any wheel multiplier
+            // rather than being multiplied by it — see BOLD_CARD_BONUS_PERCENT.
+            'questPoints' => $quest->chore->points * ($questBoosted ? $boost->multiplier : 1)
+                + $service->boldBonusFor($quest->chore, $boldChore),
             // Filtered in PHP rather than re-queried — the board is already
             // loaded, and Chore::matches() is the in-memory twin of the
             // scope the parent admin searches with.
@@ -976,19 +1064,33 @@ new class extends Component
                 >{{ $stripLabel }}</span>
             </div>
         @else
+            {{-- The chest deals rather than reveals: it bursts open onto three
+                 cards and the kid takes one. Its own celebration is off,
+                 because "here are some cards" is not news — the pick is, and
+                 chooseQuest() fires that once it knows the pick landed. --}}
             <x-chest
                 wire-key="quest-chest"
-                :revealed="$questRevealed"
-                open-action="revealQuest"
+                :revealed="$handDealt"
+                open-action="dealHand"
+                :celebrate-on-open="false"
                 accent="var(--fq-lime)"
                 kicker="Quest Chest · Open It"
-                closed-title="Today's main quest is inside"
-                :closed-text="'Worth +'.number_format($questPoints).' pts.'.($household->require_quest_first ? ' Side quests unlock the moment it\'s cleared.' : '')"
+                :closed-title="$questCards->count() > 1 ? 'Choose your quest' : 'Today\'s main quest is inside'"
+                :closed-text="($questCards->count() > 1
+                    ? $questCards->count().' cards are inside. Take one, burn the rest.'
+                    : 'Worth +'.number_format($questPoints).' pts.')
+                    .($household->require_quest_first ? ' Side quests unlock the moment it\'s cleared.' : '')"
                 opening-text="The chest is rattling..."
                 cta="Open"
-                :prize-label="$quest->chore->name"
-                :prize-sub="'+'.$questPoints.' PTS · Today\'s Quest'"
             >
+            @if (! $questRevealed)
+                <x-quest-cards
+                    :cards="$questCards"
+                    choose-action="chooseQuest"
+                    :bold-percent="\App\Services\ChoreService::BOLD_CARD_BONUS_PERCENT"
+                    :message="$questCardMessage"
+                />
+            @else
                 <div
                     wire:key="hero"
                     class="rounded-[24px] border p-5"
@@ -1043,6 +1145,17 @@ new class extends Component
                             +{{ $questPoints }} PTS
                         </span>
 
+                        {{-- Says where the extra came from. Without it the
+                             number on the hero doesn't match the chore's own
+                             points anywhere else in the app, and the card that
+                             explained it has burned. --}}
+                        @if ($questBoldBonus)
+                            <span
+                                class="rounded-full px-[7px] py-[2px] font-mono-fq text-[9px] leading-none tracking-[0.16em] uppercase"
+                                style="background: var(--fq-gold); color: var(--fq-bg)"
+                            >Bold +{{ number_format($questBoldBonus) }}</span>
+                        @endif
+
                         {{-- Pushed to the far edge — it's an escape hatch, not
                              the thing to reach for first. --}}
                         @if (isset($heldPerks['quest_reroll']))
@@ -1052,6 +1165,7 @@ new class extends Component
                         @endif
                     </div>
                 </div>
+            @endif
             </x-chest>
         @endif
 

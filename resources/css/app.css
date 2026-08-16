@@ -532,3 +532,145 @@ body {
         animation: none;
     }
 }
+
+/*
+ * The daily quest's three cards, dealt out of the chest.
+ *
+ * The deal is a flip rather than a fade because the cards arrive face-down —
+ * turning them over is the moment the kid learns what they're choosing
+ * between, and it has to read as three separate events, which is what the
+ * per-card delay off --fq-card-index buys. The row carries the perspective;
+ * a rotateY without one is just a horizontal squash.
+ */
+.fq-quest-card {
+    animation: fq-card-deal 0.45s cubic-bezier(0.2, 1.3, 0.4, 1) both;
+    animation-delay: calc(var(--fq-card-index, 0) * 120ms);
+}
+
+@keyframes fq-card-deal {
+    from {
+        opacity: 0;
+        transform: translateY(16px) rotateY(-88deg) scale(0.94);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+/*
+ * The two cards not taken.
+ *
+ * Timed at 1.15s to sit inside the 1.4s the page waits before calling the
+ * server — the suspense runs before the write, exactly as <x-chest> does it,
+ * so the hero card doesn't land on top of a card still burning. Change one and
+ * change the other.
+ *
+ * The colour work is a filter rather than a set of new background values
+ * because these cards carry their accent inline from Blade: sepia + a negative
+ * hue rotation takes whatever colour a card happens to be through ember and
+ * out to char, without this stylesheet needing to know what it started as.
+ */
+.fq-card-burn {
+    pointer-events: none;
+    animation: fq-card-burn 1.15s ease-in forwards;
+}
+
+/*
+ * The burn line itself, sweeping up the card ahead of the char.
+ *
+ * `top` is animated rather than a transform, deliberately: as a percentage it
+ * is measured against the card's own height, so one rule works for a card of
+ * any size and nothing has to publish its pixel height to CSS.
+ */
+.fq-card-burn::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: -8%;
+    right: -8%;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(to top, transparent, #ff7a18 45%, #ffe9a8);
+    filter: blur(7px);
+    opacity: 0;
+    animation: fq-card-ember 1.15s ease-in forwards;
+}
+
+@keyframes fq-card-burn {
+    0% {
+        opacity: 1;
+        filter: none;
+        transform: none;
+    }
+    35% {
+        filter: brightness(0.8) sepia(0.55) saturate(2.4) hue-rotate(-18deg);
+    }
+    100% {
+        opacity: 0;
+        filter: brightness(0.18) sepia(1) saturate(3) hue-rotate(-25deg);
+        transform: translateY(12px) rotate(var(--fq-burn-tilt, -5deg)) scale(0.88);
+    }
+}
+
+@keyframes fq-card-ember {
+    0% {
+        top: 100%;
+        opacity: 0;
+    }
+    15% {
+        opacity: 1;
+    }
+    88% {
+        opacity: 0.85;
+    }
+    100% {
+        top: -14%;
+        opacity: 0;
+    }
+}
+
+/* The one they took, lifting clear of the two going up in smoke beside it. */
+.fq-card-chosen {
+    position: relative;
+    z-index: 1;
+    animation: fq-card-chosen 1.15s cubic-bezier(0.2, 1.3, 0.4, 1) forwards;
+}
+
+@keyframes fq-card-chosen {
+    0% {
+        transform: none;
+    }
+    30% {
+        transform: translateY(-12px) scale(1.06);
+    }
+    100% {
+        transform: translateY(-5px) scale(1.03);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fq-quest-card,
+    .fq-card-chosen {
+        animation: none;
+    }
+
+    /*
+     * The burn still has to happen — the card is being removed, and a rejected
+     * card left sitting on the page is worse than a fast fade. Only the drama
+     * goes.
+     */
+    .fq-card-burn {
+        animation: fq-card-fade 0.3s ease forwards;
+    }
+
+    .fq-card-burn::after {
+        display: none;
+    }
+}
+
+@keyframes fq-card-fade {
+    to {
+        opacity: 0;
+    }
+}

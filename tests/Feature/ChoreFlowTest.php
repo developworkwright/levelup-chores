@@ -359,9 +359,13 @@ class ChoreFlowTest extends TestCase
     {
         $household = Household::factory()->create(['require_quest_first' => false]);
         $kid = Profile::factory()->for($household)->create(['age' => 6]);
-        // Two eligible chores so one can become the quest and one still shows on the board.
-        Chore::factory()->for($household)->create(['name' => 'Open to everyone A', 'min_age' => null]);
-        Chore::factory()->for($household)->create(['name' => 'Open to everyone B', 'min_age' => null]);
+        // One more age-open chore than the quest hand can hold, so exactly one
+        // is left on the board to assert against — the whole hand comes off it,
+        // not just the card the quest row happens to point at.
+        foreach (range(1, ChoreService::HAND_SIZE + 1) as $i) {
+            Chore::factory()->for($household)->create(['name' => "Open to everyone {$i}", 'min_age' => null]);
+        }
+
         Chore::factory()->for($household)->create(['name' => 'Too old for this one', 'min_age' => 10]);
 
         $board = $this->service()->boardFor($kid);
@@ -402,11 +406,15 @@ class ChoreFlowTest extends TestCase
         $restricted = Chore::factory()->for($household)->create(['name' => 'For older kids', 'min_age' => 10]);
 
         // Pin the quest to the filler chore so the restricted one is guaranteed
-        // to still be sitting on the board, regardless of random assignment.
+        // to still be sitting on the board, regardless of what gets dealt. The
+        // hand is pinned along with it: a row with no hand is one questFor()
+        // deals into, which would take the restricted chore off the board as a
+        // card and undo the pin.
         DailyQuest::create([
             'household_id' => $household->id,
             'profile_id' => $kid->id,
             'chore_id' => $filler->id,
+            'offered_chore_ids' => [$filler->id],
             'quest_date' => HouseholdClock::for($household)->today(),
         ]);
 

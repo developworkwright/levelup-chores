@@ -9,7 +9,12 @@
      open action has run. A chest whose prize is known up front (the streak
      chest) doesn't need it — but one that's only decided on opening does,
      because the reveal card sits inside a <template x-if> and gets cloned from
-     markup Blade rendered before the prize existed. --}}
+     markup Blade rendered before the prize existed.
+
+     celebrateOnOpen turns the reveal off for a chest that doesn't reveal
+     anything. The quest chest deals three cards to choose between, so the
+     thing worth announcing happens a beat later, when one of them is taken —
+     and it's announced from the server, because a pick can miss. --}}
 @props([
     'wireKey',
     'revealed',
@@ -21,10 +26,11 @@
     'closedText',
     'openingText' => 'The chest is rattling...',
     'cta' => 'Open',
-    'prizeLabel',
-    'prizeSub',
+    'prizeLabel' => null,
+    'prizeSub' => null,
     'celebrateMessage' => null,
     'prizeProperty' => null,
+    'celebrateOnOpen' => true,
 ])
 
 <div
@@ -54,13 +60,15 @@
             @if ($prizeProperty) this.label = $wire.{{ $prizeProperty }} ?? this.label; @endif
             this.phase = 'revealed';
             this.justOpened = true;
-            {{-- Held for longer than the 2200ms reveal card below, so the
-                 badge and level cards queued behind this one don't stack on
-                 top of a chest still showing its prize. --}}
-            {{-- Burst from the chest rather than rained from the top: the tap
-                 that started this is still the last one recorded, even though
-                 the rattle has been running for two and a half seconds. --}}
-            window.dispatchEvent(new CustomEvent('celebrate', { detail: { message: @js($celebrateMessage) ?? this.label, style: 'confetti', motion: 'burst', origin: 'tap', hold: 2600 } }));
+            @if ($celebrateOnOpen)
+                {{-- Held for longer than the 2200ms reveal card below, so the
+                     badge and level cards queued behind this one don't stack on
+                     top of a chest still showing its prize. --}}
+                {{-- Burst from the chest rather than rained from the top: the tap
+                     that started this is still the last one recorded, even though
+                     the rattle has been running for two and a half seconds. --}}
+                window.dispatchEvent(new CustomEvent('celebrate', { detail: { message: @js($celebrateMessage) ?? this.label, style: 'confetti', motion: 'burst', origin: 'tap', hold: 2600 } }));
+            @endif
         },
     }"
 >
@@ -130,5 +138,7 @@
         {{ $slot }}
     </div>
 
-    <x-prize-overlay :accent="$accent" :sub="$prizeSub" />
+    @if ($celebrateOnOpen)
+        <x-prize-overlay :accent="$accent" :sub="$prizeSub" />
+    @endif
 </div>

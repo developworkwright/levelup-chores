@@ -68,13 +68,15 @@ class SpinService
         // Resolved lazily (not constructor-injected) to avoid a circular
         // dependency — ChoreService itself depends on SpinService.
         $chores = app(ChoreService::class);
-        $questChoreId = $chores->questFor($profile)->chore_id;
+        // Plural because the quest is a hand of cards until one is taken, and
+        // any of them might be the answer — see possibleQuestChoreIds().
+        $questChoreIds = $chores->possibleQuestChoreIds($profile);
 
         $spinToday = $this->today($profile);
 
         $eligible = $profile->household->chores
             ->filter(fn (Chore $chore) => $chore->isAppropriateFor($profile))
-            ->reject(fn (Chore $chore) => $chore->id === $questChoreId)
+            ->reject(fn (Chore $chore) => in_array($chore->id, $questChoreIds, true))
             // Cooldowns are household-wide, so a chore a sibling already
             // claimed can no longer be earned — landing a 3x boost on it
             // would be a prize that pays nothing. A parent can bar a chore
