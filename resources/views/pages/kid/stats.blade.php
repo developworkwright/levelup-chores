@@ -321,6 +321,10 @@ new class extends Component
             LedgerKind::CashOut => ['label' => 'CASH OUT', 'tone' => 'out'],
             LedgerKind::Adjustment => ['label' => 'ADJUSTED', 'tone' => 'side'],
             LedgerKind::Transfer => ['label' => 'TRADE', 'tone' => 'side'],
+            // 'in' because the points came back, but its own word: a kid
+            // scanning this needs to see that the shop gave it back, not that
+            // they earned it twice.
+            LedgerKind::Refund => ['label' => 'REFUNDED', 'tone' => 'in'],
         };
     }
 

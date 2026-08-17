@@ -39,6 +39,15 @@ new class extends Component
     {
         $this->profile = Auth::guard('profile')->user();
         abort_unless($this->profile->isParent(), 403);
+
+        // Seeded once, so the Arena controls open showing what is actually set
+        // rather than blank fields that would read as "not configured".
+        $household = $this->profile->household;
+
+        $this->eveningWatchHour = $household->evening_watch_hour;
+        $this->weeklyChoreTarget = (string) ($household->weekly_chore_target ?? '');
+        $this->weeklyPrize = (string) ($household->weekly_prize ?? '');
+        $this->weeklyPrizeNote = (string) ($household->weekly_prize_note ?? '');
     }
 
     private function ownedKid(int $profileId): ?Profile
@@ -136,6 +145,63 @@ new class extends Component
         if ($kid) {
             app(SpinService::class)->clearToday($kid);
         }
+    }
+
+    /**
+     * The Arena's household settings.
+     *
+     * Seeded in mount() from the household so the controls open showing what
+     * is actually set, and written back together by saveArenaSettings().
+     */
+    public ?int $eveningWatchHour = null;
+
+    public string $weeklyChoreTarget = '';
+
+    public string $weeklyPrize = '';
+
+    public string $weeklyPrizeNote = '';
+
+    public ?string $arenaMessage = null;
+
+    /**
+     * Writes all four at once, from an explicit button.
+     *
+     * Deliberately not save-on-blur, which is what this was first: four fields
+     * that each wrote themselves the moment focus left them, with nothing on
+     * screen to say anything had happened. A parent filling in a prize and a
+     * rule tabs between them and has no way to tell the difference between
+     * "saved" and "silently didn't" — so there is a button, and it says so.
+     */
+    public function saveArenaSettings(): void
+    {
+        // Bounded to the evening. A watch hour before the afternoon would have
+        // the Arena calling a quest at risk over breakfast, which is the sort
+        // of nagging this page's whole copy is written to avoid.
+        $hour = max(15, min(23, (int) $this->eveningWatchHour));
+
+        $digits = preg_replace('/\D/', '', $this->weeklyChoreTarget);
+        $target = $digits === '' ? null : max(1, min(65535, (int) $digits));
+
+        $prize = trim($this->weeklyPrize);
+        $note = trim($this->weeklyPrizeNote);
+
+        $this->profile->household->update([
+            'evening_watch_hour' => $hour,
+            'weekly_chore_target' => $target,
+            // Empty clears rather than storing '', so the Arena's "is there a
+            // prize" check stays a plain null test.
+            'weekly_prize' => $prize === '' ? null : $prize,
+            'weekly_prize_note' => $note === '' ? null : $note,
+        ]);
+
+        // Echoed back from what was actually written, so a value that got
+        // clamped or stripped shows the parent the number they really have.
+        $this->eveningWatchHour = $hour;
+        $this->weeklyChoreTarget = (string) ($target ?? '');
+
+        $this->arenaMessage = $target
+            ? 'Saved.'
+            : 'Saved — with no weekly target, the house bar stays off.';
     }
 
     /** The household switch. Off, every per-kid switch is moot. */
@@ -747,6 +813,117 @@ new class extends Component
                 </div>
             </div>
         @endforeach
+    </div>
+
+    {{-- What the Arena reads. All three are the household's own call, and all
+         three are safe to leave alone: the watch hour has a sensible default,
+         and the week's target and prize simply don't draw until they're set. --}}
+    <div class="mt-[14px] rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
+        <h3 class="font-baloo text-lg font-bold">The Arena</h3>
+        <p class="mt-1 text-sm text-fq-text-2">
+            The kids' landing page: whose run is on the line tonight, the streak race, and
+            what the house is fighting.
+        </p>
+
+        <div class="mt-4 flex flex-wrap gap-[14px]">
+            <div class="min-w-[240px] flex-1">
+                <label for="watch-hour" class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                    Evening watch hour
+                </label>
+                <div class="mt-2 flex gap-2">
+                    <select
+                        id="watch-hour"
+                        wire:model="eveningWatchHour"
+                        class="flex-1 rounded-[14px] border border-fq-line-2 bg-fq-sunk px-3 py-2 text-sm outline-none"
+                    >
+                        @foreach (range(15, 23) as $hour)
+                            <option value="{{ $hour }}">{{ $hour > 12 ? $hour - 12 : $hour }}:00pm</option>
+                        @endforeach
+                    </select>
+                </div>
+                {{-- Says outright that it isn't a deadline. A parent reading
+                     this as "bedtime" would expect the app to take something
+                     away at it, and nothing ever does. --}}
+                <p class="mt-2 text-[12.5px] leading-snug text-fq-text-4">
+                    When an unfinished quest starts showing as <em>at risk</em> on the Arena.
+                    Nothing expires — the day still rolls at
+                    {{ $household->day_boundary_hour > 12 ? $household->day_boundary_hour - 12 : $household->day_boundary_hour }}:00am.
+                </p>
+            </div>
+
+            <div class="min-w-[240px] flex-1">
+                <label for="weekly-target" class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                    Weekly chore target
+                </label>
+                <input
+                    id="weekly-target"
+                    type="text"
+                    inputmode="numeric"
+                    wire:model="weeklyChoreTarget"
+                    placeholder="e.g. 60"
+                    class="mt-2 w-full rounded-[14px] border border-fq-line-2 bg-fq-sunk px-3 py-2 text-sm outline-none"
+                >
+                <p class="mt-2 text-[12.5px] leading-snug text-fq-text-4">
+                    Everyone's chores count toward one bar, Sun&ndash;Sat. Leave blank and the
+                    bar stays off.
+                </p>
+            </div>
+        </div>
+
+        <div class="mt-[14px] flex flex-wrap gap-[14px]">
+            <div class="min-w-[240px] flex-1">
+                <label for="weekly-prize" class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                    This week's prize
+                </label>
+                <input
+                    id="weekly-prize"
+                    type="text"
+                    wire:model="weeklyPrize"
+                    maxlength="120"
+                    placeholder="e.g. Friday movie pick + $5"
+                    class="mt-2 w-full rounded-[14px] border border-fq-line-2 bg-fq-sunk px-3 py-2 text-sm outline-none"
+                >
+            </div>
+
+            <div class="min-w-[240px] flex-1">
+                <label for="weekly-prize-note" class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                    Anything to add
+                </label>
+                <input
+                    id="weekly-prize-note"
+                    type="text"
+                    wire:model="weeklyPrizeNote"
+                    maxlength="160"
+                    placeholder="e.g. Saturday after tea."
+                    class="mt-2 w-full rounded-[14px] border border-fq-line-2 bg-fq-sunk px-3 py-2 text-sm outline-none"
+                >
+                {{-- The rule itself is stated by the app — the prize lands at
+                     the weekly target. This is for anything else, so a parent
+                     doesn't have to restate what the card already says. --}}
+                <p class="mt-2 text-[12.5px] leading-snug text-fq-text-4">
+                    The kids are already told they get this at the target. Optional extras only.
+                </p>
+            </div>
+        </div>
+
+        <div class="mt-4 flex flex-wrap items-center gap-3">
+            <button
+                type="button"
+                wire:click="saveArenaSettings"
+                wire:loading.attr="disabled"
+                wire:target="saveArenaSettings"
+                class="rounded-[14px] px-5 py-[11px] font-baloo text-[15px] font-bold transition hover:brightness-110 disabled:opacity-60"
+                style="background: var(--fq-lime); color: var(--fq-ink)"
+            >Save Arena settings</button>
+
+            @if ($arenaMessage)
+                <span class="text-[12.5px] text-fq-lime">{{ $arenaMessage }}</span>
+            @endif
+        </div>
+
+        <p class="mt-3 font-mono-fq text-[10px] leading-snug text-fq-text-5">
+            You hand the prize over yourself &mdash; the app shows it and never pays it.
+        </p>
     </div>
 
     {{-- The own-bed feature, off for the whole household until switched on

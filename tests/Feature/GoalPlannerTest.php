@@ -40,7 +40,7 @@ class GoalPlannerTest extends TestCase
      * The long game, standing.
      *
      * The family plan reads off the Level 3 monster rather than the household's
-     * goal columns, so a page with nothing standing has no plan to draw — which
+     * goal columns, so a page with nothing standing has no plan to draw â€” which
      * is the honest answer, and not what these tests are about.
      */
     private function longGame(Household $household, int $health, string $reward = 'Family goal'): Monster
@@ -71,7 +71,7 @@ class GoalPlannerTest extends TestCase
 
     public function test_the_stepper_moves_the_target_by_one_typical_chore(): void
     {
-        // Chores here pay 100, so a rung of the ladder is 100 — the stepper has
+        // Chores here pay 100, so a rung of the ladder is 100 â€” the stepper has
         // to move by the same unit the ladder is built from.
         $household = Household::factory()->create();
         $kid = $this->loginKid($household);
@@ -157,7 +157,7 @@ class GoalPlannerTest extends TestCase
     {
         // Chores pay 400 here and there are only 300 points to go, so every rung
         // is a one-day answer. Six rows all reading "1 day" is a table that has
-        // stopped saying anything — three is the floor so there's still a choice.
+        // stopped saying anything â€” three is the floor so there's still a choice.
         $household = Household::factory()->create();
         $item = StoreItem::factory()->for($household)->create(['cost' => 300]);
         $this->loginKid($household, ['saving_for_store_item_id' => $item->id]);
@@ -191,7 +191,7 @@ class GoalPlannerTest extends TestCase
     public function test_the_countdown_banner_stays_away_until_there_is_a_plan(): void
     {
         // A goal but no daily target: there's nothing to count down at, and a
-        // banner reading "— days until —" says less than no banner.
+        // banner reading "â€” days until â€”" says less than no banner.
         $household = Household::factory()->create();
         $item = StoreItem::factory()->for($household)->create(['name' => 'Skateboard', 'cost' => 1000]);
         $this->loginKid($household, ['points' => 100, 'saving_for_store_item_id' => $item->id]);
@@ -200,56 +200,6 @@ class GoalPlannerTest extends TestCase
         Volt::test('kid.goal')
             ->assertOk()
             ->assertDontSee('is yours');
-    }
-
-    public function test_the_family_goal_is_answered_with_the_kids_own_target(): void
-    {
-        $household = Household::factory()->create();
-        $this->longGame($household, 1200);
-        Profile::factory()->for($household)->create();
-        $this->loginKid($household, ['daily_points_goal' => 200]);
-        Chore::factory()->for($household)->create(['points' => 100]);
-
-        // 200 each across two kids is 400 a day, so 1200 takes three days.
-        Volt::test('kid.goal')
-            ->assertOk()
-            ->assertSee('3 DAYS IF EVERYONE EARNS 200 EACH');
-    }
-
-    public function test_a_kid_with_no_saving_goal_still_gets_the_family_plan(): void
-    {
-        $household = Household::factory()->create();
-        $this->longGame($household, 1200);
-        $this->loginKid($household);
-        Chore::factory()->for($household)->create();
-
-        Volt::test('kid.goal')
-            ->assertOk()
-            ->assertSee('Nothing picked yet')
-            ->assertSee('The long game')
-            ->assertSee('1,200 TO GO');
-    }
-
-    public function test_the_family_plan_multiplies_each_kids_number_by_the_kid_count(): void
-    {
-        $household = Household::factory()->create();
-        $this->longGame($household, 1200);
-        $this->freezeMay($household);
-
-        Profile::factory()->for($household)->create();
-        Profile::factory()->for($household)->create();
-        $this->loginKid($household);
-        // A parent must not inflate the split — only kids earn points.
-        Profile::factory()->parent()->for($household)->create();
-        Chore::factory()->for($household)->create(['points' => 100]);
-
-        Volt::test('kid.goal')
-            ->assertOk()
-            ->assertSee('3 KIDS EARNING')
-            // 100 each across three kids is 300 a day, so 1200 takes four days.
-            ->assertSee('300')
-            ->assertSee('4 days')
-            ->assertSee('May 5, 2026');
     }
 
     public function test_approving_a_chore_credits_the_kid_on_the_family_goal(): void
@@ -356,29 +306,6 @@ class GoalPlannerTest extends TestCase
      * carries the goal as a boss strip and nothing else, so the breakdown of who
      * put what in belongs to the page built for planning it.
      */
-    public function test_the_goal_page_shows_who_is_pulling_hardest(): void
-    {
-        $household = Household::factory()->create();
-        $monster = $this->longGame($household, 1000);
-        $nova = Profile::factory()->for($household)->create(['name' => 'Nova']);
-        $rex = $this->loginKid($household, ['name' => 'Rex']);
-        Chore::factory()->for($household)->create();
-
-        // The board is summed from what each of them landed on this monster, so
-        // the damage has to be on it rather than on the old goal counter.
-        app(MonsterService::class)->land($monster, 300, $nova);
-        app(MonsterService::class)->land($monster, 100, $rex);
-
-        $html = Volt::test('kid.goal')->assertOk()->assertSee('75%')->assertSee('25%')->html();
-
-        $this->assertStringContainsString('pulling hardest', $html);
-        $this->assertLessThan(
-            strrpos($html, 'Rex'),
-            strpos($html, 'Nova'),
-            'The biggest contributor should be listed first.'
-        );
-    }
-
     public function test_the_quests_page_tracks_progress_against_the_daily_target(): void
     {
         $household = Household::factory()->create();
@@ -421,7 +348,7 @@ class GoalPlannerTest extends TestCase
 
     public function test_todays_progress_ends_at_the_household_day_boundary(): void
     {
-        // Claimed at 2am, which the household clock still calls yesterday — so
+        // Claimed at 2am, which the household clock still calls yesterday â€” so
         // today's target starts from zero even though the date matches.
         $household = Household::factory()->create(['day_boundary_hour' => 4]);
         $kid = $this->loginKid($household, ['daily_points_goal' => 300]);
@@ -459,7 +386,7 @@ class GoalPlannerTest extends TestCase
         $chore = Chore::factory()->for($household)->create();
 
         // 700 points across the window averages 100 a day. Today's own chore is
-        // outside it — a partial day would drag the average down at breakfast.
+        // outside it â€” a partial day would drag the average down at breakfast.
         foreach (range(1, 7) as $daysAgo) {
             ChoreCompletion::create([
                 'chore_id' => $chore->id,

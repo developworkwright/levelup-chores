@@ -17,6 +17,7 @@ use App\Models\MysteryHintPurchase;
 use App\Models\Profile;
 use App\Models\QuestSkip;
 use App\Models\StreakRepair;
+use App\Models\StreakRescue;
 use App\Notifications\ChoreClosingSoon;
 use App\Notifications\ParentApprovalNeeded;
 use Illuminate\Support\Arr;
@@ -1611,11 +1612,19 @@ class ChoreService
 
         $reached = null;
 
+        // The ladder is climbed on *earned* nights only. A sibling's rescue
+        // keeps the run standing — questApprovedOn() says so — but buying
+        // somebody a milestone is a different thing entirely, and the copy on
+        // the rescue button promises it doesn't happen. Repairs and days off
+        // are deliberately not subtracted here: those are bought by the kid
+        // whose run it is, out of their own tickets, and have always counted.
+        $ladder = $profile->streak - $this->rescuedNightsInRun($profile);
+
         // Walked day by day rather than over a fixed map, because the track
         // repeats and the milestone days are unbounded. The high-water mark is
         // still what gates a payout, so recomputing — or repairing — can never
         // double-credit one already banked.
-        for ($day = $paidThrough + 1; $day <= $profile->streak; $day++) {
+        for ($day = $paidThrough + 1; $day <= $ladder; $day++) {
             $bonusDollars = $this->streakBonusOn($day);
 
             if ($bonusDollars === null) {
@@ -1641,6 +1650,70 @@ class ChoreService
         }
 
         $profile->save();
+    }
+
+    /**
+     * How long the run was that ended on a given household day — the number
+     * that was true *then*, not now.
+     *
+     * `profiles.streak` is only ever the current figure, so anything narrating
+     * a past day has to ask for that day. Bounded like every other walk here.
+     */
+    public function runLengthOn(Profile $profile, Carbon $day): int
+    {
+        $cursor = $day->copy();
+        $run = 0;
+
+        while ($run < self::MAX_STREAK_DAYS && $this->questApprovedOn($profile, $cursor)) {
+            $run++;
+            $cursor = $cursor->copy()->subDay();
+        }
+
+        return $run;
+    }
+
+    /** Whether a sibling bought this night to keep the run alive. */
+    public function wasRescuedOn(Profile $profile, Carbon $date): bool
+    {
+        return StreakRescue::where('profile_id', $profile->id)
+            ->whereDate('rescued_date', $date)
+            ->exists();
+    }
+
+    /**
+     * Rescued nights inside the run currently standing.
+     *
+     * Subtracted from the milestone walk so a rescue keeps the run and not the
+     * ladder. Walks the same days `currentStreak()` does, for the same reason
+     * it recomputes rather than increments: a parent clearing a backlog can
+     * approve days in any order and every path has to land on one number.
+     *
+     * Public because it is the honest answer to "how far along the ladder am
+     * I really" — a run of six with two rescues in it is four nights' worth of
+     * progress, and anything showing a kid their position needs to be able to
+     * say so rather than implying they bought their way up it.
+     */
+    public function rescuedNightsInRun(Profile $profile): int
+    {
+        $cursor = HouseholdClock::for($profile->household)->today();
+
+        if (! $this->questApprovedOn($profile, $cursor)) {
+            $cursor = $cursor->copy()->subDay();
+        }
+
+        $rescued = 0;
+        $walked = 0;
+
+        while ($walked < self::MAX_STREAK_DAYS && $this->questApprovedOn($profile, $cursor)) {
+            if ($this->wasRescuedOn($profile, $cursor)) {
+                $rescued++;
+            }
+
+            $walked++;
+            $cursor = $cursor->copy()->subDay();
+        }
+
+        return $rescued;
     }
 
     /**
@@ -1672,7 +1745,15 @@ class ChoreService
      * streak — either it was approved, or the day was bought back with a
      * streak repair, which the walk-back treats identically.
      */
-    private function questApprovedOn(Profile $profile, Carbon $date): bool
+    /**
+     * Whether the quest for a given household day was signed off.
+     *
+     * Public for the Arena, which has to tell a run that is merely *young*
+     * from one that died at the last rollover — the difference between a kid
+     * on nothing and a kid who just lost nine nights, and the two must never
+     * read the same on a screen the whole house is looking at.
+     */
+    public function questApprovedOn(Profile $profile, Carbon $date): bool
     {
         $repaired = StreakRepair::where('profile_id', $profile->id)
             ->whereDate('repaired_date', $date)
@@ -1682,7 +1763,12 @@ class ChoreService
         // same question — does this day count without the quest being done —
         // and the two perks differ only in when they are bought: a restore
         // rescues yesterday, a day off is taken in advance.
-        if ($repaired || $this->questSkippedOn($profile, $date)) {
+        //
+        // A sibling's rescue joins them *for this question only*. It keeps the
+        // run alive, and it is excluded from the milestone ladder separately —
+        // see refreshStreak(). Answering "no" here instead would end the run,
+        // which is the one thing a rescue is bought to prevent.
+        if ($repaired || $this->wasRescuedOn($profile, $date) || $this->questSkippedOn($profile, $date)) {
             return true;
         }
 

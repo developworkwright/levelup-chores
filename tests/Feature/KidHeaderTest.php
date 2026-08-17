@@ -85,53 +85,78 @@ class KidHeaderTest extends TestCase
         $earn = $this->pills(Volt::test('kid.quests')->html());
 
         $this->assertStringContainsString('Bonus Wheel', $earn);
-        // Swaps and jobs share one page, and the pill names both so a kid can
-        // see where each of them lives.
-        $this->assertStringContainsString('Trades &amp; Jobs', $earn);
-        // Spend and Me pages belong to other worlds, so their pills stay folded
-        // away until that world is opened.
+        // Trades left Earn for House. It sat in Earn *and* Spend on the grounds
+        // that points flow both ways — true, and not why a kid opens it: they
+        // open it because it is about their siblings, which is what House is.
+        $this->assertStringNotContainsString('Trades &amp; Jobs', $earn);
+        // Other worlds' pages stay folded away until that world is opened.
         $this->assertStringNotContainsString('Loot Shop', $earn);
         $this->assertStringNotContainsString('Badges', $earn);
+
+        $house = $this->pills(Volt::test('kid.arena')->html());
+
+        $this->assertStringContainsString('Arena', $house);
+        // Swaps and jobs share one page, and the pill names both so a kid can
+        // see where each of them lives.
+        $this->assertStringContainsString('Trades &amp; Jobs', $house);
+        $this->assertStringNotContainsString('Bonus Wheel', $house);
 
         $me = $this->pills(Volt::test('kid.stats')->html());
 
         $this->assertStringContainsString('Goals', $me);
         $this->assertStringContainsString('Badges', $me);
         $this->assertStringNotContainsString('Bonus Wheel', $me);
+
+        // The rail opens a world's *first* page, and Me leads with Stats —
+        // "how am I doing" before "what am I saving for".
+        $this->assertLessThan(
+            strpos($me, 'Goals'),
+            strpos($me, 'Stats'),
+            'Stats should be the first pill in Me, and so the page the rail opens.',
+        );
     }
 
-    public function test_trades_stays_in_the_world_the_kid_came_in_through(): void
+    /**
+     * A session world only holds while it still contains the open page.
+     *
+     * No page belongs to two worlds any more — Trades was the only one that
+     * did, and it now lives in House alone. So the half of `$holdsPage` that
+     * still earns its keep is the *rejection*: a stale `kid_world` from
+     * wherever the kid was last must not stick to a page that world doesn't
+     * hold. That is what this pins, and it is why the check can't be dropped
+     * along with the dual-world page that first needed it.
+     */
+    public function test_a_stale_world_gives_way_to_the_pages_own(): void
     {
         $this->loginKid();
 
-        // Trades belongs to both Earn and Spend. Arriving from Spend has to
-        // leave the Spend pills up rather than snapping back to Earn.
-        $fromSpend = $this->pills(
+        $stale = $this->pills(
             $this->withSession(['kid_world' => 'spend'])->get(route('kid.trades'))->assertOk()->content()
         );
 
-        $this->assertStringContainsString('Loot Shop', $fromSpend);
-        $this->assertStringNotContainsString('Bonus Wheel', $fromSpend);
+        // Spend no longer holds Trades, so the rail falls back to House.
+        $this->assertStringContainsString('Arena', $stale);
+        $this->assertStringNotContainsString('Loot Shop', $stale);
 
-        $fromEarn = $this->pills(
-            $this->withSession(['kid_world' => 'earn'])->get(route('kid.trades'))->assertOk()->content()
+        $held = $this->pills(
+            $this->withSession(['kid_world' => 'house'])->get(route('kid.trades'))->assertOk()->content()
         );
 
-        $this->assertStringContainsString('Bonus Wheel', $fromEarn);
-        $this->assertStringNotContainsString('Loot Shop', $fromEarn);
+        $this->assertStringContainsString('Arena', $held);
+        $this->assertStringNotContainsString('Bonus Wheel', $held);
     }
 
     public function test_the_world_query_parameter_opens_that_world(): void
     {
         $this->loginKid();
 
-        // What the rail's own links carry: arriving at Trades through Spend has
-        // to open Spend even with nothing in the session yet.
+        // What the rail's own links carry: arriving at the Arena through House
+        // has to open House even with nothing in the session yet.
         $pills = $this->pills(
-            $this->get(route('kid.trades').'?world=spend')->assertOk()->content()
+            $this->get(route('kid.arena').'?world=house')->assertOk()->content()
         );
 
-        $this->assertStringContainsString('Bonus Shop', $pills);
+        $this->assertStringContainsString('Trades &amp; Jobs', $pills);
         $this->assertStringNotContainsString('Quests', $pills);
     }
 

@@ -17,6 +17,12 @@ class HouseholdFactory extends Factory
             'name' => fake()->lastName().' Household',
             'timezone' => 'America/Chicago',
             'day_boundary_hour' => 4,
+            // Stated rather than left to the column default: a default is
+            // applied by the database and never read back, so a factory-made
+            // household carries a null watch hour in memory until it is
+            // reloaded — which is exactly the state that used to crash the
+            // Arena. See HouseholdClock::eveningWatch().
+            'evening_watch_hour' => 19,
             'points_per_dollar' => 100,
             'require_quest_first' => true,
             'spin_enabled' => true,

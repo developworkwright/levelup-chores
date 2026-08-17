@@ -5,6 +5,7 @@
 
 @php
     $pages = [
+        'arena' => ['label' => 'Arena', 'glyph' => '⚔', 'route' => 'kid.arena'],
         'quests' => ['label' => 'Quests', 'glyph' => '⚑', 'route' => 'kid.quests'],
         'wheel' => ['label' => 'Bonus Wheel', 'glyph' => '◎', 'route' => 'kid.wheel'],
         'loot' => ['label' => 'Loot Shop', 'glyph' => '◈', 'route' => 'kid.loot'],
@@ -17,15 +18,26 @@
     ];
 
     /*
-     * Nine pages grouped into three ideas a kid already has words for. Trades
-     * sits in both Earn and Spend because points flow both ways. Each world's
-     * pill row is justified under its own rail button, so the pages stay
-     * visually attached to the world that opened them.
+     * Ten pages grouped into four ideas a kid already has words for. Each
+     * world's pill row is justified under its own rail button, so the pages
+     * stay visually attached to the world that opened them.
+     *
+     * House is the newest and the reason the other three moved. Trades used to
+     * sit in *both* Earn and Spend, on the grounds that points flow both ways —
+     * true, and not why a kid opens it. They open it because it is about their
+     * siblings, which is what House holds: the Arena and the trades. Goals went
+     * back to being personal, the family half of it having become the Arena's
+     * job.
      */
     $worlds = [
-        'earn' => ['label' => 'Earn', 'glyph' => '⚑', 'justify' => 'justify-start', 'pages' => ['quests', 'wheel', 'trades']],
-        'spend' => ['label' => 'Spend', 'glyph' => '◈', 'justify' => 'justify-center', 'pages' => ['loot', 'trades', 'bonus']],
-        'me' => ['label' => 'Me', 'glyph' => '★', 'justify' => 'justify-end', 'pages' => ['goal', 'badges', 'stats', 'journal']],
+        'earn' => ['label' => 'Earn', 'glyph' => '⚑', 'justify' => 'justify-start', 'pages' => ['quests', 'wheel']],
+        'spend' => ['label' => 'Spend', 'glyph' => '◈', 'justify' => 'justify-center', 'pages' => ['loot', 'bonus']],
+        'house' => ['label' => 'House', 'glyph' => '⚔', 'justify' => 'justify-center', 'pages' => ['arena', 'trades']],
+        // Stats first, and so the world lands there: a rail button opens its
+        // first page, and "Me" is a question about how you're doing rather
+        // than about what you're saving for. Goals is where you go once the
+        // numbers have given you a reason to.
+        'me' => ['label' => 'Me', 'glyph' => '★', 'justify' => 'justify-end', 'pages' => ['stats', 'goal', 'badges', 'journal']],
     ];
 
     $dollars = number_format($profile->points / $profile->household->points_per_dollar, 2);

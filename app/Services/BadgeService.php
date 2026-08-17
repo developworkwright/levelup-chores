@@ -262,7 +262,14 @@ class BadgeService
     private function evaluatePointBadges(Profile $profile): void
     {
         $this->maybeAward($profile, 'big_spender', function () use ($profile) {
-            $spent = (int) $profile->ledgerEntries()->where('kind', LedgerKind::Spend)->sum('amount');
+            // Refunds are summed alongside spends rather than ignored. They
+            // carry the positive half of a redemption that was turned down, so
+            // including them nets the pair back to zero — without it an
+            // accidental tap that a parent undid would still count toward
+            // having spent the money.
+            $spent = (int) $profile->ledgerEntries()
+                ->whereIn('kind', [LedgerKind::Spend, LedgerKind::Refund])
+                ->sum('amount');
 
             return abs($spent) >= self::BIG_SPENDER_THRESHOLD;
         });

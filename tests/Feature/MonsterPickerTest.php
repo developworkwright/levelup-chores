@@ -221,12 +221,12 @@ class MonsterPickerTest extends TestCase
             ->assertSee('2 MONSTERS UP');
     }
 
-    public function test_the_goal_page_draws_all_three_and_names_the_empty_ones(): void
+    public function test_the_arena_page_draws_all_three_and_names_the_empty_ones(): void
     {
         $this->spawn(MonsterTier::One, 'Ice cream');
         $this->spawn(MonsterTier::Three, 'Weekend away');
 
-        Volt::test('kid.goal')
+        Volt::test('kid.arena')
             ->assertOk()
             ->assertSee('Three monsters, three rewards')
             ->assertSee('Ice cream')
@@ -237,12 +237,15 @@ class MonsterPickerTest extends TestCase
             ->assertSee('Worth a few weeks.');
     }
 
-    public function test_the_goal_page_says_so_when_the_arena_is_empty(): void
+    public function test_the_arena_page_says_so_when_the_arena_is_empty(): void
     {
-        Volt::test('kid.goal')
+        // One empty state now, not two. The second line came from the Goals
+        // page's "long game" panel, which said the same thing a second time
+        // beside the arena row — both have moved, and only the arena's own
+        // wording survived the move.
+        Volt::test('kid.arena')
             ->assertOk()
-            ->assertSee('Nothing standing yet')
-            ->assertSee('No Level 3 monster standing');
+            ->assertSee('Nothing standing yet');
     }
 
     public function test_the_weak_chore_is_called_out_on_the_card(): void
@@ -253,7 +256,7 @@ class MonsterPickerTest extends TestCase
             $this->chore,
         );
 
-        Volt::test('kid.goal')
+        Volt::test('kid.arena')
             ->assertOk()
             ->assertSee('Flinches at')
             ->assertSee('Vacuum')

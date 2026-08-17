@@ -19,6 +19,9 @@ class Redemption extends Model
         'requested_at',
         'fulfilled_at',
         'fulfilled_by_profile_id',
+        'rejected_at',
+        'rejected_by_profile_id',
+        'reject_reason',
     ];
 
     protected function casts(): array
@@ -27,7 +30,13 @@ class Redemption extends Model
             'status' => RedemptionStatus::class,
             'requested_at' => 'datetime',
             'fulfilled_at' => 'datetime',
+            'rejected_at' => 'datetime',
         ];
+    }
+
+    public function rejectedBy(): BelongsTo
+    {
+        return $this->belongsTo(Profile::class, 'rejected_by_profile_id');
     }
 
     public function storeItem(): BelongsTo

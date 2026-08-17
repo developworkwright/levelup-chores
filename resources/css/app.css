@@ -674,3 +674,220 @@ body {
         opacity: 0;
     }
 }
+
+/*
+ * The Arena's candle, for a kid whose quest is still open past the household's
+ * evening watch hour.
+ *
+ * The flame's *size* is what carries the state — it is set inline from the
+ * risk ramp, shrinking and dimming as the evening goes on. This class only
+ * animates it, which is why reduced motion can drop the animation entirely and
+ * lose no information at all.
+ *
+ * --fq-flick-speed rides in from the same ramp: the flicker tightens from
+ * 1.5s to 0.9s as the run gets closer to the rollover.
+ */
+.fq-candle-flame {
+    border-radius: 50% 50% 50% 50% / 62% 62% 38% 38%;
+    transform-origin: 50% 100%;
+    animation: fq-flick-hard var(--fq-flick-speed, 1.5s) ease-in-out infinite;
+}
+
+@keyframes fq-flick-hard {
+    0%,
+    100% {
+        transform: scale(1, 1) skewX(0deg);
+        opacity: 0.9;
+    }
+    9% {
+        transform: scale(0.66, 1.2) skewX(-11deg);
+        opacity: 0.42;
+    }
+    18% {
+        transform: scale(1.05, 0.86) skewX(8deg);
+        opacity: 0.95;
+    }
+    27% {
+        transform: scale(0.5, 1.3) skewX(-14deg);
+        opacity: 0.28;
+    }
+    36% {
+        transform: scale(0.95, 0.9) skewX(6deg);
+        opacity: 0.85;
+    }
+    47% {
+        transform: scale(0.62, 1.22) skewX(-9deg);
+        opacity: 0.4;
+    }
+    58% {
+        transform: scale(1.08, 0.84) skewX(12deg);
+        opacity: 1;
+    }
+    69% {
+        transform: scale(0.55, 1.28) skewX(-12deg);
+        opacity: 0.32;
+    }
+    80% {
+        transform: scale(0.98, 0.92) skewX(4deg);
+        opacity: 0.8;
+    }
+    91% {
+        transform: scale(0.7, 1.16) skewX(-7deg);
+        opacity: 0.5;
+    }
+}
+
+/* The pulse behind a lane token, and the bob on an at-risk one. */
+.fq-lane-halo {
+    animation: fq-lane-pulse 2.6s ease-in-out infinite;
+}
+
+@keyframes fq-lane-pulse {
+    0%,
+    100% {
+        transform: scale(1);
+        opacity: 0.55;
+    }
+    50% {
+        transform: scale(1.22);
+        opacity: 1;
+    }
+}
+
+.fq-lane-bob {
+    animation: fq-lane-bob 1.6s ease-in-out infinite;
+}
+
+@keyframes fq-lane-bob {
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-5px);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    /*
+     * The flame holds at whatever size the ramp put it at. That size is the
+     * state, so stopping the movement costs the reader nothing.
+     */
+    .fq-candle-flame,
+    .fq-lane-halo,
+    .fq-lane-bob {
+        animation: none;
+    }
+}
+
+/*
+ * The quest hand: three fixed 2:3 cards in a centred row.
+ *
+ * Fixed rather than fluid on purpose. The previous layout was a 3-column grid
+ * spanning the full 1052px page, so each card was ~340px wide holding two
+ * short lines — and the gap between the name and the points was the card doing
+ * nothing, growing with the viewport. A card that is a card has a face.
+ *
+ * Every size on the card rides off the two custom properties below, so the
+ * phone step-down is one rule rather than a `sm:` on each of nine elements.
+ */
+.fq-hand {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    --fq-card-w: 184px;
+    --fq-card-ring: 84px;
+    --fq-card-glyph: 48px;
+}
+
+/*
+ * The tilt wrapper is the flex item, so the shrink has to live on it.
+ *
+ * `flex: 0 1 <w>` is the whole fix for the row running off the screen: three
+ * 184px cards and their gaps need ~584px, and a fixed width with a step-down
+ * at one breakpoint left every width in between overflowing — silently, since
+ * nothing here scrolls. Now the hand starts at its ideal size and gives ground
+ * as the space does. `min-width: 0` is required with it: without it a flex
+ * item refuses to shrink past its content's minimum, which is the fixed card.
+ */
+.fq-hand > * {
+    flex: 0 1 var(--fq-card-w);
+    min-width: 0;
+}
+
+/*
+ * Height is 1.5x the card's *ideal* width — the 2:3 the design asks for — as a
+ * floor rather than a fixed size. A strict `aspect-ratio` would hold the shape
+ * while the card shrank and quietly crop the face, name and points out through
+ * `overflow-hidden`; this keeps the proportion at full size and lets a
+ * squeezed card grow downward instead of losing its contents.
+ */
+.fq-quest-card {
+    width: 100%;
+    min-height: calc(var(--fq-card-w) * 1.5);
+}
+
+/*
+ * The ring caps at its ideal size but is allowed to follow the card down —
+ * a fixed 84px disc inside a card that has shrunk to 92px is the one piece
+ * that would burst back out of the row the shrink just fixed.
+ */
+.fq-card-ring {
+    width: min(var(--fq-card-ring), 62%);
+    height: min(var(--fq-card-ring), 62%);
+    aspect-ratio: 1;
+    flex: none;
+}
+
+.fq-card-glyph {
+    width: min(var(--fq-card-glyph), 58%);
+    height: auto;
+    aspect-ratio: 1;
+}
+
+.fq-card-name {
+    font-size: 13.5px;
+    line-height: 1.25;
+}
+
+.fq-card-points {
+    font-size: 22px;
+}
+
+/* The typographic face, for a chore with no icon: the points *are* the face. */
+.fq-card-facenum {
+    font-size: 40px;
+}
+
+/*
+ * Three 184px cards plus gaps do not fit a phone.
+ *
+ * Stepped at 640px rather than 420px, which was the width the *cards* stop
+ * fitting rather than the width the *row* does — three of them plus gaps need
+ * about 584px before the page and panel padding are counted, so a breakpoint
+ * at 420 left every width in between running off the screen.
+ *
+ * The hand scales; it never reflows into a column. The row **is** the choice —
+ * three cards side by side is the thing a kid is reading, and stacking them
+ * turns a hand into a list you scroll, which is a different decision.
+ */
+@media (max-width: 640px) {
+    .fq-hand {
+        gap: 8px;
+        --fq-card-w: 132px;
+        --fq-card-ring: 62px;
+        --fq-card-glyph: 34px;
+    }
+
+    .fq-card-name {
+        font-size: 11.5px;
+    }
+
+    .fq-card-points {
+        font-size: 18px;
+    }
+
+    .fq-card-facenum {
+        font-size: 30px;
+    }
+}

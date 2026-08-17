@@ -75,9 +75,31 @@
         </p>
     @endif
 
-    {{-- The perspective lives here rather than on the cards: a rotateY needs a
+    {{-- A hand, not a grid. The cards are a fixed 2:3 and the row is centred,
+         which is what stops the old layout's problem: three cards stretched
+         across 1052px held two short lines each and a growing column of dead
+         space between the name and the points. That space is a card *face*
+         now, which is what the deal, flip and burn were implying all along.
+
+         The perspective lives here rather than on the cards: a rotateY needs a
          parent with depth or it flattens into a horizontal squash. --}}
-    <div class="mt-4 grid grid-cols-3 gap-2 sm:gap-3" style="perspective: 900px">
+    <div class="fq-hand mt-4" style="perspective: 900px">
+        @php
+            // The suits carry the ladder the row is already sorted by, so the
+            // shape in the corner says "cheap / middling / bold" before a word
+            // is read. Two cards skip the middle rather than renumbering.
+            $suits = match ($cards->count()) {
+                1 => ['♦'],
+                2 => ['♦', '♠'],
+                default => ['♦', '♣', '♠'],
+            };
+            $tilts = match ($cards->count()) {
+                1 => [0],
+                2 => [-3, 3],
+                default => [-3, 0, 3],
+            };
+        @endphp
+
         @foreach ($cards as $i => $card)
             @php
                 $chore = $card['chore'];
@@ -90,61 +112,93 @@
                     $card['bold'] => 'var(--fq-gold)',
                     default => 'var(--fq-text)',
                 };
+                $suit = $suits[$i] ?? '♠';
             @endphp
 
-            <button
-                type="button"
-                wire:key="quest-card-{{ $chore->id }}"
-                @if (! $blocked) @click="choose({{ $chore->id }})" @endif
-                @disabled($blocked)
-                class="fq-quest-card relative flex min-h-[150px] flex-col items-center overflow-hidden rounded-[18px] border-2 p-[10px] text-center transition sm:min-h-[168px] sm:p-3 {{ $blocked ? 'cursor-default opacity-45' : 'cursor-pointer hover:brightness-110' }}"
-                style="
-                    --fq-card-index: {{ $i }};
-                    --fq-burn-tilt: {{ $i % 2 === 0 ? '-6deg' : '7deg' }};
-                    background: var(--fq-panel);
-                    border-color: {{ $blocked ? 'var(--fq-line)' : $accent }};
-                    {{ $card['bold'] && ! $blocked ? "box-shadow: var(--fq-shadow-glow-sm) {$accent}" : '' }}
-                "
-                x-bind:class="taken === null ? '' : (taken === {{ $chore->id }} ? 'fq-card-chosen' : 'fq-card-burn')"
-            >
-                @if ($card['bold'])
-                    @php
-                        // Read off the card rather than passed in: a charm can
-                        // double the rate, and a chip saying 50% over a card
-                        // paying 100% is the one thing worse than no chip.
-                        $bonusPercent = (int) round($card['bonus'] / max(1, $card['points']) * 100);
-                    @endphp
-                    <span
-                        class="mb-[6px] rounded-full px-[7px] py-[2px] font-mono-fq text-[8px] leading-none tracking-[0.16em] uppercase"
-                        style="background: {{ $accent }}; color: var(--fq-bg)"
-                    >Bold +{{ $bonusPercent }}%</span>
-                @else
-                    {{-- Holds the same vertical space, so the three names start
-                         on one line and the row reads as a set. --}}
-                    <span class="mb-[6px] h-[13px]"></span>
-                @endif
+            {{-- The tilt sits on a wrapper so it never fights the deal, chosen
+                 and burn keyframes, all three of which own `transform` on the
+                 card itself. --}}
+            <div wire:key="quest-card-{{ $chore->id }}" style="transform: rotate({{ $tilts[$i] ?? 0 }}deg)">
+                <button
+                    type="button"
+                    @if (! $blocked) @click="choose({{ $chore->id }})" @endif
+                    @disabled($blocked)
+                    class="fq-quest-card relative flex flex-col items-center justify-between overflow-hidden rounded-[18px] border-2 p-3 text-center transition {{ $blocked ? 'cursor-default opacity-45' : 'cursor-pointer hover:brightness-110' }}"
+                    style="
+                        --fq-card-index: {{ $i }};
+                        --fq-burn-tilt: {{ $i % 2 === 0 ? '-6deg' : '7deg' }};
+                        background: var(--fq-panel);
+                        border-color: {{ $blocked ? 'var(--fq-line)' : $accent }};
+                        {{ $card['bold'] && ! $blocked ? "box-shadow: var(--fq-shadow-glow-sm) {$accent}" : '' }}
+                    "
+                    x-bind:class="taken === null ? '' : (taken === {{ $chore->id }} ? 'fq-card-chosen' : 'fq-card-burn')"
+                >
+                    {{-- Corner marks, like a playing card. --}}
+                    <span class="flex w-full items-start justify-between font-baloo text-[15px] leading-none" style="color: {{ $blocked ? 'var(--fq-text-5)' : $accent }}">
+                        <span>{{ $suit }}</span>
+                        <span class="rotate-180">{{ $suit }}</span>
+                    </span>
 
-                <span class="line-clamp-3 text-[12.5px] leading-[1.25] font-semibold text-fq-text sm:text-[13.5px] {{ $card['takenBy'] ? 'line-through' : '' }}">
-                    {{ $chore->name }}
-                </span>
+                    {{-- The face. Icon if the chore has one, the points if it
+                         doesn't — no card is ever blank, because a blank face
+                         is unpickable to the kid this exists for. --}}
+                    <span class="flex flex-col items-center gap-[10px]">
+                        @if ($chore->icon)
+                            <span
+                                class="fq-card-ring grid place-items-center rounded-full border"
+                                style="border-color: var(--fq-line-4); background: var(--fq-panel-alt); color: {{ $blocked ? 'var(--fq-text-5)' : $accent }}"
+                            >
+                                <x-chore-icon :icon="$chore->icon" class="fq-card-glyph" />
+                            </span>
+                        @else
+                            <span class="fq-card-facenum font-baloo leading-none font-extrabold" style="color: {{ $pointsColor }}">
+                                {{ number_format($card['points'] + $card['bonus']) }}
+                            </span>
+                        @endif
 
-                <span class="mt-auto pt-2 font-baloo text-[19px] leading-none font-extrabold sm:text-[22px]" style="color: {{ $pointsColor }}">
-                    {{ number_format($card['points'] + $card['bonus']) }}
-                </span>
-                <span class="font-mono-fq text-[8.5px] tracking-[0.16em] text-fq-text-4 uppercase">
-                    @if ($card['bonus'])
-                        {{ number_format($card['points']) }} + {{ number_format($card['bonus']) }} pts
-                    @else
-                        pts
-                    @endif
-                </span>
+                        <span class="fq-card-name line-clamp-2 font-semibold text-fq-text {{ $card['takenBy'] ? 'line-through' : '' }}">
+                            {{ $chore->name }}
+                        </span>
 
-                @if ($card['takenBy'])
-                    <span class="mt-[6px] font-mono-fq text-[8.5px] leading-tight text-fq-text-4">Taken by {{ $card['takenBy']->name }}</span>
-                @elseif ($card['expired'])
-                    <span class="mt-[6px] font-mono-fq text-[8.5px] leading-tight" style="color: var(--fq-danger)">Time's up</span>
-                @endif
-            </button>
+                        @if ($card['bold'])
+                            @php
+                                // Read off the card rather than passed in: a
+                                // charm can double the rate, and a chip saying
+                                // 50% over a card paying 100% is the one thing
+                                // worse than no chip.
+                                $bonusPercent = (int) round($card['bonus'] / max(1, $card['points']) * 100);
+                            @endphp
+                            <span
+                                class="rounded-full px-[7px] py-[2px] font-mono-fq text-[8px] leading-none tracking-[0.16em] uppercase"
+                                style="background: {{ $accent }}; color: var(--fq-bg)"
+                            >Bold +{{ $bonusPercent }}%</span>
+                        @endif
+                    </span>
+
+                    <span class="flex w-full flex-col items-center">
+                        {{-- Not repeated when the face already *is* the number. --}}
+                        @if ($chore->icon)
+                            <span class="fq-card-points font-baloo leading-none font-extrabold" style="color: {{ $pointsColor }}">
+                                {{ number_format($card['points'] + $card['bonus']) }}
+                            </span>
+                        @endif
+
+                        <span class="font-mono-fq text-[8.5px] tracking-[0.16em] text-fq-text-4 uppercase">
+                            @if ($card['bonus'])
+                                {{ number_format($card['points']) }} + {{ number_format($card['bonus']) }} pts
+                            @else
+                                pts
+                            @endif
+                        </span>
+
+                        @if ($card['takenBy'])
+                            <span class="mt-[4px] font-mono-fq text-[8.5px] leading-tight text-fq-text-4">Taken by {{ $card['takenBy']->name }}</span>
+                        @elseif ($card['expired'])
+                            <span class="mt-[4px] font-mono-fq text-[8.5px] leading-tight" style="color: var(--fq-danger)">Time's up</span>
+                        @endif
+                    </span>
+                </button>
+            </div>
         @endforeach
     </div>
 

@@ -1,10 +1,7 @@
-<?php
+﻿<?php
 
-use App\Enums\ProfileRole;
 use App\Models\Chore;
 use App\Models\Profile;
-use App\Enums\MonsterTier;
-use App\Services\MonsterService;
 use App\Services\ChoreService;
 use App\Services\HouseholdClock;
 use Illuminate\Support\Carbon;
@@ -17,7 +14,7 @@ new class extends Component
     /**
      * The daily targets offered, as multiples of what a chore round here
      * typically pays. Multiples rather than fixed point values so the ladder
-     * fits a household of 10-point chores and one of 500-point chores alike —
+     * fits a household of 10-point chores and one of 500-point chores alike â€”
      * "one chore a day" has to mean the same thing in both.
      */
     private const LADDER = [1, 2, 3, 4, 5, 6];
@@ -33,13 +30,7 @@ new class extends Component
     /** Rungs to keep even once they've stopped changing the answer. */
     private const MIN_ROWS = 3;
 
-    /** Must match BOSS_STEP_MS in resources/js/app.js — the two queue together. */
-    private const REPLAY_STEP_MS = 1500;
-
     public Profile $profile;
-
-    /** @var ?array<int, array<string, mixed>> */
-    private ?array $arenaStates = null;
 
     public function mount(): void
     {
@@ -137,62 +128,6 @@ new class extends Component
             : $plans->take(max(self::MIN_ROWS, $stopAt + 1));
     }
 
-    /**
-     * The arena: the three monsters as the cards want them, keyed by tier, each
-     * carrying any stages of its fight this kid has not watched yet.
-     *
-     * The weekly weak-point draw is rolled here as well as on the board, so a
-     * kid who comes straight to this page sees the same three flinches as one
-     * who went to Quests first.
-     *
-     * Built in `with()` rather than `mount()`, which is the opposite of the rule
-     * the chest animations follow — and deliberately so. Those have to survive a
-     * refresh; this must not outlive one. A replay is defined as "damage dealt
-     * since this kid last looked", and `markSeen()` immediately afterwards is
-     * what makes looking count: the first render plays what was missed, and
-     * every render after it has nothing left to play.
-     *
-     * Marking has to come *after* every replay is built, or it would erase the
-     * very gap it exists to describe.
-     *
-     * The three do not play at once. Three monsters getting beaten up
-     * simultaneously is noise rather than a set piece, so each waits out the one
-     * before it — `startDelay` is that queue, worked out here because the server
-     * is the only place that knows how long the whole sequence runs.
-     *
-     * @return array<int, array<string, mixed>>
-     */
-    private function arena(\App\Models\Household $household): array
-    {
-        // Memoised for the life of the request, and it has to be: this both
-        // reads the marker and moves it, so a second render inside one request
-        // would find the gap it just closed and play nothing. Private, so
-        // Livewire doesn't carry it into the next round trip — a replay must not
-        // survive one.
-        if ($this->arenaStates !== null) {
-            return $this->arenaStates;
-        }
-
-        $arena = app(MonsterService::class);
-        $states = [];
-        $delay = 0;
-
-        foreach ($arena->rotateWeaknesses($household) as $tierValue => $monster) {
-            $steps = $arena->replayFor($monster, $this->profile);
-
-            $states[$tierValue] = [
-                ...$arena->stateFor($monster),
-                'steps' => $steps,
-                'startDelay' => $delay,
-            ];
-
-            $delay += (count($steps) - 1) * self::REPLAY_STEP_MS;
-        }
-
-        $arena->markSeen($household, $this->profile);
-
-        return $this->arenaStates = $states;
-    }
 
     public function with(): array
     {
@@ -216,20 +151,6 @@ new class extends Component
         // rather than left to be read off a row of the table below.
         $chosenPlan = $dailyGoal ? $this->forecast($remaining, $dailyGoal, $today, $step) : null;
 
-        $kidCount = max(1, (int) $household->profiles()->where('role', ProfileRole::Kid)->count());
-        $familyPace = $chores->householdDailyPace($household);
-
-        // The family plan is about the long game, so it reads off the Level 3
-        // monster rather than the sum of all three. Planning a date against
-        // three goals at once would be planning against a number nobody is
-        // actually working toward.
-        $arena = app(MonsterService::class);
-        $states = $this->arena($household);
-        $longGame = $states[MonsterTier::Three->value] ?? null;
-        $longGameMonster = $longGame['monster'] ?? null;
-
-        $familyRemaining = $longGame['health'] ?? 0;
-
         return [
             'saving' => $saving,
             'savingRemaining' => $remaining,
@@ -244,9 +165,9 @@ new class extends Component
             'chosenPlan' => $chosenPlan,
             /*
              * The whole page in one number. Only shown once all of its parts
-             * exist — something to save for, a daily target, and a date near
-             * enough to be worth naming — because a banner reading "— days
-             * until —" is worse than no banner at all.
+             * exist â€” something to save for, a daily target, and a date near
+             * enough to be worth naming â€” because a banner reading "â€” days
+             * until â€”" is worse than no banner at all.
              */
             'countdown' => $saving && $remaining > 0 && $chosenPlan && $chosenPlan['days'] !== null
                 ? $chosenPlan
@@ -261,38 +182,6 @@ new class extends Component
                 ? $this->informativeRows($plans)
                 : $plans,
             'household' => $household,
-            'kidCount' => $kidCount,
-            'familyRemaining' => $familyRemaining,
-            'familyPercent' => $longGame['damagePercent'] ?? 0,
-            'longGame' => $longGame,
-            // Same ladder, read as "if each of us did this much" — the number a
-            // kid can actually commit to is their own, not the family total.
-            'familyPlans' => $this->informativeRows(
-                $ladder->map(function (int $each) use ($familyRemaining, $today, $kidCount, $step) {
-                    $together = $each * $kidCount;
-
-                    return [
-                        'each' => $each,
-                        'together' => $together,
-                        ...$this->forecast($familyRemaining, $together, $today, $step),
-                    ];
-                })
-            ),
-            // The family goal read against the kid's own target: the one rung
-            // of the family ladder they've already committed to.
-            'familyDaysAtMyTarget' => $dailyGoal
-                ? $this->daysAt($familyRemaining, $dailyGoal * $kidCount)
-                : null,
-            'familyPace' => $familyPace,
-            'familyPacePlan' => $familyPace >= 1
-                ? $this->forecast($familyRemaining, (int) floor($familyPace), $today, $step)
-                : null,
-            // Per-monster now: who has put what into the long game specifically,
-            // rather than into the family's work in general.
-            'contributors' => $longGameMonster
-                ? $arena->contributionsFor($longGameMonster)
-                : collect(),
-            'monsterStates' => $states,
         ];
     }
 }; ?>
@@ -321,23 +210,19 @@ new class extends Component
                         {{ Str::plural('day', $countdown['days']) }} until {{ $saving->name }} is yours
                     </p>
                     <p class="mt-1 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-3 uppercase">
-                        If you earn {{ number_format($dailyGoal) }} points a day ·
+                        If you earn {{ number_format($dailyGoal) }} points a day Â·
                         {{ $countdown['date']->toFormattedDateString() }}
                     </p>
                 </div>
             </div>
         @endif
 
-        {{-- Full width and above the split: the monsters *are* the family goals,
-             and the two planning columns below are how you work out what it
-             takes to finish one off. --}}
-        <x-monster-arena :states="$monsterStates" />
-
-        {{-- My plan on the left, ours on the right: the two halves are read
-             against each other, and stacking them buried the family goal under
-             a table on anything but a phone. --}}
+        {{-- One column now. The monsters and the family plan that used to sit
+             beside this moved to the Arena, where the rest of what the house
+             shares already lives â€” this page is the kid's own goal and nothing
+             else. --}}
         <div class="flex flex-wrap items-start gap-[14px]">
-            <div class="flex min-w-0 flex-[1_1_420px] flex-col gap-[14px]">
+            <div class="flex min-w-0 flex-[1_1_100%] flex-col gap-[14px]">
             @if ($saving)
                 <div
                     class="overflow-hidden rounded-[24px] border border-fq-line-3 p-5"
@@ -431,25 +316,25 @@ new class extends Component
                     <p class="mt-2 font-mono-fq text-[11px] text-fq-text-4">
                         TODAY {{ number_format($earnedToday) }} / {{ number_format($dailyGoal) }} PTS
                         @if ($earnedToday >= $dailyGoal)
-                            · <span class="text-fq-lime">DONE FOR TODAY</span>
+                            Â· <span class="text-fq-lime">DONE FOR TODAY</span>
                         @endif
                     </p>
 
                     @if ($chosenPlan && $savingRemaining > 0)
                         <p class="mt-3 text-sm text-fq-text-2">
                             @if ($chosenPlan['days'] === null)
-                                That's a slow road — try a bigger daily number below and watch the date jump.
+                                That's a slow road â€” try a bigger daily number below and watch the date jump.
                             @else
                                 Keep that up and <span class="font-semibold text-fq-text">{{ $saving->name }}</span>
                                 is yours in
                                 <span class="font-baloo text-base font-extrabold text-fq-gold">{{ $chosenPlan['days'] }}</span>
-                                {{ Str::plural('day', $chosenPlan['days']) }} — by
+                                {{ Str::plural('day', $chosenPlan['days']) }} â€” by
                                 <span class="font-semibold text-fq-text">{{ $chosenPlan['date']->toFormattedDateString() }}</span>.
                             @endif
                         </p>
                     @elseif ($saving && $savingRemaining <= 0)
                         <p class="mt-3 text-sm font-semibold text-fq-lime">
-                            You've already got enough for {{ $saving->name }} — go cash it out!
+                            You've already got enough for {{ $saving->name }} â€” go cash it out!
                         </p>
                     @endif
 
@@ -464,7 +349,7 @@ new class extends Component
                     </p>
                 @else
                     <p class="mt-2 text-sm text-fq-text-2">
-                        You haven't set one yet. Pick a number below — you can change it any time.
+                        You haven't set one yet. Pick a number below â€” you can change it any time.
                     </p>
                 @endif
 
@@ -528,95 +413,6 @@ new class extends Component
                     </div>
                 </div>
             </div>
-            </div>
-
-            <div class="flex min-w-0 flex-[1_1_360px] flex-col gap-[14px]">
-                <div class="rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                        <h3 class="font-baloo text-xl font-bold">The long game</h3>
-                        <span class="font-mono-fq text-[10px] text-fq-lime">{{ $familyPercent }}%</span>
-                    </div>
-
-                    @if (! $longGame)
-                        <p class="mt-2 text-sm text-fq-text-2">
-                            No Level 3 monster standing. Ask a parent to line up the big one &mdash;
-                            that's the one worth planning around.
-                        </p>
-                    @else
-                        <p class="mt-1 text-sm text-fq-text-2">{{ $longGame['reward'] }}</p>
-
-                        {{-- No bar here: the arena above is the same number,
-                             drawn far better. Saying it twice on one page just
-                             invites the two to disagree. --}}
-                        <p class="mt-3 font-mono-fq text-[11px] text-fq-text-4">
-                            {{ number_format($longGame['damage']) }} / {{ number_format($longGame['maxHealth']) }} PTS ·
-                            {{ number_format($familyRemaining) }} TO GO ·
-                            {{ $kidCount }} {{ Str::plural('KID', $kidCount) }} EARNING
-                        </p>
-                    @endif
-
-                    {{-- The family goal answered with the kid's own number, so the two
-                         plans on this page are tied to the same commitment. --}}
-                    @if ($familyDaysAtMyTarget)
-                        <p class="mt-[6px] font-mono-fq text-[10px] tracking-[0.12em] text-fq-gold uppercase">{{ $familyDaysAtMyTarget }} {{ Str::plural('DAY', $familyDaysAtMyTarget) }} IF EVERYONE EARNS {{ number_format($dailyGoal) }} EACH</p>
-                    @endif
-
-                    @if ($familyRemaining <= 0)
-                        <p class="mt-3 text-sm font-semibold text-fq-lime">You all did it. Ask a parent what's next!</p>
-                    @else
-                        <p class="mt-3 text-sm text-fq-text-2">
-                            This one only moves when everybody chips in — here's what it takes if you
-                            all earn the same each day.
-                        </p>
-
-                        <div class="mt-3 flex flex-col gap-2">
-                            @foreach ($familyPlans as $plan)
-                                <div
-                                    wire:key="family-plan-{{ $plan['each'] }}"
-                                    class="flex flex-wrap items-center gap-4 rounded-[16px] border border-fq-line-2 bg-fq-sunk px-4 py-3"
-                                >
-                                    <div class="shrink-0">
-                                        <p class="font-baloo text-[19px] leading-none font-extrabold">{{ number_format($plan['each']) }}</p>
-                                        <p class="mt-[2px] font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4">EACH, PER DAY</p>
-                                    </div>
-
-                                    <div class="shrink-0">
-                                        <p class="font-baloo text-[19px] leading-none font-extrabold text-fq-cyan">
-                                            {{ number_format($plan['together']) }}
-                                        </p>
-                                        <p class="mt-[2px] font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4">TOGETHER</p>
-                                    </div>
-
-                                    <div class="min-w-[140px] flex-1">
-                                        @if ($plan['days'] === null)
-                                            <p class="text-[13px] text-fq-text-5">More than a year away.</p>
-                                        @else
-                                            <p class="text-sm font-semibold">
-                                                {{ $plan['days'] }} {{ Str::plural('day', $plan['days']) }}
-                                            </p>
-                                            <p class="font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4 uppercase">
-                                                BY {{ $plan['date']->toFormattedDateString() }}
-                                            </p>
-                                        @endif
-                                    </div>
-                                </div>
-                            @endforeach
-                        </div>
-
-                        <p class="mt-3 text-[13px] text-fq-text-5">
-                            Right now the family is averaging
-                            <span class="font-semibold text-fq-text-2">{{ number_format($familyPace, 0) }} pts</span> a day between you.
-                            @if ($familyPacePlan && $familyPacePlan['days'] !== null)
-                                That's {{ $familyPacePlan['days'] }} {{ Str::plural('day', $familyPacePlan['days']) }} to go —
-                                {{ $familyPacePlan['date']->toFormattedDateString() }}.
-                            @endif
-                        </p>
-                    @endif
-
-                    <div class="mt-4 border-t border-fq-divider pt-[14px]">
-                        <x-goal-mvp :contributors="$contributors" />
-                    </div>
-                </div>
             </div>
         </div>
     </div>

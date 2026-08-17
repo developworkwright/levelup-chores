@@ -38,7 +38,12 @@ Route::post('/logout', function () {
 })->middleware('auth:profile')->name('logout');
 
 Route::middleware(['auth:profile', 'role:kid', 'sync-streak'])->prefix('kid')->group(function () {
-    Route::redirect('/', '/kid/quests');
+    // The Arena, not Quests. It is the one kid page that is not about the kid
+    // looking at it, which is exactly why it is the one they should land on:
+    // whose run is on the line tonight is news, and their own board is one tap
+    // away from it.
+    Route::redirect('/', '/kid/arena');
+    Volt::route('/arena', 'kid.arena')->name('kid.arena');
     Volt::route('/quests', 'kid.quests')->name('kid.quests');
     Volt::route('/wheel', 'kid.wheel')->name('kid.wheel');
     Volt::route('/loot', 'kid.loot')->name('kid.loot');

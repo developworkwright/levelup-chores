@@ -64,6 +64,41 @@ new class extends Component
         }
     }
 
+    /**
+     * Why a redemption was turned down, keyed by redemption id. Optional —
+     * "you already have one" is worth saying, and a form that demands a reason
+     * before a parent can undo a misclick is not.
+     *
+     * @var array<int, string>
+     */
+    public array $rejectReasons = [];
+
+    /** What just happened to a redemption, so a card vanishing is explained. */
+    public ?string $redemptionMessage = null;
+
+    public function reject(int $redemptionId): void
+    {
+        $this->redemptionMessage = null;
+
+        $redemption = Redemption::whereHas('profile', fn ($q) => $q->where('household_id', $this->profile->household_id))
+            ->where('status', RedemptionStatus::Pending)
+            ->find($redemptionId);
+
+        if (! $redemption) {
+            return;
+        }
+
+        $name = $redemption->storeItem->name;
+        $kid = $redemption->profile->name;
+
+        if (app(StoreService::class)->reject($redemption, $this->profile, $this->rejectReasons[$redemptionId] ?? null)) {
+            unset($this->rejectReasons[$redemptionId]);
+            // Names the refund, because that is the part a parent is trusting
+            // happened — the card disappearing on its own says nothing.
+            $this->redemptionMessage = "{$name} turned down — {$redemption->cost_snapshot} points back to {$kid}.";
+        }
+    }
+
     public function subscribeToPush(string $endpoint, ?string $key, ?string $token): void
     {
         $this->profile->updatePushSubscription($endpoint, $key, $token);
@@ -395,9 +430,36 @@ new class extends Component
                         </div>
                         <span class="font-baloo text-lg font-extrabold text-fq-gold">-{{ $redemption->cost_snapshot }}</span>
                     </div>
-                    <button type="button" wire:click="fulfill({{ $redemption->id }})" class="w-full rounded-[13px] py-[11px] text-sm font-bold text-fq-bg" style="background:var(--fq-cyan)">Mark fulfilled</button>
+                    {{-- Optional, and above the buttons so it is obviously
+                         attached to the refusal rather than to the reward. --}}
+                    <input
+                        type="text"
+                        wire:model="rejectReasons.{{ $redemption->id }}"
+                        maxlength="160"
+                        placeholder="Why not? (optional)"
+                        class="w-full rounded-[12px] border border-dashed border-fq-line-2 bg-fq-sunk px-3 py-2 text-[13px] outline-none focus:border-fq-coral"
+                    >
+
+                    <div class="flex gap-2">
+                        <button type="button" wire:click="fulfill({{ $redemption->id }})" class="flex-1 rounded-[13px] py-[11px] text-sm font-bold text-fq-bg" style="background:var(--fq-cyan)">Mark fulfilled</button>
+
+                        {{-- Points leave a kid's balance the moment they ask,
+                             so a request nobody meant to grant has already
+                             been paid for. This is what hands it back. --}}
+                        <button
+                            type="button"
+                            wire:click="reject({{ $redemption->id }})"
+                            wire:confirm="Turn down '{{ $redemption->storeItem->name }}' and give {{ $redemption->profile->name }} their {{ $redemption->cost_snapshot }} points back?"
+                            class="rounded-[13px] border px-[14px] py-[11px] text-sm text-fq-danger"
+                            style="border-color: var(--fq-danger-border)"
+                        >Reject</button>
+                    </div>
                 </div>
             @endforeach
         </div>
+    @endif
+
+    @if ($redemptionMessage)
+        <p class="mt-3 text-sm text-fq-lime">{{ $redemptionMessage }}</p>
     @endif
 </x-parent.shell>

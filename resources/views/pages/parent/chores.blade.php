@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\ChoreCadence;
+use App\Enums\ChoreIcon;
 use App\Models\Chore;
 use App\Models\Profile;
 use App\Services\ChoreService;
@@ -170,6 +171,37 @@ new class extends Component
         $this->ownedChore($choreId)?->delete();
     }
 
+    /**
+     * Which chore's icon picker is open. One at a time — sixteen icons under
+     * every row at once is a wall, and this is a control most parents will
+     * touch once per chore and never again.
+     */
+    public ?int $pickingIconFor = null;
+
+    public function togglePicker(int $choreId): void
+    {
+        $this->pickingIconFor = $this->pickingIconFor === $choreId ? null : $choreId;
+    }
+
+    /** Sets a chore's face, or clears it when the same icon is tapped again. */
+    public function setIcon(int $choreId, string $icon): void
+    {
+        $chore = $this->ownedChore($choreId);
+        $case = ChoreIcon::tryFrom($icon);
+
+        if (! $chore || ! $case) {
+            return;
+        }
+
+        // Tapping the current one clears it, which is the only way back to the
+        // typographic face once a parent has chosen — and the guessed default
+        // means some chores start out with a face nobody picked.
+        $chore->icon = $chore->icon === $case ? null : $case;
+        $chore->save();
+
+        $this->pickingIconFor = null;
+    }
+
     public function addChore(): void
     {
         $name = trim($this->newChoreName);
@@ -183,6 +215,12 @@ new class extends Component
             'name' => $name,
             'points' => max(0, (int) preg_replace('/\D/', '', $this->newChorePoints) ?: 100),
             'cadence' => ChoreCadence::tryFrom($this->newChoreCadence) ?? ChoreCadence::Daily,
+            // Guessed from the name so a board arrives with faces on it
+            // without a parent picking sixteen times. Null when nothing fits,
+            // which the card reads as "use the typographic face" — a wrong
+            // picture is worse than none, because the kid this is for chooses
+            // by the picture and has nothing to check it against.
+            'icon' => ChoreIcon::forName($name),
         ]);
 
         $this->newChoreName = '';
@@ -326,6 +364,26 @@ new class extends Component
                     };
                 @endphp
                 <div wire:key="chore-{{ $chore->id }}" class="flex flex-wrap items-center gap-3 rounded-[18px] border border-fq-line bg-fq-panel p-[14px]">
+                    {{-- The face this chore wears on the kids' quest cards.
+                         Tapping it opens the picker; the swatch itself is the
+                         control, so the row doesn't grow a labelled button for
+                         something most parents set once. --}}
+                    <button
+                        type="button"
+                        wire:click="togglePicker({{ $chore->id }})"
+                        title="{{ $chore->icon ? 'Card face: '.$chore->icon->label() : 'No card face — pick one' }}"
+                        class="grid h-[46px] w-[46px] shrink-0 place-items-center rounded-[14px] border transition hover:border-fq-lime"
+                        style="border-color: {{ $chore->icon ? 'var(--fq-gold)' : 'var(--fq-line-3)' }};
+                               background: var(--fq-sunk);
+                               color: {{ $chore->icon ? 'var(--fq-gold)' : 'var(--fq-text-5)' }}"
+                    >
+                        @if ($chore->icon)
+                            <x-chore-icon :icon="$chore->icon" class="h-[26px] w-[26px]" />
+                        @else
+                            <span class="font-mono-fq text-[15px] leading-none">+</span>
+                        @endif
+                    </button>
+
                     <div class="min-w-[140px] flex-1">
                         <p class="text-[15px] font-semibold {{ $chore->isUsedUp() ? 'text-fq-text-4 line-through decoration-2' : '' }}">{{ $chore->name }}</p>
                         <p class="font-mono-fq text-[10px] text-fq-text-4 uppercase">
@@ -463,6 +521,34 @@ new class extends Component
                             style="border-color: {{ $chore->hint ? 'color-mix(in srgb, var(--fq-magenta) 50%, transparent)' : 'var(--fq-line-2)' }}; background: var(--fq-sunk)"
                         >
                     </div>
+
+                    @if ($pickingIconFor === $chore->id)
+                        <div class="w-full rounded-[14px] border border-fq-line-2 bg-fq-sunk p-3">
+                            <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                                Card face &middot; what the kids pick from
+                            </p>
+
+                            <div class="mt-2 grid grid-cols-8 gap-2">
+                                @foreach (ChoreIcon::cases() as $option)
+                                    <button
+                                        type="button"
+                                        wire:click="setIcon({{ $chore->id }}, '{{ $option->value }}')"
+                                        title="{{ $option->label() }}"
+                                        class="grid aspect-square place-items-center rounded-[12px] border transition hover:border-fq-lime"
+                                        style="border-color: {{ $chore->icon === $option ? 'var(--fq-gold)' : 'var(--fq-line-3)' }};
+                                               background: var(--fq-panel);
+                                               color: {{ $chore->icon === $option ? 'var(--fq-gold)' : 'var(--fq-text-3)' }}"
+                                    >
+                                        <x-chore-icon :icon="$option" class="h-[22px] w-[22px]" />
+                                    </button>
+                                @endforeach
+                            </div>
+
+                            <p class="mt-2 font-mono-fq text-[10px] text-fq-text-5">
+                                Tap the gold one again to clear it &mdash; the card falls back to showing its points.
+                            </p>
+                        </div>
+                    @endif
                 </div>
             @endforeach
         </div>

@@ -173,21 +173,21 @@ class MonsterReplayTest extends TestCase
         $this->assertSame([(string) $three->id => 250], $this->kid->fresh()->monsters_seen);
     }
 
-    public function test_the_goal_page_plays_the_catch_up_once_and_only_once(): void
+    public function test_the_arena_page_plays_the_catch_up_once_and_only_once(): void
     {
         $monster = $this->spawn(MonsterTier::One, 1000);
         $this->arena()->land($monster, 100, $this->kid);
         $this->caughtUpTo($monster, 100);
         $this->arena()->land($monster->fresh(), 800, $this->kid);
 
-        Volt::test('kid.goal')
+        Volt::test('kid.arena')
             ->assertOk()
             ->assertSee('Catching you up');
 
         // Marked on the way past, so the second visit has nothing left to play.
         Auth::guard('profile')->login($this->kid->fresh());
 
-        Volt::test('kid.goal')
+        Volt::test('kid.arena')
             ->assertOk()
             ->assertDontSee('Catching you up');
     }
@@ -205,7 +205,7 @@ class MonsterReplayTest extends TestCase
         $this->arena()->land($one->fresh(), 800, $this->kid);
         $this->arena()->land($three->fresh(), 800, $this->kid);
 
-        $states = Volt::test('kid.goal')->assertOk()->viewData('monsterStates');
+        $states = Volt::test('kid.arena')->assertOk()->viewData('monsterStates');
 
         $this->assertSame(0, $states[1]['startDelay'], 'The first one goes straight away.');
         $this->assertGreaterThan(0, $states[3]['startDelay'], 'The next waits its turn.');

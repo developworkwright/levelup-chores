@@ -37,6 +37,11 @@
     'prizeProperty' => null,
     'celebrateMessage' => null,
     'actionLabel' => null,
+    'confirm' => false,
+    'confirmEvent' => 'slot-confirm',
+    'openEvent' => null,
+    'flag' => null,
+    'flagColor' => 'var(--fq-lime)',
 ])
 
 <div
@@ -48,7 +53,21 @@
             justOpened: false,
             {{-- 100ms past the 2.5s .fq-chest-opening jiggle in app.css — see
                  <x-chest>, which keeps the same pair in step. --}}
+            {{-- A slot that has something to ask first raises it and stops.
+                 The tile is far too small to hold a two-button question, so
+                 the panel that answers it lives outside the tray and calls
+                 begin() back through `openEvent` — which keeps the whole
+                 thing one tap, with the rattle intact. --}}
             async open() {
+                if (this.phase !== 'closed') return;
+                @if ($confirm)
+                    window.dispatchEvent(new CustomEvent(@js($confirmEvent)));
+
+                    return;
+                @endif
+                await this.begin();
+            },
+            async begin() {
                 if (this.phase !== 'closed') return;
                 this.phase = 'opening';
                 await new Promise(resolve => setTimeout(resolve, 2600));
@@ -59,6 +78,7 @@
                 window.dispatchEvent(new CustomEvent('celebrate', { detail: { message: @js($celebrateMessage) ?? this.label, style: 'confetti', motion: 'burst', origin: 'tap', hold: 2600 } }));
             },
         }"
+        @if ($openEvent) x-on:{{ $openEvent }}.window="begin()" @endif
     @endif
     {{-- overflow-hidden for the same reason as <x-chest>: the opening halo is
          wider than the slot and must stay inside its border. --}}
@@ -130,6 +150,15 @@
         </div>
     @else
         <x-chest-block :fill="$chestFill" class="h-[34px] w-[44px] sm:h-[42px] sm:w-[54px]" />
+    @endif
+
+    {{-- The flag is the whole reason a kid would wait: it has to be visible on
+         the shut chest, not discovered after they open it. --}}
+    @if ($flag)
+        <span
+            class="absolute top-[6px] right-[6px] z-20 rounded-full px-[6px] py-[2px] font-mono-fq text-[8px] leading-none font-semibold tracking-[0.14em] uppercase"
+            style="background: {{ $flagColor }}; color: var(--fq-bg)"
+        >{{ $flag }}</span>
     @endif
 
     <p class="font-baloo text-[13px] font-bold sm:text-[15px]">{{ $name }}</p>

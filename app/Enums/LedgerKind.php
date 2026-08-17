@@ -16,4 +16,15 @@ enum LedgerKind: string
      * and paying your brother is not shopping.
      */
     case Transfer = 'transfer';
+
+    /**
+     * Points handed back for a redemption a parent turned down.
+     *
+     * Deliberately its own kind rather than an `Adjustment`. An adjustment is
+     * a grown-up deciding to move a number; this is the app undoing something
+     * it charged for, and a parent scanning the ledger needs to be able to
+     * tell those apart. It also has to *net out* of the amount spent — see
+     * BadgeService's big_spender — which an adjustment would not.
+     */
+    case Refund = 'refund';
 }

@@ -1021,14 +1021,23 @@ new class extends Component
                     :border="$dailyChestAvailable ? 'var(--fq-chest-blue-line)' : 'var(--fq-line)'"
                     :background="$dailyChestAvailable ? 'var(--fq-chest-blue-bg)' : 'var(--fq-panel)'"
                     :dim="! $dailyChestAvailable"
-                    :status="$dailyChestAvailable ? 'Ready to open' : 'Back tomorrow'"
-                    :status-color="$dailyChestAvailable ? 'var(--fq-chest-blue)' : 'var(--fq-text-4)'"
+                    :status="$dailyChestAvailable ? ($questDone ? 'OP loot ready' : 'Ready to open') : 'Back tomorrow'"
+                    :status-color="$dailyChestAvailable ? ($questDone ? 'var(--fq-lime)' : 'var(--fq-chest-blue)') : 'var(--fq-text-4)'"
                     :open-action="$dailyChestAvailable ? 'openDailyChest' : null"
                     opened-status="Banked"
-                    prize-sub="Bonus Chest"
+                    :prize-sub="$questDone ? 'Bonus Chest · OP' : 'Bonus Chest'"
                     :prize-label="$dailyChestPrize ?? 'A prize!'"
                     prize-property="dailyChestPrize"
                     action-label="Open today's bonus chest"
+                    {{-- The chest rolls on a better table once the quest is
+                         cleared, and the kids were opening it first thing every
+                         morning and never finding out. So: say so on the shut
+                         chest, and stop once to ask before they spend the good
+                         version on the plain table. --}}
+                    :flag="$dailyChestAvailable && $questDone ? 'OP' : null"
+                    :confirm="$dailyChestAvailable && ! $questDone"
+                    confirm-event="bonus-chest-confirm"
+                    open-event="bonus-chest-open"
                 />
 
                 @php
@@ -1096,6 +1105,44 @@ new class extends Component
                     action-label="Go and spin the bonus wheel"
                 />
             </div>
+
+            {{-- Raised by the bonus chest when it is tapped before the quest is
+                 in. It lives here rather than inside the slot because a tray
+                 tile cannot hold a two-button question, and it hands control
+                 straight back to the slot so the chest still rattles. --}}
+            @if ($dailyChestAvailable && ! $questDone)
+            <div
+                x-data="{ asking: false }"
+                x-on:bonus-chest-confirm.window="asking = true"
+                x-show="asking"
+                x-cloak
+                x-transition
+                class="mt-3 rounded-[18px] border p-4"
+                style="border-color: var(--fq-chest-blue-line); background: var(--fq-chest-blue-bg)"
+            >
+                <p class="font-mono-fq text-[10px] tracking-[0.2em] uppercase" style="color: var(--fq-lime)">Hold on &mdash; OP loot</p>
+                <p class="mt-2 text-[13.5px] leading-snug text-fq-text-2">
+                    Clear today's main quest first and this chest rolls on the good table:
+                    more tickets, and a perk far more often. Right now it rolls on the plain one.
+                </p>
+
+                <div class="mt-3 flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        @click="asking = false; document.getElementById('quest-hero')?.scrollIntoView({ behavior: 'smooth', block: 'center' })"
+                        class="rounded-[13px] px-[18px] py-[11px] font-baloo text-[15px] font-extrabold transition hover:brightness-110"
+                        style="background: var(--fq-lime); color: var(--fq-ink)"
+                    >Do my quest first</button>
+
+                    <button
+                        type="button"
+                        @click="asking = false; $dispatch('bonus-chest-open')"
+                        class="rounded-[13px] border px-[16px] py-[11px] font-mono-fq text-[11px] tracking-[0.1em] uppercase transition hover:brightness-125"
+                        style="border-color: var(--fq-line-3); color: var(--fq-text-3)"
+                    >Open now anyway</button>
+                </div>
+            </div>
+            @endif
         </div>
 
         {{-- 3. Main quest chest. Deliberately not duplicated in the tray:
@@ -1206,7 +1253,12 @@ new class extends Component
             {{-- The chest deals rather than reveals: it bursts open onto three
                  cards and the kid takes one. Its own celebration is off,
                  because "here are some cards" is not news — the pick is, and
-                 chooseQuest() fires that once it knows the pick landed. --}}
+                 chooseQuest() fires that once it knows the pick landed.
+
+                 The id is a scroll target: the bonus chest's "do my quest
+                 first" button sends them here, and it has to land on something
+                 that exists whether the chest is shut, dealt or picked. --}}
+            <div id="quest-hero">
             <x-chest
                 wire-key="quest-chest"
                 :revealed="$handDealt"
@@ -1349,6 +1401,7 @@ new class extends Component
                 </div>
             @endif
             </x-chest>
+            </div>
         @endif
 
         @if ($perkMessage)

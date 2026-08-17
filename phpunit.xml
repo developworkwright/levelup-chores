@@ -18,6 +18,19 @@
         </include>
     </source>
     <php>
+        <!--
+            The whole suite runs in one PHP process and PHPUnit holds every
+            test object for the duration, so peak memory tracks the suite's
+            size rather than any one test. It crossed PHP's 128M CLI default
+            at around a thousand tests, and the failure it gives is a bare
+            "Premature end of PHP process" landing on whichever test happened
+            to be running — which reads as a flake rather than a ceiling.
+
+            Raise this rather than chasing it if it ever returns. A single
+            test that needs hundreds of megabytes is a bug worth finding; the
+            sum of a thousand of them is just arithmetic.
+        -->
+        <ini name="memory_limit" value="512M"/>
         <env name="APP_ENV" value="testing"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>

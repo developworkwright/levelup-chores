@@ -73,6 +73,31 @@ class HouseholdClock
      * Returns null for anything that isn't an H:i time, so a hand-typed or
      * cleared field falls through to the caller rather than becoming midnight.
      */
+    /**
+     * The instant tonight's evening watch begins, in UTC, or null when the
+     * household hasn't got a usable one.
+     *
+     * Not a deadline — nothing expires here. It is the hour past which the
+     * Arena starts drawing an open quest as at risk. Resolved through
+     * atTime(), so a watch hour set earlier than the day boundary lands in the
+     * small hours at the *end* of the day, like every other wall-clock time.
+     *
+     * **Nullable, and it has to be.** atTime() returns null for anything that
+     * isn't an H:i time, and `evening_watch_hour` reaches it as one: a model
+     * built in memory has no value for it at all (the column's default is
+     * applied by the database, not read back), and the column is an
+     * unsignedTinyInteger, so a hand-edited 200 is a legal row and an illegal
+     * hour. Declaring this non-nullable turned both of those into a TypeError
+     * on every kid page load instead of a household that simply never shows
+     * anyone as at risk.
+     */
+    public function eveningWatch(): ?Carbon
+    {
+        $hour = $this->household->evening_watch_hour;
+
+        return $hour === null ? null : $this->atTime($hour.':00');
+    }
+
     public function atTime(string $time): ?Carbon
     {
         if (! preg_match('/^(\d{1,2}):(\d{2})$/', trim($time), $parts)) {

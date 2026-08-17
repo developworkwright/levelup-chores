@@ -6,6 +6,7 @@ use App\Models\LedgerEntry;
 use App\Models\Profile;
 use App\Services\GratitudeService;
 use App\Services\HouseholdClock;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 use Livewire\WithPagination;
@@ -31,6 +32,32 @@ new class extends Component
         abort_unless($this->profile->isParent(), 403);
     }
 
+    /**
+     * When something happened, in the household's own clock.
+     *
+     * Absolute, not "3 days ago". This log is read to answer "when exactly did
+     * that go out?", and a relative stamp is precisely the thing that can't
+     * answer it — the ledger feed carried no time at all and the ticket feed
+     * carried only a relative one.
+     *
+     * Today and yesterday are named rather than dated, because on those two
+     * days the date is the part a reader has to translate and the time is the
+     * part they want. Anything older is dated outright, with the year added
+     * once it stops being this one.
+     */
+    private function stamp(Carbon $at): string
+    {
+        $local = $at->timezone($this->profile->household->timezone);
+        $today = Carbon::now($this->profile->household->timezone)->startOfDay();
+
+        return match (true) {
+            $local->greaterThanOrEqualTo($today) => 'Today '.$local->format('g:ia'),
+            $local->greaterThanOrEqualTo($today->copy()->subDay()) => 'Yesterday '.$local->format('g:ia'),
+            $local->year === $today->year => $local->format('j M, g:ia'),
+            default => $local->format('j M Y, g:ia'),
+        };
+    }
+
     private function dotColor(LedgerKind $kind): string
     {
         return match ($kind) {
@@ -39,6 +66,7 @@ new class extends Component
             LedgerKind::CashIn, LedgerKind::CashOut => 'var(--fq-cyan)',
             LedgerKind::Adjustment => 'var(--fq-violet)',
             LedgerKind::Transfer => 'var(--fq-magenta)',
+            LedgerKind::Refund => 'var(--fq-gold)',
         };
     }
 
@@ -80,7 +108,13 @@ new class extends Component
             @forelse ($entries as $entry)
                 <div wire:key="entry-{{ $entry->id }}" class="flex items-center gap-3 border-b border-fq-divider py-[12px_2px]">
                     <span class="h-2 w-2 shrink-0 rounded-full" style="background:{{ $this->dotColor($entry->kind) }}"></span>
-                    <span class="flex-1 text-sm">{{ $entry->description }}</span>
+                    <div class="min-w-0 flex-1">
+                        <p class="text-sm">{{ $entry->description }}</p>
+                        <p
+                            class="font-mono-fq text-[10px] text-fq-text-5"
+                            title="{{ $entry->created_at->timezone($profile->household->timezone)->toDayDateTimeString() }}"
+                        >{{ $this->stamp($entry->created_at) }}</p>
+                    </div>
                     @if ($entry->amount !== 0)
                         <span
                             class="font-mono-fq text-[11px] whitespace-nowrap"
@@ -109,7 +143,8 @@ new class extends Component
                     <div class="min-w-0 flex-1">
                         <p class="truncate text-sm">{{ $entry->description }}</p>
                         <p class="font-mono-fq text-[10px] text-fq-text-5">
-                            {{ $entry->profile->name }} · {{ $entry->kind->label() }} · {{ $entry->created_at->diffForHumans() }}
+                            {{ $entry->profile->name }} · {{ $entry->kind->label() }} ·
+                            <span title="{{ $entry->created_at->timezone($profile->household->timezone)->toDayDateTimeString() }}">{{ $this->stamp($entry->created_at) }}</span>
                         </p>
                     </div>
                     <span

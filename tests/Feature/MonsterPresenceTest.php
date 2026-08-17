@@ -67,7 +67,7 @@ class MonsterPresenceTest extends TestCase
     {
         $this->spawnAll();
 
-        $html = Volt::test('kid.goal')->assertOk()->html();
+        $html = Volt::test('kid.arena')->assertOk()->html();
 
         foreach (MonsterTier::cases() as $tier) {
             $this->assertStringContainsString((string) $tier->dread(), $html);
@@ -79,7 +79,7 @@ class MonsterPresenceTest extends TestCase
     {
         $this->spawnAll();
 
-        $html = Volt::test('kid.goal')->assertOk()->html();
+        $html = Volt::test('kid.arena')->assertOk()->html();
 
         $this->assertStringContainsString('fq-frame-ornate', $html);
         $this->assertStringContainsString(MonsterTier::Three->cardBasis(), $html);
@@ -90,7 +90,7 @@ class MonsterPresenceTest extends TestCase
     {
         app(MonsterService::class)->spawn($this->household, MonsterTier::One, 'Ice cream', 500);
 
-        $html = Volt::test('kid.goal')->assertOk()->html();
+        $html = Volt::test('kid.arena')->assertOk()->html();
 
         $this->assertStringNotContainsString('fq-frame-ornate', $html);
         $this->assertNull(MonsterTier::One->epithet());

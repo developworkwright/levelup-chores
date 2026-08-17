@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ChoreCadence;
+use App\Enums\ChoreIcon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -18,6 +19,7 @@ class Chore extends Model
         'household_id',
         'name',
         'hint',
+        'icon',
         'points',
         'cadence',
         'min_age',
@@ -32,6 +34,7 @@ class Chore extends Model
     {
         return [
             'cadence' => ChoreCadence::class,
+            'icon' => ChoreIcon::class,
             'quest_eligible' => 'boolean',
             'wheel_eligible' => 'boolean',
             'used_at' => 'datetime',

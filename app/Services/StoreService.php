@@ -81,4 +81,63 @@ class StoreService
         $redemption->fulfilled_by_profile_id = $approver->id;
         $redemption->save();
     }
+
+    /**
+     * Turns a redemption down and puts the points back.
+     *
+     * The refund is the whole point. Points leave a balance the instant a kid
+     * asks — that is what stops them redeeming past what they have — so a
+     * request nobody intended to grant has already been paid for, and an
+     * accidental tap costs real money until somebody notices.
+     *
+     * Recorded as {@see LedgerKind::Refund} rather than an adjustment, so it
+     * reads as the app giving back what it took rather than a parent handing
+     * points over, and so it nets out of the amount spent.
+     *
+     * Refuses anything that isn't still pending: a fulfilled reward has been
+     * handed over, and refunding it would pay the kid for keeping it. Returns
+     * false so the caller can say so.
+     */
+    public function reject(Redemption $redemption, Profile $decider, ?string $reason = null): bool
+    {
+        if ($redemption->status !== RedemptionStatus::Pending) {
+            return false;
+        }
+
+        $reason = $reason === null ? null : (trim($reason) ?: null);
+
+        DB::transaction(function () use ($redemption, $decider, $reason) {
+            $redemption->status = RedemptionStatus::Rejected;
+            $redemption->rejected_at = now();
+            $redemption->rejected_by_profile_id = $decider->id;
+            $redemption->reject_reason = $reason;
+            $redemption->save();
+
+            // The reason rides in the description because that is the only
+            // place it reaches the kid: nothing on their side lists their own
+            // requests, so the refund line in their stats is where they find
+            // out this didn't happen and why.
+            $description = "{$redemption->profile->name} — {$redemption->storeItem->name} refunded"
+                .($reason === null ? '' : " ({$reason})");
+
+            // The snapshot, not the item's price today — a parent editing the
+            // cost between the request and the rejection must not change what
+            // the kid gets back.
+            $this->ledger->record(
+                $redemption->profile->household,
+                $redemption->profile,
+                LedgerKind::Refund,
+                $redemption->cost_snapshot,
+                $description,
+                $redemption->storeItem,
+            );
+        });
+
+        // The refund can drop a kid back under a spending threshold, so the
+        // badges have to be looked at again rather than left where the
+        // redemption put them.
+        $this->badges->evaluate($redemption->profile->refresh());
+
+        return true;
+    }
 }
