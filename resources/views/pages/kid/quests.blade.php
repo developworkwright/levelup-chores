@@ -1122,8 +1122,8 @@ new class extends Component
             >
                 <p class="font-mono-fq text-[10px] tracking-[0.2em] uppercase" style="color: var(--fq-lime)">Hold on &mdash; OP loot</p>
                 <p class="mt-2 text-[13.5px] leading-snug text-fq-text-2">
-                    Clear today's main quest first and this chest rolls on the good table:
-                    more tickets, and a perk far more often. Right now it rolls on the plain one.
+                    Do your main quest first and this chest turns OP &mdash; way more tickets,
+                    and way more perks. Right now it's just a normal chest.
                 </p>
 
                 <div class="mt-3 flex flex-wrap gap-2">
