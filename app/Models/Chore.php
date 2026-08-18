@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Enums\ChoreCadence;
-use App\Enums\ChoreIcon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -34,7 +33,9 @@ class Chore extends Model
     {
         return [
             'cadence' => ChoreCadence::class,
-            'icon' => ChoreIcon::class,
+            // `icon` is deliberately uncast. It holds a Font Awesome class,
+            // and a parent can type any of them — ChoreIcon lists the presets
+            // the picker offers, not the set of legal values. See ChoreIcon.
             'quest_eligible' => 'boolean',
             'wheel_eligible' => 'boolean',
             'used_at' => 'datetime',

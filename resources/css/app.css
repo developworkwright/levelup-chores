@@ -1,6 +1,20 @@
 @import 'tailwindcss';
 @import './tokens.css';
 
+/*
+ * Font Awesome, self-hosted through Vite rather than a CDN link.
+ *
+ * The whole free set is pulled in deliberately: a parent can type any Font
+ * Awesome class into the picker, so the icon a chore ends up wearing is not
+ * knowable at build time and nothing here could be tree-shaken against it.
+ * Bundled rather than linked because this installs as a standalone app — a
+ * CDN would make every chore card blank on a bad connection.
+ */
+@import '@fortawesome/fontawesome-free/css/fontawesome.css';
+@import '@fortawesome/fontawesome-free/css/solid.css';
+@import '@fortawesome/fontawesome-free/css/regular.css';
+@import '@fortawesome/fontawesome-free/css/brands.css';
+
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
 @source '../views/livewire/**/*.blade.php';
@@ -853,10 +867,14 @@ body {
     flex: none;
 }
 
+/*
+ * Font size, not a box. Font Awesome draws its glyph at the element's
+ * font-size and ignores width/height entirely, so the h-/w- utilities this
+ * used to carry sized a container around an icon that stayed 16px.
+ */
 .fq-card-glyph {
-    width: min(var(--fq-card-glyph), 58%);
-    height: auto;
-    aspect-ratio: 1;
+    font-size: var(--fq-card-glyph);
+    line-height: 1;
 }
 
 .fq-card-name {
@@ -893,8 +911,38 @@ body {
         --fq-card-glyph: 34px;
     }
 
+    /*
+     * The face comes off on a phone. A 62px ring inside a card the width of a
+     * thumb leaves the name about two words of room, so the titles were
+     * running past the edge of the card and off the row — and the picture is
+     * the part of the card that can go, because the name and the points can't.
+     *
+     * The card is not blank without it: what's left is the suit corner, a name
+     * with the room to be read, and the points. A chore with no icon is
+     * already exactly this card with its points as the face.
+     */
+    .fq-card-ring {
+        display: none;
+    }
+
+    /*
+     * Which is the room the ring gave back. Cards keep the 2:3 shape on a
+     * desktop; on a phone they stop being tall boxes with a picture in and
+     * become the three names being chosen between.
+     *
+     * The padding comes down with it. A card is 95px wide on a 375px phone, so
+     * the 12px it carries at full size is a sixth of the name's line — enough
+     * to take "Mow the front and back lawn" from two lines to three. 8px still
+     * reads as an edge.
+     */
+    .fq-quest-card {
+        min-height: calc(var(--fq-card-w) * 1.15);
+        padding: 8px;
+    }
+
     .fq-card-name {
         font-size: 11.5px;
+        -webkit-line-clamp: 3;
     }
 
     .fq-card-points {

@@ -331,7 +331,14 @@ new class extends Component
 
                         {{-- Chore name per segment, running from the center plate out to
                              the rim along its slice — reads outward, tilt-your-head style,
-                             which fits far more of each name than a horizontal label would. --}}
+                             which fits far more of each name than a horizontal label would.
+
+                             The name and nothing else. The points were tried here and
+                             taken back out: a slice is 98px of 9px type, so a number on
+                             the end is bought with the name's last few characters — and
+                             the payout is stated in full the moment the wheel stops,
+                             which is the only point at which one of these numbers is the
+                             one that matters. --}}
                         @foreach ($wheelChores as $i => $wheelChore)
                             @php $midDeg = $i * $wheelSlice + $wheelSlice / 2; @endphp
                             <div
@@ -374,6 +381,14 @@ new class extends Component
                 >
                     <p class="font-mono-fq text-[10px] tracking-[0.2em] uppercase" style="color: {{ $boostColor }}">You landed on</p>
                     <p class="mt-1 font-baloo text-lg font-extrabold">{{ $boost->chore->name }} &mdash; {{ $boost->multiplier }}x</p>
+                    {{-- The multiplier stated as the number it actually pays.
+                         "3x" is arithmetic homework; the total is the thing
+                         worth getting off the sofa for. --}}
+                    <p class="mt-1 font-mono-fq text-[11px] text-fq-text-3">
+                        {{ number_format($boost->chore->points) }}
+                        <span class="text-fq-text-5">&rarr;</span>
+                        <span class="font-semibold" style="color: {{ $boostColor }}">{{ number_format($boost->chore->points * $boost->multiplier) }} PTS</span>
+                    </p>
                 </div>
             @endif
         </div>
@@ -434,9 +449,14 @@ new class extends Component
             <div class="flex flex-1 flex-col rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
                 <h3 class="font-baloo text-lg font-bold">Active Boost</h3>
                 @if ($revealed && $boost)
-                    <div class="mt-3 flex items-center justify-between rounded-[16px] border p-[14px]" style="{{ $boostTint }}">
-                        <span class="text-sm font-semibold">{{ $boost->chore->name }}</span>
-                        <span class="font-baloo text-[22px] font-extrabold" style="color: {{ $boostColor }}">{{ $boost->multiplier }}x</span>
+                    <div class="mt-3 flex items-center justify-between gap-3 rounded-[16px] border p-[14px]" style="{{ $boostTint }}">
+                        <span class="min-w-0">
+                            <span class="block text-sm font-semibold">{{ $boost->chore->name }}</span>
+                            <span class="font-mono-fq text-[10px] tracking-[0.1em] text-fq-text-4 uppercase">
+                                {{ number_format($boost->chore->points) }} &rarr; {{ number_format($boost->chore->points * $boost->multiplier) }} pts
+                            </span>
+                        </span>
+                        <span class="font-baloo text-[22px] font-extrabold whitespace-nowrap" style="color: {{ $boostColor }}">{{ $boost->multiplier }}x</span>
                     </div>
 
                     {{-- The claim, right here. The boosted chore is the one a

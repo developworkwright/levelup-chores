@@ -178,9 +178,30 @@ new class extends Component
      */
     public ?int $pickingIconFor = null;
 
+    /**
+     * What's been typed into the custom-class box, keyed by chore.
+     *
+     * Per chore rather than one shared string: the picker is one-at-a-time
+     * today, but a half-typed class leaking onto the next chore a parent opens
+     * is the kind of thing that only shows up once it's live.
+     *
+     * @var array<int, string>
+     */
+    public array $customIcon = [];
+
+    /** Why a typed class didn't take, keyed by chore. @var array<int, string> */
+    public array $customIconMessage = [];
+
     public function togglePicker(int $choreId): void
     {
         $this->pickingIconFor = $this->pickingIconFor === $choreId ? null : $choreId;
+        unset($this->customIconMessage[$choreId]);
+
+        // Seeded with whatever the chore is already wearing, so a parent
+        // tweaking a class starts from it rather than retyping it.
+        if ($this->pickingIconFor === $choreId) {
+            $this->customIcon[$choreId] = (string) ($this->ownedChore($choreId)?->icon ?? '');
+        }
     }
 
     /** Sets a chore's face, or clears it when the same icon is tapped again. */
@@ -196,10 +217,61 @@ new class extends Component
         // Tapping the current one clears it, which is the only way back to the
         // typographic face once a parent has chosen — and the guessed default
         // means some chores start out with a face nobody picked.
-        $chore->icon = $chore->icon === $case ? null : $case;
+        $chore->icon = $chore->icon === $case->faClass() ? null : $case->faClass();
         $chore->save();
 
         $this->pickingIconFor = null;
+        unset($this->customIconMessage[$choreId]);
+    }
+
+    /**
+     * Sets a chore's face from a Font Awesome class a parent typed.
+     *
+     * The presets above are a shortlist; this is the whole of Font Awesome.
+     * Blank clears the face, which is the same escape hatch tapping the lit
+     * preset gives — and anything that survives {@see ChoreIcon::normalizeClass}
+     * is a `fa-` token, since this string ends up in a `class` attribute.
+     *
+     * The picker deliberately stays open on success: a typed class is chosen
+     * blind, so the parent needs to see the glyph it landed on to know whether
+     * they got the one they meant.
+     */
+    public function setCustomIcon(int $choreId): void
+    {
+        $chore = $this->ownedChore($choreId);
+
+        if (! $chore) {
+            return;
+        }
+
+        $typed = trim($this->customIcon[$choreId] ?? '');
+
+        if ($typed === '') {
+            $chore->icon = null;
+            $chore->save();
+            $this->customIcon[$choreId] = '';
+            unset($this->customIconMessage[$choreId]);
+
+            return;
+        }
+
+        $class = ChoreIcon::normalizeClass($typed);
+
+        if ($class === null) {
+            // Named rather than silently ignored: the box takes free text, and
+            // a control that eats what you type reads as broken.
+            $this->customIconMessage[$choreId] = 'That doesn\'t look like a Font Awesome class — try something like fa-solid fa-rocket.';
+
+            return;
+        }
+
+        $chore->icon = $class;
+        $chore->save();
+
+        // Echoed back normalised, so a parent can see what was actually stored
+        // when they typed a bare name or pasted a whole tag.
+        $this->customIcon[$choreId] = $class;
+        unset($this->customIconMessage[$choreId]);
     }
 
     public function addChore(): void
@@ -220,7 +292,7 @@ new class extends Component
             // which the card reads as "use the typographic face" — a wrong
             // picture is worse than none, because the kid this is for chooses
             // by the picture and has nothing to check it against.
-            'icon' => ChoreIcon::forName($name),
+            'icon' => ChoreIcon::classForName($name),
         ]);
 
         $this->newChoreName = '';
@@ -371,14 +443,14 @@ new class extends Component
                     <button
                         type="button"
                         wire:click="togglePicker({{ $chore->id }})"
-                        title="{{ $chore->icon ? 'Card face: '.$chore->icon->label() : 'No card face — pick one' }}"
+                        title="{{ $chore->icon ? 'Card face: '.(ChoreIcon::tryFromClass($chore->icon)?->label() ?? $chore->icon) : 'No card face — pick one' }}"
                         class="grid h-[46px] w-[46px] shrink-0 place-items-center rounded-[14px] border transition hover:border-fq-lime"
                         style="border-color: {{ $chore->icon ? 'var(--fq-gold)' : 'var(--fq-line-3)' }};
                                background: var(--fq-sunk);
                                color: {{ $chore->icon ? 'var(--fq-gold)' : 'var(--fq-text-5)' }}"
                     >
                         @if ($chore->icon)
-                            <x-chore-icon :icon="$chore->icon" class="h-[26px] w-[26px]" />
+                            <x-chore-icon :icon="$chore->icon" class="text-[24px]" />
                         @else
                             <span class="font-mono-fq text-[15px] leading-none">+</span>
                         @endif
@@ -535,11 +607,11 @@ new class extends Component
                                         wire:click="setIcon({{ $chore->id }}, '{{ $option->value }}')"
                                         title="{{ $option->label() }}"
                                         class="grid aspect-square place-items-center rounded-[12px] border transition hover:border-fq-lime"
-                                        style="border-color: {{ $chore->icon === $option ? 'var(--fq-gold)' : 'var(--fq-line-3)' }};
+                                        style="border-color: {{ $chore->icon === $option->faClass() ? 'var(--fq-gold)' : 'var(--fq-line-3)' }};
                                                background: var(--fq-panel);
-                                               color: {{ $chore->icon === $option ? 'var(--fq-gold)' : 'var(--fq-text-3)' }}"
+                                               color: {{ $chore->icon === $option->faClass() ? 'var(--fq-gold)' : 'var(--fq-text-3)' }}"
                                     >
-                                        <x-chore-icon :icon="$option" class="h-[22px] w-[22px]" />
+                                        <x-chore-icon :icon="$option" class="text-[20px]" />
                                     </button>
                                 @endforeach
                             </div>
@@ -547,6 +619,69 @@ new class extends Component
                             <p class="mt-2 font-mono-fq text-[10px] text-fq-text-5">
                                 Tap the gold one again to clear it &mdash; the card falls back to showing its points.
                             </p>
+
+                            {{-- The sixteen above are a shortlist. Every Font
+                                 Awesome free icon works, and typing the class
+                                 is the only way to reach the other two
+                                 thousand — so the box is part of the picker
+                                 rather than a setting somewhere else. --}}
+                            <div class="mt-3 border-t border-fq-line-2 pt-3">
+                                <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                                    Or type a Font Awesome class
+                                </p>
+
+                                <div class="mt-2 flex flex-wrap items-center gap-2">
+                                    {{-- A live preview of what's in the box,
+                                         because a class typed from memory is
+                                         chosen blind — this is the only way to
+                                         see you got fa-rocket and not nothing
+                                         before it lands on a kid's card. --}}
+                                    @php $customPreview = ChoreIcon::normalizeClass($customIcon[$chore->id] ?? null); @endphp
+                                    <span
+                                        class="grid h-[42px] w-[42px] shrink-0 place-items-center rounded-[12px] border"
+                                        style="border-color: {{ $customPreview ? 'var(--fq-gold)' : 'var(--fq-line-3)' }};
+                                               background: var(--fq-panel);
+                                               color: {{ $customPreview ? 'var(--fq-gold)' : 'var(--fq-text-5)' }}"
+                                    >
+                                        @if ($customPreview)
+                                            <x-chore-icon :icon="$customPreview" class="text-[22px]" />
+                                        @else
+                                            <span class="font-mono-fq text-[13px] leading-none">?</span>
+                                        @endif
+                                    </span>
+
+                                    <input
+                                        type="text"
+                                        wire:model.live.debounce.400ms="customIcon.{{ $chore->id }}"
+                                        wire:keydown.enter="setCustomIcon({{ $chore->id }})"
+                                        placeholder="fa-solid fa-rocket"
+                                        maxlength="120"
+                                        autocapitalize="off"
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                        class="min-w-[180px] flex-1 rounded-[12px] border border-fq-line-2 px-3 py-2 text-sm outline-none focus:border-fq-gold"
+                                        style="background: var(--fq-panel)"
+                                    >
+
+                                    <button
+                                        type="button"
+                                        wire:click="setCustomIcon({{ $chore->id }})"
+                                        class="rounded-[12px] px-4 py-2 text-xs font-semibold text-fq-bg transition hover:brightness-110"
+                                        style="background: var(--fq-gold)"
+                                    >Use it</button>
+                                </div>
+
+                                @if (isset($customIconMessage[$chore->id]))
+                                    <p class="mt-2 font-mono-fq text-[10px]" style="color: var(--fq-danger)">
+                                        {{ $customIconMessage[$chore->id] }}
+                                    </p>
+                                @else
+                                    <p class="mt-2 font-mono-fq text-[10px] text-fq-text-5">
+                                        Any free icon from fontawesome.com/search &mdash; paste the whole
+                                        &lt;i&gt; tag or just the name. Empty clears the face.
+                                    </p>
+                                @endif
+                            </div>
                         </div>
                     @endif
                 </div>

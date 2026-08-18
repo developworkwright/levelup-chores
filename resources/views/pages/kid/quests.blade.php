@@ -1321,7 +1321,25 @@ new class extends Component
                     style="animation: fq-pop .3s ease both; background: var(--fq-wash-gold); border-color: rgba(255,225,77,{{ $questDone ? '0.4' : '0.65' }})"
                 >
                     <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-lime uppercase">Today's Main Quest</p>
-                    <h2 class="mt-2 font-baloo text-[26px] leading-[1.1] font-extrabold sm:text-[30px]">{{ $quest->chore->name }}</h2>
+
+                    {{-- The face the card was picked by, carried onto the
+                         quest it became. Without it the hand burns and the
+                         picture the kid actually chose from is gone — which
+                         for a pre-reader is the only part of the card they
+                         were reading. Stays on a phone, unlike the hand's:
+                         this is one full-width card, so the name isn't
+                         competing with it for room. --}}
+                    <div class="mt-2 flex items-center gap-[14px]">
+                        @if ($quest->chore->icon)
+                            <span
+                                class="grid h-[54px] w-[54px] shrink-0 place-items-center rounded-full border"
+                                style="border-color: var(--fq-line-4); background: var(--fq-panel-alt); color: var(--fq-gold)"
+                            >
+                                <x-chore-icon :icon="$quest->chore->icon" class="text-[27px]" />
+                            </span>
+                        @endif
+                        <h2 class="font-baloo text-[26px] leading-[1.1] font-extrabold sm:text-[30px]">{{ $quest->chore->name }}</h2>
+                    </div>
 
                     {{-- A deadline on the main quest is the sharpest version of
                          this: miss it and the quest rerolls, so the countdown
@@ -1636,7 +1654,22 @@ new class extends Component
                     style="{{ $state === 'pending' ? 'border-color: var(--fq-success-border)' : ($closesAt ? 'border-color: color-mix(in srgb, var(--fq-cyan) 55%, transparent)' : ($chore->isOneTime() ? 'border-color: color-mix(in srgb, var(--fq-gold) 55%, transparent); background: var(--fq-wash-gold)' : '')) }}"
                 >
                     <div class="flex items-start justify-between gap-2">
-                        <div class="min-w-0">
+                        {{-- The same face the chore wears everywhere else. A
+                             board of fourteen identical text rows is unusable
+                             to a kid who can't read them; a picture per row is
+                             the only thing that makes it scannable. --}}
+                        @if ($chore->icon)
+                            <span
+                                class="mt-[2px] grid h-[34px] w-[34px] shrink-0 place-items-center rounded-[10px] border"
+                                style="border-color: var(--fq-line-3);
+                                       background: var(--fq-sunk);
+                                       color: {{ $takenBy || $state === 'expired' ? 'var(--fq-text-5)' : 'var(--fq-text-3)' }}"
+                            >
+                                <x-chore-icon :icon="$chore->icon" class="text-[17px]" />
+                            </span>
+                        @endif
+
+                        <div class="min-w-0 flex-1">
                             {{-- Flagged, not just sorted: a card sitting at the
                                  top of the list only reads as urgent if you can
                                  see why it's there. --}}

@@ -136,4 +136,19 @@ class WheelClaimTest extends TestCase
 
         $this->assertSame(0, ChoreCompletion::where('profile_id', $kid->id)->count());
     }
+
+    public function test_the_landed_panel_states_the_boost_as_points_not_just_a_multiplier(): void
+    {
+        // "3x" is arithmetic homework; the total is the thing worth getting
+        // off the sofa for.
+        [$household, $kid] = $this->household(['require_quest_first' => false]);
+
+        $household->chores()->where('quest_eligible', false)->update(['points' => 175]);
+
+        $boost = $this->spin($kid);
+
+        Volt::test('kid.wheel')
+            ->assertOk()
+            ->assertSee(number_format(175 * $boost->multiplier).' PTS');
+    }
 }
