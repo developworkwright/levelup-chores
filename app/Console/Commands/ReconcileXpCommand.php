@@ -70,6 +70,7 @@ class ReconcileXpCommand extends Command
                 $breakdown['chores'],
                 $breakdown['badges'],
                 $breakdown['chests'],
+                $breakdown['adjustment'] === 0 ? '—' : $breakdown['adjustment'],
                 $rebuilt,
                 $delta === 0 ? '—' : sprintf('%+d', $delta),
                 $apply ? 'LVL '.$this->levelFor($rebuilt) : 'unchanged',
@@ -93,7 +94,7 @@ class ReconcileXpCommand extends Command
         }
 
         $this->table(
-            ['Kid', 'XP was', 'Level was', 'Chores', 'Badges', 'Chests', 'Rebuilt', 'Delta', 'Level now'],
+            ['Kid', 'XP was', 'Level was', 'Chores', 'Badges', 'Chests', 'Curve', 'Rebuilt', 'Delta', 'Level now'],
             $rows,
         );
 
@@ -117,7 +118,7 @@ class ReconcileXpCommand extends Command
      * deletes the completions it reverses, so counting approvals stays a
      * truthful reconstruction rather than double-counting undone days.
      *
-     * @return array{chores: int, badges: int, chests: int, total: int}
+     * @return array{chores: int, badges: int, chests: int, adjustment: int, total: int}
      */
     private function breakdownFor(Profile $kid): array
     {
@@ -132,16 +133,23 @@ class ReconcileXpCommand extends Command
             ->where('reward_kind', ChestService::KIND_XP)
             ->sum('reward_amount');
 
+        // XP granted by a curve change rather than earned. It has no source
+        // record to count, so it's carried on the profile — leaving it out
+        // would make the rebuild look short by exactly the conversion and
+        // hand back the levels the conversion existed to protect.
+        $adjustment = (int) $kid->xp_adjustment;
+
         return [
             'chores' => $chores,
             'badges' => $badges,
             'chests' => $chests,
-            'total' => $chores + $badges + $chests,
+            'adjustment' => $adjustment,
+            'total' => $chores + $badges + $chests + $adjustment,
         ];
     }
 
     private function levelFor(int $xp): int
     {
-        return 1 + intdiv($xp, Profile::XP_PER_LEVEL);
+        return Profile::levelForXp($xp);
     }
 }

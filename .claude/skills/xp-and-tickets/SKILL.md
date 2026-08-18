@@ -24,14 +24,20 @@ Covers the progression economy: XP, levels, the ticket currency, and the Bonus S
 | | Earned | Spent on |
 |---|---|---|
 | Points | Approved chores | Loot Shop (real rewards, parent fulfils) |
-| **XP** | Chores (+25), badges (`badges.xp_reward`, 50–400) | **Nothing** |
-| Tickets | 1 per level crossed, 1 per badge, and a **boss defeat** payout | Bonus Shop perks |
+| **XP** | Chores (`ChoreService::XP_PER_CHORE`, 50), badges (`badges.xp_reward`, 50–400) | **Nothing** |
+| Tickets | 1 per level crossed, **5 more when that level changes the rank**, 1 per badge, and a **boss defeat** payout | Bonus Shop perks |
 
 A monster falling pays every kid in the household 1, the finisher 2 more, and the biggest damage dealer 2 more again — see `MonsterService::TICKETS_FOR_*`. With three tiers in rotation this is now the fastest ticket source in the app, so it's the lever to reach for if perks start feeling cheap.
 
 **XP is never spent.** Tickets are *minted by* XP, not converted from it — that's the whole design. Any change that makes XP decrease as a result of a purchase breaks the premise.
 
-Level curve is flat: `Profile::XP_PER_LEVEL = 200`. Flat on purpose — "200 XP is a level" is something a young kid can hold in their head.
+## The curve and the ranks
+
+The curve is **flat inside a band and steps up between them** (`Profile::LEVEL_BANDS`): 200 XP a level through 10, 350 through 20, 500 after that. At 50 XP a chore that's 4 chores a level, then 7, then 10. Flat *within* a band on purpose — a kid can be told "levels cost more from 11" and have that be the whole rule. Use `Profile::levelForXp()`, `xpToReachLevel()` and `xpToClearLevel()`; never divide by `XP_PER_LEVEL`, which is now only the first band's cost.
+
+`App\Enums\Rank` is the title worn every 5 levels, Prowler through Doomlord, derived from the level and stored nowhere. It's what the login tiles, the header chip and the stats page lead with — the number alone never changed colour, so it never read as progress. Rank-ups pay `TicketService::PER_RANK` on top of the level's own ticket, minted in `syncLevelTickets()` off the *same* `tickets_granted_through_level` high-water mark, so a rank can't pay twice either.
+
+**`profiles.xp_adjustment`** is XP granted by the curve change rather than earned. Steepening the curve retroactively would have taken levels back off kids who had already climbed them, so the migration banked the difference here and everyone kept their exact level and bar position. It has no source record, so `ReconcileXpCommand` adds it in as a fourth source — leave it out of any future rebuild and the conversion gets flattened.
 
 ## Two high-water marks, and why
 

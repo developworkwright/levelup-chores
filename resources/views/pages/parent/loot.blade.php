@@ -108,6 +108,19 @@ new class extends Component
         }
     }
 
+    /**
+     * Steps the level gate on a reward. Clamped at 0 (no gate) — there is no
+     * cap at the top, because a parent putting the big-ticket item out at 30
+     * is exactly what the gate is for.
+     */
+    public function adjustMinLevel(int $itemId, int $delta): void
+    {
+        if ($item = $this->ownedItem($itemId)) {
+            $item->min_level = max(0, $item->min_level + $delta);
+            $item->save();
+        }
+    }
+
     public function setTag(int $itemId, string $color): void
     {
         if (($item = $this->ownedItem($itemId)) && in_array($color, array_column(AccentColor::cases(), 'value'), true)) {
@@ -224,6 +237,22 @@ new class extends Component
                                         ></button>
                                     @endif
                                 @endforeach
+                            </div>
+
+                            {{-- The level gate, stepped a rank at a time: the
+                                 boundaries that change a kid's title are the
+                                 ones worth locking a reward behind. --}}
+                            <div class="flex shrink-0 items-center gap-1">
+                                <button type="button" wire:click="adjustMinLevel({{ $item->id }}, -{{ \App\Enums\Rank::LEVELS_PER_RANK }})" class="h-[30px] w-[30px] shrink-0 rounded-[10px] border border-fq-line-3 bg-fq-sunk">&minus;</button>
+                                <div class="w-[74px] text-center">
+                                    <div class="font-baloo text-[15px] font-extrabold" style="color:{{ $item->min_level > 0 ? \App\Enums\Rank::fromLevel($item->min_level)->ringVar() : 'var(--fq-text-5)' }}">
+                                        {{ $item->min_level > 0 ? 'LVL '.$item->min_level : 'Open' }}
+                                    </div>
+                                    <div class="font-mono-fq text-[9px] text-fq-text-4">
+                                        {{ $item->min_level > 0 ? \App\Enums\Rank::fromLevel($item->min_level)->label() : 'no gate' }}
+                                    </div>
+                                </div>
+                                <button type="button" wire:click="adjustMinLevel({{ $item->id }}, {{ \App\Enums\Rank::LEVELS_PER_RANK }})" class="h-[30px] w-[30px] shrink-0 rounded-[10px] border border-fq-line-3 bg-fq-sunk">+</button>
                             </div>
 
                             <button type="button" wire:click="removeItem({{ $item->id }})" class="ml-auto shrink-0 rounded-[10px] border border-fq-danger-border px-3 py-1 text-xs text-fq-danger hover:bg-fq-danger-bg">Remove</button>

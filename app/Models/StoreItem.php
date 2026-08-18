@@ -18,6 +18,7 @@ class StoreItem extends Model
         'description',
         'cost',
         'color_tag',
+        'min_level',
     ];
 
     protected function casts(): array
@@ -35,6 +36,18 @@ class StoreItem extends Model
     public function redemptions(): HasMany
     {
         return $this->hasMany(Redemption::class);
+    }
+
+    /**
+     * Whether a level stands between this reward and the kid looking at it.
+     *
+     * Locked rewards stay on the shelf rather than being filtered out — the
+     * whole point of the gate is that a kid can see what they're climbing
+     * towards.
+     */
+    public function isLockedFor(Profile $profile): bool
+    {
+        return $profile->level() < $this->min_level;
     }
 
     /**

@@ -50,7 +50,12 @@ class BonusTicketTest extends TestCase
 
         $this->tickets()->syncLevelTickets($kid);
 
-        $this->assertSame(4 * TicketService::PER_LEVEL, $kid->refresh()->bonus_tickets);
+        // Four levels, and the fourth of them lands on 5 — the first rank
+        // boundary — which pays its own bonus on top. See LevelRankTest.
+        $this->assertSame(
+            4 * TicketService::PER_LEVEL + TicketService::PER_RANK,
+            $kid->refresh()->bonus_tickets,
+        );
     }
 
     public function test_syncing_repeatedly_does_not_re_mint(): void

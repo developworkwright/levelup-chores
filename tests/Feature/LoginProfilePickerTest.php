@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\AccentColor;
+use App\Enums\Rank;
 use App\Models\Household;
 use App\Models\Profile;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -13,27 +14,43 @@ class LoginProfilePickerTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_it_shows_a_kids_level_rather_than_their_age(): void
+    public function test_it_shows_a_kids_rank_rather_than_their_age(): void
     {
         $household = Household::factory()->create();
         Profile::factory()->for($household)->create([
             'name' => 'Nova',
             'age' => 12,
-            'xp' => Profile::XP_PER_LEVEL * 3,
+            'xp' => Profile::xpToReachLevel(12),
         ]);
 
         Volt::test('login')
             ->assertSee('Nova')
-            ->assertSee('LVL 4')
+            ->assertSee(Rank::Bonebreaker->label())
             ->assertDontSee('Age 12');
     }
 
-    public function test_a_brand_new_kid_shows_level_one(): void
+    public function test_a_brand_new_kid_wears_the_first_rank(): void
     {
         $household = Household::factory()->create();
         Profile::factory()->for($household)->create(['name' => 'Scout', 'xp' => 0]);
 
-        Volt::test('login')->assertSee('LVL 1');
+        Volt::test('login')->assertSee(Rank::Prowler->label());
+    }
+
+    public function test_the_level_is_shown_but_not_the_bar_to_the_next_one(): void
+    {
+        // The bar took the eye before the level did. It came off this screen
+        // deliberately while the level stayed and got louder — if the bar
+        // comes back, it should be a decision rather than a drift.
+        $household = Household::factory()->create();
+        Profile::factory()->for($household)->create([
+            'name' => 'Nova',
+            'xp' => Profile::xpToReachLevel(12) + 100,
+        ]);
+
+        Volt::test('login')
+            ->assertSee('LVL 12')
+            ->assertDontSee('h-[6px] w-full overflow-hidden rounded-full', false);
     }
 
     public function test_each_tile_wears_the_kids_streak(): void
@@ -51,12 +68,12 @@ class LoginProfilePickerTest extends TestCase
 
         // The console is a door for grown-ups, not one of the avatars to pick —
         // so it sits below the row under a neutral label, and a parent gets no
-        // level, streak or XP bar of their own.
+        // rank or streak of their own.
         Volt::test('login')
             ->assertSee('Grown-ups')
             ->assertSee('Parent console')
             ->assertDontSee('Rowan')
-            ->assertDontSee('LVL');
+            ->assertDontSee(Rank::Prowler->label());
     }
 
     public function test_several_parents_are_each_named_so_they_can_be_told_apart(): void

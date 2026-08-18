@@ -198,12 +198,23 @@ class SleepService
             $nightPoints = $this->pointsFor($household, $outcome);
 
             if ($nightPoints > 0) {
+                // Names the card and the night, not just the answer.
+                //
+                // This read "Westin — Came in", which in a feed of chores and
+                // loot says neither what it is about nor when: a parent has to
+                // guess that it concerns sleep, and the row's own timestamp is
+                // the *morning they answered*, pointing at the day after the
+                // night being described. Both are spelled out here instead.
+                //
+                // The night is named by the evening it began — `night_date` is
+                // the morning it ended, and nobody calls that "Sunday night".
                 $this->ledger->record(
                     $household,
                     $profile,
                     LedgerKind::Earn,
                     $nightPoints,
-                    "{$profile->name} — {$outcome->shortLabel()}",
+                    "{$profile->name} — Own bed card: ".lcfirst($outcome->shortLabel())
+                        .' ('.$date->copy()->subDay()->format('D').' night)',
                 );
             }
 

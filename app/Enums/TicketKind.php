@@ -5,6 +5,10 @@ namespace App\Enums;
 enum TicketKind: string
 {
     case LevelUp = 'level_up';
+
+    /** The bonus a level pays on top when it also changes the kid's rank. */
+    case RankUp = 'rank_up';
+
     case Badge = 'badge';
     case Purchase = 'purchase';
     case Adjustment = 'adjustment';
@@ -25,6 +29,7 @@ enum TicketKind: string
     {
         return match ($this) {
             self::LevelUp => 'Level up',
+            self::RankUp => 'Rank up',
             self::Badge => 'Badge',
             self::Purchase => 'Purchase',
             self::Adjustment => 'Adjustment',

@@ -124,8 +124,15 @@
     }
 
     if ($levelsGained > 0) {
+        // A level that changes the title is a different event from a level
+        // that doesn't, and gets announced as one — same card, but wearing the
+        // new rank's colour and naming it rather than the number.
+        $rankGained = App\Enums\Rank::fromLevel($level);
+        $ranksGained = App\Enums\Rank::countBetween($profile->level_seen ?? $level, $level);
+        $rankedUp = $ranksGained > 0;
+
         $quietRewards->push([
-            'message' => 'Level '.$level.'!',
+            'message' => $rankedUp ? 'You are a '.$rankGained->label().'!' : 'Level '.$level.'!',
             'big' => true,
             'style' => 'star',
             // Fired up from the bottom corners rather than dropped from the
@@ -134,10 +141,13 @@
             'motion' => 'cannon',
             'hero' => 'level',
             'card' => [
-                'accent' => 'var(--fq-gold)',
-                'sub' => 'Level Up',
-                'label' => 'Level '.$level,
-                'note' => $tickets($levelsGained * App\Services\TicketService::PER_LEVEL),
+                'accent' => $rankedUp ? $rankGained->ringVar() : 'var(--fq-gold)',
+                'sub' => $rankedUp ? 'Rank Up' : 'Level Up',
+                'label' => $rankedUp ? $rankGained->label() : 'Level '.$level,
+                'note' => $tickets(
+                    $levelsGained * App\Services\TicketService::PER_LEVEL
+                        + $ranksGained * App\Services\TicketService::PER_RANK
+                ).($rankedUp ? ' · Level '.$level : ''),
             ],
         ]);
     }
@@ -275,8 +285,20 @@
             <div class="flex min-w-[140px] flex-1 flex-col gap-[6px]">
                 <div class="flex items-center gap-2">
                     <span class="font-baloo text-[19px] font-bold">{{ $profile->name }}</span>
-                    <span class="rounded-[6px] bg-fq-line px-[7px] py-[3px] font-mono-fq text-[10px] text-fq-cyan">
-                        LVL {{ $profile->level() }}
+                    {{-- The number alone never changed colour, so it never read
+                         as progress. The rank does: the chip repaints every
+                         fifth level, and the title is what a kid actually
+                         calls themselves. --}}
+                    @php $rank = $profile->rank(); @endphp
+                    <span
+                        @class([
+                            'flex items-center gap-[5px] rounded-[6px] border px-[7px] py-[3px] font-mono-fq text-[10px]',
+                            'fq-rank-doomlord' => $rank->isAnimated(),
+                        ])
+                        style="background:{{ $rank->fillVar() }};border-color:{{ $rank->ringVar() }};color:{{ $rank->ringVar() }}"
+                    >
+                        <span class="tracking-[0.12em] uppercase">{{ $rank->label() }}</span>
+                        <span class="opacity-60">LVL {{ $profile->level() }}</span>
                     </span>
                 </div>
                 <div class="h-[6px] w-full max-w-[220px] overflow-hidden rounded-full bg-fq-track">

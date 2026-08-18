@@ -99,6 +99,16 @@ body {
 }
 
 /*
+ * The Doomlord chip. Same idea as the rainbow star and the same 8s loop, but
+ * it drifts its own fill rather than borrowing the badge tier's, so the top
+ * rank and the top badge don't read as the same award.
+ */
+.fq-rank-doomlord {
+    background-size: 300% 100%;
+    animation: fq-rainbow-drift 8s linear infinite;
+}
+
+/*
  * The nudge a header tile gives when its balance moves. A named class rather
  * than an arbitrary utility: it's applied from an Alpine :class expression,
  * which Tailwind's scanner doesn't read as a class name.
@@ -279,6 +289,10 @@ body {
 
     .fq-rainbow-ink {
         color: var(--fq-tier-rainbow-ring);
+    }
+
+    .fq-rank-doomlord {
+        animation: none;
     }
 }
 

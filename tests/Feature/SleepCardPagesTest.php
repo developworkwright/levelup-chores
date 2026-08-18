@@ -6,6 +6,7 @@ use App\Enums\Constellation;
 use App\Enums\SleepOutcome;
 use App\Models\Chore;
 use App\Models\Household;
+use App\Models\LedgerEntry;
 use App\Models\Profile;
 use App\Models\SleepNight;
 use App\Services\SleepService;
@@ -219,6 +220,21 @@ class SleepCardPagesTest extends TestCase
             ->assertDontSee('Now switch it on for whoever needs it');
     }
 
+    public function test_the_ledger_line_says_what_it_is_and_which_night(): void
+    {
+        // 2026-05-01 is a Friday, so the night that ended that morning is
+        // Thursday night.
+        app(SleepService::class)->record($this->kid, SleepOutcome::Visited);
+
+        $entry = LedgerEntry::where('profile_id', $this->kid->id)->latest('id')->first();
+
+        // "Ziggy — Came in" said neither what it was about nor when: a parent
+        // reading a feed of chores and loot has to guess it concerns sleep,
+        // and the row's timestamp is the morning they answered — the day
+        // *after* the night being described.
+        $this->assertSame('Ziggy — Own bed card: came in (Thu night)', $entry->description);
+    }
+
     public function test_a_parent_can_taper_the_payout_from_the_console(): void
     {
         $this->loginParent();
@@ -244,7 +260,7 @@ class SleepCardPagesTest extends TestCase
             // The button's own markup, not just the method behind it: the call
             // is built as a string with quoted arguments, and Blade escaping
             // could mangle it into something Livewire won't parse.
-            ->assertSee("adjustNightPayout(&#039;visited&#039;, -".SleepService::NIGHT_STEP.')', false)
+            ->assertSee('adjustNightPayout(&#039;visited&#039;, -'.SleepService::NIGHT_STEP.')', false)
             ->call('adjustNightPayout', SleepOutcome::Visited->value, -SleepService::NIGHT_STEP);
 
         $sleep = app(SleepService::class);

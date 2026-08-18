@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\InsufficientPointsException;
+use App\Exceptions\LevelTooLowException;
 use App\Models\Chore;
 use App\Models\Profile;
 use App\Models\StoreItem;
@@ -85,7 +86,7 @@ new class extends Component
             app(StoreService::class)->redeem($this->profile, $item);
             $this->flashMessage = 'Ask a parent to release it.';
             $this->dispatch('celebrate', message: "{$item->name} cashed out!");
-        } catch (InsufficientPointsException $e) {
+        } catch (InsufficientPointsException|LevelTooLowException $e) {
             $this->flashMessage = $e->getMessage();
         }
     }
@@ -191,6 +192,14 @@ new class extends Component
                     <span class="rounded-full border border-fq-line-3 bg-fq-sunk px-[13px] py-[7px] font-baloo text-sm font-bold text-fq-lime">
                         &approx; {{ $choresToGo }} more {{ Str::plural('chore', $choresToGo) }}
                     </span>
+                @elseif ($saving->isLockedFor($profile))
+                    {{-- Saving toward something still locked is allowed, and is
+                         half the point of the gate. Funded but locked says so
+                         rather than offering a button that would refuse. --}}
+                    <span
+                        class="rounded-full border bg-fq-sunk px-[13px] py-[7px] font-baloo text-sm font-bold"
+                        style="border-color: {{ App\Enums\Rank::fromLevel($saving->min_level)->ringVar() }}; color: {{ App\Enums\Rank::fromLevel($saving->min_level)->ringVar() }}"
+                    >Saved up — unlocks at LVL {{ $saving->min_level }}</span>
                 @else
                     <button
                         type="button"
@@ -268,32 +277,51 @@ new class extends Component
                 <div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(216px,1fr))] gap-3">
                     @foreach ($band['items'] as $item)
                         @php
+                            $locked = $item->isLockedFor($profile);
                             $affordable = $profile->points >= $item->cost;
                             $isGoal = $saving && $saving->id === $item->id;
+                            $lockRank = $locked ? App\Enums\Rank::fromLevel($item->min_level) : null;
                         @endphp
 
                         <div
                             wire:key="item-{{ $item->id }}"
-                            class="flex flex-col gap-3 rounded-[20px] border bg-fq-panel p-4"
-                            style="border-color: {{ $affordable ? 'var(--fq-line-focus)' : 'var(--fq-line)' }}"
+                            @class([
+                                'flex flex-col gap-3 rounded-[20px] border bg-fq-panel p-4',
+                                // Dimmed, never hidden. A locked reward the kid
+                                // can read is the reason to climb; one filtered
+                                // off the shelf is nothing at all.
+                                'opacity-70' => $locked,
+                            ])
+                            style="border-color: {{ $locked ? $lockRank->ringVar() : ($affordable ? 'var(--fq-line-focus)' : 'var(--fq-line)') }}"
                         >
-                            <span class="h-[6px] rounded-full" style="background:{{ $item->color_tag->cssVar() }}"></span>
+                            <span class="h-[6px] rounded-full" style="background:{{ $locked ? $lockRank->ringVar() : $item->color_tag->cssVar() }}"></span>
 
                             <div class="flex-1">
                                 <p class="text-[16px] font-semibold">{{ $item->name }}</p>
                                 <p class="mt-1 text-[13px] leading-[1.35] text-fq-text-4">{{ $item->description }}</p>
                             </div>
 
-                            <button
-                                type="button"
-                                wire:click="saveFor({{ $item->id }})"
-                                class="self-start rounded-full border border-fq-line bg-fq-sunk px-[11px] py-[5px] font-mono-fq text-[10px] tracking-[0.1em] uppercase transition hover:border-fq-line-4"
-                                style="color: {{ $isGoal ? 'var(--fq-gold)' : 'var(--fq-text-4)' }}"
-                            >{{ $isGoal ? 'Saving for this' : 'Save for this' }}</button>
+                            @if ($locked)
+                                <span
+                                    class="self-start rounded-full border bg-fq-sunk px-[11px] py-[5px] font-mono-fq text-[10px] tracking-[0.1em] uppercase"
+                                    style="border-color: {{ $lockRank->ringVar() }}; color: {{ $lockRank->ringVar() }}"
+                                >Unlocks at LVL {{ $item->min_level }}</span>
+                            @else
+                                <button
+                                    type="button"
+                                    wire:click="saveFor({{ $item->id }})"
+                                    class="self-start rounded-full border border-fq-line bg-fq-sunk px-[11px] py-[5px] font-mono-fq text-[10px] tracking-[0.1em] uppercase transition hover:border-fq-line-4"
+                                    style="color: {{ $isGoal ? 'var(--fq-gold)' : 'var(--fq-text-4)' }}"
+                                >{{ $isGoal ? 'Saving for this' : 'Save for this' }}</button>
+                            @endif
 
                             <div class="flex items-center justify-between gap-2">
                                 <span class="font-baloo text-[19px] font-extrabold text-fq-gold">{{ $item->cost }} pts</span>
-                                @if ($affordable)
+                                @if ($locked)
+                                    <button type="button" disabled class="cursor-default rounded-[13px] bg-fq-panel-alt px-4 py-[10px] text-[13px] font-semibold text-fq-text-4">
+                                        {{ $lockRank->label() }}
+                                    </button>
+                                @elseif ($affordable)
                                     <button
                                         type="button"
                                         wire:click="redeem({{ $item->id }})"

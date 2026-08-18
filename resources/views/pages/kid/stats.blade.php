@@ -578,10 +578,16 @@ new class extends Component
                     'color' => 'var(--fq-lime)',
                 ],
                 [
-                    'label' => 'Level',
-                    'value' => 'LVL '.$this->profile->level(),
-                    'suffix' => number_format($this->profile->xp).' XP',
-                    'color' => 'var(--fq-cyan)',
+                    'label' => 'Rank',
+                    'value' => $this->profile->rank()->label(),
+                    // Keeps the XP total this tile has always carried and adds
+                    // the thing worth knowing next to it: the level the title
+                    // changes at. At the top rank there is nothing left to name.
+                    'suffix' => number_format($this->profile->xp).' XP · '
+                        .($this->profile->rank()->nextLevel() === null
+                            ? 'top rank'
+                            : 'next at LVL '.$this->profile->rank()->nextLevel()),
+                    'color' => $this->profile->rank()->ringVar(),
                 ],
                 [
                     'label' => 'Badges earned',

@@ -18,6 +18,13 @@ class StoreItemFactory extends Factory
             'description' => fake()->sentence(),
             'cost' => 100,
             'color_tag' => 'lime',
+            'min_level' => 0,
         ];
+    }
+
+    /** A reward a kid can see but not have until they reach `$level`. */
+    public function lockedUntilLevel(int $level): self
+    {
+        return $this->state(fn () => ['min_level' => $level]);
     }
 }

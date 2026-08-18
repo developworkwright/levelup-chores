@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\AccentColor;
 use App\Enums\MonsterTier;
 use App\Enums\ProfileRole;
+use App\Enums\Rank;
 use App\Enums\TradeAsset;
 use Illuminate\Auth\Authenticatable as AuthenticatableTrait;
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -44,6 +45,7 @@ class Profile extends Model implements Authenticatable
         'pin_hash',
         'points',
         'xp',
+        'xp_adjustment',
         'bonus_tickets',
         'tickets_granted_through_level',
         'streak',
@@ -178,17 +180,79 @@ class Profile extends Model implements Authenticatable
         return $this->role === ProfileRole::Kid;
     }
 
-    /** Flat curve on purpose — "200 XP is a level" is something a six-year-old can hold. */
+    /**
+     * What the first band of levels costs, and still the number a young kid
+     * holds in their head: "200 XP is a level".
+     */
     public const XP_PER_LEVEL = 200;
+
+    /**
+     * The curve is flat inside a band and steps up between them, rather than
+     * growing per level: a kid can be told "levels cost more from 11" and have
+     * that be the whole rule. At 50 XP a chore that's 4 chores a level, then 7,
+     * then 10 — climbing, but never so far that the next one stops feeling
+     * reachable.
+     *
+     * @var array<int, array{through: int|null, cost: int}>
+     */
+    private const LEVEL_BANDS = [
+        ['through' => 10, 'cost' => self::XP_PER_LEVEL],
+        ['through' => 20, 'cost' => 350],
+        ['through' => null, 'cost' => 500],
+    ];
+
+    /** What crossing out of `$level` into the next one costs. */
+    public static function xpToClearLevel(int $level): int
+    {
+        foreach (self::LEVEL_BANDS as $band) {
+            if ($band['through'] === null || $level <= $band['through']) {
+                return $band['cost'];
+            }
+        }
+
+        return self::XP_PER_LEVEL;
+    }
+
+    /** Total XP a kid must have banked to stand at the start of `$level`. */
+    public static function xpToReachLevel(int $level): int
+    {
+        $total = 0;
+
+        for ($crossed = 1; $crossed < $level; $crossed++) {
+            $total += self::xpToClearLevel($crossed);
+        }
+
+        return $total;
+    }
+
+    public static function levelForXp(int $xp): int
+    {
+        $level = 1;
+
+        while ($xp >= self::xpToClearLevel($level)) {
+            $xp -= self::xpToClearLevel($level);
+            $level++;
+        }
+
+        return $level;
+    }
 
     public function level(): int
     {
-        return 1 + intdiv($this->xp, self::XP_PER_LEVEL);
+        return self::levelForXp($this->xp);
+    }
+
+    public function rank(): Rank
+    {
+        return Rank::fromLevel($this->level());
     }
 
     public function xpBarPercent(): float
     {
-        return ($this->xp % self::XP_PER_LEVEL) / (self::XP_PER_LEVEL / 100);
+        $level = $this->level();
+        $into = $this->xp - self::xpToReachLevel($level);
+
+        return $into / (self::xpToClearLevel($level) / 100);
     }
 
     public function isLocked(): bool

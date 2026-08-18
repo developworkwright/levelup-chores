@@ -198,6 +198,89 @@
     --fq-badge-empty: #241a33;
     --fq-badge-empty-fg: #5b5074;
 
+    /*
+     * Ranks — the title worn every five levels. The ladder climbs from cold
+     * and dim to hot and bright, so a kid can tell who outranks who across a
+     * room without reading a word of it.
+     */
+    --fq-rank-prowler-ring: #9d8ac0;
+    --fq-rank-prowler-fill: linear-gradient(180deg, #241a33, #150c26);
+    --fq-rank-prowler-glow: rgba(157, 138, 192, 0.35);
+    --fq-rank-nightblade-ring: #d8b4ff;
+    --fq-rank-nightblade-fill: linear-gradient(180deg, #2a1150, #150c26);
+    --fq-rank-nightblade-glow: rgba(216, 180, 255, 0.4);
+    --fq-rank-bonebreaker-ring: #e8dcc0;
+    --fq-rank-bonebreaker-fill: linear-gradient(180deg, #2b2418, #150c26);
+    --fq-rank-bonebreaker-glow: rgba(232, 220, 192, 0.4);
+    --fq-rank-dreadhunter-ring: #7dffb0;
+    --fq-rank-dreadhunter-fill: linear-gradient(180deg, #0d3323, #150c26);
+    --fq-rank-dreadhunter-glow: rgba(125, 255, 176, 0.4);
+    --fq-rank-grimwarden-ring: #ffc93d;
+    --fq-rank-grimwarden-fill: linear-gradient(180deg, #2a2405, #150c26);
+    --fq-rank-grimwarden-glow: rgba(255, 201, 61, 0.45);
+    --fq-rank-voidreaver-ring: #ff6b8a;
+    --fq-rank-voidreaver-fill: linear-gradient(180deg, #3b0c1d, #150c26);
+    --fq-rank-voidreaver-glow: rgba(255, 107, 138, 0.5);
+    /*
+     * Past 30 the ladder walks the spectrum rather than climbing one hue —
+     * fourteen ranks of "slightly warmer gold" would be fourteen chips nobody
+     * could tell apart. Each is its own colour, ending white-hot at Deathless
+     * before the top rank stops being a colour at all.
+     */
+    --fq-rank-hellfang-ring: #ff5a3c;
+    --fq-rank-hellfang-fill: linear-gradient(180deg, #3d1108, #150c26);
+    --fq-rank-hellfang-glow: rgba(255, 90, 60, 0.45);
+    --fq-rank-ruinbringer-ring: #ff7a1f;
+    --fq-rank-ruinbringer-fill: linear-gradient(180deg, #3d1e05, #150c26);
+    --fq-rank-ruinbringer-glow: rgba(255, 122, 31, 0.45);
+    --fq-rank-soulreaper-ring: #ffa32e;
+    --fq-rank-soulreaper-fill: linear-gradient(180deg, #3d2a05, #150c26);
+    --fq-rank-soulreaper-glow: rgba(255, 163, 46, 0.45);
+    --fq-rank-deathsinger-ring: #ffdb5c;
+    --fq-rank-deathsinger-fill: linear-gradient(180deg, #3d3405, #150c26);
+    --fq-rank-deathsinger-glow: rgba(255, 219, 92, 0.45);
+    --fq-rank-shadowtyrant-ring: #b4ff3d;
+    --fq-rank-shadowtyrant-fill: linear-gradient(180deg, #253d05, #150c26);
+    --fq-rank-shadowtyrant-glow: rgba(180, 255, 61, 0.45);
+    --fq-rank-worldbreaker-ring: #3dffb0;
+    --fq-rank-worldbreaker-fill: linear-gradient(180deg, #053d28, #150c26);
+    --fq-rank-worldbreaker-glow: rgba(61, 255, 176, 0.45);
+    --fq-rank-starflayer-ring: #3dffd8;
+    --fq-rank-starflayer-fill: linear-gradient(180deg, #053d34, #150c26);
+    --fq-rank-starflayer-glow: rgba(61, 255, 216, 0.45);
+    --fq-rank-voidtyrant-ring: #4db8ff;
+    --fq-rank-voidtyrant-fill: linear-gradient(180deg, #052a3d, #150c26);
+    --fq-rank-voidtyrant-glow: rgba(77, 184, 255, 0.45);
+    --fq-rank-fatespinner-ring: #6b8aff;
+    --fq-rank-fatespinner-fill: linear-gradient(180deg, #0d143d, #150c26);
+    --fq-rank-fatespinner-glow: rgba(107, 138, 255, 0.45);
+    --fq-rank-skyrender-ring: #a06bff;
+    --fq-rank-skyrender-fill: linear-gradient(180deg, #1e0d3d, #150c26);
+    --fq-rank-skyrender-glow: rgba(160, 107, 255, 0.45);
+    --fq-rank-suneater-ring: #d04dff;
+    --fq-rank-suneater-fill: linear-gradient(180deg, #2e053d, #150c26);
+    --fq-rank-suneater-glow: rgba(208, 77, 255, 0.45);
+    --fq-rank-endbringer-ring: #ff4de0;
+    --fq-rank-endbringer-fill: linear-gradient(180deg, #3d0533, #150c26);
+    --fq-rank-endbringer-glow: rgba(255, 77, 224, 0.45);
+    --fq-rank-deathless-ring: #ffffff;
+    --fq-rank-deathless-fill: linear-gradient(180deg, #2a2a3d, #150c26);
+    --fq-rank-deathless-glow: rgba(255, 255, 255, 0.5);
+    /*
+     * The top rank borrows the badge board's trick — the one tier whose
+     * colours move — but keeps its own hotter hue order so a Doomlord chip and
+     * a rainbow star never read as the same award.
+     */
+    --fq-rank-doomlord-ring: #ff8ac7;
+    --fq-rank-doomlord-fill: linear-gradient(
+        100deg,
+        #3b0c1d,
+        #2a2405 30%,
+        #2a1150 60%,
+        #3b0c1d
+    );
+    --fq-rank-doomlord-glow: rgba(255, 138, 199, 0.55);
+
     /* The wheel is a wooden carnival prop, not a UI surface. */
     --fq-wheel-rim: repeating-conic-gradient(#2b1c10 0deg 3deg, #1c120a 3deg 6deg);
     --fq-wheel-ring: #3a2a18;

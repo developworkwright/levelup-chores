@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\Rank;
 use App\Enums\TicketKind;
 use App\Exceptions\InsufficientTicketsException;
 use App\Models\Badge;
@@ -22,6 +23,14 @@ class TicketService
 {
     /** Tickets handed out for crossing a single level. */
     public const PER_LEVEL = 1;
+
+    /**
+     * Paid on top of the level's own ticket when that level changes a kid's
+     * rank. Five times an ordinary level because it takes five to earn, and
+     * because a title that arrived with the same one ticket as any other
+     * Tuesday wouldn't feel like a promotion.
+     */
+    public const PER_RANK = 5;
 
     /** Tickets handed out for unlocking a single badge. */
     public const PER_BADGE = 1;
@@ -77,6 +86,11 @@ class TicketService
 
         $levelsGained = $level - $paidThrough;
 
+        // Ranks ride the same high-water mark rather than taking one of their
+        // own: a rank is a function of the level, so the mark that stops a
+        // level paying twice already stops its rank paying twice.
+        $ranksGained = Rank::countBetween(max($paidThrough, 1), $level);
+
         // Advance the mark first so a failure partway can't pay twice.
         $profile->tickets_granted_through_level = $level;
         $profile->save();
@@ -89,6 +103,17 @@ class TicketService
                 ? "Reached level {$level}"
                 : "Reached level {$level} (+{$levelsGained} levels)",
         );
+
+        if ($ranksGained > 0) {
+            $rank = Rank::fromLevel($level);
+
+            $this->record(
+                $profile,
+                TicketKind::RankUp,
+                $ranksGained * self::PER_RANK,
+                "Became a {$rank->label()}",
+            );
+        }
     }
 
     /** Called once as a badge is attached, so it can't pay out twice. */

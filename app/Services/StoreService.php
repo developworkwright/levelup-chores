@@ -6,6 +6,7 @@ use App\Enums\LedgerKind;
 use App\Enums\ProfileRole;
 use App\Enums\RedemptionStatus;
 use App\Exceptions\InsufficientPointsException;
+use App\Exceptions\LevelTooLowException;
 use App\Models\Profile;
 use App\Models\Redemption;
 use App\Models\StoreItem;
@@ -28,6 +29,12 @@ class StoreService
      */
     public function redeem(Profile $profile, StoreItem $item): Redemption
     {
+        // Level before points: a kid who can't have the thing yet shouldn't be
+        // told they're only short of points for it.
+        if ($item->isLockedFor($profile)) {
+            throw new LevelTooLowException($item->min_level);
+        }
+
         if ($profile->points < $item->cost) {
             throw new InsufficientPointsException($item->cost - $profile->points);
         }

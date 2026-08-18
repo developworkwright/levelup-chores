@@ -104,16 +104,33 @@ new class extends Component
                     >{{ $kid->streak }}d</span>
                 </div>
 
-                <div class="flex w-full flex-col items-center gap-[7px]">
+                {{-- The XP bar used to sit between the name and the level, and
+                     it took the eye first — which made the tile about how far
+                     along a bar somebody was, a thing that creeps daily and
+                     says nothing at a glance. What a kid wants off this screen
+                     is where they stand, so the level is the loudest thing on
+                     the tile and the rank names it underneath. How close the
+                     next one is belongs on a page they can read properly. --}}
+                <div class="flex w-full flex-col items-center gap-[5px]">
                     <span class="text-[15px] font-semibold">{{ $kid->name }}</span>
-                    <div class="h-[6px] w-full overflow-hidden rounded-full bg-fq-line">
-                        <div
-                            class="h-full rounded-full"
-                            style="width:{{ $kid->xpBarPercent() }}%; background: {{ $accent }}"
-                        ></div>
-                    </div>
-                    <span class="font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-4 uppercase">
+                    @php $rank = $kid->rank(); @endphp
+                    <span
+                        @class([
+                            'font-baloo text-[21px] leading-none font-extrabold',
+                            'fq-rainbow-ink' => $rank->isAnimated(),
+                        ])
+                        @style(['color: '.$rank->ringVar() => ! $rank->isAnimated()])
+                    >
                         LVL {{ $kid->level() }}
+                    </span>
+                    <span
+                        @class([
+                            'font-mono-fq text-[9px] font-semibold tracking-[0.14em] uppercase',
+                            'fq-rainbow-ink' => $rank->isAnimated(),
+                        ])
+                        @style(['color: '.$rank->ringVar() => ! $rank->isAnimated()])
+                    >
+                        {{ $rank->label() }}
                     </span>
                 </div>
             </a>
