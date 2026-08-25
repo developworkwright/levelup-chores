@@ -154,4 +154,11 @@ new class extends Component
             <span class="h-px flex-1 bg-fq-line"></span>
         </div>
     @endif
+
+    {{-- Last on the page on purpose. This is a door before it is an arcade: the
+         avatars have to be the first thing anyone sees, and the game has to be
+         something you scroll to rather than something you land in. It holds no
+         kid data — see the `arcade_scores` migration for why that is the whole
+         design of it. --}}
+    <livewire:arcade />
 </div>

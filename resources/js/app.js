@@ -10,6 +10,13 @@
  */
 import './monsters.js';
 
+/*
+ * The login page's arcade. Registers the `fqStacker` Alpine component and
+ * nothing else — it is only ever mounted on `/`, but bundling it here keeps
+ * the app to one script, which is the whole point of it installing as a PWA.
+ */
+import './arcade.js';
+
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js').catch(() => {});
