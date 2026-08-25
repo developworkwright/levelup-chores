@@ -1,7 +1,9 @@
 <?php
 
 use App\Enums\AccentColor;
+use App\Enums\ChoreIcon;
 use App\Enums\LedgerKind;
+use App\Enums\LootCategory;
 use App\Models\BonusPerk;
 use App\Models\Profile;
 use App\Models\StoreItem;
@@ -129,6 +131,60 @@ new class extends Component
         }
     }
 
+    /**
+     * Which reward's face and pile are being edited. One at a time — the two
+     * pickers together are a wall of buttons, and this is a control most
+     * rewards need once and never again.
+     */
+    public ?int $editingItemId = null;
+
+    public function toggleItemEditor(int $itemId): void
+    {
+        $this->editingItemId = $this->editingItemId === $itemId ? null : $itemId;
+    }
+
+    /** Sets a reward's face, or clears it when the same icon is tapped again. */
+    public function setItemIcon(int $itemId, string $icon): void
+    {
+        $item = $this->ownedItem($itemId);
+        $class = ChoreIcon::normalizeClass($icon);
+
+        if (! $item || $class === null) {
+            return;
+        }
+
+        // Tapping the current one clears it — the only way back to the plain
+        // colour disc once the keyword pass has guessed something.
+        $item->icon = $item->icon === $class ? null : $class;
+        $item->save();
+    }
+
+    /** Sets or clears the link to the actual thing. */
+    public function setItemUrl(int $itemId, string $url): void
+    {
+        if ($item = $this->ownedItem($itemId)) {
+            // Sanitised here rather than at render: the column is written by a
+            // parent but read by a child as a live link, so the scheme gets
+            // checked once, on the way in. See StoreItem::normalizeUrl().
+            $item->url = StoreItem::normalizeUrl($url);
+            $item->save();
+        }
+    }
+
+    /** Files a reward, or unfiles it when its current pile is tapped again. */
+    public function setItemCategory(int $itemId, string $category): void
+    {
+        $item = $this->ownedItem($itemId);
+        $case = LootCategory::tryFrom($category);
+
+        if (! $item || ! $case) {
+            return;
+        }
+
+        $item->category = $item->category === $case ? null : $case;
+        $item->save();
+    }
+
     public function removeItem(int $itemId): void
     {
         $this->ownedItem($itemId)?->delete();
@@ -160,12 +216,20 @@ new class extends Component
 
         $cost = max(25, (int) preg_replace('/\D/', '', $this->newLootCost) ?: 25);
 
+        $description = trim($this->newLootDesc);
+
         $item = StoreItem::create([
             'household_id' => $this->profile->household_id,
             'name' => $name,
-            'description' => trim($this->newLootDesc),
+            'description' => $description,
             'cost' => $cost,
             'color_tag' => $this->newLootColor,
+            // Filed and given a face from its own words, so a reward is
+            // browsable the moment it lands rather than waiting for someone to
+            // tidy up. Null when nothing fits: an item in the wrong pile is
+            // worse than one under "Everything else", because a kid hunting
+            // for it looks in the pile it should be in and gives up.
+            'category' => LootCategory::forText($name.' '.$description)?->value,
         ]);
 
         app(LedgerService::class)->record(
@@ -206,6 +270,26 @@ new class extends Component
                 <div wire:key="loot-{{ $item->id }}" class="flex gap-3 rounded-[18px] border border-fq-line bg-fq-panel p-[14px]">
                     <span class="self-stretch rounded-full" style="width:5px;background:{{ $item->color_tag->cssVar() }}"></span>
 
+                    {{-- The face and the pile, behind one tap. Both are what
+                         the kids actually browse by, so the swatch itself is
+                         the control rather than the row growing two more
+                         labelled buttons. --}}
+                    <button
+                        type="button"
+                        wire:click="toggleItemEditor({{ $item->id }})"
+                        title="{{ $item->category?->label() ?? 'Not sorted' }}{{ $item->icon ? '' : ' · no picture' }}"
+                        class="grid h-[46px] w-[46px] shrink-0 place-items-center self-start rounded-[14px] border transition hover:border-fq-lime"
+                        style="border-color: {{ $item->icon ? ($item->category?->colorVar() ?? 'var(--fq-gold)') : 'var(--fq-line-3)' }};
+                               background: var(--fq-sunk);
+                               color: {{ $item->category?->colorVar() ?? 'var(--fq-text-5)' }}"
+                    >
+                        @if ($item->icon)
+                            <x-chore-icon :icon="$item->icon" class="text-[22px]" />
+                        @else
+                            <span class="font-mono-fq text-[15px] leading-none">+</span>
+                        @endif
+                    </button>
+
                     <div class="flex-1">
                         <input
                             type="text" value="{{ $item->name }}"
@@ -217,6 +301,30 @@ new class extends Component
                             wire:blur="updateDescription({{ $item->id }}, $event.target.value)"
                             class="mt-1 w-full border-0 bg-transparent py-[3px] text-[13px] text-fq-text-4 outline-none focus:text-fq-text"
                         >
+
+                        {{-- On the row rather than behind the picture picker.
+                             Pasting a link is the fast half of adding something
+                             a kid asked for by name, and burying it under a
+                             control about *icons* meant opening one editor to
+                             do a job that has nothing to do with the other.
+
+                             Shown with a link glyph when set, so a row that
+                             already points somewhere says so without being
+                             read. --}}
+                        <div class="mt-1 flex items-center gap-2">
+                            <i
+                                aria-hidden="true"
+                                class="fa-fw fa-solid fa-link text-[11px]"
+                                style="color: {{ $item->url ? 'var(--fq-cyan)' : 'var(--fq-text-5)' }}"
+                            ></i>
+                            <input
+                                type="text"
+                                value="{{ $item->url }}"
+                                wire:blur="setItemUrl({{ $item->id }}, $event.target.value)"
+                                placeholder="Link — lego.com/the-one-they-asked-for"
+                                class="w-full border-0 bg-transparent py-[3px] text-[12.5px] text-fq-text-4 outline-none focus:text-fq-text"
+                            >
+                        </div>
 
                         <div class="mt-3 flex flex-wrap items-center gap-y-2 gap-x-3">
                             <button type="button" wire:click="adjustCost({{ $item->id }}, -25)" class="h-[30px] w-[30px] shrink-0 rounded-[10px] border border-fq-line-3 bg-fq-sunk">&minus;</button>
@@ -257,6 +365,66 @@ new class extends Component
 
                             <button type="button" wire:click="removeItem({{ $item->id }})" class="ml-auto shrink-0 rounded-[10px] border border-fq-danger-border px-3 py-1 text-xs text-fq-danger hover:bg-fq-danger-bg">Remove</button>
                         </div>
+
+                        @if ($editingItemId === $item->id)
+                            <div class="mt-3 rounded-[14px] border border-fq-line-2 bg-fq-sunk p-3">
+                                <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                                    Shelf &middot; how the kids find it
+                                </p>
+
+                                <div class="mt-2 flex flex-wrap gap-2">
+                                    @foreach (\App\Enums\LootCategory::cases() as $option)
+                                        <button
+                                            type="button"
+                                            wire:click="setItemCategory({{ $item->id }}, '{{ $option->value }}')"
+                                            class="inline-flex items-center gap-2 rounded-full border px-[11px] py-[6px] text-[12px] transition hover:brightness-125"
+                                            style="border-color: {{ $item->category === $option ? $option->colorVar() : 'var(--fq-line-3)' }};
+                                                   background: var(--fq-panel);
+                                                   color: {{ $item->category === $option ? $option->colorVar() : 'var(--fq-text-3)' }}"
+                                        >
+                                            <x-chore-icon :icon="$option->faClass()" class="text-[13px]" />
+                                            {{ $option->label() }}
+                                        </button>
+                                    @endforeach
+                                </div>
+
+                                <p class="mt-3 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                                    Picture
+                                </p>
+
+                                <div class="mt-2 grid grid-cols-8 gap-2">
+                                    @foreach (\App\Enums\ChoreIcon::cases() as $option)
+                                        <button
+                                            type="button"
+                                            wire:click="setItemIcon({{ $item->id }}, '{{ $option->faClass() }}')"
+                                            title="{{ $option->label() }}"
+                                            class="grid aspect-square place-items-center rounded-[12px] border transition hover:border-fq-lime"
+                                            style="border-color: {{ $item->icon === $option->faClass() ? 'var(--fq-gold)' : 'var(--fq-line-3)' }};
+                                                   background: var(--fq-panel);
+                                                   color: {{ $item->icon === $option->faClass() ? 'var(--fq-gold)' : 'var(--fq-text-3)' }}"
+                                        >
+                                            <x-chore-icon :icon="$option" class="text-[18px]" />
+                                        </button>
+                                    @endforeach
+                                </div>
+
+                                {{-- The presets are a shortlist, not the limit:
+                                     a rewards shop wants pictures a chore board
+                                     never needs, so any free Font Awesome class
+                                     is accepted here too. --}}
+                                <input
+                                    type="text"
+                                    value="{{ $item->icon }}"
+                                    wire:blur="setItemIcon({{ $item->id }}, $event.target.value)"
+                                    placeholder="or paste any Font Awesome class — fa-solid fa-bicycle"
+                                    class="mt-3 w-full rounded-[12px] border border-dashed border-fq-line-2 bg-fq-panel px-3 py-2 text-[13px] outline-none focus:border-fq-cyan"
+                                >
+
+                                <p class="mt-2 font-mono-fq text-[10px] text-fq-text-5">
+                                    Tap the gold one again to clear it.
+                                </p>
+                            </div>
+                        @endif
                     </div>
                 </div>
             @endforeach

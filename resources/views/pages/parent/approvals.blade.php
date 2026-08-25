@@ -424,8 +424,30 @@ new class extends Component
                             class="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-[12px] font-baloo text-sm font-extrabold text-fq-bg"
                             style="background:{{ $redemption->profile->color->cssVar() }}"
                         >{{ mb_substr($redemption->profile->name, 0, 1) }}</div>
-                        <div class="flex-1">
-                            <p class="text-[15px] font-semibold">{{ $redemption->storeItem->name }}</p>
+                        <div class="min-w-0 flex-1">
+                            {{-- The name is the link when there is one. A
+                                 redemption for a thing a kid picked out is a
+                                 shopping errand, and the page you need is the
+                                 one they were looking at — retyping it from
+                                 the Loot Shop admin is the step this removes.
+
+                                 Same new-tab rules as the kid's card: this
+                                 leaves the app for somewhere nobody here
+                                 controls. --}}
+                            @if ($redemption->storeItem->url)
+                                <a
+                                    href="{{ $redemption->storeItem->url }}"
+                                    target="_blank"
+                                    rel="noopener noreferrer nofollow"
+                                    class="inline-flex items-center gap-[6px] text-[15px] font-semibold transition hover:brightness-125"
+                                    style="color: var(--fq-cyan)"
+                                >
+                                    {{ $redemption->storeItem->name }}
+                                    <i aria-hidden="true" class="fa-fw fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+                                </a>
+                            @else
+                                <p class="text-[15px] font-semibold">{{ $redemption->storeItem->name }}</p>
+                            @endif
                             <p class="font-mono-fq text-[10px] text-fq-text-4">{{ $redemption->profile->name }} · {{ $redemption->requested_at->diffForHumans() }}</p>
                         </div>
                         <span class="font-baloo text-lg font-extrabold text-fq-gold">-{{ $redemption->cost_snapshot }}</span>

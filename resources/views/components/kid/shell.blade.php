@@ -50,7 +50,13 @@
     // One page now, so one count: swaps sent to this kid plus jobs stuck
     // behind them. The job half is the Quests page's bounty-board pill too, so
     // it lives in the service rather than being written out twice.
-    $counts = ['trades' => $offersWaiting + app(App\Services\BountyService::class)->waitingOn($profile)];
+    // Loot joins it because new rewards were the thing nobody ever found: the
+    // shop is a long shelf, the kids don't read it end to end, and a restock
+    // was invisible. A number on the tab is seen before the page is.
+    $counts = [
+        'trades' => $offersWaiting + app(App\Services\BountyService::class)->waitingOn($profile),
+        'loot' => app(App\Services\StoreService::class)->newCountFor($profile),
+    ];
 
     /*
      * Which world the rail lights up. A page can belong to two worlds, so the

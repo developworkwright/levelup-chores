@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\LootCategory;
 use App\Exceptions\InsufficientPointsException;
 use App\Exceptions\LevelTooLowException;
 use App\Models\Chore;
@@ -44,10 +45,37 @@ new class extends Component
 
     public string $search = '';
 
+    /**
+     * Which rewards were new when this visit started.
+     *
+     * Snapshotted in mount() and *not* recomputed, for the same reason the
+     * chest animations are: marking the shop seen has to happen the moment
+     * they arrive so the tab badge clears, but the NEW chips have to stay up
+     * for the whole visit. Recomputing in with() would strip every chip off
+     * the page the first time they tapped anything.
+     *
+     * @var array<int, int>
+     */
+    public array $newItemIds = [];
+
     public function mount(): void
     {
         $this->profile = Auth::guard('profile')->user();
         abort_unless($this->profile->isKid(), 403);
+
+        $store = app(StoreService::class);
+
+        $this->newItemIds = StoreItem::where('household_id', $this->profile->household_id)
+            ->when(
+                $this->profile->loot_seen_at !== null,
+                fn ($query) => $query->where('created_at', '>', $this->profile->loot_seen_at),
+            )
+            ->pluck('id')
+            ->all();
+
+        // After the snapshot, never before â€” this is the call that closes the
+        // gap the snapshot exists to describe.
+        $store->markShopSeen($this->profile);
     }
 
     public function clearSearch(): void
@@ -113,10 +141,48 @@ new class extends Component
         // something else has no business shortening.
         $matching = $items->filter(fn (StoreItem $item) => $item->matches($this->search));
 
+        $store = app(StoreService::class);
+
+        $favoriteIds = $store->favoriteIdsFor($this->profile);
+        $boughtBefore = $store->boughtBeforeFor($this->profile);
+
+        // Read off the mount snapshot, not off loot_seen_at â€” that marker has
+        // already been moved to now.
+        $isNew = array_flip($this->newItemIds);
+        $newItems = $matching->filter(fn (StoreItem $item) => isset($isNew[$item->id]));
+
         return [
             'items' => $items,
             'matchCount' => $matching->count(),
             'catalogCount' => $items->count(),
+            'favoriteIds' => $favoriteIds,
+            'boughtBefore' => $boughtBefore,
+            'newItems' => $newItems,
+            'isNew' => $isNew,
+            // Starred first, then whatever they keep coming back to. Two
+            // different signals, one shelf: a star is a wish, a repeat buy is
+            // a habit, and both belong above the wall rather than inside it.
+            'pinned' => $matching
+                ->filter(fn (StoreItem $item) => isset($favoriteIds[$item->id]) || isset($boughtBefore[$item->id]))
+                ->sortByDesc(fn (StoreItem $item) => [
+                    isset($favoriteIds[$item->id]) ? 1 : 0,
+                    $boughtBefore[$item->id] ?? 0,
+                ])
+                ->values(),
+            'categories' => collect(LootCategory::cases())
+                ->map(fn (LootCategory $category) => [
+                    'category' => $category,
+                    'items' => $matching->filter(fn (StoreItem $item) => $item->category === $category),
+                ])
+                ->reject(fn (array $shelf) => $shelf['items']->isEmpty())
+                // Anything nobody has filed still has to be reachable, or the
+                // category view would quietly hide part of the shop.
+                ->push([
+                    'category' => null,
+                    'items' => $matching->filter(fn (StoreItem $item) => $item->category === null),
+                ])
+                ->reject(fn (array $shelf) => $shelf['items']->isEmpty())
+                ->values(),
             'saving' => $saving,
             'savingPercent' => $saving && $saving->cost > 0
                 ? min(100, (int) round($this->profile->points / $saving->cost * 100))
@@ -132,6 +198,27 @@ new class extends Component
                 ])
                 ->reject(fn (array $band) => $band['items']->isEmpty()),
         ];
+    }
+
+    /**
+     * How the shelves are grouped. Price is the old view and still the right
+     * one for "what can I afford"; category answers "what kind of thing do I
+     * want", which is the question a kid who won't read the shop actually has.
+     */
+    public string $view = 'category';
+
+    public function setView(string $view): void
+    {
+        $this->view = $view === 'price' ? 'price' : 'category';
+    }
+
+    public function toggleFavorite(int $itemId): void
+    {
+        $item = StoreItem::where('household_id', $this->profile->household_id)->find($itemId);
+
+        if ($item) {
+            app(StoreService::class)->toggleFavorite($this->profile, $item);
+        }
     }
 }; ?>
 
@@ -260,84 +347,158 @@ new class extends Component
         </div>
     @endif
 
-    {{-- Shelves rather than one flat grid: the catalog now spans 100 to 2,000
-         points, and a price band is the fastest way to answer "what can I
-         actually afford today?" --}}
-    <div class="mt-[22px] flex flex-col gap-[22px]">
-        @foreach ($bands as $band)
-            <div wire:key="band-{{ $band['label'] }}">
-                <div class="flex items-baseline gap-[10px] border-b border-fq-line pb-[10px]">
-                    <h3 class="font-baloo text-[19px] font-extrabold">{{ $band['label'] }}</h3>
-                    <span class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">{{ $band['sub'] }}</span>
-                    <span class="ml-auto font-mono-fq text-[10px] text-fq-text-5-b">
-                        {{ $band['items']->count() }} {{ Str::plural('item', $band['items']->count()) }}
-                    </span>
-                </div>
-
-                <div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(216px,1fr))] gap-3">
-                    @foreach ($band['items'] as $item)
-                        @php
-                            $locked = $item->isLockedFor($profile);
-                            $affordable = $profile->points >= $item->cost;
-                            $isGoal = $saving && $saving->id === $item->id;
-                            $lockRank = $locked ? App\Enums\Rank::fromLevel($item->min_level) : null;
-                        @endphp
-
-                        <div
-                            wire:key="item-{{ $item->id }}"
-                            @class([
-                                'flex flex-col gap-3 rounded-[20px] border bg-fq-panel p-4',
-                                // Dimmed, never hidden. A locked reward the kid
-                                // can read is the reason to climb; one filtered
-                                // off the shelf is nothing at all.
-                                'opacity-70' => $locked,
-                            ])
-                            style="border-color: {{ $locked ? $lockRank->ringVar() : ($affordable ? 'var(--fq-line-focus)' : 'var(--fq-line)') }}"
-                        >
-                            <span class="h-[6px] rounded-full" style="background:{{ $locked ? $lockRank->ringVar() : $item->color_tag->cssVar() }}"></span>
-
-                            <div class="flex-1">
-                                <p class="text-[16px] font-semibold">{{ $item->name }}</p>
-                                <p class="mt-1 text-[13px] leading-[1.35] text-fq-text-4">{{ $item->description }}</p>
-                            </div>
-
-                            @if ($locked)
-                                <span
-                                    class="self-start rounded-full border bg-fq-sunk px-[11px] py-[5px] font-mono-fq text-[10px] tracking-[0.1em] uppercase"
-                                    style="border-color: {{ $lockRank->ringVar() }}; color: {{ $lockRank->ringVar() }}"
-                                >Unlocks at LVL {{ $item->min_level }}</span>
-                            @else
-                                <button
-                                    type="button"
-                                    wire:click="saveFor({{ $item->id }})"
-                                    class="self-start rounded-full border border-fq-line bg-fq-sunk px-[11px] py-[5px] font-mono-fq text-[10px] tracking-[0.1em] uppercase transition hover:border-fq-line-4"
-                                    style="color: {{ $isGoal ? 'var(--fq-gold)' : 'var(--fq-text-4)' }}"
-                                >{{ $isGoal ? 'Saving for this' : 'Save for this' }}</button>
-                            @endif
-
-                            <div class="flex items-center justify-between gap-2">
-                                <span class="font-baloo text-[19px] font-extrabold text-fq-gold">{{ $item->cost }} pts</span>
-                                @if ($locked)
-                                    <button type="button" disabled class="cursor-default rounded-[13px] bg-fq-panel-alt px-4 py-[10px] text-[13px] font-semibold text-fq-text-4">
-                                        {{ $lockRank->label() }}
-                                    </button>
-                                @elseif ($affordable)
-                                    <button
-                                        type="button"
-                                        wire:click="redeem({{ $item->id }})"
-                                        class="rounded-[13px] px-4 py-[10px] text-[13px] font-semibold text-fq-bg transition hover:brightness-110"
-                                        style="background:var(--fq-cyan)"
-                                    >Cash out</button>
-                                @else
-                                    <button type="button" disabled class="cursor-default rounded-[13px] bg-fq-panel-alt px-4 py-[10px] text-[13px] font-semibold text-fq-text-4">
-                                        Need {{ $item->cost - $profile->points }}
-                                    </button>
-                                @endif
-                            </div>
-                        </div>
-                    @endforeach
-                </div>
+    {{-- 1. What they already want. Starred and repeat-bought rewards pinned
+         above the wall, because the two things a kid is most likely to be
+         after are the thing they wished for and the thing they keep having.
+         Absent entirely when there is nothing in it — an empty "favorites"
+         heading is just something else to scroll past. --}}
+    @if ($pinned->isNotEmpty())
+        <div class="mt-[22px]">
+            <div class="flex items-baseline gap-[10px] border-b border-fq-line pb-[10px]">
+                <h3 class="font-baloo text-[19px] font-extrabold">
+                    <i aria-hidden="true" class="fa-solid fa-star mr-2 text-[15px]" style="color: var(--fq-gold)"></i>Yours
+                </h3>
+                <span class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Starred &amp; bought before</span>
             </div>
-        @endforeach
+
+            <div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(216px,1fr))] gap-3">
+                @foreach ($pinned as $item)
+                    <x-loot-card
+                        wire:key="pinned-{{ $item->id }}"
+                        :item="$item"
+                        :profile="$profile"
+                        :saving="$saving"
+                        :is-new="isset($isNew[$item->id])"
+                        :favorite="isset($favoriteIds[$item->id])"
+                        :bought-count="$boughtBefore[$item->id] ?? 0"
+                    />
+                @endforeach
+            </div>
+        </div>
+    @endif
+
+    {{-- 2. What has just arrived. Pinned rather than flagged in place: the
+         whole reason new rewards went unnoticed is that finding one meant
+         reading the entire shop, and a chip halfway down a shelf nobody
+         scrolls is no better than no chip at all. --}}
+    @if ($newItems->isNotEmpty())
+        <div class="mt-[22px]">
+            <div class="flex items-baseline gap-[10px] border-b pb-[10px]" style="border-color: color-mix(in srgb, var(--fq-lime) 40%, transparent)">
+                <h3 class="font-baloo text-[19px] font-extrabold">
+                    <i aria-hidden="true" class="fa-solid fa-wand-magic-sparkles mr-2 text-[15px]" style="color: var(--fq-lime)"></i>New in
+                </h3>
+                <span class="font-mono-fq text-[10px] tracking-[0.14em] uppercase" style="color: var(--fq-lime)">
+                    Since you last looked
+                </span>
+            </div>
+
+            <div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(216px,1fr))] gap-3">
+                @foreach ($newItems as $item)
+                    <x-loot-card
+                        wire:key="new-{{ $item->id }}"
+                        :item="$item"
+                        :profile="$profile"
+                        :saving="$saving"
+                        :is-new="true"
+                        :favorite="isset($favoriteIds[$item->id])"
+                        :bought-count="$boughtBefore[$item->id] ?? 0"
+                    />
+                @endforeach
+            </div>
+        </div>
+    @endif
+
+    {{-- 3. The catalogue, grouped two ways.
+
+         They answer two different questions: price answers "what can I afford
+         today", kind answers "what sort of thing do I want" — and the second
+         is the one a kid who won't read the shop actually has. Kind leads for
+         that reason; price is still there for the day they are counting. --}}
+    <div class="mt-[26px] flex flex-wrap items-center justify-between gap-3">
+        <h3 class="font-baloo text-[19px] font-extrabold">Everything</h3>
+
+        <div class="flex gap-[6px] rounded-full border border-fq-line-2 bg-fq-sunk p-[3px]">
+            @foreach ([['category', 'By kind'], ['price', 'By price']] as $option)
+                <button
+                    type="button"
+                    wire:click="setView('{{ $option[0] }}')"
+                    @class([
+                        'rounded-full px-[14px] py-[6px] font-mono-fq text-[10px] tracking-[0.14em] uppercase transition',
+                        'font-semibold' => $view === $option[0],
+                    ])
+                    style="{{ $view === $option[0]
+                        ? 'background: var(--fq-tab-active); color: var(--fq-lime)'
+                        : 'background: transparent; color: var(--fq-text-4)' }}"
+                >{{ $option[1] }}</button>
+            @endforeach
+        </div>
+    </div>
+
+    <div class="mt-3 flex flex-col gap-[22px]">
+        @if ($view === 'category')
+            @foreach ($categories as $shelf)
+                <div wire:key="cat-{{ $shelf['category']?->value ?? 'other' }}">
+                    <div class="flex items-baseline gap-[10px] border-b border-fq-line pb-[10px]">
+                        <h4 class="font-baloo text-[17px] font-extrabold">
+                            @if ($shelf['category'])
+                                <x-chore-icon
+                                    :icon="$shelf['category']->faClass()"
+                                    class="mr-2 text-[15px]"
+                                    style="color: {{ $shelf['category']->colorVar() }}"
+                                />
+                            @endif
+                            {{ $shelf['category']?->label() ?? 'Everything else' }}
+                        </h4>
+                        <span class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                            {{ $shelf['category']?->blurb() ?? 'Not sorted yet' }}
+                        </span>
+                        <span class="ml-auto font-mono-fq text-[10px] text-fq-text-5-b">
+                            {{ $shelf['items']->count() }} {{ Str::plural('item', $shelf['items']->count()) }}
+                        </span>
+                    </div>
+
+                    <div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(216px,1fr))] gap-3">
+                        @foreach ($shelf['items'] as $item)
+                            <x-loot-card
+                                wire:key="item-{{ $item->id }}"
+                                :item="$item"
+                                :profile="$profile"
+                                :saving="$saving"
+                                :is-new="isset($isNew[$item->id])"
+                                :favorite="isset($favoriteIds[$item->id])"
+                                :bought-count="$boughtBefore[$item->id] ?? 0"
+                            />
+                        @endforeach
+                    </div>
+                </div>
+            @endforeach
+        @else
+            @foreach ($bands as $band)
+                <div wire:key="band-{{ $band['label'] }}">
+                    <div class="flex items-baseline gap-[10px] border-b border-fq-line pb-[10px]">
+                        <h4 class="font-baloo text-[17px] font-extrabold">{{ $band['label'] }}</h4>
+                        <span class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">{{ $band['sub'] }}</span>
+                        <span class="ml-auto font-mono-fq text-[10px] text-fq-text-5-b">
+                            {{ $band['items']->count() }} {{ Str::plural('item', $band['items']->count()) }}
+                        </span>
+                    </div>
+
+                    <div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(216px,1fr))] gap-3">
+                        @foreach ($band['items'] as $item)
+                            <x-loot-card
+                                wire:key="item-{{ $item->id }}"
+                                :item="$item"
+                                :profile="$profile"
+                                :saving="$saving"
+                                :is-new="isset($isNew[$item->id])"
+                                :favorite="isset($favoriteIds[$item->id])"
+                                :bought-count="$boughtBefore[$item->id] ?? 0"
+                            />
+                        @endforeach
+                    </div>
+                </div>
+            @endforeach
+        @endif
     </div>
 </x-kid.shell>
+

@@ -7,10 +7,12 @@ use App\Enums\ProfileRole;
 use App\Enums\RedemptionStatus;
 use App\Exceptions\InsufficientPointsException;
 use App\Exceptions\LevelTooLowException;
+use App\Models\LootFavorite;
 use App\Models\Profile;
 use App\Models\Redemption;
 use App\Models\StoreItem;
 use App\Notifications\ParentApprovalNeeded;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
@@ -79,6 +81,102 @@ class StoreService
         }
 
         return $redemption;
+    }
+
+    /**
+     * How many rewards have landed since this kid last opened the shop.
+     *
+     * The number the Spend rail button wears. It is the whole answer to "they
+     * never see the new things": a badge on the tab is seen before the shop
+     * is, which is the only place a kid who doesn't read the shelves will
+     * notice anything has changed.
+     */
+    public function newCountFor(Profile $profile): int
+    {
+        return StoreItem::where('household_id', $profile->household_id)
+            ->when(
+                $profile->loot_seen_at !== null,
+                fn ($query) => $query->where('created_at', '>', $profile->loot_seen_at),
+            )
+            ->count();
+    }
+
+    /**
+     * Marks the shop as looked at.
+     *
+     * Called on render, *after* the page has worked out what was new — the
+     * same ordering MonsterService::markSeen() needs, and for the same reason:
+     * marking first would erase the very gap the page exists to show.
+     */
+    public function markShopSeen(Profile $profile): void
+    {
+        $profile->loot_seen_at = now();
+        $profile->save();
+    }
+
+    /**
+     * How many times this kid has actually had each reward, keyed by item id.
+     *
+     * The half of "favorites" worth deriving rather than storing. A star says
+     * what a kid is dreaming about; a repeat purchase says what actually moves
+     * them, and it needs nothing taught and no taps.
+     *
+     * Counts fulfilled redemptions only. A pending request is a wish that has
+     * not been granted yet, and a rejected one is a wish that was turned down
+     * — neither is evidence of anything.
+     *
+     * @return array<int, int>
+     */
+    public function boughtBeforeFor(Profile $profile): array
+    {
+        return Redemption::where('profile_id', $profile->id)
+            ->where('status', RedemptionStatus::Fulfilled)
+            ->selectRaw('store_item_id, count(*) as total')
+            ->groupBy('store_item_id')
+            ->pluck('total', 'store_item_id')
+            ->map(fn ($total) => (int) $total)
+            ->all();
+    }
+
+    /** Star or unstar a reward. Returns whether it is starred afterwards. */
+    public function toggleFavorite(Profile $profile, StoreItem $item): bool
+    {
+        if ($item->household_id !== $profile->household_id) {
+            return false;
+        }
+
+        $existing = LootFavorite::where('profile_id', $profile->id)
+            ->where('store_item_id', $item->id)
+            ->first();
+
+        if ($existing) {
+            $existing->delete();
+
+            return false;
+        }
+
+        try {
+            LootFavorite::create([
+                'profile_id' => $profile->id,
+                'store_item_id' => $item->id,
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            // A double tap that beat its own lookup. It is starred either way,
+            // which is what the caller asked for.
+            return true;
+        }
+
+        return true;
+    }
+
+    /** @return array<int, true> Item ids this kid has starred. */
+    public function favoriteIdsFor(Profile $profile): array
+    {
+        return LootFavorite::where('profile_id', $profile->id)
+            ->pluck('store_item_id')
+            ->flip()
+            ->map(fn () => true)
+            ->all();
     }
 
     public function fulfill(Redemption $redemption, Profile $approver): void

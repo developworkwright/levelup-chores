@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 
 use App\Models\Chore;
 use App\Models\Profile;
@@ -14,7 +14,7 @@ new class extends Component
     /**
      * The daily targets offered, as multiples of what a chore round here
      * typically pays. Multiples rather than fixed point values so the ladder
-     * fits a household of 10-point chores and one of 500-point chores alike â€”
+     * fits a household of 10-point chores and one of 500-point chores alike —
      * "one chore a day" has to mean the same thing in both.
      */
     private const LADDER = [1, 2, 3, 4, 5, 6];
@@ -165,9 +165,9 @@ new class extends Component
             'chosenPlan' => $chosenPlan,
             /*
              * The whole page in one number. Only shown once all of its parts
-             * exist â€” something to save for, a daily target, and a date near
-             * enough to be worth naming â€” because a banner reading "â€” days
-             * until â€”" is worse than no banner at all.
+             * exist — something to save for, a daily target, and a date near
+             * enough to be worth naming — because a banner reading "— days
+             * until —" is worse than no banner at all.
              */
             'countdown' => $saving && $remaining > 0 && $chosenPlan && $chosenPlan['days'] !== null
                 ? $chosenPlan
@@ -210,7 +210,7 @@ new class extends Component
                         {{ Str::plural('day', $countdown['days']) }} until {{ $saving->name }} is yours
                     </p>
                     <p class="mt-1 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-3 uppercase">
-                        If you earn {{ number_format($dailyGoal) }} points a day Â·
+                        If you earn {{ number_format($dailyGoal) }} points a day ·
                         {{ $countdown['date']->toFormattedDateString() }}
                     </p>
                 </div>
@@ -219,7 +219,7 @@ new class extends Component
 
         {{-- One column now. The monsters and the family plan that used to sit
              beside this moved to the Arena, where the rest of what the house
-             shares already lives â€” this page is the kid's own goal and nothing
+             shares already lives — this page is the kid's own goal and nothing
              else. --}}
         <div class="flex flex-wrap items-start gap-[14px]">
             <div class="flex min-w-0 flex-[1_1_100%] flex-col gap-[14px]">
@@ -316,25 +316,25 @@ new class extends Component
                     <p class="mt-2 font-mono-fq text-[11px] text-fq-text-4">
                         TODAY {{ number_format($earnedToday) }} / {{ number_format($dailyGoal) }} PTS
                         @if ($earnedToday >= $dailyGoal)
-                            Â· <span class="text-fq-lime">DONE FOR TODAY</span>
+                            · <span class="text-fq-lime">DONE FOR TODAY</span>
                         @endif
                     </p>
 
                     @if ($chosenPlan && $savingRemaining > 0)
                         <p class="mt-3 text-sm text-fq-text-2">
                             @if ($chosenPlan['days'] === null)
-                                That's a slow road â€” try a bigger daily number below and watch the date jump.
+                                That's a slow road — try a bigger daily number below and watch the date jump.
                             @else
                                 Keep that up and <span class="font-semibold text-fq-text">{{ $saving->name }}</span>
                                 is yours in
                                 <span class="font-baloo text-base font-extrabold text-fq-gold">{{ $chosenPlan['days'] }}</span>
-                                {{ Str::plural('day', $chosenPlan['days']) }} â€” by
+                                {{ Str::plural('day', $chosenPlan['days']) }} — by
                                 <span class="font-semibold text-fq-text">{{ $chosenPlan['date']->toFormattedDateString() }}</span>.
                             @endif
                         </p>
                     @elseif ($saving && $savingRemaining <= 0)
                         <p class="mt-3 text-sm font-semibold text-fq-lime">
-                            You've already got enough for {{ $saving->name }} â€” go cash it out!
+                            You've already got enough for {{ $saving->name }} — go cash it out!
                         </p>
                     @endif
 
@@ -349,7 +349,7 @@ new class extends Component
                     </p>
                 @else
                     <p class="mt-2 text-sm text-fq-text-2">
-                        You haven't set one yet. Pick a number below â€” you can change it any time.
+                        You haven't set one yet. Pick a number below — you can change it any time.
                     </p>
                 @endif
 

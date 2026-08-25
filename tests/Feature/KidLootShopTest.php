@@ -57,6 +57,7 @@ class KidLootShopTest extends TestCase
         $this->loginKid($household, ['points' => 0]);
 
         Volt::test('kid.loot')
+            ->call('setView', 'price')
             ->assertSee('Treat yourself')
             ->assertSee('Under 150 pts')
             ->assertSee('Worth a few days')
@@ -74,6 +75,7 @@ class KidLootShopTest extends TestCase
 
         // An empty shelf is worse than no shelf — it reads as a loading bug.
         Volt::test('kid.loot')
+            ->call('setView', 'price')
             ->assertSee('Treat yourself')
             ->assertDontSee('Worth a few days')
             ->assertDontSee('Big ticket');
@@ -92,6 +94,7 @@ class KidLootShopTest extends TestCase
         // 150 and 1000 are the shelf floors, so all three bands exist and the
         // edges land above rather than below.
         Volt::test('kid.loot')
+            ->call('setView', 'price')
             ->assertSee('Treat yourself')
             ->assertSee('Worth a few days')
             ->assertSee('Big ticket');
@@ -107,6 +110,7 @@ class KidLootShopTest extends TestCase
         $this->loginKid($household, ['points' => 0]);
 
         Volt::test('kid.loot')
+            ->call('setView', 'price')
             ->assertSee('150 – 999 pts')
             ->assertDontSee('150 – 499 pts')
             ->assertDontSee('500 pts and up');
@@ -244,6 +248,7 @@ class KidLootShopTest extends TestCase
         $this->loginKid($household, ['points' => 0]);
 
         Volt::test('kid.loot')
+            ->call('setView', 'price')
             ->set('search', 'lego')
             ->assertSee('Lego set')
             ->assertDontSee('Ice cream run')

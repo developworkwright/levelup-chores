@@ -180,6 +180,32 @@ class RedemptionRejectionTest extends TestCase
         $this->assertSame('not before dinner', $redemption->fresh()->reject_reason);
     }
 
+    public function test_a_redemption_links_straight_to_the_thing_that_was_asked_for(): void
+    {
+        $this->item->update(['url' => 'https://lego.com/the-set']);
+        $this->request();
+
+        Auth::guard('profile')->login($this->parent);
+
+        // The request is a shopping errand: the page you need is the one they
+        // were looking at, not one to go and find again in the shop admin.
+        Volt::test('parent.approvals')
+            ->assertSee('https://lego.com/the-set')
+            ->assertSee('Extra screen time');
+    }
+
+    public function test_a_redemption_with_nothing_to_link_to_stays_plain_text(): void
+    {
+        $this->item->update(['url' => null]);
+        $this->request();
+
+        Auth::guard('profile')->login($this->parent);
+
+        Volt::test('parent.approvals')
+            ->assertSee('Extra screen time')
+            ->assertDontSee('fa-arrow-up-right-from-square');
+    }
+
     public function test_a_parent_cannot_reject_another_households_redemption(): void
     {
         $other = Household::factory()->create();

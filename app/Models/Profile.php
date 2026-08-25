@@ -51,6 +51,7 @@ class Profile extends Model implements Authenticatable
         'streak',
         'pending_streak_chest',
         'badges_seen_at',
+        'loot_seen_at',
         'level_seen',
         'pending_mystery_celebration',
         'saving_for_store_item_id',
@@ -81,6 +82,7 @@ class Profile extends Model implements Authenticatable
             'pending_monster_kills' => 'array',
             'locked_until' => 'datetime',
             'badges_seen_at' => 'datetime',
+            'loot_seen_at' => 'datetime',
             'sleep_card_enabled' => 'boolean',
         ];
     }
