@@ -198,7 +198,7 @@ class ChoreSearchTest extends TestCase
      */
     private function householdWithBoard(array $names): Household
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
 
         Chore::factory()->for($household)->create(['name' => 'The daily quest', 'quest_eligible' => true]);
 

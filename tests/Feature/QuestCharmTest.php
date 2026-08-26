@@ -53,7 +53,7 @@ class QuestCharmTest extends TestCase
      */
     private function householdWithChores(array $points): array
     {
-        $household = Household::factory()->create(['require_quest_first' => true]);
+        $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['age' => 10]);
 
         foreach ($points as $i => $value) {

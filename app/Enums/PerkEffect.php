@@ -15,7 +15,6 @@ enum PerkEffect: string
     case QuestReroll = 'quest_reroll';
     case StreakRestore = 'streak_restore';
     case MysteryHint = 'mystery_hint';
-    case QuestSkip = 'quest_skip';
     case NameMonster = 'name_monster';
     case NightSaver = 'night_saver';
     case QuestCharm = 'quest_charm';
@@ -76,16 +75,6 @@ enum PerkEffect: string
                 'description' => "Get a clue about which chore is today's Mystery Chore.",
                 'cost' => 6,
                 'glyph' => '?',
-            ],
-            // The dearest thing in the shop, and deliberately dearer than
-            // Streak Restore: a restore buys back one day you already lost,
-            // while this keeps the chain *and* opens the board without the
-            // quest being done at all.
-            self::QuestSkip => [
-                'name' => 'Day Off',
-                'description' => "Skip today's main quest — the board opens and your streak survives. Once a week, and you earn nothing for it.",
-                'cost' => 8,
-                'glyph' => '»',
             ],
             self::NameMonster => [
                 'name' => 'Name a Monster',

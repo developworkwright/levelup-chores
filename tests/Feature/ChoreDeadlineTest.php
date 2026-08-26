@@ -42,7 +42,7 @@ class ChoreDeadlineTest extends TestCase
      */
     private function household(array $attributes = []): Household
     {
-        $household = Household::factory()->create($attributes + ['require_quest_first' => false]);
+        $household = Household::factory()->create($attributes);
 
         Chore::factory()->for($household)->create([
             'name' => 'The quest',
@@ -131,21 +131,6 @@ class ChoreDeadlineTest extends TestCase
         $this->assertSame('expired', $this->service()->stateFor($kid->fresh(), $chore->refresh()));
     }
 
-    public function test_the_board_reads_expired_rather_than_locked_when_the_quest_gate_is_on(): void
-    {
-        $household = $this->household(['require_quest_first' => true]);
-        $kid = Profile::factory()->for($household)->create();
-        $chore = $this->chore($household, now()->addHour());
-
-        Carbon::setTestNow(now()->addHours(2));
-
-        $entry = $this->service()->boardFor($kid->fresh())->firstWhere('chore.id', $chore->id);
-
-        // "Locked" promises the chore is theirs once the quest is done, which
-        // is exactly the wrong thing to say about one that has already closed.
-        $this->assertSame('expired', $entry['state']);
-    }
-
     public function test_a_closed_chore_is_never_handed_out_as_a_quest(): void
     {
         $household = Household::factory()->create();
@@ -158,8 +143,8 @@ class ChoreDeadlineTest extends TestCase
             'expires_at' => now()->subHour(),
         ]);
 
-        // A quest nobody can clear costs a streak day and leaves a gated board
-        // gated — the same dead end a spent one-time chore would create.
+        // A quest nobody can clear costs a streak night — the same dead end a
+        // spent one-time chore would create.
         $this->assertSame($safe->id, $this->service()->questFor($kid)->chore_id);
     }
 

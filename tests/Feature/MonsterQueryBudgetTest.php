@@ -37,7 +37,7 @@ class MonsterQueryBudgetTest extends TestCase
     {
         parent::setUp();
 
-        $this->household = Household::factory()->create(['require_quest_first' => false]);
+        $this->household = Household::factory()->create();
         $this->kid = Profile::factory()->for($this->household)->create();
         Profile::factory()->for($this->household)->create();
         Profile::factory()->parent()->for($this->household)->create();

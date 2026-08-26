@@ -37,7 +37,7 @@ class BoardOrderTest extends TestCase
      */
     private function household(): Household
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
 
         Chore::factory()->for($household)->create([
             'name' => 'The quest',

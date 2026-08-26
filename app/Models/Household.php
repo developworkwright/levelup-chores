@@ -19,7 +19,6 @@ class Household extends Model
         'weekly_prize',
         'weekly_prize_note',
         'points_per_dollar',
-        'require_quest_first',
         'spin_enabled',
         'sleep_card_enabled',
         'sleep_constellation_points',
@@ -32,7 +31,6 @@ class Household extends Model
     protected function casts(): array
     {
         return [
-            'require_quest_first' => 'boolean',
             'spin_enabled' => 'boolean',
             'sleep_card_enabled' => 'boolean',
             'lucky_hold_won' => 'boolean',

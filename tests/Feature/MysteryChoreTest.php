@@ -182,7 +182,7 @@ class MysteryChoreTest extends TestCase
         // That kid has done the work and is one approval away from the bonus.
         // Plenty of alternatives exist, so a null here is the guard talking
         // rather than an empty pool.
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
         Chore::factory()->for($household)->count(4)->create();
 
@@ -195,7 +195,7 @@ class MysteryChoreTest extends TestCase
     {
         // Swapping after the payout would hang a second +500 on a different
         // chore the same day.
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create();
         Chore::factory()->for($household)->count(4)->create();
@@ -212,7 +212,7 @@ class MysteryChoreTest extends TestCase
         // up: the chore is on cooldown for the whole household, so nobody can
         // win today's bonus on it any more. Refusing the swap would leave the
         // parent with a dead mystery for the rest of the day.
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create();
         $settled = Chore::factory()->for($household)->create(['name' => 'Already signed off']);
@@ -252,7 +252,7 @@ class MysteryChoreTest extends TestCase
 
     public function test_claiming_the_mystery_chore_awards_nothing_on_its_own(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $winner = Profile::factory()->for($household)->create();
         $chore = Chore::factory()->for($household)->create(['points' => 100]);
 
@@ -273,7 +273,7 @@ class MysteryChoreTest extends TestCase
 
     public function test_approving_the_mystery_chore_pays_the_bonus(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
         $winner = Profile::factory()->for($household)->create(['points' => 0]);
         $chore = Chore::factory()->for($household)->create(['points' => 100]);
@@ -291,7 +291,7 @@ class MysteryChoreTest extends TestCase
     {
         // One entry, not two — the ledger is what the parent's Activity feed
         // reads, and a split payout there would read as the chore paying twice.
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
         $winner = Profile::factory()->for($household)->create(['points' => 0]);
         $chore = Chore::factory()->for($household)->create(['points' => 100]);
@@ -307,7 +307,7 @@ class MysteryChoreTest extends TestCase
 
     public function test_a_sent_back_mystery_claim_wins_nothing(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create(['points' => 0]);
         $chore = Chore::factory()->for($household)->create(['points' => 100]);
@@ -324,7 +324,7 @@ class MysteryChoreTest extends TestCase
 
     public function test_the_race_survives_a_rejection_and_the_next_kid_can_win_it(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
         $first = Profile::factory()->for($household)->create();
         $second = Profile::factory()->for($household)->create(['points' => 0]);
@@ -340,7 +340,7 @@ class MysteryChoreTest extends TestCase
 
     public function test_approving_an_ordinary_chore_pays_no_bonus(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create(['points' => 0]);
         // Hinted chores win the draw outright, which pins the mystery here.
@@ -356,7 +356,7 @@ class MysteryChoreTest extends TestCase
 
     public function test_the_bonus_is_paid_once_even_if_approve_is_called_twice(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create(['points' => 0]);
         $chore = Chore::factory()->for($household)->create(['points' => 100]);
@@ -377,7 +377,7 @@ class MysteryChoreTest extends TestCase
         // quietly costs a kid the bonus they won at bedtime.
         Carbon::setTestNow(Carbon::parse('2026-08-05 18:00:00'));
 
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create(['points' => 0]);
         $chore = Chore::factory()->for($household)->create(['points' => 100]);
@@ -399,7 +399,7 @@ class MysteryChoreTest extends TestCase
 
     public function test_the_mystery_chore_stays_in_the_normal_side_quest_board(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
         $chore = Chore::factory()->for($household)->create(['name' => 'Sweep the porch']);
         $filler = Chore::factory()->for($household)->create(['name' => 'Filler chore']);
@@ -423,7 +423,7 @@ class MysteryChoreTest extends TestCase
 
     public function test_a_second_kid_cannot_claim_the_mystery_chore_once_someone_else_has(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $first = Profile::factory()->for($household)->create();
         $second = Profile::factory()->for($household)->create();
         $chore = Chore::factory()->for($household)->create(['points' => 500]);
@@ -460,7 +460,7 @@ class MysteryChoreTest extends TestCase
 
     public function test_a_rejected_mystery_claim_reopens_it_for_everyone(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
         $first = Profile::factory()->for($household)->create();
         $chore = Chore::factory()->for($household)->create();
@@ -477,7 +477,7 @@ class MysteryChoreTest extends TestCase
         // board, same as any chore — only its mystery status/bonus is
         // secret. This checks the board entry's own payout stays normal
         // (100) while the separate status card teases the real bonus.
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
         Chore::factory()->for($household)->create(['name' => 'Sweep the porch', 'points' => 100]);
         $filler = Chore::factory()->for($household)->create(['name' => 'Filler quest chore']);
@@ -511,7 +511,7 @@ class MysteryChoreTest extends TestCase
      */
     private function pinnedMystery(): array
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
         $chore = Chore::factory()->for($household)->create(['name' => 'Scrub the tub']);
         Chore::factory()->for($household)->create(['name' => 'Filler chore', 'cadence' => 'unlimited']);

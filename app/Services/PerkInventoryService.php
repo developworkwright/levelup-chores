@@ -113,7 +113,6 @@ class PerkInventoryService
                 : null,
             PerkEffect::StreakRestore => $this->streakRestoreReason($profile),
             PerkEffect::MysteryHint => $this->mysteryHintReason($profile),
-            PerkEffect::QuestSkip => $this->questSkipReason($profile),
             PerkEffect::NameMonster => $this->monsters->nameable($profile->household) === null
                 ? 'Nothing left to name'
                 : null,
@@ -152,7 +151,6 @@ class PerkInventoryService
             PerkEffect::QuestReroll => $this->applyQuestReroll($profile),
             PerkEffect::StreakRestore => $this->applyStreakRestore($profile),
             PerkEffect::MysteryHint => $this->applyMysteryHint($profile),
-            PerkEffect::QuestSkip => $this->applyQuestSkip($profile),
             PerkEffect::NameMonster => $this->applyNameMonster($profile, $input),
             PerkEffect::NightSaver => $this->applyNightSaver($profile),
             PerkEffect::QuestCharm => $this->applyQuestCharm($profile),
@@ -240,34 +238,6 @@ class PerkInventoryService
         }
 
         return "Hint unlocked: {$hint}";
-    }
-
-    private function applyQuestSkip(Profile $profile): string
-    {
-        if (! $this->chores->skipQuestToday($profile)) {
-            throw new PerkUnavailableException('There is nothing to skip today.');
-        }
-
-        return 'Day off — the board is open and your streak is safe.';
-    }
-
-    /**
-     * One day off a week, and the refusal says when the next one is rather than
-     * just "no".
-     *
-     * A date is the difference between a rule and a wall: a kid who can read
-     * "Back on Mon 18 Aug" knows to save it for the day they actually need it,
-     * where "already used" only tells them they've lost something.
-     */
-    private function questSkipReason(Profile $profile): ?string
-    {
-        if ($next = $this->chores->nextQuestSkipDate($profile)) {
-            return 'Back on '.$next->format('D j M');
-        }
-
-        return $this->chores->isQuestDoneToday($profile)
-            ? "Today's quest is already cleared"
-            : null;
     }
 
     /**

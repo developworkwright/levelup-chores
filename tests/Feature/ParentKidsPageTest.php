@@ -395,23 +395,6 @@ class ParentKidsPageTest extends TestCase
             ->assertDontSee('Not opened yet');
     }
 
-    public function test_a_bought_day_off_is_shown_as_one(): void
-    {
-        // The kid's own page says "Day Off · Board Open". The parent's said
-        // "Not opened yet", which reads as a kid who has done nothing rather
-        // than one who spent tickets on a rest day.
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->create();
-        $this->actingAsParent($household);
-
-        $this->assertTrue(app(ChoreService::class)->skipQuestToday($kid));
-
-        Volt::test('parent.kids')
-            ->assertSee('Day off — bought', escape: false)
-            ->assertDontSee('Not opened yet');
-    }
-
     public function test_an_opened_quest_can_still_be_swapped(): void
     {
         // Opening the chest doesn't commit the kid to anything, so the parent's

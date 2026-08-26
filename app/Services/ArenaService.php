@@ -111,9 +111,9 @@ class ArenaService
 
         $today = HouseholdClock::for($to->household)->today();
 
-        // Nothing on the line: the quest is in, or the day was bought off and
-        // there is no quest left to be poked about.
-        if ($this->chores->isQuestDoneToday($to) || $this->chores->hasSkippedQuestToday($to)) {
+        // Nothing on the line: the quest is in, so there is nothing to be poked
+        // about.
+        if ($this->chores->isQuestDoneToday($to)) {
             return false;
         }
 
@@ -195,11 +195,9 @@ class ArenaService
 
         $today = HouseholdClock::for($target->household)->today();
 
-        // Nothing to rescue: the quest is in, the target bought the day off
-        // themselves, or somebody already rescued them tonight. The unique
-        // index backs the last one up against a race.
+        // Nothing to rescue: the quest is in, or somebody already rescued them
+        // tonight. The unique index backs the second one up against a race.
         if ($this->chores->isQuestDoneToday($target)
-            || $this->chores->hasSkippedQuestToday($target)
             || $this->chores->wasRescuedOn($target, $today)) {
             return false;
         }
@@ -253,7 +251,6 @@ class ArenaService
         return match (true) {
             $rescuer->is($target) => 'You can\'t rescue your own run',
             $target->streak < 1 => 'No run to save yet',
-            $this->chores->hasSkippedQuestToday($target) => 'They bought the day off',
             $this->chores->wasRescuedOn($target, $today) => 'Already rescued tonight',
             $rescuer->bonus_tickets < self::RESCUE_COST => 'Not enough tickets',
             default => null,
@@ -267,7 +264,6 @@ class ArenaService
      * @return Collection<int, array{
      *     profile: Profile,
      *     state: string,
-     *     dayOff: bool,
      *     streak: int,
      *     quest: string,
      *     clearedAt: ?Carbon,
@@ -303,10 +299,6 @@ class ArenaService
                 return [
                     'profile' => $kid,
                     'state' => $state,
-                    // Safe for two different reasons, and every lane has to say
-                    // which: "Quest cleared" over a day nobody worked is the
-                    // screen taking credit on the kid's behalf.
-                    'dayOff' => $this->chores->hasSkippedQuestToday($kid),
                     'streak' => $kid->streak,
                     'quest' => $quest->isPicked() ? $quest->chore->name : 'Not picked yet',
                     'clearedAt' => $quest->completed_at,
@@ -323,14 +315,6 @@ class ArenaService
     public function stateFor(Profile $kid, bool $questDone): string
     {
         if ($questDone) {
-            return self::STATE_SAFE;
-        }
-
-        // A bought day off is safe, not open. There is no quest left to clear
-        // — that is what was paid for — and the streak already counts the day
-        // as kept, so a candle over this lane would be the Arena warning a kid
-        // about a run that is in no danger at all.
-        if ($this->chores->hasSkippedQuestToday($kid)) {
             return self::STATE_SAFE;
         }
 

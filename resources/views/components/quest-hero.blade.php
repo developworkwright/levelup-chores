@@ -33,11 +33,6 @@
     'questApproved',
     'questPending',
     'questSentBack',
-    // Whether the board below is actually still locked behind this quest —
-    // ChoreService::boardIsGated(), passed in rather than read off the
-    // household flag here. A bought day off opens the board with the quest
-    // still open, and the copy promising the unlock has to know that.
-    'boardGated',
     'questCardMessage' => null,
     'boost' => null,
     'questBoosted' => false,
@@ -165,10 +160,9 @@
         accent="var(--fq-lime)"
         kicker="Quest Chest · Open It"
         :closed-title="$questCards->count() > 1 ? 'Choose your quest' : 'Today\'s main quest is inside'"
-        :closed-text="($questCards->count() > 1
+        :closed-text="$questCards->count() > 1
             ? $questCards->count().' cards are inside. Take one, burn the rest.'
-            : 'Worth +'.number_format($questPoints).' pts.')
-            .($boardGated ? ' Side quests unlock the moment it\'s cleared.' : '')"
+            : 'Worth +'.number_format($questPoints).' pts.'"
         opening-text="The chest is rattling..."
         cta="Open"
         {{-- Only when a charm is sitting unused. Buying one changes a
@@ -248,11 +242,11 @@
 
             <p class="mt-2 max-w-[420px] text-sm text-fq-text-2">
                 @if ($questDone)
-                    Quest cleared. Every side quest below is unlocked for today.
+                    Quest cleared. Your streak keeps climbing tonight.
                 @elseif ($questSentBack)
                     A parent sent this one back — finish it off and mark it done again.
                 @else
-                    Clear this one first — the side quests stay locked until it's done.
+                    Clear this one to keep your streak — the side quests below are open whenever you want them.
                 @endif
             </p>
 

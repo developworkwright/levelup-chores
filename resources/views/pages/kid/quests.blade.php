@@ -31,9 +31,9 @@ use Livewire\Volt\Component;
  * the boss all sat on it too, which made it a long page a kid had to already
  * know their way around. Those moved to Home, which is organised by *when*
  * rather than by what kind of thing something is. What's left here is the work:
- * the quest that gates the board (<x-quest-hero>, shared with Home so there is
- * one implementation of the chest rather than two), the side quests, the
- * gratitude quest, the bounty board and the mystery chore.
+ * the main quest (<x-quest-hero>, shared with Home so there is one
+ * implementation of the chest rather than two), the side quests, the gratitude
+ * quest, the bounty board and the mystery chore.
  */
 new class extends Component
 {
@@ -75,10 +75,8 @@ new class extends Component
     /**
      * Board states a kid can't act on right now.
      *
-     * 'locked' is deliberately absent: with require_quest_first on it covers
-     * the entire board, so hiding it would leave a kid staring at nothing and
-     * no clue why. 'pending' is absent too — their own claim waiting on a
-     * parent is progress, and the card is the only proof the tap landed.
+     * 'pending' is deliberately absent — their own claim waiting on a parent
+     * is progress, and the card is the only proof the tap landed.
      *
      * @var array<int, string>
      */
@@ -470,11 +468,7 @@ new class extends Component
 
         // stateFor() already accounts for the mystery chore's household-wide
         // (not per-kid) exclusivity, so no special-casing is needed here.
-        if (
-            $service->boardIsGated($this->profile)
-            || $chore->id === $quest->chore_id
-            || ! $chore->isAppropriateFor($this->profile)
-        ) {
+        if ($chore->id === $quest->chore_id || ! $chore->isAppropriateFor($this->profile)) {
             return false;
         }
 
@@ -687,8 +681,6 @@ new class extends Component
             'dailyGoalPercent' => $this->profile->daily_points_goal > 0
                 ? min(100, (int) round($earnedToday / $this->profile->daily_points_goal * 100))
                 : 0,
-            'allUnlocked' => ! $service->boardIsGated($this->profile),
-            'questSkipped' => $service->hasSkippedQuestToday($this->profile),
         ];
     }
 }; ?>
@@ -781,7 +773,6 @@ new class extends Component
             :quest-approved="$questApproved"
             :quest-pending="$questPending"
             :quest-sent-back="$questSentBack"
-            :board-gated="! $allUnlocked"
             :quest-card-message="$questCardMessage"
             :boost="$boost"
             :quest-boosted="$questBoosted"
@@ -874,15 +865,11 @@ new class extends Component
         {{-- 4. Side quests --}}
         <div class="flex flex-wrap items-center justify-between gap-2">
             <h3 class="font-baloo text-xl font-bold">Side Quests</h3>
-            {{-- A bought day says so rather than reading as "All Unlocked":
-                 the kid spent eight tickets on it and should see where the
-                 open board came from. --}}
-            <span class="font-mono-fq text-[10px] tracking-[0.14em] uppercase" style="color: {{ $allUnlocked ? 'var(--fq-lime)' : 'var(--fq-gold)' }}">
-                @if ($questSkipped)
-                    Day Off &middot; Board Open
-                @else
-                    {{ $allUnlocked ? 'All Unlocked' : 'Locked Until Quest Is Done' }}
-                @endif
+            {{-- The board no longer waits on the main quest, so there is no
+                 lock state left to report — this says what is true instead of
+                 labelling the only condition there is. --}}
+            <span class="font-mono-fq text-[10px] tracking-[0.14em] uppercase" style="color: var(--fq-lime)">
+                Any of them, any order
             </span>
         </div>
 
@@ -988,7 +975,6 @@ new class extends Component
                     $boostColor = $boosted && $boost->multiplier === 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)';
                     $labels = [
                         'ready' => 'Mark it done',
-                        'locked' => 'Locked',
                         'pending' => 'Pending approval',
                         // "Back tomorrow" on a chore a sibling took reads as
                         // "you already did this" — the one wording that could
@@ -1008,7 +994,7 @@ new class extends Component
                 @endphp
                 <div
                     wire:key="chore-{{ $chore->id }}"
-                    class="flex flex-col rounded-[18px] border bg-fq-panel p-[15px] {{ $state === 'locked' ? 'opacity-55' : '' }} {{ $takenBy || $state === 'expired' ? 'opacity-70' : '' }} {{ $chore->isOneTime() || $closesAt ? 'border-2' : 'border border-fq-line' }}"
+                    class="flex flex-col rounded-[18px] border bg-fq-panel p-[15px] {{ $takenBy || $state === 'expired' ? 'opacity-70' : '' }} {{ $chore->isOneTime() || $closesAt ? 'border-2' : 'border border-fq-line' }}"
                     style="{{ $state === 'pending' ? 'border-color: var(--fq-success-border)' : ($closesAt ? 'border-color: color-mix(in srgb, var(--fq-cyan) 55%, transparent)' : ($chore->isOneTime() ? 'border-color: color-mix(in srgb, var(--fq-gold) 55%, transparent); background: var(--fq-wash-gold)' : '')) }}"
                 >
                     <div class="flex items-start justify-between gap-2">

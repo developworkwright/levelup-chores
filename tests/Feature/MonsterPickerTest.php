@@ -43,7 +43,6 @@ class MonsterPickerTest extends TestCase
         parent::setUp();
 
         $this->household = Household::factory()->create([
-            'require_quest_first' => false,
         ]);
 
         $this->kid = Profile::factory()->for($this->household)->create(['name' => 'Nova']);

@@ -41,7 +41,7 @@ class KidHomePageTest extends TestCase
     {
         parent::setUp();
 
-        $this->household = Household::factory()->create(['require_quest_first' => false]);
+        $this->household = Household::factory()->create();
 
         // Pinned to the middle of the day: the standings draw an at-risk state
         // off the household's evening watch hour, and a test run that happens

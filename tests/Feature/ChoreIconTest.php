@@ -289,7 +289,7 @@ class ChoreIconTest extends TestCase
 
     public function test_the_quest_card_draws_the_icon_when_a_chore_has_one(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => true]);
+        $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['age' => 10]);
 
         Chore::factory()->for($household)->create([
@@ -315,7 +315,7 @@ class ChoreIconTest extends TestCase
         // A board of identical text rows is unusable to a kid who can't read
         // them; the picture is the only thing that makes it scannable, and it
         // used to stop existing the moment the hand burned.
-        $household = Household::factory()->create(['require_quest_first' => true]);
+        $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['age' => 10]);
 
         // Three faceless chores to fill the hand, so the only icon anywhere on
@@ -349,7 +349,7 @@ class ChoreIconTest extends TestCase
     {
         // The hand burns after the pick. Without the face on the quest itself
         // the picture a pre-reader actually chose from is simply gone.
-        $household = Household::factory()->create(['require_quest_first' => true]);
+        $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['age' => 10]);
 
         $chore = Chore::factory()->for($household)->create([
@@ -373,7 +373,7 @@ class ChoreIconTest extends TestCase
 
     public function test_a_chore_with_no_icon_falls_back_to_the_typographic_face(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => true]);
+        $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['age' => 10]);
 
         Chore::factory()->for($household)->create([
@@ -395,7 +395,7 @@ class ChoreIconTest extends TestCase
 
     public function test_the_hand_is_a_row_of_fixed_cards_not_a_stretched_grid(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => true]);
+        $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['age' => 10]);
 
         foreach ([50, 150, 400] as $points) {

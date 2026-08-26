@@ -43,7 +43,7 @@ class QuestPageLayoutTest extends TestCase
         // Pinned to the middle of the day, like BountyBoardTest: settling a
         // bounty runs badge evaluation, and the wall-clock badges would
         // otherwise mint XP into an overnight run's assertions.
-        $this->household = Household::factory()->create(['require_quest_first' => false]);
+        $this->household = Household::factory()->create();
 
         $this->travelTo(Carbon::parse('2026-05-01 12:00', $this->household->timezone));
 

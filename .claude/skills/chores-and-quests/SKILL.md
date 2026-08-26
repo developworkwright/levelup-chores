@@ -35,7 +35,7 @@ Hands are dealt per kid and independently, so two kids can draw the same chore. 
 - `offered_chore_ids` — the hand, cheapest first. Null on rows written before this existed; **always read it through `DailyQuest::offeredChoreIds()`**, which reads null as a one-card hand of `chore_id`.
 - `chore_id` — **a placeholder until the pick, the quest afterwards.** It is deliberately never null, so every existing consumer of `$quest->chore` keeps working. Before the pick it holds the first card and means nothing.
 - `dealt_at` — the chest has been opened and the cards are on the table.
-- `revealed_at` — a card has been taken. This keeps its exact old meaning of "the kid knows what their quest is": it gates the board and it starts the `speed_runner` timer. `DailyQuest::isPicked()` is the readable form.
+- `revealed_at` — a card has been taken. This keeps its exact old meaning of "the kid knows what their quest is", and it starts the `speed_runner` timer. `DailyQuest::isPicked()` is the readable form.
 
 Two stamps rather than one because there is a refresh-shaped gap between opening the chest and choosing: without `dealt_at` the chest re-closes on any re-render and replays a 2.6s animation the kid already sat through.
 
@@ -74,7 +74,9 @@ Three invariants worth not breaking:
 
 `SpinService::eligibleChoresFor()` clears the same set for the same reason — any card might turn out to be the quest, so the wheel can't land on one. Note this makes an empty wheel more likely in a small household; `spin()` throws on an empty pool and the wheel page guards in front of the call rather than around it.
 
-If `household.require_quest_first` is true, every other chore on the board is `'locked'` until `quest.completed_at` is set (`claimQuest()`). Claiming the quest also calls `claim()` for the quest's chore, so it flows through the same points/mystery path as any other chore. The streak moves at parent approval, not here (see [[streaks]]).
+**The quest gates nothing.** `household.require_quest_first` and the `'locked'` board state are gone: side quests are claimable whether or not the main quest is done. The gate existed to stop kids cherry-picking the easy chores, but the bold card, the Quest Charm and the wheel already make the quest the better-paying move, and in practice the lock was the thing keeping kids from browsing the board at all. Don't reintroduce a claim-time check for it — `choreIsClaimable()` on the Quests page and `boostClaim()` on Home were the two second copies of that rule, and both are gone.
+
+`claimQuest()` calls `claim()` for the quest's chore, so it flows through the same points/mystery path as any other chore. The streak moves at parent approval, not here (see [[streaks]]) — clearing the quest is now the *only* thing the quest is for.
 
 ### A sent-back quest reopens
 
@@ -89,7 +91,7 @@ The hero's CTA stays live and reads "Mark it done again", with a separate `Sent 
 
 ### Auto-reroll of a blocked quest
 
-Because cooldowns are household-wide, a sibling can finish the chore that was handed to you as today's quest. That would dead-end the kid's day: no quest completion, no streak day, and with `require_quest_first` on, a board that never unlocks.
+Because cooldowns are household-wide, a sibling can finish the chore that was handed to you as today's quest. That would dead-end the kid's day: no quest completion and no streak day.
 
 **Before the pick, the hand is what matters, not `chore_id`.** `rerollIfUnavailable()` branches on `isPicked()` first: an unpicked quest is only stuck when `handIsDead()` — every card claimed, expired or deleted — and re-deals then. A sibling taking the placeholder card leaves two perfectly good cards on the table, and re-dealing over a hand the kid may already be reading would be worse than the problem. Everything below applies to a quest that has been picked.
 
@@ -108,7 +110,6 @@ Four conditions guard it, each protecting something real:
 
 `boardFor(Profile)` returns each appropriate chore as `['chore' => Chore, 'state' => string, 'takenBy' => ?Profile, 'closesAt' => ?Carbon]`, where `takenBy` is the claimant when it isn't this kid and `closesAt` is a live deadline. States:
 
-- `'locked'` — quest not done yet and `require_quest_first` is on.
 - `'pending'` — **this** profile holds the in-flight claim.
 - `'done'` — someone in the household holds it: another kid's pending claim, or anyone's approved claim inside the cadence boundary (`ChoreCadence::Weekly` → last 7 household-days; otherwise last 1).
 - `'expired'` — a parent's deadline has passed (below). Unclaimable for the rest of the household day.
@@ -136,7 +137,6 @@ A parent can put any chore on a clock from the Chores admin — "beat me to it b
 - **A deadline binds only for the household day it lands in.** `Chore::hasExpiredAt($now, $dayStart)` returns false for a stamp older than `$dayStart`, so it lifts on its own overnight and nobody has to clear it — that's why there is no scheduled job and no `used_at`-style release path. `ChoreService::isExpired()` / `deadlineFor()` wrap it with the clock, exactly as `claimantFor()` does.
 - **`Chore::scopeNotExpiredAt()` is the SQL twin** of `hasExpiredAt()`, kept beside it the way `scopeMatching()` and `matches()` are. Used by `questCandidates()` and `BadgeService::clearedWholeBoardToday()` — a closed chore must never be handed out as a quest (it would never reopen today, costing a streak day) nor counted toward a perfect board (which would make the badge unwinnable).
 - **A claim outranks a deadline.** `stateFrom()` checks the claimant first: someone who got there before the clock ran out keeps their pending claim rather than watching it flip to "time's up".
-- **`'expired'` outranks `'locked'`.** Gating hides the ordinary states behind the main quest, but "Locked" promises the chore is yours once the quest is done — the wrong thing to say about one that has already closed.
 - **Closed chores stay on the board** reading "Time's up", rather than vanishing like a spent one-time chore. The countdown only teaches anything if losing it is visible.
 - **`drawMysteryChore()` rejects expired chores** — hiding the bonus behind a chore nobody can claim means nobody wins it. `SpinService::eligibleChoresFor()` needs no change; it already filters on `stateFor() === 'ready'`.
 - **`HouseholdClock::atTime('17:00')`** maps a wall-clock time onto the household day in progress and returns UTC (same reason `startOf()` does). A time earlier than `day_boundary_hour` belongs to the small hours at the *end* of the day — on a 4am boundary, "2:00" means tonight. It returns null for anything unparseable, so a blank input lifts the deadline rather than resolving to midnight.

@@ -14,7 +14,6 @@ use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\MysteryHintPurchase;
 use App\Models\Profile;
-use App\Models\QuestSkip;
 use App\Models\StreakRepair;
 use App\Models\StreakRescue;
 use App\Notifications\ChoreClosingSoon;
@@ -705,86 +704,6 @@ class ChoreService
         return $this->questFor($profile)->completed_at !== null;
     }
 
-    /** Whether this kid has bought today off. */
-    public function hasSkippedQuestToday(Profile $profile): bool
-    {
-        return $this->questSkippedOn($profile, HouseholdClock::for($profile->household)->today());
-    }
-
-    private function questSkippedOn(Profile $profile, Carbon $date): bool
-    {
-        return QuestSkip::where('profile_id', $profile->id)
-            ->whereDate('skip_date', $date)
-            ->exists();
-    }
-
-    /**
-     * The day this kid may next buy off, or null when they can do it now.
-     *
-     * One a week, counted from the household's own week start — the same
-     * boundary the monsters' weak points rotate on, so "a new week" means one
-     * thing across the app. A day off is meant to be a day off; without the cap
-     * a kid with tickets to spare can hold a streak having done nothing for a
-     * fortnight, and the streak chests pay real money.
-     */
-    public function nextQuestSkipDate(Profile $profile): ?Carbon
-    {
-        $weekStart = HouseholdClock::for($profile->household)->today()->startOfWeek();
-
-        $usedThisWeek = QuestSkip::where('profile_id', $profile->id)
-            ->whereDate('skip_date', '>=', $weekStart->toDateString())
-            ->exists();
-
-        return $usedThisWeek ? $weekStart->copy()->addWeek() : null;
-    }
-
-    /**
-     * Buys today off: the board opens without the quest, and the streak counts
-     * the day as kept.
-     *
-     * Returns false when there is nothing to buy — the quest is already
-     * cleared, or this week's day off has been taken — so the perk can refuse
-     * without being spent. Nothing here pays out: skipping the work skips the
-     * points with it, which is the whole trade.
-     *
-     * The weekly cap is enforced here and not only in `blockedReason()`. A rule
-     * that lives only in the thing that greys out a button is a rule that any
-     * second caller quietly ignores.
-     */
-    public function skipQuestToday(Profile $profile): bool
-    {
-        if ($this->isQuestDoneToday($profile) || $this->nextQuestSkipDate($profile) !== null) {
-            return false;
-        }
-
-        QuestSkip::create([
-            'profile_id' => $profile->id,
-            'skip_date' => HouseholdClock::for($profile->household)->today(),
-        ]);
-
-        // The chain moves on the day being kept, not on a chore being approved,
-        // so this is where a bought day joins the run.
-        $this->refreshStreak($profile);
-
-        return true;
-    }
-
-    /**
-     * Whether the rest of the board is still locked behind today's quest.
-     *
-     * One place, because three callers ask it — the board itself, the claim
-     * path behind it, and the page's own copy — and a gate that three people
-     * calculate is a gate that eventually disagrees with itself.
-     */
-    public function boardIsGated(Profile $profile): bool
-    {
-        if (! $profile->household->require_quest_first) {
-            return false;
-        }
-
-        return ! $this->isQuestDoneToday($profile) && ! $this->hasSkippedQuestToday($profile);
-    }
-
     /**
      * Point chores for the board, excluding the assigned quest, each
      * annotated with ['chore' => Chore, 'state' => string]. The mystery
@@ -793,8 +712,6 @@ class ChoreService
      */
     public function boardFor(Profile $profile): Collection
     {
-        $gated = $this->boardIsGated($profile);
-
         // Every card still on the table comes off the board, not just the one
         // the quest row currently points at. Before the pick that row holds a
         // placeholder, so keying on it alone would leave two of the three cards
@@ -812,20 +729,14 @@ class ChoreService
         return $profile->household->chores
             ->filter(fn (Chore $chore) => $chore->isAppropriateFor($profile))
             ->reject(fn (Chore $chore) => in_array($chore->id, $questChoreIds, true))
-            ->map(function (Chore $chore) use ($profile, $gated) {
+            ->map(function (Chore $chore) use ($profile) {
                 $claimant = $chore->cadence === ChoreCadence::Unlimited
                     ? null
                     : $this->claimantFor($chore);
 
-                $state = $this->stateFrom($profile, $claimant, $this->isExpired($chore));
-
                 return [
                     'chore' => $chore,
-                    // Gating hides the ordinary states behind the main quest,
-                    // but never a closed one: "Locked" promises the chore is
-                    // yours once the quest is done, which is precisely the
-                    // wrong thing to say about one that has already run out.
-                    'state' => $gated && $state !== 'expired' ? 'locked' : $state,
+                    'state' => $this->stateFrom($profile, $claimant, $this->isExpired($chore)),
                     // Who took it, when that someone isn't this kid. The board
                     // names them so nobody starts scrubbing a bathtub a sibling
                     // already claimed — finding that out at submit time means
@@ -1601,9 +1512,9 @@ class ChoreService
         // The ladder is climbed on *earned* nights only. A sibling's rescue
         // keeps the run standing — questApprovedOn() says so — but buying
         // somebody a milestone is a different thing entirely, and the copy on
-        // the rescue button promises it doesn't happen. Repairs and days off
-        // are deliberately not subtracted here: those are bought by the kid
-        // whose run it is, out of their own tickets, and have always counted.
+        // the rescue button promises it doesn't happen. A repair is deliberately
+        // not subtracted here: it is bought by the kid whose run it is, out of
+        // their own tickets, and has always counted.
         $ladder = $profile->streak - $this->rescuedNightsInRun($profile);
 
         // Walked day by day rather than over a fixed map, because the track
@@ -1745,16 +1656,11 @@ class ChoreService
             ->whereDate('repaired_date', $date)
             ->exists();
 
-        // A bought day counts exactly as a repaired one does. Both answer the
-        // same question — does this day count without the quest being done —
-        // and the two perks differ only in when they are bought: a restore
-        // rescues yesterday, a day off is taken in advance.
-        //
-        // A sibling's rescue joins them *for this question only*. It keeps the
+        // A sibling's rescue counts here exactly as a repair does. It keeps the
         // run alive, and it is excluded from the milestone ladder separately —
         // see refreshStreak(). Answering "no" here instead would end the run,
         // which is the one thing a rescue is bought to prevent.
-        if ($repaired || $this->wasRescuedOn($profile, $date) || $this->questSkippedOn($profile, $date)) {
+        if ($repaired || $this->wasRescuedOn($profile, $date)) {
             return true;
         }
 

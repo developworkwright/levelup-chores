@@ -34,7 +34,7 @@ class BonusChestTimingTest extends TestCase
     {
         parent::setUp();
 
-        $this->household = Household::factory()->create(['require_quest_first' => false]);
+        $this->household = Household::factory()->create();
         $this->travelTo(Carbon::parse('2026-05-04 12:00', $this->household->timezone));
 
         $this->kid = Profile::factory()->for($this->household)->create(['age' => 10]);

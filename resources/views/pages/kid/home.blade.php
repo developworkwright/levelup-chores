@@ -464,21 +464,6 @@ new class extends Component
             ];
         }
 
-        // Through boardIsGated() rather than re-reading the household flag
-        // here. A bought day off opens the board without the quest ever being
-        // cleared, and this second copy of the rule never heard about it: the
-        // card went on refusing the claim over a board the Quests page had
-        // already opened. Guarded on $quest so the gate is never asked in a
-        // household with nothing to draw one from, where questFor() throws.
-        if ($quest && $service->boardIsGated($this->profile)) {
-            return [
-                'claimable' => false,
-                'label' => 'Main quest first',
-                'note' => 'Clear today\'s main quest and this unlocks.',
-                'toQuests' => true,
-            ];
-        }
-
         $state = $service->stateFor($this->profile, $chore);
         $claimant = $service->claimantFor($chore);
 
@@ -639,10 +624,6 @@ new class extends Component
             'questCharmPayout' => $quest ? $service->charmPayoutFor($this->profile) : 0,
             'questClosesAt' => $quest ? $service->deadlineFor($quest->chore) : null,
             'questDone' => $quest?->completed_at !== null,
-            // Asked once, for the hero's copy and the boost card alike. Only
-            // with a quest in hand: boardIsGated() draws one, and a household
-            // with nothing to draw from makes that throw.
-            'boardGated' => $quest ? $service->boardIsGated($this->profile) : false,
             'questApproved' => $completion?->status === CompletionStatus::Approved,
             'questPending' => $completion?->status === CompletionStatus::Pending,
             'questSentBack' => $completion?->status === CompletionStatus::Rejected,
@@ -789,7 +770,6 @@ new class extends Component
                     :quest-approved="$questApproved"
                     :quest-pending="$questPending"
                     :quest-sent-back="$questSentBack"
-                    :board-gated="$boardGated"
                     :quest-card-message="$questCardMessage"
                     :boost="$boost"
                     :quest-boosted="$questBoosted"
@@ -1476,7 +1456,7 @@ new class extends Component
                 :status="$standings->isEmpty()
                     ? null
                     : ($openCount === 0
-                        ? ($standings->contains('dayOff', true) ? 'Everyone safe' : 'Everyone cleared')
+                        ? 'Everyone cleared'
                         : $openCount.' still open')"
                 :status-color="$openCount === 0 ? 'var(--fq-lime)' : 'var(--fq-text-4)'"
             />
@@ -1495,12 +1475,6 @@ new class extends Component
                                 $isMe = $kid->is($profile);
 
                                 [$stateLabel, $stateInk] = match (true) {
-                                    // Ahead of the state, which reads safe for a
-                                    // bought day as much as for a cleared one —
-                                    // the run is in the same shape either way,
-                                    // but the row must not report work that
-                                    // nobody did.
-                                    $row['dayOff'] => ['Day off', 'var(--fq-gold)'],
                                     $row['state'] === App\Services\ArenaService::STATE_SAFE => ['Cleared', 'var(--fq-lime)'],
                                     $row['state'] === App\Services\ArenaService::STATE_AT_RISK => ['At risk', 'var(--fq-streak)'],
                                     $row['state'] === App\Services\ArenaService::STATE_BROKEN => ['Back to zero', 'var(--fq-text-4)'],
@@ -1538,9 +1512,7 @@ new class extends Component
 
                     <div class="mt-[14px] flex flex-wrap items-center justify-between gap-3">
                         <p class="text-[13px] text-fq-text-4">
-                            @if ($mine && $mine['dayOff'])
-                                Day off bought — tonight counts anyway, and there's nothing left to do.
-                            @elseif ($mine && $mine['state'] === App\Services\ArenaService::STATE_SAFE)
+                            @if ($mine && $mine['state'] === App\Services\ArenaService::STATE_SAFE)
                                 Your night is safe. Clear one every day and the run keeps climbing.
                             @else
                                 Clear today's quest and tonight counts towards your run.

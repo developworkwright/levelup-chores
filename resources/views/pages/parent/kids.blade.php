@@ -377,11 +377,6 @@ new class extends Component
      * as unopened right up until the quest was claimed — and a sent-back quest,
      * which clears `completed_at` on purpose, fell all the way back to
      * "not opened" as well.
-     *
-     * A bought day off gets its own state for the same reason: the kid's page
-     * says "Day Off · Board Open" and the parent's said "Not opened yet", which
-     * reads as a kid who has done nothing rather than one who spent tickets on
-     * a rest day.
      */
     private function questSummaryFor(Profile $kid): array
     {
@@ -401,12 +396,7 @@ new class extends Component
             return [
                 'chore' => null,
                 'hand' => $chores->offeredChoresFor($kid),
-                // A day off outranks the cards: it is why they aren't picking.
-                'status' => match (true) {
-                    $chores->hasSkippedQuestToday($kid) => 'skipped',
-                    $quest->dealt_at !== null => 'choosing',
-                    default => 'not_started',
-                },
+                'status' => $quest->dealt_at !== null ? 'choosing' : 'not_started',
                 'canReroll' => true,
                 'charmed' => $quest->isCharmed(),
                 'charmsHeld' => app(PerkInventoryService::class)->countOf($kid, PerkEffect::QuestCharm),
@@ -428,7 +418,6 @@ new class extends Component
         $status = match (true) {
             $completion !== null => $completion->status->value,
             $quest->completed_at !== null => 'pending',
-            $chores->hasSkippedQuestToday($kid) => 'skipped',
             $quest->revealed_at !== null => 'opened',
             default => 'not_started',
         };
@@ -633,7 +622,6 @@ new class extends Component
                     // claim the kid has a quest, and at this point they don't.
                     'choosing' => ['label' => 'Choosing a card', 'color' => 'var(--fq-violet)'],
                     'opened' => ['label' => 'Opened, not done', 'color' => 'var(--fq-cyan)'],
-                    'skipped' => ['label' => 'Day off — bought', 'color' => 'var(--fq-violet)'],
                     'pending' => ['label' => 'Waiting on you', 'color' => 'var(--fq-gold)'],
                     'approved' => ['label' => 'Cleared', 'color' => 'var(--fq-lime)'],
                     'rejected' => ['label' => 'Sent back', 'color' => 'var(--fq-danger)'],

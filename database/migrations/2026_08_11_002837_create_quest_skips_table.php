@@ -1,6 +1,5 @@
 <?php
 
-use App\Enums\PerkEffect;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -9,9 +8,12 @@ use Illuminate\Support\Facades\Schema;
 /**
  * The Day Off perk: storage for it, and its catalogue row.
  *
- * Shaped like `streak_repairs`, which it sits beside in the streak's reckoning
- * — both answer the same question, "does this day count even though the quest
- * wasn't done", and `questApprovedOn()` reads them together.
+ * Both are undone further down the stack — see the migration that folds Day Off
+ * into Streak Restore. This one is left in place, and rewritten to name the
+ * effect as the literal `'quest_skip'` rather than through `PerkEffect`, which
+ * no longer has the case: a migration that reaches into today's enums stops
+ * being a record of what the schema was and starts being a way for a fresh
+ * `migrate` to fatal.
  */
 return new class extends Migration
 {
@@ -29,17 +31,15 @@ return new class extends Migration
             $table->unique(['profile_id', 'skip_date']);
         });
 
-        // Households that already exist get the perk too — PerkEffect::defaults()
-        // only covers ones created from here on, via the seeder and the factory.
-        $defaults = PerkEffect::QuestSkip->defaults();
-
+        // Households that already exist get the perk too — the seeder and the
+        // factory only cover ones created from here on.
         $rows = DB::table('households')->pluck('id')->map(fn (int $id) => [
             'household_id' => $id,
-            'effect' => PerkEffect::QuestSkip->value,
-            'name' => $defaults['name'],
-            'description' => $defaults['description'],
-            'cost' => $defaults['cost'],
-            'glyph' => $defaults['glyph'],
+            'effect' => 'quest_skip',
+            'name' => 'Day Off',
+            'description' => "Skip today's main quest — the board opens and your streak survives. Once a week, and you earn nothing for it.",
+            'cost' => 8,
+            'glyph' => '»',
             'enabled' => true,
             'created_at' => now(),
             'updated_at' => now(),
@@ -54,6 +54,6 @@ return new class extends Migration
     {
         Schema::dropIfExists('quest_skips');
 
-        DB::table('bonus_perks')->where('effect', PerkEffect::QuestSkip->value)->delete();
+        DB::table('bonus_perks')->where('effect', 'quest_skip')->delete();
     }
 };

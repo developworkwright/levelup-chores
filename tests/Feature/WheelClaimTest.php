@@ -8,7 +8,6 @@ use App\Models\ChoreCompletion;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Models\Spin;
-use App\Services\ChoreService;
 use App\Services\SpinService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -53,7 +52,7 @@ class WheelClaimTest extends TestCase
 
     public function test_the_boosted_chore_can_be_claimed_from_the_wheel_page(): void
     {
-        [, $kid] = $this->household(['require_quest_first' => false]);
+        [, $kid] = $this->household();
         $boost = $this->spin($kid);
 
         Volt::test('kid.home')
@@ -72,7 +71,7 @@ class WheelClaimTest extends TestCase
 
     public function test_a_claimed_boost_reads_as_waiting_on_a_parent(): void
     {
-        [, $kid] = $this->household(['require_quest_first' => false]);
+        [, $kid] = $this->household();
         $this->spin($kid);
 
         Volt::test('kid.home')
@@ -81,31 +80,14 @@ class WheelClaimTest extends TestCase
             ->assertDontSee('Mark it done');
     }
 
-    public function test_the_claim_is_held_back_until_the_main_quest_is_cleared(): void
+    public function test_the_boosted_claim_does_not_wait_on_the_main_quest(): void
     {
-        [, $kid] = $this->household(['require_quest_first' => true]);
-        $this->spin($kid);
-
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('Main quest first')
-            ->assertDontSee('Mark it done')
-            ->call('claimBoostedChore');
-
-        $this->assertSame(0, ChoreCompletion::where('profile_id', $kid->id)->count());
-    }
-
-    public function test_a_bought_day_off_opens_the_boosted_claim_too(): void
-    {
-        [, $kid] = $this->household(['require_quest_first' => true]);
+        [, $kid] = $this->household();
         $boost = $this->spin($kid);
 
-        // The Day Off perk opens the board with the quest still open. This card
-        // asks ChoreService for the gate rather than keeping its own copy of
-        // the rule, which is what had it refusing the claim over a board the
-        // Quests page had already unlocked.
-        $this->assertTrue(app(ChoreService::class)->skipQuestToday($kid));
-
+        // The card used to keep its own copy of the board gate and refuse the
+        // claim until the quest was cleared. There is no gate now, and the one
+        // thing worth pinning is that no trace of it came back.
         Volt::test('kid.home')
             ->assertOk()
             ->assertSee('Mark it done')
@@ -119,7 +101,7 @@ class WheelClaimTest extends TestCase
 
     public function test_a_sibling_who_got_there_first_is_named(): void
     {
-        [$household, $kid] = $this->household(['require_quest_first' => false]);
+        [$household, $kid] = $this->household();
         $boost = $this->spin($kid);
 
         $sibling = Profile::factory()->for($household)->create(['name' => 'Rex']);
@@ -143,7 +125,7 @@ class WheelClaimTest extends TestCase
 
     public function test_there_is_nothing_to_claim_before_the_wheel_is_spun(): void
     {
-        $this->household(['require_quest_first' => false]);
+        $this->household();
 
         Volt::test('kid.home')
             ->assertOk()
@@ -153,7 +135,7 @@ class WheelClaimTest extends TestCase
 
     public function test_claiming_without_a_spin_does_nothing(): void
     {
-        [, $kid] = $this->household(['require_quest_first' => false]);
+        [, $kid] = $this->household();
 
         Volt::test('kid.home')->call('claimBoostedChore');
 
@@ -164,7 +146,7 @@ class WheelClaimTest extends TestCase
     {
         // "3x" is arithmetic homework; the total is the thing worth getting
         // off the sofa for.
-        [$household, $kid] = $this->household(['require_quest_first' => false]);
+        [$household, $kid] = $this->household();
 
         $household->chores()->where('quest_eligible', false)->update(['points' => 175]);
 

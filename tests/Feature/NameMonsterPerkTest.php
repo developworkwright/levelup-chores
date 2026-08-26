@@ -32,7 +32,7 @@ class NameMonsterPerkTest extends TestCase
     {
         parent::setUp();
 
-        $this->household = Household::factory()->create(['require_quest_first' => false]);
+        $this->household = Household::factory()->create();
         $this->kid = Profile::factory()->for($this->household)->create(['name' => 'Nova']);
         Chore::factory()->for($this->household)->create(['points' => 100]);
 

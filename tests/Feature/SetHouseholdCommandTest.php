@@ -145,19 +145,11 @@ class SetHouseholdCommandTest extends TestCase
 
     public function test_it_toggles_the_boolean_settings(): void
     {
-        $household = Household::factory()->create([
-            'require_quest_first' => true,
-            'spin_enabled' => true,
-        ]);
+        $household = Household::factory()->create(['spin_enabled' => true]);
 
-        $this->artisan('household:set', [
-            '--require-quest-first' => 'false',
-            '--spin-enabled' => 'no',
-        ])->assertSuccessful();
+        $this->artisan('household:set', ['--spin-enabled' => 'no'])->assertSuccessful();
 
-        $household->refresh();
-        $this->assertFalse($household->require_quest_first);
-        $this->assertFalse($household->spin_enabled);
+        $this->assertFalse($household->refresh()->spin_enabled);
     }
 
     public function test_it_rejects_a_non_boolean_toggle(): void

@@ -43,9 +43,9 @@ Everything is scoped to one household. There's no public sign-up, no email/passw
 
 ```mermaid
 flowchart LR
-    A["🎁 Open the chest<br/><i>reveals today's quest</i>"] --> B["✅ Clear the quest"]
-    B --> C["🔓 Side quests unlock<br/><i>instantly, no waiting</i>"]
-    C --> D["🎯 Claim chores<br/><i>one is secretly the Mystery</i>"]
+    A["🎁 Open the chest<br/><i>deals today's quest hand</i>"] --> B["✅ Clear the quest<br/><i>keeps the streak alive</i>"]
+    A --> D["🎯 Claim any side quest<br/><i>one is secretly the Mystery</i>"]
+    B --> D
     D --> E["🧑‍⚖️ Parent approves"]
     E --> F["💰 Points · XP · Streak"]
     E --> H["⚔️ Damage lands on the monster<br/><i>double on a weak point</i>"]
@@ -58,7 +58,9 @@ flowchart LR
     style H fill:#4d1f2a,stroke:#ec4899,color:#fff
 ```
 
-The board **unlocks on the claim, not the approval** — deliberately. A kid should never be blocked waiting on a parent to check their phone. Points, streaks and monster damage, however, only land once a parent signs off.
+**Nothing on the board waits on the main quest.** Side quests are claimable from the moment a kid opens the app — the quest chest earns its place by paying better (bold cards, charms, the wheel) rather than by holding the rest hostage. Clearing the quest is what feeds the streak.
+
+The board also **moves on the claim, not the approval** — a chore locks for the whole household the second someone taps it, so nobody is blocked waiting on a parent to check their phone. Points, streaks and monster damage, however, only land once a parent signs off.
 
 ---
 
@@ -68,13 +70,13 @@ The board **unlocks on the claim, not the approval** — deliberately. A kid sho
 
 | | Feature | How it works |
 |---|---|---|
-| 🎁 | **Daily Quest** | One randomly assigned chore per kid per day, hidden inside a chest. Opening it is the reveal moment. Optionally gates the rest of the board until cleared. |
+| 🎁 | **Daily Quest** | A hand of chores per kid per day, hidden inside a chest. Opening it is the reveal moment. Clearing it is what feeds the streak — the rest of the board is open regardless. |
 | 🕵️ | **Mystery Chore** | Each day one chore is secretly worth **+500 points**. Nobody knows which. The first kid in the household to finish it wins — then everyone sees who got it. |
 | 🎡 | **Bonus Wheel** | One spin a day. Lands on a chore and multiplies it **2×**, or **3×** on a 35% roll. |
 | 🔥 | **Streak Chest** | Consecutive days of approved quests build a streak. Milestones pay real money and unlock a chest with a reveal animation. |
 | 🛒 | **Loot Shop** | Spend points on rewards the parent defines — screen time, Robux, dessert pick, a family outing. |
 | 🏅 | **Badges** | 13 achievements on their own tab, each with what unlocks it and the XP it pays. 5 are secret — name and description stay hidden until earned. |
-| 🎟️ | **Bonus Shop** | Levelling up, earning badges and beating monsters mint **tickets**. Spend them on wheel respins, quest rerolls, streak repairs, Mystery Chore hints, a once-a-week day off, or the right to name a monster. Spending never costs XP — your level is permanent. |
+| 🎟️ | **Bonus Shop** | Levelling up, earning badges and beating monsters mint **tickets**. Spend them on wheel respins, quest rerolls, streak repairs, Mystery Chore hints, quest charms, or the right to name a monster. Spending never costs XP — your level is permanent. |
 | 👹 | **The Arena** | The family goal, standing as a monster. Every chore you finish is damage; beat it and the household gets what it was guarding. |
 
 ### For parents
@@ -178,7 +180,7 @@ Three currencies, doing three different jobs:
 
 The point of the split: a kid should never have to choose between keeping their progress and buying something. XP *mints* tickets, it isn't *converted* into them, so a level once reached is permanent no matter how much gets spent.
 
-A monster falling is a rare, whole-household event and pays every kid at once — worth remembering if perks ever start feeling cheap. Two of the perks are capped rather than priced: **Day Off** skips a main quest and keeps the streak, once per week, because streak milestones pay real money and an uncapped skip would let a kid climb that ladder having done nothing.
+A monster falling is a rare, whole-household event and pays every kid at once — worth remembering if perks ever start feeling cheap.
 
 Both minting paths are guarded by high-water marks — `tickets_granted_through_level` and `streak_milestone_paid_through`. XP can fall (`quest:reset-today` claws back 25 per undone approval) and a streak can lapse and be repaired, so without them the same threshold could pay out twice.
 
@@ -277,7 +279,6 @@ Per-household settings live in the `households` row rather than in config:
 | `timezone` | `America/Chicago` | Household-local time |
 | `day_boundary_hour` | `4` | Hour the household "day" rolls over |
 | `points_per_dollar` | `100` | Conversion rate for cash-out |
-| `require_quest_first` | `true` | Gate side quests behind the daily quest |
 | `spin_enabled` | `true` | Bonus wheel on/off |
 
 The family goals themselves live in the `monsters` table rather than on the household — one row per monster ever faced, living or beaten — and are edited from the **Monsters** tab.
@@ -361,7 +362,6 @@ With no options it just prints the current settings, including the one people ac
 | Timezone              | America/New_York |
 | Day resets at         | 04:00            |
 | Points per dollar     | 100              |
-| Quest gates the board | yes              |
 | Bonus wheel           | enabled          |
 
 It is Thu 30 Jul 2026, 21:50 EDT in this household, and chores counts toward Jul 30, 2026.
@@ -374,7 +374,6 @@ Pass any of these to change it:
 | `--timezone=` | `America/Chicago` | Any IANA name, e.g. `America/New_York` |
 | `--day-boundary-hour=` | `4` | 0–23, in household-local time |
 | `--points-per-dollar=` | `100` | Cash-out conversion rate |
-| `--require-quest-first=` | `true` | Gate side quests behind the daily quest |
 | `--spin-enabled=` | `true` | Turn the bonus wheel on or off |
 | `--name=` | — | Display name for the household |
 

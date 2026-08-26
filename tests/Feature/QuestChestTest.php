@@ -206,7 +206,7 @@ class QuestChestTest extends TestCase
         Volt::test('kid.quests')
             ->call('revealQuest')
             ->call('claimQuest')
-            ->assertSee('Quest cleared. Every side quest below is unlocked', false);
+            ->assertSee('Quest cleared. Your streak keeps climbing tonight.', false);
     }
 
     public function test_a_sent_back_quest_is_not_credited_as_cleared(): void

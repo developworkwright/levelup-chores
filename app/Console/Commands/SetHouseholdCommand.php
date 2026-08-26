@@ -14,7 +14,6 @@ class SetHouseholdCommand extends Command
         {--timezone= : IANA timezone, e.g. America/New_York}
         {--day-boundary-hour= : Hour (0-23) the household day rolls over}
         {--points-per-dollar= : How many points are worth $1}
-        {--require-quest-first= : true|false — gate side quests behind the daily quest}
         {--spin-enabled= : true|false — turn the bonus wheel on or off}';
 
     protected $description = 'Show or change household settings. Run with no options to just show them.';
@@ -113,7 +112,7 @@ class SetHouseholdCommand extends Command
             $changes['points_per_dollar'] = (int) $rate;
         }
 
-        foreach (['require-quest-first' => 'require_quest_first', 'spin-enabled' => 'spin_enabled'] as $option => $column) {
+        foreach (['spin-enabled' => 'spin_enabled'] as $option => $column) {
             $raw = $this->option($option);
 
             if ($raw === null) {
@@ -143,7 +142,6 @@ class SetHouseholdCommand extends Command
             ['Timezone', $household->timezone],
             ['Day resets at', sprintf('%02d:00', $household->day_boundary_hour)],
             ['Points per dollar', $household->points_per_dollar],
-            ['Quest gates the board', $household->require_quest_first ? 'yes' : 'no'],
             ['Bonus wheel', $household->spin_enabled ? 'enabled' : 'disabled'],
         ]);
 

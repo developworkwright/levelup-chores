@@ -123,7 +123,7 @@ class HouseholdCooldownTest extends TestCase
 
     public function test_the_board_hides_a_chore_a_sibling_already_claimed(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $doer = Profile::factory()->for($household)->create();
         $sibling = Profile::factory()->for($household)->create();
 

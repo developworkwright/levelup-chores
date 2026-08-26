@@ -25,7 +25,6 @@ class HouseholdFactory extends Factory
             // Arena. See HouseholdClock::eveningWatch().
             'evening_watch_hour' => 19,
             'points_per_dollar' => 100,
-            'require_quest_first' => true,
             'spin_enabled' => true,
             // Stated for the same reason evening_watch_hour above is: a column
             // default is applied by the database and never read back, so a

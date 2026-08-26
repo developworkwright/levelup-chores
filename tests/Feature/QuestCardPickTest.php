@@ -53,7 +53,7 @@ class QuestCardPickTest extends TestCase
      */
     private function householdWithChores(array $points): array
     {
-        $household = Household::factory()->create(['require_quest_first' => true]);
+        $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['age' => 10]);
 
         foreach ($points as $i => $value) {
@@ -131,7 +131,7 @@ class QuestCardPickTest extends TestCase
         $this->assertFalse($this->service()->isQuestRevealedToday($kid));
     }
 
-    public function test_choosing_a_card_sets_the_quest_and_unlocks_the_board(): void
+    public function test_choosing_a_card_sets_the_quest(): void
     {
         [, $kid] = $this->householdWithChores([10, 20, 30, 40, 50, 60]);
 
@@ -323,8 +323,8 @@ class QuestCardPickTest extends TestCase
         $this->assertNotNull($rerolled);
         $this->assertNotSame($chosen->chore_id, $rerolled->chore_id);
         $this->assertNotContains($chosen->chore_id, $rerolled->offeredChoreIds());
-        // A fresh hand deserves the chest animation again rather than a silent
-        // relabel, and the board stays gated until they pick from it.
+        // A fresh hand deserves the chest animation again rather than a
+        // silent relabel.
         $this->assertNull($rerolled->dealt_at);
         $this->assertNull($rerolled->revealed_at);
     }
@@ -404,7 +404,7 @@ class QuestCardPickTest extends TestCase
 
     public function test_an_unlimited_chore_stays_pickable_however_many_siblings_have_done_it(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => true]);
+        $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['age' => 10]);
         $sibling = Profile::factory()->for($household)->create(['age' => 12]);
 

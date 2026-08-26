@@ -13,8 +13,8 @@ use Tests\TestCase;
 /**
  * Cooldowns are household-wide, so a sibling can finish the chore that was
  * handed to you as today's quest. Left alone that dead-ends the kid's whole
- * day — no streak, and with `require_quest_first` on, a board that never
- * unlocks. The quest silently moves to something they can actually do.
+ * day — no quest completion and no streak night. The quest silently moves to
+ * something they can actually do.
  */
 class BlockedQuestTest extends TestCase
 {

@@ -47,22 +47,26 @@ class ChoreFlowTest extends TestCase
         $this->service()->approve($completion, $parent);
     }
 
-    public function test_board_is_locked_until_quest_is_claimed(): void
+    public function test_the_board_is_open_with_the_quest_still_undone(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => true]);
+        // The board used to come back entirely `'locked'` here. The gate is
+        // gone: a kid can work the board in whatever order they like, and
+        // clearing the quest is only what feeds the streak.
+        $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->count(3)->create(['points' => 100]);
+        Chore::factory()->for($household)->count(ChoreService::HAND_SIZE + 3)->create(['points' => 100]);
 
         $board = $this->service()->boardFor($kid);
 
-        $this->assertTrue($board->every(fn ($entry) => $entry['state'] === 'locked'));
+        $this->assertCount(3, $board);
+        $this->assertTrue($board->every(fn ($entry) => $entry['state'] === 'ready'));
     }
 
-    public function test_claiming_quest_unlocks_the_board_immediately(): void
+    public function test_the_board_stays_open_once_the_quest_is_claimed(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => true]);
+        $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->count(3)->create(['points' => 100]);
+        Chore::factory()->for($household)->count(ChoreService::HAND_SIZE + 3)->create(['points' => 100]);
 
         $this->service()->claimQuest($kid);
 
@@ -356,7 +360,7 @@ class ChoreFlowTest extends TestCase
 
     public function test_board_excludes_chores_the_kid_is_too_young_for(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['age' => 6]);
         // One more age-open chore than the quest hand can hold, so exactly one
         // is left on the board to assert against — the whole hand comes off it,
@@ -399,7 +403,7 @@ class ChoreFlowTest extends TestCase
 
     public function test_a_kid_old_enough_can_see_an_age_restricted_chore(): void
     {
-        $household = Household::factory()->create(['require_quest_first' => false]);
+        $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['age' => 12]);
         $filler = Chore::factory()->for($household)->create(['name' => 'Filler quest chore']);
         $restricted = Chore::factory()->for($household)->create(['name' => 'For older kids', 'min_age' => 10]);

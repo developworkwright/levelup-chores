@@ -37,7 +37,7 @@ class BoardVisibilityTest extends TestCase
      */
     private function household(array $attributes = [], bool $withDecoy = true): Household
     {
-        $household = Household::factory()->create($attributes + ['require_quest_first' => false]);
+        $household = Household::factory()->create($attributes);
 
         Chore::factory()->for($household)->create([
             'name' => 'The quest',
@@ -156,18 +156,19 @@ class BoardVisibilityTest extends TestCase
             ->assertSee('Pending approval');
     }
 
-    public function test_locked_chores_are_never_hidden(): void
+    public function test_a_claimable_chore_survives_the_hide_toggle(): void
     {
-        // Gating locks the entire board until the main quest is done, so
-        // hiding locked chores would leave a kid staring at nothing.
-        $household = $this->household(['require_quest_first' => true]);
+        // The toggle only ever hides what a kid can't act on. A chore that is
+        // ready has to stay put, quest or no quest — this used to read "Locked"
+        // here, which is the state the board no longer has.
+        $household = $this->household();
         $this->chore($household, 'Feed animals');
         $this->loginKid($household);
 
         Volt::test('kid.quests')
             ->call('toggleUnavailable')
             ->assertSee('Feed animals')
-            ->assertSee('Locked');
+            ->assertSee('Mark it done');
     }
 
     public function test_the_toggle_stays_out_of_the_way_on_a_clear_board(): void

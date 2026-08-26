@@ -86,13 +86,12 @@ Rewards are tickets, points, XP, or a perk straight into the inventory. A perk r
 | Quest reroll | Reassigns `DailyQuest` and clears `revealed_at` so the chest replays — see [[chores-and-quests]] |
 | Streak restore | Writes `streak_repairs` for the missed day — see [[streaks]] |
 | Mystery hint | Reveals the chore's parent-written `hint`, per-kid via `mystery_hint_purchases` |
-| Day Off | Writes `quest_skips` for today: the board opens without the quest, and the streak counts the day as kept. **Once per household week** |
 | Name a Monster | Sets `monsters.nickname` on a live monster nobody has named yet — shown everywhere via `Monster::displayName()` |
+| Night Saver | Buys back a night out of their own bed — see the sleep card |
+| Quest Charm | A bet on the quest chest, cast before it opens — see [[chores-and-quests]] |
 
 Hints are deliberately per-kid: one sibling paying must not clue in the rest. Note the mystery chore's own selection now favours chores that *have* a hint, so this perk always has something to sell.
 
-**Day Off is the dearest perk (8) on purpose**, and dearer than Streak Restore (5): a restore buys back one day already lost, while this keeps the chain *and* opens the board with no work done. It pays nothing — skipping the quest skips its points — and it is capped at **one per household week**, because streak milestones pay real money (up to $40 at day 30, doubled on later laps) and an uncapped skip lets a kid climb that ladder having done nothing. `questApprovedOn()` reads `quest_skips` alongside `streak_repairs`, since both answer "does this day count without the quest being done".
-
-The cap lives in **both** `ChoreService::nextQuestSkipDate()` (enforced inside `skipQuestToday()`) and `blockedReason()`. The refusal is a date — "Back on Mon 17 Aug" — not a flat no: a kid who can read when it returns saves it for a day they need.
+**There was a seventh, `Day Off` (`quest_skip`), and it is gone.** It bought a kid past the main quest: the board opened without the quest being done, and the streak counted the day anyway, once per household week at 8 tickets. Its whole first half died with the board gate — side quests no longer wait on the quest — and the half that survived is what Streak Restore already does. So it was folded into Streak Restore: held perks converted, `quest_skips` rows converted to `streak_repairs` (they meant the same thing to `questApprovedOn()`, so runs kept their length), and the table dropped. **Don't add a "buy today off in advance" perk back without deciding what it does that a restore doesn't** — the answer last time was "opens the board", and there is no board to open.
 
 **`PerkInventoryService::use()` takes an optional `array $input`.** Only Name a Monster reads it (`monster_id`, `name`); every other effect ignores it. That perk is also the one whose tap on the Bonus page opens a form rather than spending immediately — nothing is consumed until a name is submitted, since a half-typed name is a failure to apply and a failed perk stays in the pocket. A parent can strip a name from the Monster Deck, which is the veto that makes it safe to sell.
