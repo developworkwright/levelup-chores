@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\PerkEffect;
 use App\Enums\TicketKind;
 use App\Models\BonusTicketEntry;
 use App\Models\Chore;
@@ -9,11 +10,13 @@ use App\Models\ChoreCompletion;
 use App\Models\DailyChest;
 use App\Models\DailyMystery;
 use App\Models\Household;
+use App\Models\OwnedPerk;
 use App\Models\Profile;
 use App\Models\Spin;
 use App\Services\ChestService;
 use App\Services\ChoreService;
 use App\Services\HouseholdClock;
+use App\Services\PerkInventoryService;
 use App\Services\TicketService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -550,6 +553,76 @@ class ParentKidsPageTest extends TestCase
         Volt::test('parent.kids')->call('rerollQuest', $foreign->id);
 
         $this->assertSame($before, app(ChoreService::class)->questFor($foreign->refresh())->chore_id);
+    }
+
+    public function test_a_parent_can_hand_a_kid_a_quest_charm(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create(['name' => 'Nova', 'bonus_tickets' => 0]);
+        Chore::factory()->for($household)->count(3)->create();
+        $this->actingAsParent($household);
+
+        Volt::test('parent.kids')
+            ->call('giveQuestCharm', $kid->id)
+            ->assertSee('Nova is holding 1 charm')
+            ->assertSee('chest can still take one');
+
+        $perk = OwnedPerk::where('profile_id', $kid->id)->sole();
+
+        $this->assertSame(PerkEffect::QuestCharm, $perk->effect);
+        $this->assertSame(OwnedPerk::SOURCE_GIFT, $perk->source);
+        // A gift, like the free reroll beside it — the kid pays nothing.
+        $this->assertSame(0, $kid->refresh()->bonus_tickets);
+    }
+
+    public function test_a_charm_given_after_the_chest_is_open_is_kept_for_a_later_quest(): void
+    {
+        // The charm can't go on a hand the kid has already read, so the parent
+        // is told the gift is for another morning rather than left thinking
+        // they have improved today.
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create(['name' => 'Nova']);
+        Chore::factory()->for($household)->count(3)->create();
+        $this->actingAsParent($household);
+
+        app(ChoreService::class)->dealQuestHand($kid);
+
+        Volt::test('parent.kids')
+            ->call('giveQuestCharm', $kid->id)
+            ->assertSee('keeps for a future quest');
+
+        $this->assertSame(1, OwnedPerk::where('profile_id', $kid->id)->count());
+    }
+
+    public function test_the_quest_tile_shows_a_charmed_chest_and_charms_still_in_the_pocket(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->count(3)->create();
+        $this->actingAsParent($household);
+
+        $perks = app(PerkInventoryService::class);
+        $perks->grant($kid, PerkEffect::QuestCharm, OwnedPerk::SOURCE_GIFT);
+        $perks->grant($kid, PerkEffect::QuestCharm, OwnedPerk::SOURCE_GIFT);
+        app(ChoreService::class)->charmQuest($kid);
+
+        Volt::test('parent.kids')
+            ->assertSee('Chest is charmed')
+            ->assertSee('2 charms in pocket');
+    }
+
+    public function test_a_parent_cannot_hand_a_charm_to_another_households_kid(): void
+    {
+        $household = Household::factory()->create();
+        Chore::factory()->for($household)->create();
+
+        $otherHousehold = Household::factory()->create();
+        $foreign = Profile::factory()->for($otherHousehold)->create();
+
+        $this->actingAsParent($household);
+        Volt::test('parent.kids')->call('giveQuestCharm', $foreign->id);
+
+        $this->assertSame(0, OwnedPerk::where('profile_id', $foreign->id)->count());
     }
 
     public function test_a_kid_cannot_reach_the_parent_console(): void

@@ -2,11 +2,13 @@
 
 use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
+use App\Enums\PerkEffect;
 use App\Enums\ProfileRole;
 use App\Enums\SleepOutcome;
 use App\Enums\TicketKind;
 use App\Models\ChoreCompletion;
 use App\Models\Monster;
+use App\Models\OwnedPerk;
 use App\Models\Profile;
 use App\Services\BadgeService;
 use App\Services\ChestService;
@@ -14,10 +16,12 @@ use App\Services\ChoreService;
 use App\Services\HouseholdClock;
 use App\Services\LedgerService;
 use App\Services\MonsterService;
+use App\Services\PerkInventoryService;
 use App\Services\SleepService;
 use App\Services\SpinService;
 use App\Services\TicketService;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 use Livewire\Volt\Component;
 
 new class extends Component
@@ -311,6 +315,38 @@ new class extends Component
             : 'Nothing to swap — the quest is already cleared, or there is no other eligible chore.';
     }
 
+    /**
+     * Hands a Quest Charm over for nothing, the way rerollQuest() hands over a
+     * reroll — same perk the Bonus Shop sells, minus the tickets.
+     *
+     * Gives rather than casts. A charm only goes on a chest that is still shut,
+     * so a parent tapping this in the afternoon would be spending the kid's one
+     * gamble for them, on a hand the kid has already read. In the pocket it
+     * keeps until they decide a morning is worth it.
+     */
+    public function giveQuestCharm(int $profileId): void
+    {
+        $kid = $this->ownedKid($profileId);
+
+        if (! $kid) {
+            return;
+        }
+
+        $perks = app(PerkInventoryService::class);
+        $perks->grant($kid, PerkEffect::QuestCharm, OwnedPerk::SOURCE_GIFT);
+
+        $held = $perks->countOf($kid, PerkEffect::QuestCharm);
+        $charms = $held.' '.Str::plural('charm', $held);
+
+        // Says which of the two things just happened, because they feel very
+        // different to a parent: a charm handed over at breakfast is for today,
+        // and one handed over after the chest is open is a present for a
+        // morning that hasn't come yet.
+        $this->questMessages[$profileId] = $perks->blockedReason($kid, PerkEffect::QuestCharm) === null
+            ? "Quest Charm handed over — {$kid->name} is holding {$charms}, and today's chest can still take one."
+            : "Quest Charm handed over — {$kid->name} is holding {$charms}. Today's chest can't take one any more, so it keeps for a future quest.";
+    }
+
     public function changePin(int $profileId): void
     {
         $kid = $this->ownedKid($profileId) ?? ($profileId === $this->profile->id ? $this->profile : null);
@@ -372,6 +408,8 @@ new class extends Component
                     default => 'not_started',
                 },
                 'canReroll' => true,
+                'charmed' => $quest->isCharmed(),
+                'charmsHeld' => app(PerkInventoryService::class)->countOf($kid, PerkEffect::QuestCharm),
             ];
         }
 
@@ -403,6 +441,8 @@ new class extends Component
             // dead on a quest that is still swappable — opened and sent-back
             // quests both still are.
             'canReroll' => $quest->completed_at === null,
+            'charmed' => $quest->isCharmed(),
+            'charmsHeld' => app(PerkInventoryService::class)->countOf($kid, PerkEffect::QuestCharm),
         ];
     }
 
@@ -629,12 +669,39 @@ new class extends Component
                         <p class="mt-1 font-mono-fq text-[10px] leading-snug text-fq-text-4">{{ $quest['hand']->pluck('name')->join(' · ') }}</p>
                     @endif
 
-                    <button
-                        type="button"
-                        wire:click="rerollQuest({{ $kid->id }})"
-                        @disabled(! $quest['canReroll'])
-                        class="mt-2 w-full rounded-[10px] border border-fq-line-3 bg-fq-panel py-[6px] text-xs text-fq-text-3 disabled:opacity-40"
-                    >{{ $quest['chore'] ? 'Swap for new cards' : 'Deal a new hand' }}</button>
+                    @php
+                        // What the parent needs before they hand another one
+                        // over: whether today is already charmed, and how many
+                        // are sitting unspent in the pocket.
+                        $charmNotes = array_filter([
+                            $quest['charmed'] ? 'Chest is charmed' : null,
+                            $quest['charmsHeld'] > 0
+                                ? $quest['charmsHeld'].' '.\Illuminate\Support\Str::plural('charm', $quest['charmsHeld']).' in pocket'
+                                : null,
+                        ]);
+                    @endphp
+                    @if ($charmNotes)
+                        <p class="mt-1 font-mono-fq text-[10px]" style="color: var(--fq-violet)">{{ implode(' · ', $charmNotes) }}</p>
+                    @endif
+
+                    <div class="mt-2 flex gap-2">
+                        <button
+                            type="button"
+                            wire:click="rerollQuest({{ $kid->id }})"
+                            @disabled(! $quest['canReroll'])
+                            class="flex-1 rounded-[10px] border border-fq-line-3 bg-fq-panel py-[6px] text-xs text-fq-text-3 disabled:opacity-40"
+                        >{{ $quest['chore'] ? 'Swap for new cards' : 'Deal a new hand' }}</button>
+
+                        {{-- Never disabled: a charm is handed over, not cast,
+                             so there is always a pocket for it to go in even on
+                             a day whose chest is long since open. --}}
+                        <button
+                            type="button"
+                            wire:click="giveQuestCharm({{ $kid->id }})"
+                            class="flex-shrink-0 rounded-[10px] border px-3 py-[6px] text-xs whitespace-nowrap"
+                            style="border-color: var(--fq-violet); color: var(--fq-violet); background: var(--fq-sunk)"
+                        >&#10023; Give a charm</button>
+                    </div>
                     @if (! empty($questMessages[$kid->id]))
                         <p class="mt-1 text-[11px] text-fq-text-4">{{ $questMessages[$kid->id] }}</p>
                     @endif
