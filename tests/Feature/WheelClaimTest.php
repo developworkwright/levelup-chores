@@ -8,6 +8,7 @@ use App\Models\ChoreCompletion;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Models\Spin;
+use App\Services\ChoreService;
 use App\Services\SpinService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -92,6 +93,28 @@ class WheelClaimTest extends TestCase
             ->call('claimBoostedChore');
 
         $this->assertSame(0, ChoreCompletion::where('profile_id', $kid->id)->count());
+    }
+
+    public function test_a_bought_day_off_opens_the_boosted_claim_too(): void
+    {
+        [, $kid] = $this->household(['require_quest_first' => true]);
+        $boost = $this->spin($kid);
+
+        // The Day Off perk opens the board with the quest still open. This card
+        // asks ChoreService for the gate rather than keeping its own copy of
+        // the rule, which is what had it refusing the claim over a board the
+        // Quests page had already unlocked.
+        $this->assertTrue(app(ChoreService::class)->skipQuestToday($kid));
+
+        Volt::test('kid.home')
+            ->assertOk()
+            ->assertSee('Mark it done')
+            ->assertDontSee('Main quest first')
+            ->call('claimBoostedChore');
+
+        $completion = ChoreCompletion::where('profile_id', $kid->id)->firstOrFail();
+
+        $this->assertSame($boost->chore_id, $completion->chore_id);
     }
 
     public function test_a_sibling_who_got_there_first_is_named(): void

@@ -33,6 +33,11 @@
     'questApproved',
     'questPending',
     'questSentBack',
+    // Whether the board below is actually still locked behind this quest —
+    // ChoreService::boardIsGated(), passed in rather than read off the
+    // household flag here. A bought day off opens the board with the quest
+    // still open, and the copy promising the unlock has to know that.
+    'boardGated',
     'questCardMessage' => null,
     'boost' => null,
     'questBoosted' => false,
@@ -163,7 +168,7 @@
         :closed-text="($questCards->count() > 1
             ? $questCards->count().' cards are inside. Take one, burn the rest.'
             : 'Worth +'.number_format($questPoints).' pts.')
-            .($household->require_quest_first ? ' Side quests unlock the moment it\'s cleared.' : '')"
+            .($boardGated ? ' Side quests unlock the moment it\'s cleared.' : '')"
         opening-text="The chest is rattling..."
         cta="Open"
         {{-- Only when a charm is sitting unused. Buying one changes a

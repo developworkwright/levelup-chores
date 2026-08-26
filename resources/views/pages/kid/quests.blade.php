@@ -781,6 +781,7 @@ new class extends Component
             :quest-approved="$questApproved"
             :quest-pending="$questPending"
             :quest-sent-back="$questSentBack"
+            :board-gated="! $allUnlocked"
             :quest-card-message="$questCardMessage"
             :boost="$boost"
             :quest-boosted="$questBoosted"

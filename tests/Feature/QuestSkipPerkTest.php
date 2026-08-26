@@ -13,6 +13,7 @@ use App\Models\OwnedPerk;
 use App\Models\Profile;
 use App\Models\QuestSkip;
 use App\Models\StreakRepair;
+use App\Services\ArenaService;
 use App\Services\BadgeService;
 use App\Services\ChoreService;
 use App\Services\HouseholdClock;
@@ -318,6 +319,71 @@ class QuestSkipPerkTest extends TestCase
 
         $this->assertTrue($this->chores()->isQuestDoneToday($this->kid->fresh()));
         $this->assertSame(CompletionStatus::Approved, ChoreCompletion::sole()->status);
+    }
+
+    public function test_a_bought_day_is_safe_on_the_arena_rather_than_at_risk(): void
+    {
+        $this->household->update(['day_boundary_hour' => 4, 'evening_watch_hour' => 19, 'timezone' => 'UTC']);
+        $this->travelTo(Carbon::parse('2026-08-13 19:30', 'UTC'));
+
+        $arena = app(ArenaService::class);
+
+        // Past the watch hour with the quest open: the candle state.
+        $this->assertSame(ArenaService::STATE_AT_RISK, $arena->stateFor($this->kid, false));
+
+        $this->ownADayOff();
+        $this->perks()->use($this->kid, PerkEffect::QuestSkip);
+
+        // The quest is still open and always will be — that is what was bought
+        // — so a state read off `completed_at` alone kept warning about a run
+        // the perk had already made safe.
+        $this->assertSame(ArenaService::STATE_SAFE, $arena->stateFor($this->kid->fresh(), false));
+    }
+
+    public function test_the_arena_names_the_day_off_instead_of_claiming_the_quest_was_cleared(): void
+    {
+        $this->household->update(['day_boundary_hour' => 4, 'evening_watch_hour' => 19, 'timezone' => 'UTC']);
+        $this->travelTo(Carbon::parse('2026-08-13 19:30', 'UTC'));
+
+        Auth::guard('profile')->login($this->kid);
+
+        $this->ownADayOff();
+        $this->perks()->use($this->kid, PerkEffect::QuestSkip);
+
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        Volt::test('kid.arena')
+            ->assertOk()
+            ->assertSee('Day off')
+            ->assertDontSee('At risk')
+            // Safe, but nobody cleared anything: the lane must not hand the kid
+            // credit for work the perk let them skip.
+            ->assertDontSee('Quest cleared');
+    }
+
+    public function test_a_kid_who_bought_the_day_off_is_not_nudged_or_rescued(): void
+    {
+        $sibling = Profile::factory()->for($this->household)->create([
+            'name' => 'Rex',
+            'bonus_tickets' => 10,
+        ]);
+
+        $this->ownADayOff();
+        $this->perks()->use($this->kid, PerkEffect::QuestSkip);
+
+        $arena = app(ArenaService::class);
+
+        // Neither is offered by the page any more, both being panels the safe
+        // state never reaches — but a rule that lives only in a hidden button
+        // is a rule the next caller ignores, and a rescue charges three
+        // tickets for a run that was never in danger.
+        $this->assertFalse($arena->nudge($sibling, $this->kid->fresh()));
+        $this->assertFalse($arena->rescue($sibling, $this->kid->fresh()));
+        $this->assertSame(
+            'They bought the day off',
+            $arena->rescueBlockedReason($sibling, $this->kid->fresh()),
+        );
+        $this->assertSame(10, $sibling->fresh()->bonus_tickets);
     }
 
     public function test_a_bought_day_reads_as_kept_when_tomorrow_is_checked(): void

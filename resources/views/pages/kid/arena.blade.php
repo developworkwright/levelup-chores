@@ -228,7 +228,10 @@ new class extends Component
                      neutral ring the lanes use. --}}
                 <span class="text-[34px]" @if ($stillOpen) style="color: var(--fq-text-3)" @endif>{{ $stillOpen === 0 ? '🔥' : '○' }}</span>
                 @if ($stillOpen === 0)
-                    <span class="font-baloo text-[28px] leading-[1.1] font-extrabold">Every quest cleared.</span>
+                    {{-- A house where somebody bought the day off is safe
+                         without every quest having been cleared, and this line
+                         has to be true of both. --}}
+                    <span class="font-baloo text-[28px] leading-[1.1] font-extrabold">{{ $lanes->contains('dayOff', true) ? 'Every run is safe.' : 'Every quest cleared.' }}</span>
                     <span class="font-mono-fq text-[11px] text-fq-text-4">
                         Nobody's run is on the line — the next one starts at {{ $rollLabel }}.
                     </span>
@@ -415,18 +418,24 @@ new class extends Component
                     $kid = $lane['profile'];
                     $accent = $kid->color->cssVar();
 
-                    [$glyph, $stateLabel, $pillInk, $pillBg] = match ($lane['state']) {
-                        ArenaService::STATE_SAFE => ['🔥', 'Cleared', 'var(--fq-lime)', 'color-mix(in srgb, var(--fq-lime) 16%, transparent)'],
-                        ArenaService::STATE_AT_RISK => ['🕯️', 'At risk', 'var(--fq-streak)', 'color-mix(in srgb, var(--fq-streak) 20%, transparent)'],
-                        ArenaService::STATE_BROKEN => ['💀', 'Back to zero', 'var(--fq-text-4)', 'var(--fq-panel-alt)'],
+                    [$glyph, $stateLabel, $pillInk, $pillBg] = match (true) {
+                        // Checked ahead of the state, which reads safe for a
+                        // bought day exactly as it does for a cleared one. The
+                        // run is in the same shape either way; the lane just
+                        // must not claim work that nobody did.
+                        $lane['dayOff'] => ['🌙', 'Day off', 'var(--fq-gold)', 'color-mix(in srgb, var(--fq-gold) 16%, transparent)'],
+                        $lane['state'] === ArenaService::STATE_SAFE => ['🔥', 'Cleared', 'var(--fq-lime)', 'color-mix(in srgb, var(--fq-lime) 16%, transparent)'],
+                        $lane['state'] === ArenaService::STATE_AT_RISK => ['🕯️', 'At risk', 'var(--fq-streak)', 'color-mix(in srgb, var(--fq-streak) 20%, transparent)'],
+                        $lane['state'] === ArenaService::STATE_BROKEN => ['💀', 'Back to zero', 'var(--fq-text-4)', 'var(--fq-panel-alt)'],
                         default => ['○', 'Still open', 'var(--fq-text-3)', 'var(--fq-panel-alt)'],
                     };
 
-                    $subLabel = match ($lane['state']) {
-                        ArenaService::STATE_SAFE => $lane['clearedAt']
+                    $subLabel = match (true) {
+                        $lane['dayOff'] => 'Bought the day off · run still counts',
+                        $lane['state'] === ArenaService::STATE_SAFE => $lane['clearedAt']
                             ? 'Quest cleared '.$lane['clearedAt']->timezone($household->timezone)->format('g:ia')
                             : 'Quest cleared',
-                        ArenaService::STATE_BROKEN => 'Run of '.$lane['brokenFrom'].' ended at '.$rollLabel,
+                        $lane['state'] === ArenaService::STATE_BROKEN => 'Run of '.$lane['brokenFrom'].' ended at '.$rollLabel,
                         default => $lane['quest'],
                     };
                 @endphp
