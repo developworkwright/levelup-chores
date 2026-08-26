@@ -953,3 +953,36 @@ body {
         font-size: 30px;
     }
 }
+
+/*
+ * The Lucky Block's hit, in the three parts the handoff times out: the block
+ * struck from below, the prize rising out of it, and the card that replaces
+ * it. Named classes rather than arbitrary utilities because they are applied
+ * from Alpine `:class` expressions, which Tailwind's scanner doesn't read —
+ * the same reason .fq-bump and .fq-chest-opening live here.
+ *
+ * The whole sequence is ~800ms and must not grow: this fires potentially
+ * daily, and a kid who hits the block every morning is watching it for the
+ * hundredth time, not the first.
+ */
+.fq-lucky-hit {
+    animation: fq-lucky-hit 420ms ease-in-out;
+}
+
+.fq-lucky-rise {
+    /* Starts at 180ms, so the prize is already climbing while the block is
+       still coming back down. */
+    animation: fq-lucky-rise 320ms ease-out 180ms both;
+}
+
+.fq-lucky-reveal {
+    animation: fq-pop 200ms ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fq-lucky-hit,
+    .fq-lucky-rise,
+    .fq-lucky-reveal {
+        animation: none;
+    }
+}

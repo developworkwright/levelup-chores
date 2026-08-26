@@ -2,10 +2,15 @@
 
 use App\Enums\LootCategory;
 use App\Exceptions\InsufficientPointsException;
+use App\Exceptions\InsufficientTicketsException;
 use App\Exceptions\LevelTooLowException;
+use App\Exceptions\LuckyBlockEmptyException;
 use App\Models\Chore;
+use App\Models\LuckyHit;
 use App\Models\Profile;
 use App\Models\StoreItem;
+use App\Services\GratitudeService;
+use App\Services\LuckyBlockService;
 use App\Services\StoreService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
@@ -83,6 +88,37 @@ new class extends Component
         $this->search = '';
     }
 
+    /**
+     * The hit this visit produced, if any.
+     *
+     * Transient by design: the reveal is the answer to a tap, so it belongs to
+     * the tap. Reloading the page puts the block back rather than replaying a
+     * win â€” the pending prize is a grown-up's problem from that point, and it
+     * is in their approvals queue.
+     */
+    public ?int $luckyHitId = null;
+
+    /**
+     * Three tickets in, one prize out. The deduction and the draw happen
+     * together, server-side, in one transaction â€” see LuckyBlockService::hit().
+     */
+    public function hitLuckyBlock(): void
+    {
+        try {
+            $hit = app(LuckyBlockService::class)->hit($this->profile);
+
+            $this->luckyHitId = $hit->id;
+            $this->flashMessage = null;
+        } catch (InsufficientTicketsException|LuckyBlockEmptyException $e) {
+            $this->flashMessage = $e->getMessage();
+        }
+    }
+
+    public function dismissLuckyBlock(): void
+    {
+        $this->luckyHitId = null;
+    }
+
     public function togglePicker(): void
     {
         $this->pickingSaving = ! $this->pickingSaving;
@@ -141,6 +177,8 @@ new class extends Component
         // something else has no business shortening.
         $matching = $items->filter(fn (StoreItem $item) => $item->matches($this->search));
 
+        $lucky = app(LuckyBlockService::class);
+
         $store = app(StoreService::class);
 
         $favoriteIds = $store->favoriteIdsFor($this->profile);
@@ -152,6 +190,16 @@ new class extends Component
         $newItems = $matching->filter(fn (StoreItem $item) => isset($isNew[$item->id]));
 
         return [
+            // The Lucky Block's whole state. Only three things here move: the
+            // ticket count, the journal boolean and the pool â€” everything else
+            // on that card is fixed copy.
+            'luckyPool' => $lucky->poolFor($this->profile),
+            'luckyHit' => $this->luckyHitId === null
+                ? null
+                : LuckyHit::where('profile_id', $this->profile->id)
+                    ->with('luckyPrize')
+                    ->find($this->luckyHitId),
+            'luckyJournalDone' => ! app(GratitudeService::class)->isAvailable($this->profile),
             'items' => $items,
             'matchCount' => $matching->count(),
             'catalogCount' => $items->count(),
@@ -236,6 +284,17 @@ new class extends Component
     @if ($flashMessage)
         <p class="mt-3 text-sm font-semibold text-fq-lime">{{ $flashMessage }}</p>
     @endif
+
+    {{-- Pinned above the goal card, the search and the whole catalog run.
+         It is the only thing in the shop bought with tickets rather than
+         points, so it goes where nothing has to be scrolled past to find it.
+         --}}
+    <x-lucky-block
+        :pool="$luckyPool"
+        :tickets="$profile->bonus_tickets"
+        :journal-done="$luckyJournalDone"
+        :hit="$luckyHit"
+    />
 
     @if ($saving)
         @php $savingAccent = $saving->color_tag->cssVar(); @endphp
@@ -350,7 +409,7 @@ new class extends Component
     {{-- 1. What they already want. Starred and repeat-bought rewards pinned
          above the wall, because the two things a kid is most likely to be
          after are the thing they wished for and the thing they keep having.
-         Absent entirely when there is nothing in it — an empty "favorites"
+         Absent entirely when there is nothing in it ï¿½ an empty "favorites"
          heading is just something else to scroll past. --}}
     @if ($pinned->isNotEmpty())
         <div class="mt-[22px]">
@@ -411,7 +470,7 @@ new class extends Component
     {{-- 3. The catalogue, grouped two ways.
 
          They answer two different questions: price answers "what can I afford
-         today", kind answers "what sort of thing do I want" — and the second
+         today", kind answers "what sort of thing do I want" ï¿½ and the second
          is the one a kid who won't read the shop actually has. Kind leads for
          that reason; price is still there for the day they are counting. --}}
     <div class="mt-[26px] flex flex-wrap items-center justify-between gap-3">

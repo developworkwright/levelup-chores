@@ -5,6 +5,7 @@
         'approvals' => ['label' => 'Approvals', 'route' => 'parent.approvals'],
         'chores' => ['label' => 'Quests', 'route' => 'parent.chores'],
         'loot' => ['label' => 'Loot Shop', 'route' => 'parent.loot'],
+        'lucky' => ['label' => 'Lucky Block', 'route' => 'parent.lucky'],
         'monsters' => ['label' => 'Monsters', 'route' => 'parent.monsters'],
         'kids' => ['label' => 'Kids & Points', 'route' => 'parent.kids'],
         'standings' => ['label' => 'Standings', 'route' => 'parent.standings'],
@@ -16,7 +17,10 @@
         ->count()
         + \App\Models\Redemption::whereHas('profile', fn ($q) => $q->where('household_id', $profile->household_id))
             ->where('status', \App\Enums\RedemptionStatus::Pending)
-            ->count();
+            ->count()
+        // A Lucky Block win is a promise until somebody keeps it, so it counts
+        // here exactly as a cash-out does.
+        + \App\Models\LuckyHit::where('household_id', $profile->household_id)->pending()->count();
 @endphp
 
 <div class="mx-auto max-w-[1080px] px-[14px] pb-10">

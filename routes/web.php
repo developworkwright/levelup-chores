@@ -67,6 +67,10 @@ Route::middleware(['auth:profile', 'role:parent'])->prefix('parent')->group(func
     Volt::route('/approvals', 'parent.approvals')->name('parent.approvals');
     Volt::route('/chores', 'parent.chores')->name('parent.chores');
     Volt::route('/loot', 'parent.loot')->name('parent.loot');
+    // Its own screen rather than a third section on the Loot Shop admin: the
+    // Lucky Block's odds are flat, so the prize list *is* the balance, and a
+    // screen that leads with that reads differently from a shelf of prices.
+    Volt::route('/lucky', 'parent.lucky')->name('parent.lucky');
     Volt::route('/monsters', 'parent.monsters')->name('parent.monsters');
     Volt::route('/kids', 'parent.kids')->name('parent.kids');
     Volt::route('/standings', 'parent.standings')->name('parent.standings');

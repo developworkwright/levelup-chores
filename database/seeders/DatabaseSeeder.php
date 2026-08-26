@@ -6,6 +6,7 @@ use App\Enums\PerkEffect;
 use App\Models\BonusPerk;
 use App\Models\Chore;
 use App\Models\Household;
+use App\Models\LuckyPrize;
 use App\Models\Profile;
 use App\Models\StoreItem;
 use App\Services\MonsterService;
@@ -30,6 +31,10 @@ class DatabaseSeeder extends Seeder
         $this->seedChores($household);
         $this->seedStoreItems($household);
         $this->seedBonusPerks($household);
+        // Same three-way split as the perks: the migration seeds households
+        // that already exist, this seeds the demo one, the factory seeds the
+        // ones tests build.
+        LuckyPrize::seedDefaults($household);
         $this->seedSavingGoals($household);
         $this->seedMonster($household);
     }

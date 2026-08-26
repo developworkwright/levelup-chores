@@ -16,6 +16,7 @@ use App\Services\BonusShopService;
 use App\Services\ChestService;
 use App\Services\ChoreService;
 use App\Services\HouseholdClock;
+use App\Services\LuckyBlockService;
 use App\Services\MonsterService;
 use App\Services\PerkInventoryService;
 use App\Services\SpinService;
@@ -701,6 +702,11 @@ new class extends Component
                     'blocked' => $inventory->blockedReason($this->profile, PerkEffect::WheelRespin),
                 ]
                 : null,
+            // Whether there is a Lucky Block to point at. The strip above the
+            // run needs one boolean and the ticket count already on the
+            // profile — the block itself, its rules and its prize list all
+            // live in the Loot Shop, which is the point of it being a strip.
+            'luckyOpen' => app(LuckyBlockService::class)->isOpenFor($this->profile),
             'standings' => $this->standings(),
             // The week's shared chore target and what hitting it pays. Null
             // when a parent hasn't set one, which takes the bar with it.
@@ -724,6 +730,11 @@ new class extends Component
     @if ($monsterState)
         <x-monster-watcher :state="$monsterState" />
     @endif
+
+    {{-- Above the run, and not a section: it points at something on another
+         page rather than being something to do here. Renders nothing below two
+         tickets, or with an empty pool. --}}
+    <x-lucky-strip :tickets="$profile->bonus_tickets" :open="$luckyOpen" class="mb-[22px]" />
 
     <div class="flex flex-col gap-[22px]">
         {{-- The daily quest, opened right here. The hero is the same component

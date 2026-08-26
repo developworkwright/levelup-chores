@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Enums\PerkEffect;
 use App\Models\BonusPerk;
 use App\Models\Household;
+use App\Models\LuckyPrize;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 class HouseholdFactory extends Factory
@@ -26,13 +27,18 @@ class HouseholdFactory extends Factory
             'points_per_dollar' => 100,
             'require_quest_first' => true,
             'spin_enabled' => true,
+            // Stated for the same reason evening_watch_hour above is: a column
+            // default is applied by the database and never read back, so a
+            // factory-made household carries a null here until it is reloaded.
+            'lucky_hold_won' => false,
         ];
     }
 
     /**
-     * The migration can only seed the perk catalogue for households that
-     * already exist, and tests migrate an empty database — so a household
-     * built here has to bring its own, exactly as the seeder does.
+     * The migration can only seed the perk catalog and the Lucky Block pool
+     * for households that already exist, and tests migrate an empty database —
+     * so a household built here has to bring its own, exactly as the seeder
+     * does.
      */
     public function configure(): static
     {
@@ -43,6 +49,8 @@ class HouseholdFactory extends Factory
                     $effect->defaults(),
                 );
             }
+
+            LuckyPrize::seedDefaults($household);
         });
     }
 }

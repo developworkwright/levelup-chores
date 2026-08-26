@@ -26,6 +26,7 @@ class Household extends Model
         'sleep_points_own_bed',
         'sleep_points_visited',
         'sleep_points_rough',
+        'lucky_hold_won',
     ];
 
     protected function casts(): array
@@ -34,6 +35,7 @@ class Household extends Model
             'require_quest_first' => 'boolean',
             'spin_enabled' => 'boolean',
             'sleep_card_enabled' => 'boolean',
+            'lucky_hold_won' => 'boolean',
         ];
     }
 
@@ -55,6 +57,12 @@ class Household extends Model
     public function ledgerEntries(): HasMany
     {
         return $this->hasMany(LedgerEntry::class);
+    }
+
+    /** The Lucky Block's prize pool — see LuckyBlockService. */
+    public function luckyPrizes(): HasMany
+    {
+        return $this->hasMany(LuckyPrize::class);
     }
 
     /** The arena: every monster this family has faced, living or beaten. */

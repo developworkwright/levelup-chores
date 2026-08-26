@@ -100,6 +100,42 @@
     --fq-ticket-label: #a3934f;
 
     /*
+     * The Lucky Block, from the design_handoff_lucky_block bundle.
+     *
+     * The `?` block is drawn entirely in CSS — a gradient face, an inset bevel
+     * top and bottom, four square studs and a Baloo `?` — so its palette is
+     * warmer and more saturated than the gold the rest of the app spends
+     * points in. That separation is deliberate: the block is a prop, not a
+     * readout, and it must not read as another ticket tile.
+     */
+    --fq-lucky-face: linear-gradient(165deg, #ffd75e, #e8a219 62%, #b87708);
+    --fq-lucky-stud: #8a5504;
+    --fq-lucky-glyph: #fffbe8;
+    --fq-lucky-glyph-shadow: #a86a05;
+    --fq-lucky-glow: 0 8px 20px rgba(232, 162, 25, 0.3);
+    --fq-lucky-panel: linear-gradient(165deg, #2a2405, #150c26 72%);
+    /* The one-line pointer on Home. Flatter than the card, and warmer. */
+    --fq-lucky-strip: linear-gradient(150deg, #2a2405, #1a1208 74%);
+    /* Its dimmed twin, shown at exactly two tickets. */
+    --fq-lucky-strip-dim: linear-gradient(165deg, #c9a54a, #8a6410);
+    --fq-lucky-chip: #1a1208;
+    /* The nine prizes it wasn't, under the one it was. */
+    --fq-lucky-grayed: #4a3a6b;
+
+    /*
+     * The green this handoff uses for the journal shortcut, the parent screen's
+     * toggles and the "a grown-up has this now" line. The app had no green
+     * outside the rank ladder, and borrowing a rank's ring color for a
+     * confirmation would have made two unrelated things look related.
+     */
+    --fq-green: #7dffb0;
+    --fq-green-deep: #0d3323;
+    --fq-green-ink: #c7ebd8;
+    --fq-ink-green: #07220f;
+    --fq-green-panel: linear-gradient(180deg, #0d3323, #0e0719 82%);
+    --fq-fill-green: linear-gradient(150deg, #c7ffe0, #7dffb0);
+
+    /*
      * The badges tile beside it — same shape, violet instead of gold, because
      * it's the other header tile that's a door rather than a readout.
      */
@@ -366,6 +402,11 @@
     --color-fq-steel-text: var(--fq-steel-text);
     --color-fq-steel-label: var(--fq-steel-label);
     --color-fq-steel-edge: var(--fq-steel-edge);
+
+    --color-fq-green: var(--fq-green);
+    --color-fq-green-ink: var(--fq-green-ink);
+    --color-fq-lucky-grayed: var(--fq-lucky-grayed);
+    --color-fq-notice-text: var(--fq-notice-text);
 
     --color-fq-danger: var(--fq-danger);
     --color-fq-danger-2: var(--fq-danger-2);
@@ -644,4 +685,23 @@
     80% { transform: rotate(10deg) scale(1.08); }
     88% { transform: rotate(-14deg) scale(1.1); }
     94% { transform: rotate(14deg) scale(1.12); }
+}
+
+/*
+ * The Lucky Block being struck from below: it jumps, overshoots on the way
+ * down, and settles. 420ms, once, on tap — the mock loops it only so the
+ * motion is visible in a static document.
+ */
+@keyframes fq-lucky-hit {
+    0% { transform: translateY(0); }
+    22% { transform: translateY(-14px); }
+    46% { transform: translateY(3px); }
+    70% { transform: translateY(-2px); }
+    100% { transform: translateY(0); }
+}
+
+/* The prize coming up out of the block, overlapping the tail of the bounce. */
+@keyframes fq-lucky-rise {
+    0% { opacity: 0; transform: translateY(18px) scale(.6); }
+    100% { opacity: 1; transform: translateY(-6px) scale(1); }
 }

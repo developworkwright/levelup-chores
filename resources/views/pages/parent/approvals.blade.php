@@ -6,10 +6,12 @@ use App\Enums\RedemptionStatus;
 use App\Exceptions\BountyUnavailableException;
 use App\Models\Bounty;
 use App\Models\ChoreCompletion;
+use App\Models\LuckyHit;
 use App\Models\Profile;
 use App\Models\Redemption;
 use App\Services\BountyService;
 use App\Services\ChoreService;
+use App\Services\LuckyBlockService;
 use App\Services\StoreService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
@@ -61,6 +63,26 @@ new class extends Component
 
         if ($redemption) {
             app(StoreService::class)->fulfill($redemption, $this->profile);
+        }
+    }
+
+    /**
+     * Hands over a Lucky Block win.
+     *
+     * A tick-off and nothing else. There is no "reject" twin here the way
+     * there is for a cash-out, because there is nothing to refund: the prize
+     * was drawn against three tickets that are already spent, and turning it
+     * down would mean un-drawing it. A prize that shouldn't have been in the
+     * pool gets switched off on the Lucky Block screen instead.
+     */
+    public function tickOffLucky(int $hitId): void
+    {
+        $hit = LuckyHit::where('household_id', $this->profile->household_id)
+            ->pending()
+            ->find($hitId);
+
+        if ($hit) {
+            app(LuckyBlockService::class)->fulfill($hit, $this->profile);
         }
     }
 
@@ -177,6 +199,7 @@ new class extends Component
                 ->with(['profile', 'storeItem'])
                 ->oldest('requested_at')
                 ->get(),
+            'luckyHits' => app(LuckyBlockService::class)->pendingFor($this->profile->household),
             'pushSubscribed' => $this->profile->pushSubscriptions()->exists(),
             'vapidPublicKey' => config('webpush.vapid.public_key'),
         ];
@@ -483,5 +506,53 @@ new class extends Component
 
     @if ($redemptionMessage)
         <p class="mt-3 text-sm text-fq-lime">{{ $redemptionMessage }}</p>
+    @endif
+
+    {{-- Lucky Block wins. Only shown when there are any: this is not a queue a
+         household necessarily uses, and an empty-state card for a feature that
+         may be switched off is one more thing to scroll past. --}}
+    @if ($luckyHits->isNotEmpty())
+        <h2 class="mt-6 font-baloo text-xl font-bold">Lucky Block Wins</h2>
+
+        <div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3">
+            @foreach ($luckyHits as $hit)
+                <div
+                    wire:key="lucky-hit-{{ $hit->id }}"
+                    class="flex flex-col gap-[13px] rounded-[20px] border p-4"
+                    style="border-color: var(--fq-ticket-line); background: var(--fq-ticket-bg)"
+                >
+                    <div class="flex items-center gap-3">
+                        <div
+                            class="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-[12px] font-baloo text-sm font-extrabold text-fq-bg"
+                            style="background:{{ $hit->profile->color->cssVar() }}"
+                        >{{ mb_substr($hit->profile->name, 0, 1) }}</div>
+
+                        <div class="min-w-0 flex-1">
+                            <p class="flex items-center gap-2 text-[15px] font-semibold">
+                                <x-chore-icon :icon="$hit->iconClass()" class="text-base" style="color: var(--fq-lime)" />
+                                {{ $hit->prize_name }}
+                            </p>
+                            <p class="font-mono-fq text-[10px] text-fq-text-4">
+                                {{ $hit->profile->name }} · {{ $hit->won_at->diffForHumans() }}
+                            </p>
+                        </div>
+
+                        {{-- Tickets, not points, and the card says so — this is
+                             the one thing in the approvals queue that cost no
+                             money and can't be refunded. --}}
+                        <span class="shrink-0 font-baloo text-lg font-extrabold text-fq-gold">
+                            &minus;{{ $hit->tickets_spent }}<i aria-hidden="true" class="fa-solid fa-ticket ml-1 text-[11px]"></i>
+                        </span>
+                    </div>
+
+                    <button
+                        type="button"
+                        wire:click="tickOffLucky({{ $hit->id }})"
+                        class="w-full rounded-[13px] py-[11px] text-sm font-bold text-fq-bg"
+                        style="background: var(--fq-green)"
+                    >Handed over</button>
+                </div>
+            @endforeach
+        </div>
     @endif
 </x-parent.shell>
