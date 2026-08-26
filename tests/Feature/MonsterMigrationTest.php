@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Enums\BossSkin;
 use App\Enums\MonsterHitKind;
-use App\Enums\MonsterTier;
 use App\Models\Household;
 use App\Models\Monster;
 use App\Models\MonsterHit;
@@ -17,7 +16,7 @@ use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 /**
- * The one-way move from a single family goal onto the three-tier arena.
+ * The one-way move from a single family goal onto the monster arena.
  *
  * Worth testing rather than eyeballing: it runs once, against a database with
  * real history in it, and there is no second chance to get the trophy shelf
@@ -139,7 +138,7 @@ class MonsterMigrationTest extends TestCase
 
         $this->migrate();
 
-        $monster = app(MonsterService::class)->at($household, MonsterTier::Three);
+        $monster = app(MonsterService::class)->current($household);
 
         $this->assertNotNull($monster);
         $this->assertSame('Trip to the zoo', $monster->reward_name);
@@ -150,17 +149,16 @@ class MonsterMigrationTest extends TestCase
         $this->assertSame(800, $monster->healthLeft());
     }
 
-    public function test_the_lower_tiers_start_empty_for_a_parent_to_name(): void
+    public function test_exactly_one_monster_is_left_standing(): void
     {
         $household = $this->household();
 
         $this->migrate();
 
-        $arena = app(MonsterService::class);
-
-        $this->assertNull($arena->at($household, MonsterTier::One));
-        $this->assertNull($arena->at($household, MonsterTier::Two));
-        $this->assertCount(1, $arena->live($household));
+        $this->assertSame(
+            1,
+            Monster::where('household_id', $household->id)->whereNull('defeated_at')->count(),
+        );
     }
 
     public function test_each_kids_contribution_survives_as_a_hit_in_their_name(): void
@@ -171,7 +169,7 @@ class MonsterMigrationTest extends TestCase
 
         $this->migrate();
 
-        $monster = app(MonsterService::class)->at($household, MonsterTier::Three);
+        $monster = app(MonsterService::class)->current($household);
         $board = app(MonsterService::class)->contributionsFor($monster);
 
         $this->assertSame(700, $board->firstWhere('profile_id', $nova->id)['points']);
@@ -186,7 +184,7 @@ class MonsterMigrationTest extends TestCase
 
         $this->migrate();
 
-        $monster = app(MonsterService::class)->at($household, MonsterTier::Three);
+        $monster = app(MonsterService::class)->current($household);
 
         // 1200 on the bar, 1100 of it earned: the remaining 100 is whatever a
         // parent nudged or the daily reset rolled back, and belongs to nobody.
@@ -205,7 +203,7 @@ class MonsterMigrationTest extends TestCase
 
         $this->migrate();
 
-        $this->assertTrue(app(MonsterService::class)->live($household)->isEmpty());
+        $this->assertNull(app(MonsterService::class)->current($household));
     }
 
     public function test_the_trophy_shelf_is_rebuilt_from_past_defeats(): void
@@ -222,7 +220,6 @@ class MonsterMigrationTest extends TestCase
 
         $this->assertSame('Pizza night', $shelved->reward_name);
         $this->assertSame(BossSkin::Gnash, $shelved->skin);
-        $this->assertSame(MonsterTier::Three, $shelved->tier);
         $this->assertSame(1000, $shelved->max_health);
         $this->assertTrue($shelved->isDefeated());
         $this->assertSame('Nova', $shelved->contributions[0]['name']);
@@ -247,7 +244,7 @@ class MonsterMigrationTest extends TestCase
 
         $this->assertCount(1, $monsters);
         $this->assertTrue($monsters->sole()->isDefeated());
-        $this->assertTrue(app(MonsterService::class)->live($household)->isEmpty());
+        $this->assertNull(app(MonsterService::class)->current($household));
     }
 
     public function test_households_are_migrated_independently(): void
@@ -259,9 +256,9 @@ class MonsterMigrationTest extends TestCase
 
         $arena = app(MonsterService::class);
 
-        $this->assertSame('Trip to the zoo', $arena->at($first, MonsterTier::Three)->reward_name);
-        $this->assertSame('New bikes', $arena->at($second, MonsterTier::Three)->reward_name);
-        $this->assertSame(250, $arena->at($second, MonsterTier::Three)->damage());
+        $this->assertSame('Trip to the zoo', $arena->current($first)->reward_name);
+        $this->assertSame('New bikes', $arena->current($second)->reward_name);
+        $this->assertSame(250, $arena->current($second)->damage());
     }
 
     public function test_running_it_twice_changes_nothing(): void
@@ -274,7 +271,7 @@ class MonsterMigrationTest extends TestCase
         $this->migrate();
 
         $this->assertSame(2, Monster::where('household_id', $household->id)->count());
-        $this->assertSame(1200, app(MonsterService::class)->at($household, MonsterTier::Three)->damage());
+        $this->assertSame(1200, app(MonsterService::class)->current($household)->damage());
     }
 
     public function test_it_comes_back_for_a_goal_that_started_after_it_first_ran(): void
@@ -287,7 +284,7 @@ class MonsterMigrationTest extends TestCase
 
         $this->migrate();
 
-        $this->assertTrue(app(MonsterService::class)->live($household)->isEmpty());
+        $this->assertNull(app(MonsterService::class)->current($household));
 
         DB::table('households')->where('id', $household->id)->update([
             'goal_name' => 'Bowling night',
@@ -298,7 +295,7 @@ class MonsterMigrationTest extends TestCase
 
         $this->migrate();
 
-        $standing = app(MonsterService::class)->at($household, MonsterTier::Three);
+        $standing = app(MonsterService::class)->current($household);
 
         $this->assertSame('Bowling night', $standing->reward_name);
         $this->assertSame(4, $standing->battle);

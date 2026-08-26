@@ -2,7 +2,6 @@
 
 use App\Enums\BossSkin;
 use App\Enums\MonsterHitKind;
-use App\Enums\MonsterTier;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 
@@ -41,7 +40,6 @@ return new class extends Migration
 
         $alreadyStanding = DB::table('monsters')
             ->where('household_id', $household->id)
-            ->where('tier', MonsterTier::Three->value)
             ->whereNull('defeated_at')
             ->exists();
 
@@ -55,12 +53,10 @@ return new class extends Migration
         // goal after the first migration ran.
         $battle = (int) DB::table('monsters')
             ->where('household_id', $household->id)
-            ->where('tier', MonsterTier::Three->value)
             ->max('battle');
 
         $monsterId = DB::table('monsters')->insertGetId([
             'household_id' => $household->id,
-            'tier' => MonsterTier::Three->value,
             'battle' => $battle + 1,
             'skin' => $household->boss_key ?: BossSkin::default()->value,
             'reward_name' => $household->goal_name ?: 'Family goal',

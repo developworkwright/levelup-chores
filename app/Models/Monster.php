@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Enums\BossSkin;
-use App\Enums\MonsterTier;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -11,7 +10,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * One family goal, drawn as a monster. Three stand at a time, one per tier.
+ * The family goal, drawn as a monster. One stands at a time; the rest of the
+ * rows are the trophy shelf.
  *
  * The health left on it is not stored — it is summed from the hits landed on
  * it, which is the same table the leaderboard underneath the bar is grouped
@@ -24,7 +24,6 @@ class Monster extends Model
 
     protected $fillable = [
         'household_id',
-        'tier',
         'battle',
         'skin',
         'nickname',
@@ -42,7 +41,6 @@ class Monster extends Model
     protected function casts(): array
     {
         return [
-            'tier' => MonsterTier::class,
             'skin' => BossSkin::class,
             'weak_rotated_on' => 'date',
             'started_at' => 'datetime',
@@ -100,11 +98,11 @@ class Monster extends Model
     /**
      * Damage taken, floored at zero.
      *
-     * Prefers a sum already loaded by the query — the arena draws three
-     * monsters at once, and `withSum('hits', 'damage')` is what keeps that from
-     * being three extra round trips. Floored because a parent can nudge a tier
-     * back down past where it started, and a monster on negative damage would
-     * render with a health bar longer than its own body.
+     * Prefers a sum already loaded by the query — `withSum('hits', 'damage')`
+     * is what keeps a card from costing an extra round trip. Floored because a
+     * parent can nudge the bar back down past where it started, and a monster
+     * on negative damage would render with a health bar longer than its own
+     * body.
      */
     public function damage(): int
     {

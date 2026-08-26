@@ -6,7 +6,6 @@ use App\Enums\BountyKind;
 use App\Enums\BountyStatus;
 use App\Enums\ChoreCadence;
 use App\Enums\CompletionStatus;
-use App\Enums\MonsterTier;
 use App\Enums\TradeAsset;
 use App\Exceptions\BountyUnavailableException;
 use App\Exceptions\InsufficientPointsException;
@@ -455,7 +454,7 @@ class BountyBoardTest extends TestCase
     public function test_a_hired_job_earns_xp_and_moves_the_family_goal_like_any_chore(): void
     {
         $parent = Profile::factory()->for($this->household)->parent()->create();
-        $monster = app(MonsterService::class)->spawn($this->household, MonsterTier::Three, 'Weekend away', 1000);
+        $monster = app(MonsterService::class)->spawn($this->household, 'Weekend away', 1000);
 
         // Starts at nothing, so the 200 points this earns stay under the
         // `big_saver` threshold and no badge XP lands on top of the chore's.

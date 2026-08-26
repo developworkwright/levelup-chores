@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Enums\MonsterTier;
 use App\Enums\TicketKind;
 use App\Models\BonusTicketEntry;
 use App\Models\Chore;
@@ -49,7 +48,7 @@ class MonsterKillRewardTest extends TestCase
 
     private function spawn(int $health = 1000): Monster
     {
-        return $this->arena()->spawn($this->household, MonsterTier::One, 'Ice cream outing', $health);
+        return $this->arena()->spawn($this->household, 'Ice cream outing', $health);
     }
 
     private function ticketsFor(Profile $kid): int
@@ -182,14 +181,14 @@ class MonsterKillRewardTest extends TestCase
         $this->assertSame(5, $this->ticketsFor($nova));
     }
 
-    public function test_a_cascade_pays_for_each_monster_it_takes_down(): void
+    public function test_each_monster_beaten_pays_again(): void
     {
         $nova = $this->kid('Nova');
 
-        $one = $this->arena()->spawn($this->household, MonsterTier::One, 'Ice cream', 100);
-        $two = $this->arena()->spawn($this->household, MonsterTier::Two, 'Pizza night', 100);
-
-        foreach ([$one, $two] as $monster) {
+        // One after the other now rather than in a cascade — the next one can
+        // only be stood up once the first is off the board.
+        foreach (['Ice cream', 'Pizza night'] as $reward) {
+            $monster = $this->arena()->spawn($this->household, $reward, 100);
             $this->arena()->land($monster, 100, $nova);
             $this->arena()->settle($monster, $nova);
         }

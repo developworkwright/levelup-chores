@@ -347,9 +347,9 @@ body {
 }
 
 /*
- * The frame a level 3 monster's card wears — an inner rule and four corner
- * marks, so the biggest fight is legible as the biggest fight before anyone has
- * read a word on it.
+ * The frame the monster's card wears — an inner rule and four corner marks, so
+ * the fight is legible as the thing on the page worth looking at before anyone
+ * has read a word on it.
  *
  * Drawn with insets rather than extra elements: the card is already a stack of
  * absolutely positioned artwork, and a border that needs markup would have to
@@ -389,7 +389,7 @@ body {
 }
 
 /*
- * The level 3 monster, watching from the edge of the page it is not on.
+ * The monster, watching from the edge of a page it is not on.
  *
  * Behind everything and untouchable — the shell isolates its own stacking
  * context, so the negative z-index puts this under the content without letting

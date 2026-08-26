@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Enums\MonsterTier;
 use App\Models\Chore;
 use App\Models\DailyQuest;
 use App\Models\Household;
@@ -100,7 +99,7 @@ class BadgeTest extends TestCase
     public function test_team_effort_awarded_to_every_kid_when_a_monster_goes_down(): void
     {
         $household = Household::factory()->create();
-        app(MonsterService::class)->spawn($household, MonsterTier::One, 'Ice cream', 100);
+        app(MonsterService::class)->spawn($household, 'Ice cream', 100);
         $parent = Profile::factory()->parent()->for($household)->create();
         $kidA = Profile::factory()->for($household)->create();
         $kidB = Profile::factory()->for($household)->create();

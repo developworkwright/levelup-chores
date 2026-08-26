@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Enums\MonsterTier;
 use App\Enums\PerkEffect;
 use App\Exceptions\PerkUnavailableException;
 use App\Models\Chore;
@@ -55,9 +54,9 @@ class NameMonsterPerkTest extends TestCase
         $this->perks()->grant($this->kid, PerkEffect::NameMonster, 'shop');
     }
 
-    private function spawn(MonsterTier $tier = MonsterTier::One): Monster
+    private function spawn(): Monster
     {
-        return $this->arena()->spawn($this->household, $tier, 'Ice cream', 500);
+        return $this->arena()->spawn($this->household, 'Ice cream', 500);
     }
 
     public function test_a_kid_names_a_monster_and_everyone_sees_it(): void
@@ -66,7 +65,6 @@ class NameMonsterPerkTest extends TestCase
         $this->ownAName();
 
         $this->perks()->use($this->kid, PerkEffect::NameMonster, [
-            'monster_id' => $monster->id,
             'name' => 'Barry',
         ]);
 
@@ -81,7 +79,6 @@ class NameMonsterPerkTest extends TestCase
         $this->ownAName();
 
         $this->perks()->use($this->kid, PerkEffect::NameMonster, [
-            'monster_id' => $monster->id,
             'name' => 'Barry',
         ]);
 
@@ -100,7 +97,6 @@ class NameMonsterPerkTest extends TestCase
 
         try {
             $this->perks()->use($this->kid, PerkEffect::NameMonster, [
-                'monster_id' => $monster->id,
                 'name' => '   ',
             ]);
             $this->fail('A blank name should be refused.');
@@ -118,7 +114,6 @@ class NameMonsterPerkTest extends TestCase
         $this->ownAName();
 
         $this->perks()->use($this->kid, PerkEffect::NameMonster, [
-            'monster_id' => $monster->id,
             'name' => str_repeat('a', 80),
         ]);
 
@@ -132,7 +127,6 @@ class NameMonsterPerkTest extends TestCase
         $this->ownAName();
 
         $this->perks()->use($this->kid, PerkEffect::NameMonster, [
-            'monster_id' => $monster->id,
             'name' => 'Barry',
         ]);
 
@@ -140,7 +134,6 @@ class NameMonsterPerkTest extends TestCase
         $this->expectException(PerkUnavailableException::class);
 
         $this->perks()->use($this->kid->fresh(), PerkEffect::NameMonster, [
-            'monster_id' => $monster->id,
             'name' => 'Susan',
         ]);
     }
@@ -155,33 +148,37 @@ class NameMonsterPerkTest extends TestCase
         $monster = $this->spawn();
         $this->assertNull($this->perks()->blockedReason($this->kid, PerkEffect::NameMonster));
 
-        $this->arena()->nameMonster($this->household, $monster->id, 'Barry');
+        $this->arena()->nameMonster($this->household, 'Barry');
         $this->assertSame(
             'Nothing left to name',
             $this->perks()->blockedReason($this->kid->fresh(), PerkEffect::NameMonster),
         );
     }
 
-    public function test_a_monster_from_another_household_cannot_be_named(): void
+    /**
+     * The perk no longer takes a monster id — it names whatever this household
+     * is fighting — so reaching another family's arena is structurally out of
+     * reach rather than merely refused. This holds the line anyway.
+     */
+    public function test_naming_cannot_reach_another_households_monster(): void
     {
-        $this->spawn();
         $elsewhere = Household::factory()->create();
-        $theirs = $this->arena()->spawn($elsewhere, MonsterTier::One, 'Not ours', 500);
+        $theirs = $this->arena()->spawn($elsewhere, 'Not ours', 500);
 
         $this->ownAName();
 
+        // Nothing standing here, and a monster standing over there.
         $this->expectException(PerkUnavailableException::class);
 
-        $this->perks()->use($this->kid, PerkEffect::NameMonster, [
-            'monster_id' => $theirs->id,
-            'name' => 'Barry',
-        ]);
+        $this->perks()->use($this->kid, PerkEffect::NameMonster, ['name' => 'Barry']);
+
+        $this->assertNull($theirs->fresh()->nickname);
     }
 
     public function test_the_name_rides_on_the_kill_card_rather_than_the_skin(): void
     {
-        $monster = $this->arena()->spawn($this->household, MonsterTier::One, 'Ice cream outing', 100);
-        $this->arena()->nameMonster($this->household, $monster->id, 'Barry');
+        $monster = $this->arena()->spawn($this->household, 'Ice cream outing', 100);
+        $this->arena()->nameMonster($this->household, 'Barry');
 
         $this->arena()->land($monster->fresh(), 100, $this->kid);
         $this->arena()->settle($monster->fresh(), $this->kid);
@@ -195,12 +192,12 @@ class NameMonsterPerkTest extends TestCase
 
     public function test_the_form_opens_on_the_tap_and_spends_nothing_yet(): void
     {
-        $this->spawn();
+        $monster = $this->spawn();
         $this->ownAName();
 
         Volt::test('kid.bonus')
             ->call('usePerk', PerkEffect::NameMonster->value)
-            ->assertSee('What should it be called?')
+            ->assertSee('What should '.$monster->skin->label().' be called?')
             ->assertSet('monsterName', '');
 
         $this->assertCount(1, $this->perks()->unusedFor($this->kid->fresh()));
@@ -215,7 +212,7 @@ class NameMonsterPerkTest extends TestCase
             ->call('usePerk', PerkEffect::NameMonster->value)
             ->set('monsterName', 'Barry')
             ->call('nameMonster')
-            ->assertSet('namingMonsterId', null);
+            ->assertSet('naming', false);
 
         $this->assertSame('Barry', $monster->fresh()->nickname);
         $this->assertCount(0, $this->perks()->unusedFor($this->kid->fresh()));
@@ -269,7 +266,7 @@ class NameMonsterPerkTest extends TestCase
         Volt::test('kid.bonus')
             ->call('usePerk', PerkEffect::NameMonster->value)
             ->call('cancelNaming')
-            ->assertSet('namingMonsterId', null)
+            ->assertSet('naming', false)
             ->assertDontSee('What should it be called?');
 
         $this->assertCount(1, $this->perks()->unusedFor($this->kid->fresh()));
@@ -278,7 +275,7 @@ class NameMonsterPerkTest extends TestCase
     public function test_a_parent_can_take_a_name_back_off(): void
     {
         $monster = $this->spawn();
-        $this->arena()->nameMonster($this->household, $monster->id, 'Barry');
+        $this->arena()->nameMonster($this->household, 'Barry');
 
         $parent = Profile::factory()->parent()->for($this->household)->create();
         Auth::guard('profile')->login($parent);
@@ -286,23 +283,23 @@ class NameMonsterPerkTest extends TestCase
         Volt::test('parent.monsters')
             ->assertSee('Barry')
             ->assertSee('Take the name off')
-            ->call('clearNickname', MonsterTier::One->value);
+            ->call('clearNickname');
 
         $this->assertNull($monster->fresh()->nickname);
         $this->assertSame($monster->skin->label(), $monster->fresh()->displayName());
     }
 
-    public function test_the_next_monster_at_a_tier_starts_unnamed(): void
+    public function test_the_next_monster_starts_unnamed(): void
     {
-        $monster = $this->arena()->spawn($this->household, MonsterTier::One, 'Ice cream', 100);
-        $this->arena()->nameMonster($this->household, $monster->id, 'Barry');
+        $monster = $this->arena()->spawn($this->household, 'Ice cream', 100);
+        $this->arena()->nameMonster($this->household, 'Barry');
 
         $this->arena()->land($monster->fresh(), 100, $this->kid);
         $this->arena()->settle($monster->fresh(), $this->kid);
 
-        $next = $this->arena()->spawn($this->household, MonsterTier::One, 'Ice cream again', 100);
+        $next = $this->arena()->spawn($this->household, 'Ice cream again', 100);
 
-        // The name belonged to the monster, not the slot — and the beaten one
+        // The name belonged to the monster, not the arena — and the beaten one
         // keeps it on the shelf.
         $this->assertNull($next->nickname);
         $this->assertSame('Barry', $monster->fresh()->displayName());

@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Enums\AccentColor;
-use App\Enums\MonsterTier;
 use App\Enums\ProfileRole;
 use App\Enums\Rank;
 use App\Enums\TradeAsset;
@@ -63,7 +62,6 @@ class Profile extends Model implements Authenticatable
         'sleep_constellations_paid',
         'sleep_run_paid_through',
         'pending_sleep_chest',
-        'last_monster_tier',
         'monsters_seen',
         'pending_monster_kills',
     ];
@@ -77,7 +75,6 @@ class Profile extends Model implements Authenticatable
         return [
             'role' => ProfileRole::class,
             'color' => AccentColor::class,
-            'last_monster_tier' => MonsterTier::class,
             'monsters_seen' => 'array',
             'pending_monster_kills' => 'array',
             'locked_until' => 'datetime',

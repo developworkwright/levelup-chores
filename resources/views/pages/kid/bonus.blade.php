@@ -40,8 +40,8 @@ new class extends Component
         }
     }
 
-    /** The monster a kid is part-way through naming, and what they've typed. */
-    public ?int $namingMonsterId = null;
+    /** Whether the naming form is open, and what they've typed into it. */
+    public bool $naming = false;
 
     public string $monsterName = '';
 
@@ -53,12 +53,10 @@ new class extends Component
             return;
         }
 
-        // Naming needs a target and a word, so the tap opens the form instead
+        // Naming needs the kid to say a word, so the tap opens the form instead
         // of spending the perk. Everything else fires on the tap.
         if ($case === PerkEffect::NameMonster) {
-            $this->namingMonsterId = app(MonsterService::class)
-                ->nameable($this->profile->household)
-                ->first()?->id;
+            $this->naming = true;
             $this->monsterName = '';
             $this->flashMessage = null;
 
@@ -70,15 +68,12 @@ new class extends Component
 
     public function nameMonster(): void
     {
-        $this->spendPerk(PerkEffect::NameMonster, [
-            'monster_id' => $this->namingMonsterId,
-            'name' => $this->monsterName,
-        ]);
+        $this->spendPerk(PerkEffect::NameMonster, ['name' => $this->monsterName]);
     }
 
     public function cancelNaming(): void
     {
-        $this->namingMonsterId = null;
+        $this->naming = false;
         $this->monsterName = '';
     }
 
@@ -211,30 +206,15 @@ new class extends Component
              tap opens this instead of spending the perk outright. Nothing is
              spent until "Name it" — a perk that failed to apply stays in the
              pocket, and a half-typed name is a failure to apply. --}}
-        @if ($namingMonsterId !== null && $nameable->isNotEmpty())
+        @if ($naming && $nameable)
             <div class="rounded-[18px] border p-4" style="border-color: var(--fq-steel-edge); background: var(--fq-steel-panel)">
-                <p class="font-mono-fq text-[10px] tracking-[0.2em] uppercase" style="color: var(--fq-steel-text)">Name a monster</p>
+                <p class="font-mono-fq text-[10px] tracking-[0.2em] uppercase" style="color: var(--fq-steel-text)">Name the monster</p>
                 <h3 class="mt-1 font-baloo text-xl font-extrabold" style="color: var(--fq-steel-name)">
-                    What should it be called?
+                    What should {{ $nameable->skin->label() }} be called?
                 </h3>
                 <p class="mt-1 text-[13px]" style="color: var(--fq-steel-text)">
                     It keeps the name until the day it goes down.
                 </p>
-
-                <div class="mt-3 flex flex-wrap gap-2">
-                    @foreach ($nameable as $monster)
-                        <button
-                            type="button"
-                            wire:key="nameable-{{ $monster->id }}"
-                            wire:click="$set('namingMonsterId', {{ $monster->id }})"
-                            class="rounded-[12px] border px-3 py-2 text-xs font-semibold transition"
-                            style="
-                                border-color: {{ $namingMonsterId === $monster->id ? 'var(--fq-lime)' : 'var(--fq-steel-edge)' }};
-                                color: {{ $namingMonsterId === $monster->id ? 'var(--fq-lime)' : 'var(--fq-steel-text)' }};
-                            "
-                        >{{ $monster->tier->label() }} &middot; {{ $monster->skin->label() }}</button>
-                    @endforeach
-                </div>
 
                 <div class="mt-3 flex flex-wrap items-center gap-2">
                     <input

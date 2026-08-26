@@ -182,13 +182,11 @@
     }
 
     // Every monster that has fallen since this kid last looked. A list, because
-    // one chore can finish two off at once — its overkill rolling up onto the
-    // tier above and killing that too — and because a kid can be days late to
-    // any of it.
+    // a kid can be days late to any of it.
     //
     // Everything the card says was stamped at the kill, not looked up now: by
     // the time a kid reads this a parent has very likely stood the next monster
-    // up at that tier, and asking the arena who died would name the wrong one.
+    // up, and asking the arena who died would name the wrong one.
     foreach ($profile->pending_monster_kills ?? [] as $kill) {
         $blow = $kill['finisher'] ? $kill['finisher'].' landed the final blow' : 'Everyone pulled together';
 
@@ -217,7 +215,7 @@
             'hero' => 'boss',
             'card' => [
                 'accent' => 'var(--fq-lime)',
-                'sub' => $kill['tier'].' Defeated',
+                'sub' => 'Monster Defeated',
                 'label' => $kill['name'],
                 // The monster is the headline, the reward is why anyone was
                 // fighting it, and the tickets are what this particular kid got

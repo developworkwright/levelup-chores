@@ -29,7 +29,10 @@ return new class extends Migration
             // 1, 2 or 3. Small and quick through to the long game, and the
             // direction overkill spills: a killing blow on tier 1 rolls its
             // excess onto tier 2.
-            $table->unsignedTinyInteger('tier');
+            // Defaulted so the seed migrations below need not name it — the
+            // column is dropped again by the collapse-to-one migration, and
+            // every row those seeds write is a tier 3.
+            $table->unsignedTinyInteger('tier')->default(3);
 
             // Which monster this is at its tier, counting from one. Identity,
             // and what keeps a re-spawned tier 1 from being confused with the

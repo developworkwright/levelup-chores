@@ -1,10 +1,8 @@
-{{-- One monster, drawn as a card.
+{{-- The monster, drawn as a card.
 
-     Used three times over in the arena and again in the picker a kid taps after
-     finishing a chore, which is the reason it takes its click handling through
-     `$attributes` rather than owning any: the same card has to be a display in
-     one place and a button in the other, and two near-identical copies of a
-     monster would drift.
+     Takes its click handling through `$attributes` rather than owning any, so
+     the arena can hand it a handler without the card growing an opinion about
+     what tapping it means.
 
      `state['steps']`, when it holds more than one entry, is the damage this kid
      missed while they were away — the card plays those stages back before
@@ -14,25 +12,11 @@
      from the step rather than the state, or the bar would sit at the final
      figure while the monster acted out getting there.
 
-     Framed as health *remaining*, matching the old single boss — the bar empties
-     as the family earns. --}}
-@props([
-    'state',
-    'compact' => false,
-    'selected' => false,
-])
+     Framed as health *remaining* — the bar empties as the family earns. --}}
+@props(['state'])
 
 @php
     $skin = $state['skin'];
-    $tier = $state['tier'];
-
-    // The three visual levers the tier pulls, all on the same drawing: how big
-    // it is in its frame, how far past the edges it spills, and how heavy the
-    // weather around it is. Compact cards opt out — the picker is a row of
-    // thumbnails, and a cropped thumbnail is just a blurry one.
-    $art = $compact ? 'w-[74px]' : 'w-full max-w-[190px]';
-    $zoom = $compact ? 1.0 : $tier->artZoom();
-    $segments = $tier->healthSegments();
 
     // A card with nothing to catch up on still runs the component — it is what
     // owns the numbers — it just has a single stage to show.
@@ -56,31 +40,28 @@
 @endphp
 
 <div
-    x-data="fqMonsterReplay(@js($timeline), @js($skin->value), @js($state['startDelay'] ?? 0), @js($tier->dread()))"
+    x-data="fqMonsterReplay(@js($timeline), @js($skin->value), @js($state['startDelay'] ?? 0))"
     @click="finish()"
+    {{-- The ornate frame used to be the level 3 card's alone, earned by being
+         the biggest of three. There is only one now, so it is the big fight by
+         definition and simply wears it. --}}
     {{ $attributes->merge([
-        'class' => 'flex flex-col overflow-hidden rounded-[22px] transition '
-            .($compact ? 'border ' : $tier->frameClass().' ')
-            .($selected ? 'border-fq-lime' : 'border-fq-line-2'),
+        'class' => 'fq-frame-ornate flex flex-col overflow-hidden rounded-[22px] border-2 border-fq-line-2 transition',
     ]) }}
     style="background: linear-gradient(160deg, #1d0b2f, var(--fq-panel) 60%)"
 >
-    <div class="flex {{ $compact ? 'flex-row items-center gap-[14px]' : 'flex-col items-center gap-3' }} p-4">
+    <div class="flex flex-col items-center gap-3 p-4">
         {{-- Square, and holding its own height: every stage is absolutely
              positioned so they stack, which means none of them can be the one
              propping the box open. --}}
-        <div class="relative aspect-square {{ $art }} shrink-0 overflow-hidden rounded-[18px]">
+        <div class="relative aspect-square w-full max-w-[220px] shrink-0 overflow-hidden rounded-[18px]">
             {{-- Drawn by monsters.js rather than Blade, so `wire:ignore` keeps
                  Livewire's morph from wiping markup the server never rendered.
                  The key carries the stage, so a genuine change still replaces
-                 the node and Alpine redraws it.
-
-                 The zoom is a transform on the wrapper rather than anything
-                 sent into the generator: the artwork ships verbatim, and the
-                 frame clips whatever hangs over the edge. --}}
+                 the node and Alpine redraws it. --}}
             @foreach ($steps as $index => $step)
                 <div
-                    wire:key="monster-art-{{ $tier->value }}-{{ $skin->value }}-{{ $step['stage']->value }}-{{ $index }}"
+                    wire:key="monster-art-{{ $skin->value }}-{{ $step['stage']->value }}-{{ $index }}"
                     wire:ignore
                     x-show="index === {{ $index }}"
                     @if ($index > 0) x-cloak @endif
@@ -88,7 +69,6 @@
                     x-html="monster(@js($step['stage']->value))"
                     :style="{ background: cardBg }"
                     class="fq-boss absolute inset-0"
-                    style="transform: scale({{ $zoom }}); transform-origin: 50% 58%"
                 ></div>
             @endforeach
 
@@ -102,28 +82,16 @@
             ></span>
         </div>
 
-        <div class="min-w-0 flex-1 {{ $compact ? '' : 'w-full text-center' }}">
-            <p class="font-mono-fq text-[10px] tracking-[0.2em] text-fq-gold uppercase">
-                {{ $tier->label() }}
-            </p>
-
-            <h3 class="mt-[2px] font-baloo {{ $compact ? 'text-[18px]' : 'text-[22px]' }} leading-tight font-extrabold">
+        <div class="w-full min-w-0 flex-1 text-center">
+            <h3 class="font-baloo text-[22px] leading-tight font-extrabold">
                 {{ $state['name'] }}
             </h3>
 
-            @if (! $compact && $tier->epithet())
-                <p class="font-mono-fq text-[9px] tracking-[0.18em] text-fq-coral uppercase">
-                    {{ $tier->epithet() }}
-                </p>
-            @endif
-
-            {{-- The reward is the reason to pick this one over the other two, so
-                 it outranks the monster's own flavour text. --}}
+            {{-- The reward is the reason anybody is hitting it, so it outranks
+                 the monster's own flavour text. --}}
             <p class="mt-[3px] text-[13px] font-semibold text-fq-lime">{{ $state['reward'] }}</p>
 
-            @unless ($compact)
-                <p class="mt-[6px] text-[12px] text-fq-text-4">{{ $state['tagline'] }}</p>
-            @endunless
+            <p class="mt-[6px] text-[12px] text-fq-text-4">{{ $state['tagline'] }}</p>
         </div>
     </div>
 
@@ -137,15 +105,6 @@
                 :style="{ width: current.healthPercent + '%' }"
                 style="background: linear-gradient(90deg, #7a1030, var(--fq-streak) 60%, #ff8ac7)"
             ></div>
-
-            {{-- Notches over the top rather than segments built into the fill,
-                 so the bar still animates as one continuous width. --}}
-            @for ($notch = 1; $notch < $segments; $notch++)
-                <span
-                    class="pointer-events-none absolute inset-y-0 w-[2px] bg-fq-bg/70"
-                    style="left: {{ round($notch / $segments * 100, 4) }}%"
-                ></span>
-            @endfor
         </div>
 
         <div class="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 font-mono-fq text-[10px]">
@@ -174,7 +133,7 @@
             </p>
         @endif
 
-        @unless ($compact || $state['defeated'])
+        @unless ($state['defeated'])
             <p x-text="`&ldquo;${current.taunt}&rdquo;`" class="mt-[10px] font-baloo text-[13px] text-fq-text-2 italic"></p>
         @endunless
     </div>

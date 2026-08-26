@@ -27,7 +27,7 @@ Tiered sets go through `awardMilestones($profile, MAP, $measure)`, which takes *
 
 **This is the important operational rule:** `evaluate()` is not run on a schedule — it must be called explicitly after any event that could satisfy a condition. Current call sites: `ChoreService::approve()`, `StoreService::redeem()`, `SiblingOfferService::accept()`, `SpinService::spin()`, `ChestService::open()` and `PerkInventoryService::use()`. **When adding a new point-affecting or activity-affecting flow, call `$this->badges->evaluate($profile)` at the end of it, or the badges tied to that flow will never unlock.**
 
-`evaluateHouseholdGoal(Household)` is separate and household-scoped: once the household has any beaten `Monster`, it awards `team_effort` to **every kid profile in the household**, not just whoever landed the killing blow. Called from `ChoreService::approve()`. It fires on the *first* kill at any tier — `maybeAward` is idempotent per key, so the ice cream monster counts as much as the weekend away.
+`evaluateHouseholdGoal(Household)` is separate and household-scoped: once the household has any beaten `Monster`, it awards `team_effort` to **every kid profile in the household**, not just whoever landed the killing blow. Called from `ChoreService::approve()`. It fires on the *first* kill — `maybeAward` is idempotent per key, so a cheap monster counts as much as a weekend away.
 
 ## Current badge keys and conditions
 

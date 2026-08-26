@@ -114,7 +114,7 @@ class PerkInventoryService
             PerkEffect::StreakRestore => $this->streakRestoreReason($profile),
             PerkEffect::MysteryHint => $this->mysteryHintReason($profile),
             PerkEffect::QuestSkip => $this->questSkipReason($profile),
-            PerkEffect::NameMonster => $this->monsters->nameable($profile->household)->isEmpty()
+            PerkEffect::NameMonster => $this->monsters->nameable($profile->household) === null
                 ? 'Nothing left to name'
                 : null,
             PerkEffect::NightSaver => $this->sleep->saveReason($profile),
@@ -191,7 +191,6 @@ class PerkInventoryService
         try {
             $name = $this->monsters->nameMonster(
                 $profile->household,
-                (int) ($input['monster_id'] ?? 0),
                 (string) ($input['name'] ?? ''),
             );
         } catch (\RuntimeException $e) {

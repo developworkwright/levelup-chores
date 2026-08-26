@@ -27,7 +27,7 @@ Covers the progression economy: XP, levels, the ticket currency, and the Bonus S
 | **XP** | Chores (`ChoreService::XP_PER_CHORE`, 50), badges (`badges.xp_reward`, 50–400) | **Nothing** |
 | Tickets | 1 per level crossed, **5 more when that level changes the rank**, 1 per badge, and a **boss defeat** payout | Bonus Shop perks |
 
-A monster falling pays every kid in the household 1, the finisher 2 more, and the biggest damage dealer 2 more again — see `MonsterService::TICKETS_FOR_*`. With three tiers in rotation this is now the fastest ticket source in the app, so it's the lever to reach for if perks start feeling cheap.
+A monster falling pays every kid in the household 1, the finisher 2 more, and the biggest damage dealer 2 more again — see `MonsterService::TICKETS_FOR_*`. A kill is a rare, whole-household event, so this is the lever to reach for if perks start feeling cheap.
 
 **XP is never spent.** Tickets are *minted by* XP, not converted from it — that's the whole design. Any change that makes XP decrease as a result of a purchase breaks the premise.
 

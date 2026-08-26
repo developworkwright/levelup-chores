@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Enums\ChoreCadence;
-use App\Enums\MonsterTier;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyMystery;
@@ -19,7 +18,12 @@ use Livewire\Volt\Volt;
 use Tests\TestCase;
 
 /**
- * The moment the board stops and asks which monster a finished chore lands on.
+ * Tapping "done" on the quest board, and what the board shows of the fight.
+ *
+ * This file used to be about the picker — the overlay that stopped after every
+ * finished chore to ask which of three monsters it landed on. The picker is
+ * gone, and most of what is here now exists to make sure it stays gone: a claim
+ * is one tap, start to finish, with nothing in between it and the board.
  */
 class MonsterPickerTest extends TestCase
 {
@@ -84,165 +88,74 @@ class MonsterPickerTest extends TestCase
      * settled and can't land on the chore a test is about to claim and quietly
      * double it. The test about weak points sets its own.
      */
-    private function spawn(MonsterTier $tier, string $reward): void
+    private function spawn(string $reward): void
     {
-        $monster = app(MonsterService::class)->spawn($this->household, $tier, $reward, 5000);
+        $monster = app(MonsterService::class)->spawn($this->household, $reward, 5000);
         app(MonsterService::class)->setWeakness($monster, $this->decoy);
     }
 
-    private function damageAt(MonsterTier $tier): int
+    private function damage(): int
     {
-        return app(MonsterService::class)->at($this->household, $tier)?->damage() ?? 0;
+        return app(MonsterService::class)->current($this->household)?->damage() ?? 0;
     }
 
-    public function test_finishing_a_chore_asks_which_monster_when_more_than_one_stands(): void
+    public function test_finishing_a_chore_asks_nothing_and_claims_it(): void
     {
-        $this->spawn(MonsterTier::One, 'Ice cream');
-        $this->spawn(MonsterTier::Three, 'Weekend away');
+        $this->spawn('Weekend away');
 
-        Volt::test('kid.quests')
-            ->call('claimChore', $this->chore->id)
-            ->assertSet('targetingChoreId', $this->chore->id)
-            ->assertSee('Who takes the hit?')
-            ->assertSee('Ice cream')
-            ->assertSee('Weekend away');
+        Volt::test('kid.quests')->call('claimChore', $this->chore->id);
 
-        // Nothing is claimed until they answer.
-        $this->assertSame(0, ChoreCompletion::count());
-    }
-
-    public function test_one_monster_standing_is_not_a_question_worth_asking(): void
-    {
-        $this->spawn(MonsterTier::Two, 'Pizza night');
-
-        Volt::test('kid.quests')
-            ->call('claimChore', $this->chore->id)
-            ->assertSet('targetingChoreId', null)
-            ->assertDontSee('Who takes the hit?');
-
-        $this->assertSame(MonsterTier::Two, ChoreCompletion::sole()->target_tier);
+        $this->assertSame($this->chore->id, ChoreCompletion::sole()->chore_id);
+        $this->assertSame($this->kid->id, ChoreCompletion::sole()->profile_id);
     }
 
     public function test_an_empty_arena_claims_straight_through(): void
     {
-        Volt::test('kid.quests')
-            ->call('claimChore', $this->chore->id)
-            ->assertSet('targetingChoreId', null);
+        Volt::test('kid.quests')->call('claimChore', $this->chore->id);
 
-        $this->assertSame(1, ChoreCompletion::count());
-        $this->assertNull(ChoreCompletion::sole()->target_tier);
+        $this->assertSame($this->chore->id, ChoreCompletion::sole()->chore_id);
     }
 
-    public function test_picking_a_monster_claims_the_chore_against_it(): void
+    /**
+     * The race the old picker's second pass existed to catch, still caught —
+     * now by the one claimability check on the way in.
+     */
+    public function test_a_chore_a_sibling_already_took_is_not_claimed_twice(): void
     {
-        $this->spawn(MonsterTier::One, 'Ice cream');
-        $this->spawn(MonsterTier::Three, 'Weekend away');
-
-        Volt::test('kid.quests')
-            ->call('claimChore', $this->chore->id)
-            ->call('aimAt', MonsterTier::Three->value)
-            ->assertSet('targetingChoreId', null)
-            ->assertDontSee('Who takes the hit?');
-
-        $this->assertSame(MonsterTier::Three, ChoreCompletion::sole()->target_tier);
-    }
-
-    public function test_the_pick_is_remembered_for_next_time(): void
-    {
-        $this->spawn(MonsterTier::One, 'Ice cream');
-        $this->spawn(MonsterTier::Three, 'Weekend away');
-
-        Volt::test('kid.quests')
-            ->call('claimChore', $this->chore->id)
-            ->call('aimAt', MonsterTier::One->value);
-
-        $this->assertSame(MonsterTier::One, $this->kid->fresh()->last_monster_tier);
-    }
-
-    public function test_backing_out_claims_nothing(): void
-    {
-        $this->spawn(MonsterTier::One, 'Ice cream');
-        $this->spawn(MonsterTier::Three, 'Weekend away');
-
-        Volt::test('kid.quests')
-            ->call('claimChore', $this->chore->id)
-            ->call('cancelAim')
-            ->assertSet('targetingChoreId', null)
-            ->assertDontSee('Who takes the hit?');
-
-        $this->assertSame(0, ChoreCompletion::count());
-    }
-
-    public function test_a_monster_that_falls_while_the_picker_is_open_is_refused(): void
-    {
-        $this->spawn(MonsterTier::One, 'Ice cream');
-        $this->spawn(MonsterTier::Three, 'Weekend away');
-
-        $component = Volt::test('kid.quests')->call('claimChore', $this->chore->id);
-
-        // A sibling finishes it off between the question and the answer.
-        $one = app(MonsterService::class)->at($this->household, MonsterTier::One);
-        app(MonsterService::class)->land($one, 5000, $this->kid);
-        app(MonsterService::class)->settle($one, $this->kid);
-
-        $component->call('aimAt', MonsterTier::One->value)
-            ->assertSet('targetingChoreId', null)
-            ->assertSee('That one just went down!');
-
-        $this->assertSame(0, ChoreCompletion::count());
-    }
-
-    public function test_a_chore_taken_by_a_sibling_mid_choice_is_not_claimed(): void
-    {
-        $this->spawn(MonsterTier::One, 'Ice cream');
-        $this->spawn(MonsterTier::Three, 'Weekend away');
-
-        $component = Volt::test('kid.quests')->call('claimChore', $this->chore->id);
+        $this->spawn('Weekend away');
 
         $sibling = Profile::factory()->for($this->household)->create(['name' => 'Pip']);
         app(ChoreService::class)->claim($sibling, $this->chore);
 
-        $component->call('aimAt', MonsterTier::Three->value);
+        Volt::test('kid.quests')
+            ->call('claimChore', $this->chore->id)
+            ->assertSee('got to Vacuum first');
 
-        // Theirs is the only claim on it — the second pass caught the race.
         $this->assertSame($sibling->id, ChoreCompletion::sole()->profile_id);
     }
 
-    public function test_the_arena_strip_names_what_each_monster_is_guarding(): void
+    public function test_the_arena_strip_names_what_the_monster_is_guarding(): void
     {
-        $this->spawn(MonsterTier::One, 'Ice cream');
-        $this->spawn(MonsterTier::Three, 'Weekend away');
+        $this->spawn('Weekend away');
 
         Volt::test('kid.quests')
             ->assertOk()
             ->assertSee('Boss Fight')
-            ->assertSee('Ice cream')
-            ->assertSee('Weekend away')
-            ->assertSee('2 MONSTERS UP');
+            ->assertSee('Weekend away');
     }
 
-    public function test_the_arena_page_draws_all_three_and_names_the_empty_ones(): void
+    public function test_the_arena_page_draws_the_monster_standing(): void
     {
-        $this->spawn(MonsterTier::One, 'Ice cream');
-        $this->spawn(MonsterTier::Three, 'Weekend away');
+        $this->spawn('Weekend away');
 
         Volt::test('kid.arena')
             ->assertOk()
-            ->assertSee('Three monsters, three rewards')
-            ->assertSee('Ice cream')
-            ->assertSee('Weekend away')
-            // Level 2 has nobody in it, and a hole in the row would read as a
-            // bug rather than an invitation.
-            ->assertSee('Empty')
-            ->assertSee('Worth a few weeks.');
+            ->assertSee('What the house is fighting')
+            ->assertSee('Weekend away');
     }
 
     public function test_the_arena_page_says_so_when_the_arena_is_empty(): void
     {
-        // One empty state now, not two. The second line came from the Goals
-        // page's "long game" panel, which said the same thing a second time
-        // beside the arena row — both have moved, and only the arena's own
-        // wording survived the move.
         Volt::test('kid.arena')
             ->assertOk()
             ->assertSee('Nothing standing yet');
@@ -250,9 +163,9 @@ class MonsterPickerTest extends TestCase
 
     public function test_the_weak_chore_is_called_out_on_the_card(): void
     {
-        $this->spawn(MonsterTier::One, 'Ice cream');
+        $this->spawn('Weekend away');
         app(MonsterService::class)->setWeakness(
-            app(MonsterService::class)->at($this->household, MonsterTier::One),
+            app(MonsterService::class)->current($this->household),
             $this->chore,
         );
 
@@ -265,19 +178,15 @@ class MonsterPickerTest extends TestCase
 
     public function test_the_damage_lands_once_a_parent_approves(): void
     {
-        $this->spawn(MonsterTier::One, 'Ice cream');
-        $this->spawn(MonsterTier::Three, 'Weekend away');
+        $this->spawn('Weekend away');
 
-        Volt::test('kid.quests')
-            ->call('claimChore', $this->chore->id)
-            ->call('aimAt', MonsterTier::One->value);
+        Volt::test('kid.quests')->call('claimChore', $this->chore->id);
 
-        $this->assertSame(0, $this->damageAt(MonsterTier::One));
+        $this->assertSame(0, $this->damage());
 
         $parent = Profile::factory()->parent()->for($this->household)->create();
         app(ChoreService::class)->approve(ChoreCompletion::sole(), $parent);
 
-        $this->assertSame(100, $this->damageAt(MonsterTier::One));
-        $this->assertSame(0, $this->damageAt(MonsterTier::Three));
+        $this->assertSame(100, $this->damage());
     }
 }

@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Enums\CompletionStatus;
-use App\Enums\MonsterTier;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\Household;
@@ -45,7 +44,7 @@ class GoalPlannerTest extends TestCase
      */
     private function longGame(Household $household, int $health, string $reward = 'Family goal'): Monster
     {
-        return app(MonsterService::class)->spawn($household, MonsterTier::Three, $reward, $health);
+        return app(MonsterService::class)->spawn($household, $reward, $health);
     }
 
     private function service(): ChoreService
@@ -450,7 +449,7 @@ class GoalPlannerTest extends TestCase
         $arena->land($first, 200, $rex);
         $arena->settle($first, $rex);
 
-        $next = $arena->spawn($household, MonsterTier::Three, 'Trip to the zoo', 1000);
+        $next = $arena->spawn($household, 'Trip to the zoo', 1000);
 
         $this->assertSame([0, 0], $arena->contributionsFor($next)->pluck('points')->all());
 

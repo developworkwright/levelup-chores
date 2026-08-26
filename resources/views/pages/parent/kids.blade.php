@@ -462,30 +462,29 @@ new class extends Component
                 : null,
             'mysteryClaimant' => $mysteryClaimant,
             'household' => $household,
-            // A glance only — naming rewards, pricing them and setting health
-            // all live on the Monster Deck, which is where the per-tier
-            // dollars-per-point readout can sit beside them.
-            'arenaStates' => app(MonsterService::class)
-                ->live($household)
-                ->map(fn (Monster $monster) => app(MonsterService::class)->stateFor($monster))
-                ->all(),
+            // A glance only — naming the reward, pricing it and setting health
+            // all live on the Monster Deck, which is where the dollars-per-point
+            // readout can sit beside them.
+            'arenaState' => ($monster = app(MonsterService::class)->current($household))
+                ? app(MonsterService::class)->stateFor($monster)
+                : null,
         ];
     }
 }; ?>
 
 <x-parent.shell :profile="$profile" active="kids">
-    {{-- The family goal is three monsters now, each with its own reward and its
-         own health, so it has a page of its own. What is left here is the
-         glance: how the arena stands, and the way through to change it. --}}
+    {{-- The family goal has a reward, a price and a health bar to set, so it has
+         a page of its own. What is left here is the glance: how the fight
+         stands, and the way through to change it. --}}
     <div class="mb-[14px] rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
         <div class="flex flex-wrap items-center justify-between gap-3">
             <div class="min-w-0">
-                <h3 class="font-baloo text-lg font-bold">Family Goals</h3>
+                <h3 class="font-baloo text-lg font-bold">Family Goal</h3>
                 <p class="mt-1 text-[13px] text-fq-text-3">
-                    @if ($arenaStates)
+                    @if ($arenaState)
                         What the kids are fighting for right now.
                     @else
-                        Nothing standing, so the kids have nothing to aim at.
+                        Nothing standing, so the kids' work has nothing to land on.
                     @endif
                 </p>
             </div>
@@ -497,28 +496,24 @@ new class extends Component
             >Open the Monster Deck</a>
         </div>
 
-        @if ($arenaStates)
-            <div class="mt-3 flex flex-col gap-[10px]">
-                @foreach ($arenaStates as $tierValue => $state)
-                    <div wire:key="goal-tier-{{ $tierValue }}">
-                        <div class="flex flex-wrap items-baseline justify-between gap-2">
-                            <span class="text-[13px] font-semibold">
-                                {{ $state['tier']->label() }} &middot; {{ $state['reward'] }}
-                            </span>
-                            <span class="font-mono-fq text-[10px] text-fq-text-4">
-                                {{ number_format($state['damage']) }} / {{ number_format($state['maxHealth']) }} PTS
-                                &middot; {{ $state['damagePercent'] }}%
-                            </span>
-                        </div>
+        @if ($arenaState)
+            <div class="mt-3">
+                <div class="flex flex-wrap items-baseline justify-between gap-2">
+                    <span class="text-[13px] font-semibold">
+                        {{ $arenaState['name'] }} &middot; {{ $arenaState['reward'] }}
+                    </span>
+                    <span class="font-mono-fq text-[10px] text-fq-text-4">
+                        {{ number_format($arenaState['damage']) }} / {{ number_format($arenaState['maxHealth']) }} PTS
+                        &middot; {{ $arenaState['damagePercent'] }}%
+                    </span>
+                </div>
 
-                        <div class="mt-[6px] h-[10px] overflow-hidden rounded-full border border-fq-line bg-fq-track">
-                            <div
-                                class="h-full rounded-full transition-[width] duration-500"
-                                style="width:{{ $state['damagePercent'] }}%;background:linear-gradient(90deg, var(--fq-cyan), var(--fq-lime), var(--fq-gold))"
-                            ></div>
-                        </div>
-                    </div>
-                @endforeach
+                <div class="mt-[6px] h-[10px] overflow-hidden rounded-full border border-fq-line bg-fq-track">
+                    <div
+                        class="h-full rounded-full transition-[width] duration-500"
+                        style="width:{{ $arenaState['damagePercent'] }}%;background:linear-gradient(90deg, var(--fq-cyan), var(--fq-lime), var(--fq-gold))"
+                    ></div>
+                </div>
             </div>
         @endif
 

@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
-use App\Enums\MonsterTier;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyQuest;
@@ -75,7 +74,7 @@ class ChoreFlowTest extends TestCase
     public function test_approving_a_completion_credits_points_xp_and_family_goal(): void
     {
         $household = Household::factory()->create();
-        $monster = app(MonsterService::class)->spawn($household, MonsterTier::Three, 'Weekend away', 1000);
+        $monster = app(MonsterService::class)->spawn($household, 'Weekend away', 1000);
         // Pinned to the middle of the day. `early_bird` and `night_owl` key off
         // the wall clock and each pay 100 XP, so on the real one this asserted
         // 50 XP by day and failed by 150 after 10pm.
@@ -102,7 +101,7 @@ class ChoreFlowTest extends TestCase
     {
         $household = Household::factory()->create();
         // Nothing above it to spill onto, so the overkill has nowhere to go.
-        $monster = app(MonsterService::class)->spawn($household, MonsterTier::Three, 'Weekend away', 50);
+        $monster = app(MonsterService::class)->spawn($household, 'Weekend away', 50);
         $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create();
         $chore = Chore::factory()->for($household)->create(['points' => 100, 'min_age' => 1]);

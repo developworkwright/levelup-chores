@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Enums\MonsterTier;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\Profile;
@@ -15,15 +14,16 @@ use Livewire\Volt\Volt;
 use Tests\TestCase;
 
 /**
- * The arena is on the two pages kids open most, and it draws three monsters
- * where there used to be one. A query hidden inside the per-monster loop
- * triples quietly and nothing fails — the sort of cost that only turns up on a
- * slow phone months later.
+ * The arena is on the two pages kids open most, so what it costs to draw
+ * matters — the sort of thing that only turns up on a slow phone months later.
  *
- * These measure the *difference* between one monster standing and three, not
- * the pages' totals. A total is mostly other people's work and would move every
- * time an unrelated panel changed; the delta is the thing this feature owns,
- * and it should stay flat as monsters are added.
+ * These measure the *difference* an arena makes rather than the pages' totals.
+ * A total is mostly other people's work and would move every time an unrelated
+ * panel changed; the delta is the thing this feature owns.
+ *
+ * They used to compare one monster against three. There is only ever one now,
+ * which removes the multiplication these were written to catch — what is left
+ * is the guard on the fixed cost, and on a kill not costing a query per kid.
  */
 class MonsterQueryBudgetTest extends TestCase
 {
@@ -49,16 +49,16 @@ class MonsterQueryBudgetTest extends TestCase
         Auth::guard('profile')->login($this->kid->fresh());
     }
 
-    private function spawn(MonsterTier $tier): void
+    private function spawn(): void
     {
         $arena = app(MonsterService::class);
-        $monster = $arena->spawn($this->household, $tier, "Reward {$tier->value}", 5000);
+        $monster = $arena->spawn($this->household, 'Weekend away', 5000);
         $arena->land($monster, 500, $this->kid);
     }
 
     /**
      * Queries for one render, with the page's once-a-day lazy work already
-     * done — the daily quest, the mystery draw and the week's weak points all
+     * done — the daily quest, the mystery draw and the week's weak point all
      * assign themselves on first sight, and counting those would measure the
      * setup rather than the page.
      */
@@ -77,43 +77,39 @@ class MonsterQueryBudgetTest extends TestCase
         return $count;
     }
 
-    public function test_the_quest_board_costs_the_same_whether_one_monster_stands_or_three(): void
+    public function test_the_quest_board_pays_a_fixed_price_for_the_strip(): void
     {
-        $this->spawn(MonsterTier::One);
-        $one = $this->queriesToRender('kid.quests');
+        $empty = $this->queriesToRender('kid.quests');
 
-        $this->spawn(MonsterTier::Two);
-        $this->spawn(MonsterTier::Three);
-        $three = $this->queriesToRender('kid.quests');
+        $this->spawn();
+        $standing = $this->queriesToRender('kid.quests');
 
         $this->assertLessThanOrEqual(
-            2,
-            $three - $one,
-            'Two more monsters added '.($three - $one).' queries — that is a lookup inside the loop.',
+            3,
+            $standing - $empty,
+            'The strip cost '.($standing - $empty).' queries — it should be the monster and its weak chore.',
         );
     }
 
-    public function test_the_arena_costs_the_same_whether_one_monster_stands_or_three(): void
+    public function test_the_arena_page_pays_a_fixed_price_for_the_card(): void
     {
-        $this->spawn(MonsterTier::One);
-        $one = $this->queriesToRender('kid.goal');
+        $empty = $this->queriesToRender('kid.arena');
 
-        $this->spawn(MonsterTier::Two);
-        $this->spawn(MonsterTier::Three);
-        $three = $this->queriesToRender('kid.goal');
+        $this->spawn();
+        $standing = $this->queriesToRender('kid.arena');
 
-        // The goal page does more per monster than the strip — a replay and a
-        // contributions board — so it gets a little room, but not a multiple.
+        // The card does more than the strip — a replay and the seen marker —
+        // so it gets a little room, but not an open account.
         $this->assertLessThanOrEqual(
-            6,
-            $three - $one,
-            'Two more monsters added '.($three - $one).' queries to the arena.',
+            8,
+            $standing - $empty,
+            'The arena card cost '.($standing - $empty).' queries.',
         );
     }
 
     public function test_a_kill_does_not_cost_a_query_per_kid_beyond_paying_them(): void
     {
-        $this->spawn(MonsterTier::Three);
+        $this->spawn();
 
         // Two more mouths to pay, and the payout is one pass over the household.
         Profile::factory()->for($this->household)->create();
@@ -122,7 +118,7 @@ class MonsterQueryBudgetTest extends TestCase
         $chores = app(ChoreService::class);
         $parent = $this->household->profiles()->where('role', 'parent')->sole();
         $chore = Chore::where('household_id', $this->household->id)->first();
-        $completion = $chores->claim($this->kid, $chore, MonsterTier::Three);
+        $completion = $chores->claim($this->kid, $chore);
 
         DB::flushQueryLog();
         DB::enableQueryLog();

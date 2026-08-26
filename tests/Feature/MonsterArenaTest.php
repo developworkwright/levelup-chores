@@ -4,8 +4,6 @@ namespace Tests\Feature;
 
 use App\Enums\BossSkin;
 use App\Enums\BossStage;
-use App\Enums\MonsterHitKind;
-use App\Enums\MonsterTier;
 use App\Models\Household;
 use App\Models\Monster;
 use App\Models\MonsterHit;
@@ -34,77 +32,75 @@ class MonsterArenaTest extends TestCase
         return Profile::factory()->for($household)->create(['name' => $name]);
     }
 
-    public function test_a_tier_can_be_stood_up_and_is_found_by_its_tier(): void
+    public function test_a_monster_can_be_stood_up_and_is_found_again(): void
     {
         $household = $this->household();
 
-        $monster = $this->arena()->spawn($household, MonsterTier::Two, 'Pizza night', 800, 2500);
+        $monster = $this->arena()->spawn($household, 'Pizza night', 800, 2500);
 
-        $this->assertSame(MonsterTier::Two, $monster->tier);
         $this->assertSame('Pizza night', $monster->reward_name);
         $this->assertSame(800, $monster->max_health);
         $this->assertSame(2500, $monster->reward_cost_cents);
         $this->assertSame(1, $monster->battle);
         $this->assertNull($monster->defeated_at);
 
-        $this->assertTrue($this->arena()->at($household, MonsterTier::Two)->is($monster));
-        $this->assertNull($this->arena()->at($household, MonsterTier::One));
+        $this->assertTrue($this->arena()->current($household)->is($monster));
     }
 
-    public function test_three_tiers_stand_at_once_and_wear_different_faces(): void
+    public function test_the_next_monster_wears_a_new_face(): void
     {
         $household = $this->household();
         $arena = $this->arena();
+        $kid = $this->kid($household);
 
-        $arena->spawn($household, MonsterTier::One, 'Ice cream', 500);
-        $arena->spawn($household, MonsterTier::Two, 'Pizza night', 2000);
-        $arena->spawn($household, MonsterTier::Three, 'Weekend away', 8000);
+        $first = $arena->spawn($household, 'Ice cream', 100);
+        $arena->land($first, 100, $kid);
+        $arena->settle($first, $kid);
 
-        $live = $arena->live($household);
+        $second = $arena->spawn($household, 'Pizza night', 2000);
 
-        $this->assertCount(3, $live);
-        $this->assertSame('Ice cream', $live[1]->reward_name);
-        $this->assertSame('Weekend away', $live[3]->reward_name);
-
-        $skins = $live->map(fn (Monster $monster) => $monster->skin->value)->all();
-        $this->assertCount(3, array_unique($skins), 'Three monsters must not share a face.');
+        $this->assertNotSame(
+            $first->skin->value,
+            $second->skin->value,
+            'Beating one must introduce somebody new, not refill the same bar.',
+        );
     }
 
-    public function test_a_tier_cannot_be_doubled_up(): void
+    public function test_a_second_monster_cannot_stand_beside_the_first(): void
     {
         $household = $this->household();
-        $this->arena()->spawn($household, MonsterTier::One, 'Ice cream', 500);
+        $this->arena()->spawn($household, 'Ice cream', 500);
 
         $this->expectException(\RuntimeException::class);
 
-        $this->arena()->spawn($household, MonsterTier::One, 'A second one', 500);
+        $this->arena()->spawn($household, 'A second one', 500);
     }
 
-    public function test_the_next_one_at_a_tier_counts_on_from_the_last(): void
+    public function test_the_next_one_counts_on_from_the_last(): void
     {
         $household = $this->household();
         $arena = $this->arena();
 
-        $first = $arena->spawn($household, MonsterTier::One, 'Ice cream', 100);
+        $first = $arena->spawn($household, 'Ice cream', 100);
         $arena->land($first, 100, $this->kid($household));
         $arena->settle($first);
 
-        $second = $arena->spawn($household, MonsterTier::One, 'Ice cream again', 100);
+        $second = $arena->spawn($household, 'Ice cream again', 100);
 
         $this->assertSame(2, $second->battle);
-        $this->assertTrue($arena->at($household, MonsterTier::One)->is($second));
+        $this->assertTrue($arena->current($household)->is($second));
     }
 
     public function test_health_is_summed_from_hits(): void
     {
         $household = $this->household();
         $kid = $this->kid($household);
-        $monster = $this->arena()->spawn($household, MonsterTier::One, 'Ice cream', 500);
+        $monster = $this->arena()->spawn($household, 'Ice cream', 500);
 
         $this->arena()->land($monster, 120, $kid);
         $this->arena()->land($monster, 80, $kid);
 
-        $fresh = $this->arena()->at($household, MonsterTier::One);
+        $fresh = $this->arena()->current($household);
 
         $this->assertSame(200, $fresh->damage());
         $this->assertSame(300, $fresh->healthLeft());
@@ -114,12 +110,12 @@ class MonsterArenaTest extends TestCase
     {
         $household = $this->household();
         $kid = $this->kid($household);
-        $monster = $this->arena()->spawn($household, MonsterTier::One, 'Ice cream', 100);
+        $monster = $this->arena()->spawn($household, 'Ice cream', 100);
 
         $this->arena()->land($monster, 70, $kid);
         $applied = $this->arena()->land($monster, 50, $kid);
 
-        // 30 stuck, 20 is the caller's to spill onto the tier above.
+        // 30 stuck; the other 20 simply stops there. Nothing spills any more.
         $this->assertSame(30, $applied);
         $this->assertSame(100, $monster->damage());
         $this->assertSame(0, $monster->healthLeft());
@@ -129,7 +125,7 @@ class MonsterArenaTest extends TestCase
     {
         $household = $this->household();
         $kid = $this->kid($household);
-        $monster = $this->arena()->spawn($household, MonsterTier::One, 'Ice cream', 100);
+        $monster = $this->arena()->spawn($household, 'Ice cream', 100);
 
         $this->arena()->land($monster, 100, $kid);
         $this->arena()->settle($monster, $kid);
@@ -143,7 +139,7 @@ class MonsterArenaTest extends TestCase
         $household = $this->household();
         $nova = $this->kid($household, 'Nova');
         $pip = $this->kid($household, 'Pip');
-        $monster = $this->arena()->spawn($household, MonsterTier::One, 'Ice cream', 100);
+        $monster = $this->arena()->spawn($household, 'Ice cream', 100);
 
         $this->arena()->land($monster, 70, $nova);
         $this->arena()->land($monster, 30, $pip);
@@ -162,7 +158,7 @@ class MonsterArenaTest extends TestCase
     public function test_settling_does_nothing_while_the_monster_still_stands(): void
     {
         $household = $this->household();
-        $monster = $this->arena()->spawn($household, MonsterTier::One, 'Ice cream', 100);
+        $monster = $this->arena()->spawn($household, 'Ice cream', 100);
 
         $this->arena()->land($monster, 40, $this->kid($household));
 
@@ -174,13 +170,13 @@ class MonsterArenaTest extends TestCase
     {
         $household = $this->household();
         $kid = $this->kid($household);
-        $monster = $this->arena()->spawn($household, MonsterTier::One, 'Ice cream', 100);
+        $monster = $this->arena()->spawn($household, 'Ice cream', 100);
 
         $this->arena()->land($monster, 100, $kid);
         $this->arena()->settle($monster, $kid);
         $this->arena()->adjust($monster->fresh(), -60);
 
-        $state = $this->arena()->stateFor($this->arena()->at($household, MonsterTier::One) ?? $monster->fresh());
+        $state = $this->arena()->stateFor($monster->fresh());
 
         $this->assertTrue($state['defeated']);
         $this->assertSame(BossStage::Defeated, $state['stage']);
@@ -190,7 +186,7 @@ class MonsterArenaTest extends TestCase
     {
         $household = $this->household();
         $kid = $this->kid($household);
-        $monster = $this->arena()->spawn($household, MonsterTier::One, 'Ice cream', 500);
+        $monster = $this->arena()->spawn($household, 'Ice cream', 500);
 
         $this->arena()->land($monster, 100, $kid);
         $this->arena()->adjust($monster, 50);
@@ -206,7 +202,7 @@ class MonsterArenaTest extends TestCase
     public function test_an_adjustment_cannot_push_a_bar_past_either_end(): void
     {
         $household = $this->household();
-        $monster = $this->arena()->spawn($household, MonsterTier::One, 'Ice cream', 100);
+        $monster = $this->arena()->spawn($household, 'Ice cream', 100);
 
         $this->arena()->land($monster, 40, $this->kid($household));
 
@@ -224,7 +220,7 @@ class MonsterArenaTest extends TestCase
         $pip = $this->kid($household, 'Pip');
         $this->kid($household, 'Wren');
 
-        $monster = $this->arena()->spawn($household, MonsterTier::One, 'Ice cream', 500);
+        $monster = $this->arena()->spawn($household, 'Ice cream', 500);
         $this->arena()->land($monster, 60, $pip);
         $this->arena()->land($monster, 140, $nova);
 
@@ -237,22 +233,11 @@ class MonsterArenaTest extends TestCase
         $this->assertFalse($board[2]['isLeader']);
     }
 
-    public function test_a_spill_counts_toward_the_kid_who_caused_it(): void
-    {
-        $household = $this->household();
-        $kid = $this->kid($household);
-        $monster = $this->arena()->spawn($household, MonsterTier::Two, 'Pizza night', 500);
-
-        $this->arena()->land($monster, 40, $kid, null, MonsterHitKind::Spill);
-
-        $this->assertSame(40, $this->arena()->contributionsFor($monster)->firstWhere('profile_id', $kid->id)['points']);
-    }
-
     public function test_state_reports_the_stage_the_health_lands_in(): void
     {
         $household = $this->household();
         $kid = $this->kid($household);
-        $monster = $this->arena()->spawn($household, MonsterTier::Three, 'Weekend away', 100);
+        $monster = $this->arena()->spawn($household, 'Weekend away', 100);
 
         $this->arena()->land($monster, 60, $kid);
 
@@ -269,7 +254,7 @@ class MonsterArenaTest extends TestCase
     public function test_a_monster_on_its_last_points_never_rounds_up_to_untouched(): void
     {
         $household = $this->household();
-        $monster = $this->arena()->spawn($household, MonsterTier::Three, 'Weekend away', 10000);
+        $monster = $this->arena()->spawn($household, 'Weekend away', 10000);
 
         $this->arena()->land($monster, 9999, $this->kid($household));
 
@@ -281,13 +266,13 @@ class MonsterArenaTest extends TestCase
         $household = $this->household();
         $kid = $this->kid($household);
 
-        $first = $this->arena()->spawn($household, MonsterTier::One, 'Ice cream', 100);
+        $first = $this->arena()->spawn($household, 'Ice cream', 100);
         $this->arena()->land($first, 100, $kid);
         $this->arena()->settle($first, $kid);
 
-        $this->arena()->spawn($household, MonsterTier::One, 'Ice cream again', 100);
+        $next = $this->arena()->spawn($household, 'Ice cream again', 100);
 
-        $this->assertCount(1, $this->arena()->live($household));
+        $this->assertTrue($this->arena()->current($household)->is($next));
         $this->assertCount(1, $this->arena()->shelf($household));
         $this->assertSame('Ice cream', $this->arena()->shelf($household)->first()->reward_name);
     }
@@ -296,7 +281,7 @@ class MonsterArenaTest extends TestCase
     {
         $household = $this->household();
         $kid = $this->kid($household);
-        $monster = $this->arena()->spawn($household, MonsterTier::One, 'Ice cream', 500);
+        $monster = $this->arena()->spawn($household, 'Ice cream', 500);
 
         $this->arena()->land($monster, 10, $kid);
         $this->arena()->land($monster, 20, $kid);
@@ -305,52 +290,48 @@ class MonsterArenaTest extends TestCase
         $this->assertSame([30, 20, 10], $this->arena()->hits($monster)->pluck('damage')->all());
     }
 
-    public function test_one_monster_per_battle_per_tier(): void
+    public function test_one_monster_per_battle(): void
     {
         $household = $this->household();
-        Monster::factory()->for($household)->create(['tier' => MonsterTier::One, 'battle' => 1]);
+        Monster::factory()->for($household)->create(['battle' => 1]);
 
         $this->expectException(QueryException::class);
 
-        Monster::factory()->for($household)->create(['tier' => MonsterTier::One, 'battle' => 1]);
+        Monster::factory()->for($household)->create(['battle' => 1]);
     }
 
     public function test_a_household_with_no_monsters_has_an_empty_arena(): void
     {
         $household = $this->household();
 
-        $this->assertTrue($this->arena()->live($household)->isEmpty());
-        $this->assertNull($this->arena()->at($household, MonsterTier::Three));
+        $this->assertNull($this->arena()->current($household));
         $this->assertSame(BossSkin::default(), $this->arena()->nextSkin($household));
     }
 
-    public function test_damage_is_read_without_a_query_per_monster(): void
+    public function test_damage_is_read_without_a_second_query(): void
     {
         $household = $this->household();
         $kid = $this->kid($household);
 
-        foreach (MonsterTier::cases() as $tier) {
-            $monster = $this->arena()->spawn($household, $tier, "Reward {$tier->value}", 500);
-            $this->arena()->land($monster, 25 * $tier->value, $kid);
-        }
+        $this->arena()->land($this->arena()->spawn($household, 'Weekend away', 500), 75, $kid);
 
-        $live = $this->arena()->live($household);
+        $monster = $this->arena()->current($household);
 
         \DB::enableQueryLog();
-        $damages = $live->map(fn (Monster $monster) => $monster->damage())->values()->all();
+        $damage = $monster->damage();
         $queries = \DB::getQueryLog();
         \DB::disableQueryLog();
 
-        $this->assertSame([25, 50, 75], $damages);
-        $this->assertCount(0, $queries, 'Health must come from the loaded sum, not three extra queries.');
+        $this->assertSame(75, $damage);
+        $this->assertCount(0, $queries, 'Health must come from the loaded sum, not an extra query.');
     }
 
     public function test_an_untouched_monster_reports_no_damage_without_a_query(): void
     {
         $household = $this->household();
-        $this->arena()->spawn($household, MonsterTier::One, 'Ice cream', 500);
+        $this->arena()->spawn($household, 'Ice cream', 500);
 
-        $monster = $this->arena()->live($household)->first();
+        $monster = $this->arena()->current($household);
 
         \DB::enableQueryLog();
         $damage = $monster->damage();
@@ -360,19 +341,24 @@ class MonsterArenaTest extends TestCase
         $this->assertCount(0, \DB::getQueryLog());
     }
 
+    /**
+     * Damage from an earlier fight must not follow the family onto the next
+     * monster — the shelf is history, and the bar in front of them is not.
+     */
     public function test_hits_are_scoped_to_their_own_monster(): void
     {
         $household = $this->household();
         $kid = $this->kid($household);
 
-        $one = $this->arena()->spawn($household, MonsterTier::One, 'Ice cream', 500);
-        $two = $this->arena()->spawn($household, MonsterTier::Two, 'Pizza night', 500);
+        $first = $this->arena()->spawn($household, 'Ice cream', 500);
+        $this->arena()->land($first, 100, $kid);
+        $first->forceFill(['defeated_at' => now()])->save();
 
-        $this->arena()->land($one, 100, $kid);
-        $this->arena()->land($two, 40, $kid);
+        $second = $this->arena()->spawn($household, 'Pizza night', 500);
+        $this->arena()->land($second, 40, $kid);
 
-        $this->assertSame(100, $this->arena()->at($household, MonsterTier::One)->damage());
-        $this->assertSame(40, $this->arena()->at($household, MonsterTier::Two)->damage());
+        $this->assertSame(100, $first->fresh()->damage());
+        $this->assertSame(40, $this->arena()->current($household)->damage());
         $this->assertSame(2, MonsterHit::where('household_id', $household->id)->count());
     }
 }

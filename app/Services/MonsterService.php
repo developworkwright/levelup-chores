@@ -5,9 +5,7 @@ namespace App\Services;
 use App\Enums\BossSkin;
 use App\Enums\BossStage;
 use App\Enums\ChoreCadence;
-use App\Enums\CompletionStatus;
 use App\Enums\MonsterHitKind;
-use App\Enums\MonsterTier;
 use App\Enums\ProfileRole;
 use App\Enums\TicketKind;
 use App\Models\Chore;
@@ -20,18 +18,22 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 
 /**
- * The arena: three family goals standing at once, each drawn as a monster.
+ * The arena: the family goal the house is fighting, drawn as a monster.
  *
- * Where the old single boss was art painted over `households.goal_now`, these
- * are the goals themselves. A monster's health is summed from the hits landed
- * on it and nothing else, so this service owns both — writing a hit is the only
- * way damage happens, and reading the sum is the only way health is known.
+ * One stands at a time. Three stood here once, one per tier, and the kids chose
+ * which of them each finished chore hit — a good idea that cost a tap on every
+ * single claim and a decision nobody wanted to make twice a day. What is left
+ * is what the tap was ever for: something the family is working toward, and a
+ * bar that moves when the work gets done.
  *
- * What it deliberately does *not* do is decide which monster a chore hits, or
- * what a weak point is worth. That is ChoreService's, at the moment an approval
- * turns work into damage; this service exposes the primitives it orchestrates
- * ({@see self::land()}, {@see self::settle()}) and keeps every rule about what a
- * monster *is* in one place.
+ * A monster's health is summed from the hits landed on it and nothing else, so
+ * this service owns both — writing a hit is the only way damage happens, and
+ * reading the sum is the only way health is known.
+ *
+ * What it deliberately does *not* do is decide what a weak point is worth. That
+ * is ChoreService's, at the moment a claim turns work into damage; this service
+ * exposes the primitives it orchestrates ({@see self::land()}, {@see
+ * self::settle()}) and keeps every rule about what a monster *is* in one place.
  */
 class MonsterService
 {
@@ -55,54 +57,39 @@ class MonsterService
      * they put in.
      *
      * The reward the monster was guarding is the family's, so the tickets are
-     * too — a kid who was at a friend's house all week still lives here, and a
-     * kill that pays only the people who swung turns a family win into a
-     * scoreboard.
+     * the family's too — a kid who had a bad week still watched it go down.
      */
     public const TICKETS_FOR_EVERYONE = 1;
 
-    /** On top, for whoever landed the killing blow. */
+    /** On top, for whoever landed the last blow. */
     public const TICKETS_FOR_FINISHER = 2;
 
     /**
-     * On top, for whoever did the most damage to it.
+     * On top, for whoever put the most damage in.
      *
-     * Separate from the finisher's, and stacking with it, because they reward
-     * different things: the last hit is luck of the timing, and the biggest
-     * share is a fortnight of work. One kid doing both takes all five.
+     * Separate from the finisher's, because the kid who did the work over three
+     * weeks and the kid who happened to tap last are rarely the same person and
+     * only one of them is luck.
      */
     public const TICKETS_FOR_TOP_DAMAGE = 2;
 
-    /**
-     * The monsters currently standing, keyed by tier.
-     *
-     * Between zero and three of them: a tier is empty from the moment its
-     * monster falls until a parent names what the next one pays out, which is
-     * the one decision the app can't make on their behalf.
-     *
-     * @return Collection<int, Monster>
-     */
-    public function live(Household $household): Collection
-    {
-        // `weakChore` eagerly, because every card names it. Left lazy it is one
-        // query per monster — invisible with a single boss, and three times the
-        // cost the moment the arena draws three of them.
-        return Monster::with('weakChore')
-            ->withSum('hits', 'damage')
-            ->where('household_id', $household->id)
-            ->live()
-            ->orderBy('tier')
-            ->get()
-            ->keyBy(fn (Monster $monster) => $monster->tier->value);
-    }
+    /** The longest a kid's name for a monster may be. */
+    public const NICKNAME_LIMIT = 24;
 
-    public function at(Household $household, MonsterTier $tier): ?Monster
+    /**
+     * The monster this household is fighting, or null while the arena is empty.
+     *
+     * Empty from the moment one falls until a parent names what the next one
+     * pays out, which is the one decision the app can't make on their behalf.
+     */
+    public function current(Household $household): ?Monster
     {
+        // `weakChore` eagerly, because every card that draws this names it.
         return Monster::with('weakChore')
             ->withSum('hits', 'damage')
             ->where('household_id', $household->id)
-            ->where('tier', $tier->value)
             ->live()
+            ->latest('id')
             ->first();
     }
 
@@ -114,7 +101,7 @@ class MonsterService
      * monster has left, and showing a 40-point chore land for 12 reads as the
      * app shortchanging the kid who finished it.
      *
-     * @return array{monster: Monster, tier: MonsterTier, skin: BossSkin, stage: BossStage,
+     * @return array{monster: Monster, skin: BossSkin, stage: BossStage,
      *               name: string, tagline: string, reward: string, health: int, maxHealth: int,
      *               healthPercent: int, damage: int, damagePercent: int, taunt: string,
      *               defeated: bool, weakChore: ?string}
@@ -134,7 +121,6 @@ class MonsterService
 
         return [
             'monster' => $monster,
-            'tier' => $monster->tier,
             'skin' => $monster->skin,
             'stage' => $stage,
             'name' => $monster->displayName(),
@@ -170,31 +156,27 @@ class MonsterService
     }
 
     /**
-     * Stands a new monster up at a tier, which is a parent naming what beating
-     * it buys and how much work that is worth.
+     * Stands the next monster up, which is a parent naming what beating it buys
+     * and how much work that is worth.
      *
-     * Refuses to double up: a tier already occupied has to be beaten before the
-     * next one arrives, or the kids would be aiming at two level 1s.
+     * Refuses to double up: the one standing has to be beaten before the next
+     * arrives, or the kids would be splitting their work across two bars again.
      */
     public function spawn(
         Household $household,
-        MonsterTier $tier,
         string $rewardName,
         int $maxHealth,
         ?int $rewardCostCents = null,
         ?BossSkin $skin = null,
     ): Monster {
-        if ($this->at($household, $tier) !== null) {
-            throw new \RuntimeException("Tier {$tier->value} already has a monster standing.");
+        if ($this->current($household) !== null) {
+            throw new \RuntimeException('A monster is already standing.');
         }
 
-        $battle = (int) Monster::where('household_id', $household->id)
-            ->where('tier', $tier->value)
-            ->max('battle');
+        $battle = (int) Monster::where('household_id', $household->id)->max('battle');
 
         return Monster::create([
             'household_id' => $household->id,
-            'tier' => $tier,
             'battle' => $battle + 1,
             'skin' => $skin ?? $this->nextSkin($household),
             'reward_name' => $rewardName,
@@ -205,109 +187,65 @@ class MonsterService
     }
 
     /**
-     * A face nobody in this arena is already wearing.
+     * A face this family didn't just beat.
      *
-     * Continues the rotation from the last monster this family met, so beating
-     * one introduces somebody new rather than the same face with the bar
-     * refilled — then walks on past any skin currently standing at another
-     * tier, because three identical monsters would make the choice between them
-     * meaningless.
+     * Continues the rotation from the last monster they met, so beating one
+     * introduces somebody new rather than the same face with the bar refilled.
      */
     public function nextSkin(Household $household): BossSkin
     {
-        $standing = $this->live($household)
-            ->map(fn (Monster $monster) => $monster->skin)
-            ->all();
-
         $latest = Monster::where('household_id', $household->id)
             ->latest('id')
             ->first();
 
-        $skin = $latest?->skin->next() ?? BossSkin::default();
-
-        // Bounded by the catalogue: with at most three standing there is always
-        // a free face, and this can't outrun the rotation looking for it.
-        foreach (BossSkin::cases() as $ignored) {
-            if (! in_array($skin, $standing, true)) {
-                return $skin;
-            }
-
-            $skin = $skin->next();
-        }
-
-        return $skin;
+        return $latest?->skin->next() ?? BossSkin::default();
     }
 
     /**
-     * The tier a chore hits when nobody said which.
-     *
-     * The highest one standing: before the picker exists this is the tier the
-     * single family goal used to be, and after it exists this is what a
-     * completion from an older client still does something sensible with.
-     * Null when the arena is empty.
-     */
-    public function defaultTier(Household $household): ?MonsterTier
-    {
-        return $this->live($household)
-            ->sortByDesc(fn (Monster $monster) => $monster->tier->value)
-            ->first()?->tier;
-    }
-
-    /**
-     * Draws this week's weak chore for any monster that hasn't got one yet,
-     * and returns the arena.
+     * Draws this week's weak chore if the monster hasn't got one yet, and
+     * returns the monster.
      *
      * Lazy, in the way the daily quest and the mystery chore are lazy: the
      * first person to look on a new week is the one who rolls it, so there is
      * no scheduled job to keep alive and no household that quietly stops
      * rotating because a cron died.
-     *
-     * The three draws are distinct. One chore that is everybody's weak point
-     * would collapse the choice back into "do that job", which is the opposite
-     * of what the weak points are for.
-     *
-     * @return Collection<int, Monster>
      */
-    public function rotateWeaknesses(Household $household): Collection
+    public function rotateWeakness(Household $household): ?Monster
     {
-        $live = $this->live($household);
-        $weekStart = HouseholdClock::for($household)->today()->startOfWeek();
+        $monster = $this->current($household);
 
-        // Weak points already spoken for this week — including ones a parent
-        // picked by hand, which are as binding on the draw as a drawn one.
-        $taken = $live
-            ->filter(fn (Monster $monster) => $monster->weak_chore_id !== null)
-            ->map(fn (Monster $monster) => $monster->weak_chore_id)
-            ->all();
-
-        foreach ($live as $monster) {
-            // Compared as dates rather than instants. A household keeps its own
-            // timezone, so the stamp comes back out of a date column at UTC
-            // midnight while the week starts at the family's — five hours
-            // apart, which reads as "last week" on every single page load and
-            // re-rolls the weak points continuously.
-            $isStale = $monster->weak_rotated_on === null
-                || $monster->weak_rotated_on->toDateString() < $weekStart->toDateString();
-
-            if (! $isStale) {
-                continue;
-            }
-
-            $chore = $this->drawWeakChore($household, $taken);
-
-            $monster->forceFill([
-                'weak_chore_id' => $chore?->id,
-                // Stamped even when the draw came up empty, so a household with
-                // no eligible chores isn't re-rolled on every page load.
-                'weak_rotated_on' => $weekStart,
-            ])->save();
-
-            if ($chore !== null) {
-                $taken[] = $chore->id;
-            }
+        if ($monster === null) {
+            return null;
         }
 
-        return $live;
+        $weekStart = HouseholdClock::for($household)->today()->startOfWeek();
+
+        // Compared as dates rather than instants. A household keeps its own
+        // timezone, so the stamp comes back out of a date column at UTC
+        // midnight while the week starts at the family's — five hours apart,
+        // which reads as "last week" on every single page load and re-rolls the
+        // weak point continuously.
+        $isStale = $monster->weak_rotated_on === null
+            || $monster->weak_rotated_on->toDateString() < $weekStart->toDateString();
+
+        if (! $isStale) {
+            return $monster;
+        }
+
+        $pool = $this->weakChorePool($household);
+
+        $monster->forceFill([
+            'weak_chore_id' => $pool->isEmpty() ? null : $pool->random()->id,
+            // Stamped even when the draw came up empty, so a household with no
+            // eligible chores isn't re-rolled on every page load.
+            'weak_rotated_on' => $weekStart,
+        ])->save();
+
+        // Loaded against the old id, so left alone it would name last week's
+        // chore on every card that reads it.
+        $monster->unsetRelation('weakChore');
+
+        return $monster;
     }
 
     /**
@@ -330,6 +268,8 @@ class MonsterService
             'weak_chore_id' => $chore?->id,
             'weak_rotated_on' => HouseholdClock::for($monster->household)->today()->startOfWeek(),
         ])->save();
+
+        $monster->unsetRelation('weakChore');
     }
 
     /**
@@ -359,22 +299,13 @@ class MonsterService
     }
 
     /**
-     * @param  array<int, int>  $taken
-     */
-    private function drawWeakChore(Household $household, array $taken): ?Chore
-    {
-        $pool = $this->weakChorePool($household)
-            ->reject(fn (Chore $chore) => in_array($chore->id, $taken, true));
-
-        return $pool->isEmpty() ? null : $pool->random();
-    }
-
-    /**
      * Lands damage on a monster and returns how much of it actually stuck.
      *
-     * Capped at what the monster has left, so the caller can take the
-     * difference and spill it onto the tier above — a killing blow's excess
-     * rolling upward is why one chore can produce two hits.
+     * Capped at what the monster has left, so a killing blow's excess simply
+     * stops there. That excess used to roll onto the tier above, which is the
+     * one thing genuinely lost by having a single bar — and the alternative,
+     * banking damage against a monster nobody has named yet, would be a fourth
+     * currency to explain.
      *
      * A monster already on the shelf absorbs nothing: aiming at it is a
      * correction waiting to happen, not damage.
@@ -404,133 +335,37 @@ class MonsterService
     /**
      * Turns an approved chore into damage on the arena.
      *
-     * The chore's full payout lands on the monster the kid aimed at, doubled if
-     * they hit its weak point, and whatever that monster hasn't the health left
-     * to absorb rolls up to the next tier — where it can kill again, and spill
-     * again. One chore finishing off two monsters in a breath is the best thing
-     * this feature does, and it falls out of the loop rather than being
-     * special-cased.
-     *
-     * Aimed at an empty tier — beaten this afternoon, not yet replaced — the hit
-     * simply starts higher up rather than being thrown away. Only a family with
-     * nothing standing at all loses it, and there is nowhere honest to put it in
-     * that case: banking damage against a monster nobody has named yet would be
-     * a fourth currency to explain.
-     *
-     * The doubling survives the climb. It was earned against the weak point the
-     * kid was shown when they chose, and quietly halving the part that spills
-     * would make the best hit in the game read like a bug.
-     *
-     * @param  ?MonsterTier  $from  overrides the tier stored on the completion,
-     *                              which is how a parent re-aims a mis-tap
+     * The chore's full payout lands on the monster standing, doubled if the kid
+     * hit its weak point. Nothing standing means there is nowhere to put it —
+     * the work still earned its points, which were always the kid's own and
+     * never the monster's to give.
      */
-    public function strike(Household $household, ChoreCompletion $completion, ?MonsterTier $from = null): void
+    public function strike(Household $household, ChoreCompletion $completion): void
     {
+        $monster = $this->current($household);
+
+        if ($monster === null) {
+            return;
+        }
+
         $damage = $completion->points_awarded
             * ($completion->struck_weak_point ? self::WEAK_MULTIPLIER : 1);
 
-        $tier = $from ?? $completion->target_tier ?? $this->defaultTier($household);
-        $kind = MonsterHitKind::Hit;
-
-        while ($tier !== null && $damage > 0) {
-            $monster = $this->at($household, $tier);
-
-            if ($monster !== null) {
-                $applied = $this->land($monster, $damage, $completion->profile, $completion, $kind);
-
-                if ($applied > 0) {
-                    $damage -= $applied;
-                    $this->settle($monster, $completion->profile);
-
-                    // Only what actually rolls off a monster is a spill. A hit
-                    // that skipped an empty tier on the way up was never
-                    // anything but the kid's own blow, landing where it could.
-                    $kind = MonsterHitKind::Spill;
-                }
-            }
-
-            $tier = $tier->above();
+        if ($this->land($monster, $damage, $completion->profile, $completion) > 0) {
+            $this->settle($monster, $completion->profile);
         }
     }
 
-    /**
-     * A parent correcting a mis-tap: the same chore, landing on the monster the
-     * kid meant.
-     *
-     * The old hits are deleted and re-thrown rather than a compensating pair of
-     * adjustments being written, so the kid keeps the credit on the right
-     * monster and the feed reads as though the tap had been right all along.
-     *
-     * Refused once anything it touched has fallen. A beaten monster has already
-     * had its celebration and its reward promised out loud, and quietly pulling
-     * the blow that killed it back out is worse than the mis-tap ever was.
-     *
-     * The weak-point doubling is carried over untouched. It was earned against
-     * what the kid was shown when they chose; re-aiming moves the damage, not
-     * its size.
-     */
-    public function reaim(ChoreCompletion $completion, MonsterTier $tier): bool
+    /** The monster standing, if nobody has named it yet. */
+    public function nameable(Household $household): ?Monster
     {
-        $household = $completion->profile?->household;
+        $monster = $this->current($household);
 
-        if ($household === null || $completion->status !== CompletionStatus::Approved) {
-            return false;
-        }
-
-        $landed = MonsterHit::with('monster')
-            ->where('chore_completion_id', $completion->id)
-            ->get();
-
-        if ($landed->contains(fn (MonsterHit $hit) => $hit->monster?->isDefeated() ?? true)) {
-            return false;
-        }
-
-        if ($this->at($household, $tier) === null) {
-            return false;
-        }
-
-        MonsterHit::whereIn('id', $landed->pluck('id'))->delete();
-
-        // Kept in step with where the damage actually went, so the completion
-        // is still an honest record of what this chore did.
-        $completion->forceFill(['target_tier' => $tier])->save();
-
-        $this->strike($household, $completion, $tier);
-
-        return true;
+        return $monster?->nickname === null ? $monster : null;
     }
 
     /**
-     * The blows landed across the whole arena, newest first — the feed a parent
-     * re-aims from.
-     *
-     * @return Collection<int, MonsterHit>
-     */
-    public function recentHits(Household $household, int $limit = 20): Collection
-    {
-        return MonsterHit::with(['profile', 'monster', 'completion.chore'])
-            ->where('household_id', $household->id)
-            ->orderByDesc('created_at')
-            ->orderByDesc('id')
-            ->limit($limit)
-            ->get();
-    }
-
-    /** The longest a kid's name for a monster may be. */
-    public const NICKNAME_LIMIT = 24;
-
-    /**
-     * The monsters standing that nobody has named yet.
-     *
-     * @return Collection<int, Monster>
-     */
-    public function nameable(Household $household): Collection
-    {
-        return $this->live($household)->filter(fn (Monster $monster) => $monster->nickname === null);
-    }
-
-    /**
-     * A kid naming a monster. Returns the name that stuck.
+     * A kid naming the monster. Returns the name that stuck.
      *
      * First come, first served: a monster already carrying a name keeps it
      * until the day it goes down, so the perk is worth using the moment a new
@@ -540,7 +375,7 @@ class MonsterService
      *
      * @throws \RuntimeException when there is nothing to name or the name is unusable
      */
-    public function nameMonster(Household $household, int $monsterId, string $name): string
+    public function nameMonster(Household $household, string $name): string
     {
         $name = trim(preg_replace('/\s+/', ' ', $name) ?? '');
 
@@ -548,10 +383,10 @@ class MonsterService
             throw new \RuntimeException('Give it a name first.');
         }
 
-        $monster = $this->nameable($household)->firstWhere('id', $monsterId);
+        $monster = $this->nameable($household);
 
         if ($monster === null) {
-            throw new \RuntimeException('That one has a name already.');
+            throw new \RuntimeException('There is nothing standing to name.');
         }
 
         $name = mb_substr($name, 0, self::NICKNAME_LIMIT);
@@ -568,32 +403,12 @@ class MonsterService
     }
 
     /**
-     * The chores a parent may put this monster's weak point on: the draw's own
-     * pool, minus anything another monster is already flinching at.
+     * A parent moving the monster's health by hand.
      *
-     * @return Collection<int, Chore>
-     */
-    public function weakChoreOptions(Household $household, Monster $monster): Collection
-    {
-        $taken = $this->live($household)
-            ->reject(fn (Monster $other) => $other->is($monster))
-            ->map(fn (Monster $other) => $other->weak_chore_id)
-            ->filter()
-            ->all();
-
-        return $this->weakChorePool($household)
-            ->reject(fn (Chore $chore) => in_array($chore->id, $taken, true))
-            ->values();
-    }
-
-    /**
-     * A parent moving a monster's health by hand.
-     *
-     * Uncapped downward and unattributed by design: it is the tool for damage
-     * that never came from a chore — a job rolled back by the daily reset, a
-     * tier seeded mid-battle — and crediting it to a kid would put points on
-     * the leaderboard that nobody earned. A mis-tapped chore is not this; that
-     * gets re-aimed, so the kid keeps the credit on the monster they meant.
+     * Unattributed by design: it is the tool for damage that never came from a
+     * chore — a job rolled back by the daily reset, a monster seeded mid-battle
+     * — and crediting it to a kid would put points on the leaderboard that
+     * nobody earned.
      */
     public function adjust(Monster $monster, int $delta): ?MonsterHit
     {
@@ -703,8 +518,7 @@ class MonsterService
      * Everything the card will say is stamped in here rather than looked up
      * later: the monster's name, its artwork, and what beating it bought. A kid
      * can be days late to this, by which time a parent has stood the next
-     * monster up at that tier — asking the arena who died would name the wrong
-     * one entirely.
+     * monster up — asking the arena who died would name the wrong one entirely.
      *
      * The finisher is stored as the word each kid should read — "You" on the
      * profile that landed the blow, their name on everyone else's. Cheaper and
@@ -739,7 +553,6 @@ class MonsterService
                 'name' => $monster->displayName(),
                 'skin' => $monster->skin->value,
                 'reward' => $monster->reward_name,
-                'tier' => $monster->tier->label(),
                 'finisher' => match (true) {
                     $finisher === null => null,
                     $finisher->id === $kid->id => 'You',
@@ -832,25 +645,25 @@ class MonsterService
     }
 
     /**
-     * Remembers where this kid left each fight, so the next visit only replays
+     * Remembers where this kid left the fight, so the next visit only replays
      * what has happened since.
      *
-     * Called by the arena as it renders, *after* the replays have been built —
+     * Called by the arena as it renders, *after* the replay has been built —
      * the same compute-then-mark order the shell uses for badges and levels, and
      * what makes a replay play exactly once.
      *
-     * Only the monsters standing are kept. A beaten one's marker is dropped
+     * Only the monster standing is kept. A beaten one's marker is dropped
      * rather than carried forever: its last blows arrive as a kill card instead,
-     * which is a better telling of the same news, and the map stays three keys
-     * wide no matter how many fights a family gets through.
+     * which is a better telling of the same news, and the map stays one key wide
+     * no matter how many fights a family gets through.
      */
     public function markSeen(Household $household, Profile $profile): void
     {
-        $seen = $this->live($household)
-            ->mapWithKeys(fn (Monster $monster) => [
-                (string) $monster->id => min($monster->damage(), (int) $monster->max_health),
-            ])
-            ->all();
+        $monster = $this->current($household);
+
+        $seen = $monster === null
+            ? []
+            : [(string) $monster->id => min($monster->damage(), (int) $monster->max_health)];
 
         // The arena renders on every round trip and most of them have nothing
         // new to record.
@@ -964,10 +777,10 @@ class MonsterService
      * query that loaded it.
      *
      * Dropped rather than patched. A caller landing two blows in a row — a
-     * kill, then its spill onto the tier above — has to read the second
-     * against the first, and the alternative is keeping a copy of a sum in step
-     * with a table by hand, which is the exact thing this design set out not to
-     * do. The next read goes back to the database and is simply right.
+     * hit and then a parent's adjustment — has to read the second against the
+     * first, and the alternative is keeping a copy of a sum in step with a
+     * table by hand, which is the exact thing this design set out not to do.
+     * The next read goes back to the database and is simply right.
      */
     private function record(
         Monster $monster,

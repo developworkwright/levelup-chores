@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Enums\ChoreCadence;
 use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
-use App\Enums\MonsterTier;
 use App\Enums\ProfileRole;
 use App\Enums\QuestCharmEffect;
 use App\Models\Chore;
@@ -1356,19 +1355,15 @@ class ChoreService
      * signed the work off that is the chore's own points and nothing more.
      */
     /**
-     * @param  ?MonsterTier  $target  which of the three monsters this is aimed at,
-     *                                or null to let the arena pick the obvious one
-     */
-    /**
      * @param  int  $bonusPoints  Paid on top of the chore's own points, after
      *                            any wheel multiplier. Only the daily quest's
      *                            bold card uses it — see
      *                            {@see self::BOLD_CARD_BONUS_PERCENT}.
      */
-    public function claim(Profile $profile, Chore $chore, ?MonsterTier $target = null, int $bonusPoints = 0): ChoreCompletion
+    public function claim(Profile $profile, Chore $chore, int $bonusPoints = 0): ChoreCompletion
     {
         $multiplier = $this->spin->multiplierFor($profile, $chore);
-        $aim = $this->aimFor($profile->household, $chore, $target);
+        $aim = $this->aimFor($profile->household, $chore);
 
         // Not for the bonus — for the assignment. The draw excludes chores that
         // already have a claimant, so a day whose first mystery lookup happened
@@ -1424,32 +1419,23 @@ class ChoreService
     }
 
     /**
-     * What this claim is aiming at, settled here at the moment the kid commits
-     * rather than later when a parent gets round to it.
+     * Whether this claim caught the monster's weak point, settled here at the
+     * moment the kid commits rather than later when a parent gets round to it.
      *
-     * Both halves are deliberately frozen. The tier is the kid's answer to
-     * "which of the three", and the weak point is the reason they may have
-     * picked it — so a monster beaten by a sibling this afternoon, or a weak
-     * chore a parent swaps this evening, must not reach back and change what
-     * this was worth when it was chosen. Same rule {@see self::awardMysteryBonus()}
-     * follows for the same reason.
+     * Deliberately frozen. The weak point is the reason a kid may have picked
+     * this chore over another, so one a parent swaps this evening must not
+     * reach back and halve what the work was worth when it was chosen. Same
+     * rule {@see self::awardMysteryBonus()} follows, for the same reason.
      *
-     * @return array{target_tier: ?MonsterTier, struck_weak_point: bool}
+     * @return array{struck_weak_point: bool}
      */
-    private function aimFor(Household $household, Chore $chore, ?MonsterTier $target): array
+    private function aimFor(Household $household, Chore $chore): array
     {
-        // Rolls this week's weak points if nobody has looked yet, so the first
+        // Rolls this week's weak point if nobody has looked yet, so the first
         // kid through the door plays by the same board as the last.
-        $live = $this->monsters->rotateWeaknesses($household);
-
-        $tier = $target ?? $this->monsters->defaultTier($household);
-        $monster = $tier !== null ? $live->get($tier->value) : null;
+        $monster = $this->monsters->rotateWeakness($household);
 
         return [
-            // Kept even when that tier is standing empty: approval spills the
-            // hit up to whatever *is* alive, and the kid's choice is a better
-            // record of intent than the tier we'd substitute for it here.
-            'target_tier' => $tier,
             'struck_weak_point' => $monster !== null && $this->monsters->isWeakPoint($monster, $chore),
         ];
     }
@@ -1459,7 +1445,7 @@ class ChoreService
      * deliberate, so a kid isn't blocked by a parent's response time. The
      * streak is not touched here; it only moves once a parent approves.
      */
-    public function claimQuest(Profile $profile, ?MonsterTier $target = null): DailyQuest
+    public function claimQuest(Profile $profile): DailyQuest
     {
         $quest = $this->questFor($profile);
 
@@ -1477,7 +1463,7 @@ class ChoreService
             $quest->completed_at = now();
             $quest->save();
 
-            $this->claim($profile, $quest->chore, $target, $bonus);
+            $this->claim($profile, $quest->chore, $bonus);
         }
 
         return $quest;

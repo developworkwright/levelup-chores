@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Enums\BountyKind;
 use App\Enums\BountyStatus;
 use App\Enums\CompletionStatus;
-use App\Enums\MonsterTier;
 use App\Enums\TradeAsset;
 use App\Models\Badge;
 use App\Models\Bounty;
@@ -215,7 +214,7 @@ class QuestPageLayoutTest extends TestCase
     /** A monster standing at the long-game tier, which is what draws the strip. */
     private function standUpBoss(string $reward = 'Pizza night', int $health = 1000): void
     {
-        app(MonsterService::class)->spawn($this->household, MonsterTier::Three, $reward, $health);
+        app(MonsterService::class)->spawn($this->household, $reward, $health);
     }
 
     public function test_the_sections_come_in_the_order_the_handoff_fixes(): void

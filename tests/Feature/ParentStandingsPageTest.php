@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Enums\CompletionStatus;
-use App\Enums\MonsterTier;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyQuest;
@@ -44,7 +43,7 @@ class ParentStandingsPageTest extends TestCase
 
         // The standings read the long game, so the damage has to be on it.
         $arena = app(MonsterService::class);
-        $monster = $arena->spawn($household, MonsterTier::Three, 'Weekend away', 1000);
+        $monster = $arena->spawn($household, 'Weekend away', 1000);
         $arena->land($monster, 200, $nova);
         $arena->land($monster, 100, $rue);
 

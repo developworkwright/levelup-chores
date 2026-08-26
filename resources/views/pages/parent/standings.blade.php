@@ -1,7 +1,6 @@
 <?php
 
 use App\Enums\CompletionStatus;
-use App\Enums\MonsterTier;
 use App\Enums\ProfileRole;
 use App\Models\ChoreCompletion;
 use App\Models\Profile;
@@ -161,11 +160,8 @@ new class extends Component
         $choresThisWeek = fn (Profile $kid) => (int) ($week->get($kid->id)?->chores_done ?? 0);
         $pointsThisWeek = fn (Profile $kid) => (int) ($week->get($kid->id)?->points_earned ?? 0);
 
-        // The long game is what the standings are about — a table planning
-        // against three goals at once would be planning against a number
-        // nobody is working toward.
         $arena = app(MonsterService::class);
-        $longGame = $arena->at($household, MonsterTier::Three);
+        $longGame = $arena->current($household);
         $longGameState = $longGame ? $arena->stateFor($longGame) : null;
         $contributors = $longGame ? $arena->contributionsFor($longGame) : collect();
         $intoTheGoal = $contributors->pluck('points', 'profile_id');

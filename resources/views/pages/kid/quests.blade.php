@@ -1,7 +1,6 @@
 <?php
 
 use App\Enums\CompletionStatus;
-use App\Enums\MonsterTier;
 use App\Enums\PerkEffect;
 use App\Enums\SleepOutcome;
 use App\Exceptions\BountyUnavailableException;
@@ -282,24 +281,9 @@ new class extends Component
 
     public function claimQuest(): void
     {
-        // The chest has to be opened before the quest can be claimed.
-        if (! app(ChoreService::class)->isQuestRevealedToday($this->profile)) {
-            return;
-        }
-
-        if ($this->shouldAim()) {
-            $this->targetingQuest = true;
-
-            return;
-        }
-
-        $this->completeQuest(null);
-    }
-
-    private function completeQuest(?MonsterTier $target): void
-    {
         $service = app(ChoreService::class);
 
+        // The chest has to be opened before the quest can be claimed.
         if (! $service->isQuestRevealedToday($this->profile)) {
             return;
         }
@@ -308,7 +292,7 @@ new class extends Component
         $wasDone = $service->isQuestDoneToday($this->profile);
         $boosted = app(SpinService::class)->multiplierFor($this->profile, $quest->chore) > 1;
 
-        $service->claimQuest($this->profile, $target);
+        $service->claimQuest($this->profile);
 
         // Read after the claim, which is what settles it. This is the charm's
         // second chance and the reason it can't really be wasted — a hand that
@@ -522,92 +506,17 @@ new class extends Component
         app(ChoreService::class)->openStreakChest($this->profile);
     }
 
-    /**
-     * The chore waiting on the kid to say which monster it hits, or null when
-     * nothing is mid-choice.
-     *
-     * Held on the component rather than in the session: it exists for the two
-     * seconds between "done" and picking a target, and a refresh in the middle
-     * should drop the whole thing rather than resurrect a half-finished tap.
-     */
-    public ?int $targetingChoreId = null;
-
-    /** True for the quest, which goes through its own claim path. */
-    public bool $targetingQuest = false;
-
-    /**
-     * Whether finishing something should stop and ask which monster it hits.
-     *
-     * One monster standing is not a decision, and a picker with one answer on
-     * it is how a good idea turns into an extra tap. None standing goes
-     * straight through as well — the work still earns its points, it just has
-     * nothing to land on.
-     */
-    private function shouldAim(): bool
-    {
-        return app(MonsterService::class)->live($this->profile->household)->count() > 1;
-    }
-
-    /** The kid choosing which monster the thing they just finished lands on. */
-    public function aimAt(int $tier): void
-    {
-        $target = MonsterTier::tryFrom($tier);
-        $choreId = $this->targetingChoreId;
-        $wasQuest = $this->targetingQuest;
-
-        $this->cancelAim();
-
-        // A tier that emptied while the picker was open: a sibling can finish
-        // the last monster off between the question and the answer.
-        if ($target === null || app(MonsterService::class)->at($this->profile->household, $target) === null) {
-            $this->boardMessage = 'That one just went down! Pick another and try again.';
-
-            return;
-        }
-
-        // Remembered so the picker opens on it next time. A preference, not a
-        // commitment — every claim still asks.
-        $this->profile->last_monster_tier = $target;
-        $this->profile->save();
-
-        if ($wasQuest) {
-            $this->completeQuest($target);
-        } elseif ($choreId !== null) {
-            $this->completeChore($choreId, $target);
-        }
-    }
-
-    public function cancelAim(): void
-    {
-        $this->targetingChoreId = null;
-        $this->targetingQuest = false;
-    }
-
     public function claimChore(int $choreId): void
     {
         $this->boardMessage = null;
 
-        if (! $this->choreIsClaimable($choreId)) {
-            return;
-        }
-
-        if ($this->shouldAim()) {
-            $this->targetingChoreId = $choreId;
-
-            return;
-        }
-
-        $this->completeChore($choreId, null);
+        $this->completeChore($choreId);
     }
 
     /**
      * Everything that has to be true before a chore can be claimed, re-checked
      * server-side — never trust a disabled button in the browser.
      *
-     * Runs twice on a targeted claim: once to decide whether to open the
-     * picker, and again when the kid answers. The window between the two is
-     * small but it is exactly the window a sibling tapping the same chore lives
-     * in, so the second pass is the one that matters.
      */
     private function choreIsClaimable(int $choreId): bool
     {
@@ -651,7 +560,7 @@ new class extends Component
         return true;
     }
 
-    private function completeChore(int $choreId, ?MonsterTier $target): void
+    private function completeChore(int $choreId): void
     {
         if (! $this->choreIsClaimable($choreId)) {
             return;
@@ -659,37 +568,28 @@ new class extends Component
 
         $chore = Chore::findOrFail($choreId);
         $boosted = app(SpinService::class)->multiplierFor($this->profile, $chore) > 1;
-        $monster = $target ? app(MonsterService::class)->at($this->profile->household, $target) : null;
 
         // Nothing here says anything about the mystery chore, deliberately.
         // Announcing the find on the tap told a kid which chore carried the
         // bonus for the price of submitting it, so submitting everything on the
         // board was a way to be told the answer. It's announced when a parent
         // approves the work, by the card the kid shell queues.
-        $aimed = $monster ? " Aimed at {$monster->displayName()}." : '';
-
         if ($boosted) {
-            $this->dispatch('celebrate', message: "{$chore->name} claimed! Bonus wheel treat earned.{$aimed}", treat: 'cookie', motion: 'burst', origin: 'tap');
+            $this->dispatch('celebrate', message: "{$chore->name} claimed! Bonus wheel treat earned.", treat: 'cookie', motion: 'burst', origin: 'tap');
         } else {
-            $this->dispatch('celebrate', message: "{$chore->name} claimed! Waiting on parent.{$aimed}", motion: 'burst', origin: 'tap');
+            $this->dispatch('celebrate', message: "{$chore->name} claimed! Waiting on parent.", motion: 'burst', origin: 'tap');
         }
 
-        app(ChoreService::class)->claim($this->profile, $chore, $target);
+        app(ChoreService::class)->claim($this->profile, $chore);
     }
 
-    /**
-     * The three monsters as the picker and the strip both want them, keyed by
-     * tier.
-     *
-     * @return array<int, array<string, mixed>>
-     */
-    private function monsterStates(): array
+    /** The monster standing, as the strip and the watcher want it. */
+    private function monsterState(): ?array
     {
         $arena = app(MonsterService::class);
+        $monster = $arena->rotateWeakness($this->profile->household);
 
-        return $arena->rotateWeaknesses($this->profile->household)
-            ->map(fn ($monster) => $arena->stateFor($monster))
-            ->all();
+        return $monster ? $arena->stateFor($monster) : null;
     }
 
     public function with(): array
@@ -856,7 +756,7 @@ new class extends Component
             'household' => $household,
             // Status only — no replay, and nothing marked seen. See
             // <x-monster-mini> for why the catch-up belongs to the Goal page.
-            'monsterStates' => $this->monsterStates(),
+            'monsterState' => $this->monsterState(),
             // A window onto Trades & Jobs: only what this kid could take right
             // now, with the link carrying everything else.
             'bountyBoard' => app(BountyService::class)->boardFor($this->profile),
@@ -876,72 +776,9 @@ new class extends Component
 }; ?>
 
 <x-kid.shell :profile="$profile" active="quests" refresh-action="refreshBoard">
-    {{-- The long game, watching the board being cleared. --}}
-    @if ($monsterStates[App\Enums\MonsterTier::Three->value] ?? null)
-        <x-monster-watcher :state="$monsterStates[App\Enums\MonsterTier::Three->value]" />
-    @endif
-
-    {{-- The one question the board stops to ask: which of the three does this
-         one land on?
-
-         A full-screen overlay rather than something inline, because it is the
-         moment the work turns into a choice — and because the cards have to be
-         big enough to compare a reward against a health bar on a phone. It only
-         ever opens when more than one monster is standing; see shouldAim(). --}}
-    @if ($targetingChoreId !== null || $targetingQuest)
-        {{-- The scroller is this plain block, and the centring happens on the
-             wrapper inside it. A `fixed` element that is both the flex
-             container *and* the thing that scrolls loses whatever overflows
-             past its top edge: the browser will not scroll back to content
-             pushed out by `align-items`, so on a phone the picker opened
-             showing the last card with the heading unreachable above it.
-             `min-h-full` on the wrapper is what lets a short panel sit centred
-             while a tall one simply grows and scrolls. --}}
-        <div
-            class="fixed inset-0 z-50 overflow-y-auto overscroll-contain"
-            style="background: rgba(8, 4, 16, 0.82)"
-            wire:key="monster-picker"
-        >
-            <div class="flex min-h-full items-end justify-center p-4 sm:items-center">
-                <div class="w-full max-w-[880px] rounded-[24px] border border-fq-line-2 bg-fq-panel p-5 sm:p-6">
-                    <div class="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                            <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-coral uppercase">Nice work</p>
-                            <h2 class="mt-1 font-baloo text-2xl font-extrabold">Who takes the hit?</h2>
-                            <p class="mt-1 max-w-[420px] text-[13px] text-fq-text-4">
-                                All your points from this one go to the monster you pick.
-                            </p>
-                        </div>
-
-                        <button
-                            type="button"
-                            wire:click="cancelAim"
-                            class="rounded-[12px] border border-fq-line-3 bg-fq-sunk px-4 py-[9px] text-[13px] text-fq-text-2-b transition hover:text-fq-text"
-                        >Not yet</button>
-                    </div>
-
-                    {{-- Compact cards, not the arena's. Three full cards stack
-                         to well over a phone screen, which is what made the
-                         overflow above matter in the first place — and this is
-                         a decision to make in one glance, not a gallery. The
-                         big artwork lives on the Goal page. --}}
-                    <div class="mt-4 flex flex-wrap items-stretch gap-[14px]">
-                        @foreach ($monsterStates as $tierValue => $state)
-                            <x-monster-card
-                                :state="$state"
-                                :compact="true"
-                                :selected="$profile->last_monster_tier?->value === $tierValue"
-                                wire:key="pick-{{ $tierValue }}"
-                                wire:click="aimAt({{ $tierValue }})"
-                                class="min-w-0 flex-[1_1_260px] cursor-pointer hover:border-fq-lime"
-                                role="button"
-                                tabindex="0"
-                            />
-                        @endforeach
-                    </div>
-                </div>
-            </div>
-        </div>
+    {{-- The monster, watching the board being cleared. --}}
+    @if ($monsterState)
+        <x-monster-watcher :state="$monsterState" />
     @endif
 
     {{-- One column, in the order the handoff fixes: what you owe today, what's
@@ -1431,8 +1268,8 @@ new class extends Component
         {{-- 4. Boss fight, promoted out of the old sidebar to sit directly
              under the quest that feeds it. --}}
         <div wire:key="family-goal">
-            @if ($monsterStates)
-                <x-monster-mini :states="$monsterStates" :pending="$pendingCount" wire:key="family-boss" />
+            @if ($monsterState)
+                <x-monster-mini :state="$monsterState" :pending="$pendingCount" wire:key="family-boss" />
             @endif
         </div>
 

@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Enums\BossSkin;
-use App\Enums\MonsterTier;
 use App\Models\Badge;
 use App\Models\Chore;
 use App\Models\Household;
@@ -224,7 +223,6 @@ class KidCelebrationTest extends TestCase
     {
         app(MonsterService::class)->spawn(
             $this->household,
-            MonsterTier::Three,
             'Pizza night',
             1000,
             skin: BossSkin::default(),
@@ -341,7 +339,6 @@ class KidCelebrationTest extends TestCase
         // arena now would stage the wrong monster falling over.
         app(MonsterService::class)->spawn(
             $this->household,
-            MonsterTier::Three,
             'Trip to the zoo',
             2000,
             skin: BossSkin::Gnash->next(),
@@ -358,7 +355,7 @@ class KidCelebrationTest extends TestCase
         // Nothing queued it, so there is nothing owed — a kid joining a
         // household that beat its monster last month hears nothing.
         app(MonsterService::class)
-            ->spawn($this->household, MonsterTier::Three, 'Pizza night', 1000)
+            ->spawn($this->household, 'Pizza night', 1000)
             ->forceFill(['defeated_at' => now()])
             ->save();
 
@@ -375,7 +372,7 @@ class KidCelebrationTest extends TestCase
 
         // A parent lines up the next reward at that tier before the kid ever
         // logs in.
-        app(MonsterService::class)->spawn($this->household, MonsterTier::Three, 'Trip to the zoo', 2000);
+        app(MonsterService::class)->spawn($this->household, 'Trip to the zoo', 2000);
         $this->reload();
 
         // The arena on the page now reads "Trip to the zoo", so the only thing
@@ -395,7 +392,6 @@ class KidCelebrationTest extends TestCase
         // reason it keeps naming the goal that was actually reached.
         app(MonsterService::class)->spawn(
             $this->household,
-            MonsterTier::Three,
             'Weekend away',
             2000,
             skin: BossSkin::default()->next(),

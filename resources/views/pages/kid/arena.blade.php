@@ -30,11 +30,9 @@ new class extends Component
 {
     public Profile $profile;
 
-    /** @var array<int, array<string, mixed>>|null */
-    private ?array $arenaStates = null;
+    /** @var array<string, mixed>|false|null */
+    private array|false|null $arenaState = null;
 
-    /** Matches the Goals page's replay queue — see arena() there. */
-    private const REPLAY_STEP_MS = 900;
 
     public function mount(): void
     {
@@ -43,41 +41,35 @@ new class extends Component
     }
 
     /**
-     * The three monsters, lifted off the Goals page whole.
+     * The monster, with whatever this kid missed queued up in front of it.
      *
-     * Same memoisation and the same markSeen() ordering: this both reads the
-     * "last looked" marker and moves it, so a second call inside one request
-     * would find the gap it had already closed. See the Goals page's arena()
-     * for the full reasoning — it is one mechanism in two places until the
-     * family half of Goals is gone for good.
+     * Memoised, because this both reads the "last looked" marker and moves it:
+     * a second call inside one request would find the gap it had already
+     * closed. `false` rather than null for "asked, nothing standing" — null is
+     * the not-yet-asked state, and an empty arena must not re-run markSeen().
      *
-     * @return array<int, array<string, mixed>>
+     * @return array<string, mixed>|null
      */
-    private function arena(Household $household): array
+    private function arena(Household $household): ?array
     {
-        if ($this->arenaStates !== null) {
-            return $this->arenaStates;
+        if ($this->arenaState !== null) {
+            return $this->arenaState ?: null;
         }
 
         $monsters = app(MonsterService::class);
-        $states = [];
-        $delay = 0;
+        $monster = $monsters->rotateWeakness($household);
 
-        foreach ($monsters->rotateWeaknesses($household) as $tierValue => $monster) {
-            $steps = $monsters->replayFor($monster, $this->profile);
-
-            $states[$tierValue] = [
-                ...$monsters->stateFor($monster),
-                'steps' => $steps,
-                'startDelay' => $delay,
-            ];
-
-            $delay += (count($steps) - 1) * self::REPLAY_STEP_MS;
-        }
+        $state = $monster === null ? false : [
+            ...$monsters->stateFor($monster),
+            'steps' => $monsters->replayFor($monster, $this->profile),
+            'startDelay' => 0,
+        ];
 
         $monsters->markSeen($household, $this->profile);
 
-        return $this->arenaStates = $states;
+        $this->arenaState = $state;
+
+        return $state ?: null;
     }
 
     /** Why the last nudge or rescue didn't land. A silent no-op reads as broken. */
@@ -173,7 +165,7 @@ new class extends Component
                     'rescueBlocked' => $arena->rescueBlockedReason($this->profile, $entry['profile']),
                 ])
                 ->values(),
-            'monsterStates' => $this->arena($household),
+            'monsterState' => $this->arena($household),
             'choresToday' => $arena->choresToday($household),
             'superlatives' => $arena->superlatives($household),
             'crown' => $arena->crown($household),
@@ -510,19 +502,19 @@ new class extends Component
         </div>
     </div>
 
-    {{-- 3. The monsters, moved off the Goals page. --}}
+    {{-- 3. The monster, moved off the Goals page. --}}
     <div class="mt-[18px] flex flex-col gap-[14px]">
         <div class="flex flex-wrap items-end justify-between gap-[18px]">
             <div class="flex flex-col gap-[2px]">
-                <span class="font-mono-fq text-[11px] tracking-[0.26em] uppercase" style="color: var(--fq-coral)">Three standing</span>
+                <span class="font-mono-fq text-[11px] tracking-[0.26em] uppercase" style="color: var(--fq-coral)">The fight</span>
                 <span class="font-baloo text-[30px] leading-[1.05] font-extrabold">What the house is fighting</span>
             </div>
             <span class="font-mono-fq text-[11px] tracking-[0.14em] text-fq-text-4">
-                EVERY APPROVED CHORE IS DAMAGE &middot; AIM WHEN YOU CLAIM
+                EVERY APPROVED CHORE IS DAMAGE
             </span>
         </div>
 
-        <x-monster-arena :states="$monsterStates" />
+        <x-monster-arena :state="$monsterState" />
     </div>
 
     {{-- 4. Today: what everyone got done, and who is wearing the crown. --}}

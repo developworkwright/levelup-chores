@@ -168,9 +168,9 @@ class BadgeService
      * happened to land the killing blow — award it to every kid once the family
      * has put a monster down.
      *
-     * Any monster, at any tier, and only ever once: `maybeAward` is idempotent
-     * per badge key, so the first kill is the one that pays and the ice cream
-     * monster counts every bit as much as the weekend away.
+     * Only ever once: `maybeAward` is idempotent per badge key, so the first
+     * kill is the one that pays and a cheap monster counts every bit as much as
+     * a weekend away.
      */
     public function evaluateHouseholdGoal(Household $household): void
     {

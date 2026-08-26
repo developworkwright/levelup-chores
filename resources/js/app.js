@@ -522,9 +522,8 @@ document.addEventListener('alpine:init', () => {
         },
 
         /**
-         * The artwork for one step of the replay, at this tier's weather. The
-         * dread is the difference between a level 1 monster and a level 3 one
-         * wearing the same face: the floor glow, the motes, the breathing.
+         * The artwork for one step of the replay, at the arena's weather — the
+         * floor glow, the motes and the breathing.
          */
         monster(stage) {
             return monsterSvg(this.skin, stage, this.dread);
