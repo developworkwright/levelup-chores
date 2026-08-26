@@ -36,7 +36,7 @@ class ChestOverlayTest extends TestCase
         $kid = $this->kidWithChores();
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.quests')->assertSee("phase === 'revealed' && justOpened", false);
+        Volt::test('kid.home')->assertSee("phase === 'revealed' && justOpened", false);
     }
 
     public function test_a_chest_never_renders_pre_flagged_as_just_opened(): void
@@ -49,7 +49,7 @@ class ChestOverlayTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.quests')
+        Volt::test('kid.home')
             ->assertSee('justOpened: false', false)
             ->assertDontSee('justOpened: true', false);
     }
@@ -65,7 +65,7 @@ class ChestOverlayTest extends TestCase
         $kid = $this->kidWithChores();
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.quests')->assertSee('--fq-glow-size: 120px', false);
+        Volt::test('kid.home')->assertSee('--fq-glow-size: 120px', false);
 
         $this->assertStringContainsString(
             'margin-left: calc(var(--fq-glow-size) / -2)',
@@ -84,7 +84,7 @@ class ChestOverlayTest extends TestCase
         $kid = $this->kidWithChores();
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.quests')->assertSee('setTimeout(resolve, 2600)', false);
+        Volt::test('kid.home')->assertSee('setTimeout(resolve, 2600)', false);
 
         $this->assertStringContainsString(
             'animation: fq-chest-jiggle 2.5s',
@@ -102,7 +102,7 @@ class ChestOverlayTest extends TestCase
         $kid = $this->kidWithChores();
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.quests')
+        Volt::test('kid.home')
             ->assertSee('hold: 2600', false)
             ->assertSee('show = false, 2200', false);
     }
@@ -116,7 +116,7 @@ class ChestOverlayTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         // Suppressing the overlay must not also hide the revealed content.
-        Volt::test('kid.quests')
+        Volt::test('kid.home')
             ->assertSee("phase: 'revealed'", false)
             ->assertSee(app(ChoreService::class)->questFor($kid)->chore->name);
     }

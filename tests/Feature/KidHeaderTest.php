@@ -55,12 +55,16 @@ class KidHeaderTest extends TestCase
         }
     }
 
-    public function test_the_rail_carries_the_three_worlds_on_every_page(): void
+    public function test_the_rail_carries_every_world_on_every_page(): void
     {
         $this->loginKid();
 
         foreach (['kid.quests', 'kid.loot', 'kid.stats'] as $page) {
             Volt::test($page)
+                // Home leads the rail from every page — it is the way back to
+                // the front of the day, and a kid who is lost reaches for the
+                // first button without reading the rest.
+                ->assertSee('Home')
                 ->assertSee('Earn')
                 ->assertSee('Spend')
                 ->assertSee('Me');
@@ -82,16 +86,10 @@ class KidHeaderTest extends TestCase
     {
         $this->loginKid();
 
-        $earn = $this->pills(Volt::test('kid.quests')->html());
-
-        $this->assertStringContainsString('Bonus Wheel', $earn);
-        // Trades left Earn for House. It sat in Earn *and* Spend on the grounds
-        // that points flow both ways — true, and not why a kid opens it: they
-        // open it because it is about their siblings, which is what House is.
-        $this->assertStringNotContainsString('Trades &amp; Jobs', $earn);
-        // Other worlds' pages stay folded away until that world is opened.
-        $this->assertStringNotContainsString('Loot Shop', $earn);
-        $this->assertStringNotContainsString('Badges', $earn);
+        // Earn is down to the board alone now that the wheel moved to Home, so
+        // it draws no pill row at all — a single pill marked as the open page
+        // is a control with nowhere to go.
+        $this->assertSame('', $this->pills(Volt::test('kid.quests')->html()));
 
         $house = $this->pills(Volt::test('kid.arena')->html());
 
@@ -99,13 +97,14 @@ class KidHeaderTest extends TestCase
         // Swaps and jobs share one page, and the pill names both so a kid can
         // see where each of them lives.
         $this->assertStringContainsString('Trades &amp; Jobs', $house);
-        $this->assertStringNotContainsString('Bonus Wheel', $house);
+        // Other worlds' pages stay folded away until that world is opened.
+        $this->assertStringNotContainsString('Loot Shop', $house);
 
         $me = $this->pills(Volt::test('kid.stats')->html());
 
         $this->assertStringContainsString('Goals', $me);
         $this->assertStringContainsString('Badges', $me);
-        $this->assertStringNotContainsString('Bonus Wheel', $me);
+        $this->assertStringNotContainsString('Arena', $me);
 
         // The rail opens a world's *first* page, and Me leads with Stats —
         // "how am I doing" before "what am I saving for".
@@ -143,7 +142,7 @@ class KidHeaderTest extends TestCase
         );
 
         $this->assertStringContainsString('Arena', $held);
-        $this->assertStringNotContainsString('Bonus Wheel', $held);
+        $this->assertStringNotContainsString('Loot Shop', $held);
     }
 
     public function test_the_world_query_parameter_opens_that_world(): void
@@ -157,7 +156,7 @@ class KidHeaderTest extends TestCase
         );
 
         $this->assertStringContainsString('Trades &amp; Jobs', $pills);
-        $this->assertStringNotContainsString('Quests', $pills);
+        $this->assertStringNotContainsString('Loot Shop', $pills);
     }
 
     public function test_a_world_carries_the_badge_of_a_page_inside_it(): void

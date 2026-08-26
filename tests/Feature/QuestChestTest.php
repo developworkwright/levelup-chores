@@ -39,7 +39,7 @@ class QuestChestTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_the_quests_page_shows_the_streak_chest_ready_to_open(): void
+    public function test_home_shows_the_streak_chest_ready_to_open(): void
     {
         $household = Household::factory()->create(['points_per_dollar' => 100]);
         $kid = Profile::factory()->for($household)->create(['streak' => 3, 'pending_streak_chest' => 3]);
@@ -47,11 +47,10 @@ class QuestChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        // The streak chest lives in the loot tray now, so "ready" is the slot's
-        // status line rather than a card of its own — see the Loot Tray handoff
-        // for why the extras were collected into one row.
-        Volt::test('kid.quests')
-            ->assertSee('Streak chest')
+        // The streak chest lives on Home now, alongside the rest of the daily
+        // loop and the track that says what each milestone pays.
+        Volt::test('kid.home')
+            ->assertSee('Streak Chest')
             ->assertSee('Ready to open');
     }
 
@@ -65,7 +64,7 @@ class QuestChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.quests')
+        Volt::test('kid.home')
             ->assertSee('+100 PTS')
             ->assertDontSee('+$1');
     }
@@ -79,7 +78,7 @@ class QuestChestTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         // Day 3 pays $1 → 100 pts, day 30 pays $40 → 4000 pts.
-        Volt::test('kid.quests')
+        Volt::test('kid.home')
             ->assertSee('Day 3')
             ->assertSee('100 pts')
             ->assertSee('Day 30')
@@ -88,7 +87,7 @@ class QuestChestTest extends TestCase
             ->assertDontSee('$40 ');
     }
 
-    public function test_opening_the_streak_chest_from_the_quests_page_clears_it(): void
+    public function test_opening_the_streak_chest_from_home_clears_it(): void
     {
         $household = Household::factory()->create(['points_per_dollar' => 100]);
         $kid = Profile::factory()->for($household)->create(['streak' => 3, 'pending_streak_chest' => 3]);
@@ -96,12 +95,12 @@ class QuestChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.quests')->call('openStreakChest');
+        Volt::test('kid.home')->call('openStreakChest');
 
         $this->assertNull($kid->refresh()->pending_streak_chest);
     }
 
-    public function test_the_quests_page_shows_the_come_back_tomorrow_message_when_no_chest_is_pending(): void
+    public function test_home_shows_the_come_back_tomorrow_message_when_no_chest_is_pending(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['streak' => 2]);
@@ -134,7 +133,7 @@ class QuestChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.quests')
+        Volt::test('kid.home')
             ->assertSee("Complete today's quest and come back tomorrow to open the chest", false);
     }
 

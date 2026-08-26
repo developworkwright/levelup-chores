@@ -186,7 +186,7 @@ class StreakCycleTest extends TestCase
     {
         Auth::guard('profile')->login($this->kidOnStreak(31));
 
-        Volt::test('kid.quests')
+        Volt::test('kid.home')
             ->assertOk()
             ->assertSee('Round 2')
             ->assertSee('Day 33')
@@ -203,7 +203,7 @@ class StreakCycleTest extends TestCase
     {
         Auth::guard('profile')->login($this->kidOnStreak(30));
 
-        Volt::test('kid.quests')
+        Volt::test('kid.home')
             ->assertOk()
             ->assertDontSee("You've unlocked every streak chest")
             ->assertDontSee('All unlocked');

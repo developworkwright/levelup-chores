@@ -69,14 +69,17 @@ class ArenaPageTest extends TestCase
         return app(ArenaService::class);
     }
 
-    public function test_kids_land_on_the_arena_rather_than_quests(): void
+    public function test_kids_land_on_home_rather_than_the_arena(): void
     {
         $kid = $this->kid();
         $this->chores();
 
         Auth::guard('profile')->login($kid);
 
-        $this->get('/kid')->assertRedirect('/kid/arena');
+        // The Arena held this slot, and the news on it is still the best news
+        // in the app. But a landing page has to answer "what do I do now"
+        // before "what is happening" — the Arena is step four of Home instead.
+        $this->get('/kid')->assertRedirect('/kid/home');
     }
 
     public function test_the_arena_renders_the_race_and_the_monsters(): void

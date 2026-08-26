@@ -97,7 +97,7 @@ class DailyChestRewardTest extends TestCase
         // bug and is really the balance having moved a beat early.
         Auth::guard('profile')->login($this->kid);
 
-        $page = Volt::test('kid.quests')->call('openDailyChest');
+        $page = Volt::test('kid.home')->call('openDailyChest');
 
         $chest = DailyChest::where('profile_id', $this->kid->id)->firstOrFail();
 

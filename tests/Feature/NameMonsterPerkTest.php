@@ -243,11 +243,12 @@ class NameMonsterPerkTest extends TestCase
 
     public function test_every_page_that_uses_a_perk_asks_for_its_style(): void
     {
-        // Three pages spend perks — the shop, the quest board and the wheel —
-        // and the toast's own default is money. A page that forgets to pass a
-        // style doesn't fail, it just quietly rains coins, which is exactly how
-        // the board kept doing it after the shop was fixed.
-        foreach (['bonus', 'quests', 'wheel'] as $page) {
+        // Three pages spend perks — the shop, the quest board and Home, which
+        // holds the wheel and the quest hero — and the toast's own default is
+        // money. A page that forgets to pass a style doesn't fail, it just
+        // quietly rains coins, which is exactly how the board kept doing it
+        // after the shop was fixed.
+        foreach (['bonus', 'quests', 'home'] as $page) {
             $source = file_get_contents(resource_path("views/pages/kid/{$page}.blade.php"));
 
             $this->assertStringContainsString(

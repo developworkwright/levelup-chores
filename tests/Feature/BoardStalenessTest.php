@@ -207,7 +207,7 @@ class BoardStalenessTest extends TestCase
         // The button lives in the shared shell, so a tab that doesn't pass
         // refresh-action falls back to Livewire's generic $refresh. If that
         // wiring breaks, it breaks on four pages at once.
-        foreach (['quests', 'wheel', 'loot', 'bonus', 'badges'] as $tab) {
+        foreach (['home', 'quests', 'loot', 'bonus', 'badges'] as $tab) {
             Volt::test("kid.{$tab}")->assertOk()->assertSee('Refresh');
         }
     }

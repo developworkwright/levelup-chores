@@ -21,6 +21,13 @@
     'openAction' => null,
     'accent' => 'var(--fq-gold)',
     'wash' => 'var(--fq-wash-gold)',
+    {{-- The chest's own body. It defaults to the quest chest's gold because
+         that is the one this component was built for, but Home stacks three of
+         these on one page and three identical gold boxes read as one thing
+         repeated rather than as three different rewards. --}}
+    'fill' => 'linear-gradient(180deg, #ffe98a, #e0b312)',
+    'band' => '#5c4506',
+    'lock' => '#3c2c04',
     'kicker',
     'closedTitle',
     'closedText',
@@ -122,9 +129,9 @@
                  the style attribute, and an Alpine style binding owns that
                  attribute outright. See .fq-chest-opening in app.css. --}}
             <x-chest-block
-                fill="linear-gradient(180deg, #ffe98a, #e0b312)"
-                band="#5c4506"
-                lock="#3c2c04"
+                :fill="$fill"
+                :band="$band"
+                :lock="$lock"
                 radius="12px"
                 class="relative h-[68px] w-[88px] sm:h-[60px] sm:w-[76px]"
                 x-bind:class="phase === 'opening' ? 'fq-chest-opening' : 'fq-chest-idle'"

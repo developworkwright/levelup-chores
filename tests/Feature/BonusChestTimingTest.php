@@ -56,7 +56,7 @@ class BonusChestTimingTest extends TestCase
 
     public function test_an_unearned_chest_stops_to_explain_what_waiting_is_worth(): void
     {
-        Volt::test('kid.quests')
+        Volt::test('kid.home')
             ->assertSee('Ready to open')
             // The prompt is on the page, hidden until the chest is tapped.
             ->assertSee('Hold on', escape: false)
@@ -69,14 +69,17 @@ class BonusChestTimingTest extends TestCase
 
     public function test_the_chest_asks_before_opening_only_while_the_quest_is_open(): void
     {
-        $html = Volt::test('kid.quests')->html();
-        $this->assertStringContainsString('bonus-chest-confirm', $html);
+        // The stop is <x-chest>'s own 'confirming' phase now that the chest is
+        // a card on Home rather than a tile in the Quests tray — a tile was too
+        // small to hold a two-button question and had to raise an event for it.
+        $html = Volt::test('kid.home')->html();
+        $this->assertStringContainsString("this.phase = 'confirming'", $html);
 
         $this->clearQuest();
 
         // Nothing left to ask: the chest is already on the good table.
-        $cleared = Volt::test('kid.quests')->html();
-        $this->assertStringNotContainsString('bonus-chest-confirm', $cleared);
+        $cleared = Volt::test('kid.home')->html();
+        $this->assertStringNotContainsString("this.phase = 'confirming'", $cleared);
     }
 
     public function test_a_cleared_quest_flags_the_chest_as_op_on_the_shut_tile(): void
@@ -85,23 +88,24 @@ class BonusChestTimingTest extends TestCase
 
         // Has to be visible *before* it is opened — a boost discovered
         // afterwards changes nobody's behaviour tomorrow.
-        Volt::test('kid.quests')
-            ->assertSee('OP loot ready')
-            ->assertSee('Bonus Chest · OP', escape: false);
+        Volt::test('kid.home')
+            ->assertSee('Ready · OP', escape: false)
+            ->assertSee('Bonus Chest · OP', escape: false)
+            ->assertSee('Your chest is OP today');
     }
 
     public function test_the_op_flag_is_absent_while_the_quest_is_still_open(): void
     {
-        Volt::test('kid.quests')
+        Volt::test('kid.home')
             ->assertSee('Ready to open')
-            ->assertDontSee('OP loot ready');
+            ->assertDontSee('Ready · OP', escape: false);
     }
 
     public function test_the_chest_still_opens_for_a_kid_who_chooses_not_to_wait(): void
     {
         // The prompt is a stop, not a lock. Opening early is a real choice and
         // has to keep working.
-        Volt::test('kid.quests')->call('openDailyChest');
+        Volt::test('kid.home')->call('openDailyChest');
 
         $this->assertNotNull(
             app(\App\Services\ChestService::class)->openedToday($this->kid),
@@ -113,7 +117,7 @@ class BonusChestTimingTest extends TestCase
     {
         $this->clearQuest();
 
-        Volt::test('kid.quests')->call('openDailyChest');
+        Volt::test('kid.home')->call('openDailyChest');
 
         $chest = app(\App\Services\ChestService::class)->openedToday($this->kid);
 
@@ -123,7 +127,7 @@ class BonusChestTimingTest extends TestCase
 
     public function test_a_chest_opened_before_the_quest_records_that_it_was_not(): void
     {
-        Volt::test('kid.quests')->call('openDailyChest');
+        Volt::test('kid.home')->call('openDailyChest');
 
         $this->assertFalse((bool) app(\App\Services\ChestService::class)->openedToday($this->kid)->quest_was_done);
     }

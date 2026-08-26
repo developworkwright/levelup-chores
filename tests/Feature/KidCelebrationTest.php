@@ -398,7 +398,7 @@ class KidCelebrationTest extends TestCase
         );
         $this->reload();
 
-        Volt::test('kid.quests')
+        Volt::test('kid.home')
             ->assertOk()
             // The card still names the monster that actually died...
             ->assertSee(BossSkin::default()->label(), false)

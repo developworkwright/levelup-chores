@@ -5,9 +5,9 @@
 
 @php
     $pages = [
+        'home' => ['label' => 'Home', 'glyph' => '⌂', 'route' => 'kid.home'],
         'arena' => ['label' => 'Arena', 'glyph' => '⚔', 'route' => 'kid.arena'],
         'quests' => ['label' => 'Quests', 'glyph' => '⚑', 'route' => 'kid.quests'],
-        'wheel' => ['label' => 'Bonus Wheel', 'glyph' => '◎', 'route' => 'kid.wheel'],
         'loot' => ['label' => 'Loot Shop', 'glyph' => '◈', 'route' => 'kid.loot'],
         'goal' => ['label' => 'Goals', 'glyph' => '◔', 'route' => 'kid.goal'],
         'trades' => ['label' => 'Trades & Jobs', 'glyph' => '⇄', 'route' => 'kid.trades'],
@@ -18,19 +18,27 @@
     ];
 
     /*
-     * Ten pages grouped into four ideas a kid already has words for. Each
-     * world's pill row is justified under its own rail button, so the pages
-     * stay visually attached to the world that opened them.
+     * The pages grouped into ideas a kid already has words for. Each world's
+     * pill row is justified under its own rail button, so the pages stay
+     * visually attached to the world that opened them.
      *
-     * House is the newest and the reason the other three moved. Trades used to
-     * sit in *both* Earn and Spend, on the grounds that points flow both ways —
-     * true, and not why a kid opens it. They open it because it is about their
-     * siblings, which is what House holds: the Arena and the trades. Goals went
-     * back to being personal, the family half of it having become the Arena's
-     * job.
+     * Home is first and holds one page on purpose. It is not a world so much as
+     * the way back to the front of the day, and a kid who is lost should be
+     * able to reach for the first button on the rail without reading any of the
+     * others. Worlds holding a single page draw no pill row at all — a lone
+     * pill that is always the open page is a control that can't do anything.
+     *
+     * House is the reason the middle three moved. Trades used to sit in *both*
+     * Earn and Spend, on the grounds that points flow both ways — true, and not
+     * why a kid opens it. They open it because it is about their siblings,
+     * which is what House holds: the Arena and the trades. Goals went back to
+     * being personal, the family half of it having become the Arena's job.
      */
     $worlds = [
-        'earn' => ['label' => 'Earn', 'glyph' => '⚑', 'justify' => 'justify-start', 'pages' => ['quests', 'wheel']],
+        'home' => ['label' => 'Home', 'glyph' => '⌂', 'justify' => 'justify-start', 'pages' => ['home']],
+        // Just the board now. The bonus wheel moved to Home, where it is step
+        // three of the day rather than a page to remember to go to.
+        'earn' => ['label' => 'Earn', 'glyph' => '⚑', 'justify' => 'justify-start', 'pages' => ['quests']],
         'spend' => ['label' => 'Spend', 'glyph' => '◈', 'justify' => 'justify-center', 'pages' => ['loot', 'bonus']],
         'house' => ['label' => 'House', 'glyph' => '⚔', 'justify' => 'justify-center', 'pages' => ['arena', 'trades']],
         // Stats first, and so the world lands there: a rail button opens its
@@ -448,10 +456,15 @@
                 <a
                     href="{{ route($pages[$lands]['route']) }}?world={{ $key }}"
                     wire:navigate
-                    class="flex flex-1 items-center justify-center gap-2 rounded-[14px] border border-transparent px-[14px] py-[11px] text-center text-[15px] font-bold whitespace-nowrap"
+                    {{-- Home made the rail five buttons wide, which is one more
+                         than a 375px phone can hold at the old size. The glyph
+                         is what gives way rather than the label: a kid picks
+                         the button by the word on it, and a rail that wraps to
+                         two rows stops reading as one bank of controls. --}}
+                    class="flex flex-1 items-center justify-center gap-[6px] rounded-[14px] border border-transparent px-[6px] py-[10px] text-center text-[13px] font-bold whitespace-nowrap sm:gap-2 sm:px-[14px] sm:py-[11px] sm:text-[15px]"
                     style="{{ $activeWorld === $key ? 'background: var(--fq-tab-active); color: var(--fq-lime)' : 'background:transparent; color: var(--fq-ink)' }}"
                 >
-                    <span class="text-sm">{{ $world['glyph'] }}</span>{{ $world['label'] }}
+                    <span class="hidden text-sm sm:inline">{{ $world['glyph'] }}</span>{{ $world['label'] }}
                     {{-- Generic wording now that the badge covers trades and
                          jobs both: a world's count is the sum of its pages'. --}}
                     <x-count-badge
@@ -464,7 +477,12 @@
 
         {{-- The open world's pages, justified under the rail button that opened
              them. No `world` parameter on these: the session already holds the
-             world, and a pill never changes it. --}}
+             world, and a pill never changes it.
+
+             A world holding one page draws nothing — the rail button already
+             took the kid there, and a single pill marked as the open page is a
+             control with nowhere to go. --}}
+        @if (count($worlds[$activeWorld]['pages']) > 1)
         <nav
             aria-label="Pages in {{ $worlds[$activeWorld]['label'] }}"
             class="mt-[10px] flex flex-wrap gap-[6px] px-[2px] sm:gap-2 {{ $worlds[$activeWorld]['justify'] }}"
@@ -519,6 +537,7 @@
                 </a>
             @endforeach
         </nav>
+        @endif
     </div>
 
     <div class="mt-4">

@@ -187,7 +187,7 @@ class SpinAvailabilityTest extends TestCase
 
         // SpinService throws on an empty pool and the page never catches it,
         // so the guard has to sit in front of the call.
-        Volt::test('kid.wheel')->call('spin')->assertOk();
+        Volt::test('kid.home')->call('spin')->assertOk();
 
         $this->assertFalse($this->spins()->hasSpunToday($kid));
     }

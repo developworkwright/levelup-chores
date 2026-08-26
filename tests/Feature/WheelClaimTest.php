@@ -55,7 +55,7 @@ class WheelClaimTest extends TestCase
         [, $kid] = $this->household(['require_quest_first' => false]);
         $boost = $this->spin($kid);
 
-        Volt::test('kid.wheel')
+        Volt::test('kid.home')
             ->assertOk()
             ->assertSee('Mark it done')
             ->call('claimBoostedChore');
@@ -74,7 +74,7 @@ class WheelClaimTest extends TestCase
         [, $kid] = $this->household(['require_quest_first' => false]);
         $this->spin($kid);
 
-        Volt::test('kid.wheel')
+        Volt::test('kid.home')
             ->call('claimBoostedChore')
             ->assertSee('Waiting on a parent')
             ->assertDontSee('Mark it done');
@@ -85,7 +85,7 @@ class WheelClaimTest extends TestCase
         [, $kid] = $this->household(['require_quest_first' => true]);
         $this->spin($kid);
 
-        Volt::test('kid.wheel')
+        Volt::test('kid.home')
             ->assertOk()
             ->assertSee('Main quest first')
             ->assertDontSee('Mark it done')
@@ -109,7 +109,7 @@ class WheelClaimTest extends TestCase
             'submitted_at' => now(),
         ]);
 
-        Volt::test('kid.wheel')
+        Volt::test('kid.home')
             ->assertOk()
             ->assertSee('Rex got this one')
             ->assertDontSee('Mark it done')
@@ -122,7 +122,7 @@ class WheelClaimTest extends TestCase
     {
         $this->household(['require_quest_first' => false]);
 
-        Volt::test('kid.wheel')
+        Volt::test('kid.home')
             ->assertOk()
             ->assertSee('No boost yet today.')
             ->assertDontSee('Mark it done');
@@ -132,7 +132,7 @@ class WheelClaimTest extends TestCase
     {
         [, $kid] = $this->household(['require_quest_first' => false]);
 
-        Volt::test('kid.wheel')->call('claimBoostedChore');
+        Volt::test('kid.home')->call('claimBoostedChore');
 
         $this->assertSame(0, ChoreCompletion::where('profile_id', $kid->id)->count());
     }
@@ -147,7 +147,7 @@ class WheelClaimTest extends TestCase
 
         $boost = $this->spin($kid);
 
-        Volt::test('kid.wheel')
+        Volt::test('kid.home')
             ->assertOk()
             ->assertSee(number_format(175 * $boost->multiplier).' PTS');
     }

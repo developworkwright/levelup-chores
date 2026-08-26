@@ -99,12 +99,12 @@ class DailyChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        // Both chests are permanent slots in the loot tray now, so "shown" is
-        // about them being openable rather than present — which is exactly what
-        // their tap targets say.
-        Volt::test('kid.quests')
+        // Both chests are cards on Home now, one under the other. "Shown" is
+        // about them being openable rather than present, which is what their
+        // headline copy says.
+        Volt::test('kid.home')
             ->assertSee("Open today's bonus chest")
-            ->assertSee('Open your streak chest');
+            ->assertSee('Your streak chest is waiting');
     }
 
     public function test_the_chest_records_whether_the_quest_was_done(): void
@@ -176,7 +176,7 @@ class DailyChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.quests')
+        Volt::test('kid.home')
             ->assertSee("Open today's bonus chest")
             ->call('openDailyChest')
             ->assertSuccessful();
@@ -192,7 +192,7 @@ class DailyChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.quests')
+        Volt::test('kid.home')
             ->assertSee("Open today's bonus chest")
             ->assertSee('Day 3')
             ->assertSee('100 pts');
@@ -207,7 +207,7 @@ class DailyChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        $component = Volt::test('kid.quests')->call('openDailyChest');
+        $component = Volt::test('kid.home')->call('openDailyChest');
 
         $prize = $component->get('dailyChestPrize');
 
@@ -250,7 +250,7 @@ class DailyChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        $component = Volt::test('kid.quests')->assertSee("Open today's bonus chest");
+        $component = Volt::test('kid.home')->assertSee("Open today's bonus chest");
 
         $kid->update(['pending_streak_chest' => 3]);
 
@@ -264,30 +264,27 @@ class DailyChestTest extends TestCase
         $this->assertSame(3, $kid->refresh()->pending_streak_chest);
     }
 
-    public function test_a_chest_already_opened_elsewhere_disappears_instead_of_revealing_nothing(): void
+    public function test_a_chest_already_opened_elsewhere_reveals_what_it_actually_held(): void
     {
         $kid = $this->kid();
 
         Auth::guard('profile')->login($kid);
 
-        $component = Volt::test('kid.quests')->assertSee("Open today's bonus chest");
+        $component = Volt::test('kid.home')->assertSee("Open today's bonus chest");
 
         // A second tab (or a back-button visit) gets there first.
         $this->chests()->open($kid->refresh());
 
         $component->call('openDailyChest');
 
-        $this->assertNull($component->get('dailyChestPrize'));
-        $this->assertFalse($component->get('dailyChestAvailable'));
+        // The reveal names the chest that exists rather than blanking. An empty
+        // prize card is the one outcome a chest must never show, and "you got
+        // nothing" is not what happened.
+        $this->assertNotNull($component->get('dailyChestPrize'));
         $this->assertSame(1, DailyChest::where('profile_id', $kid->id)->count());
-
-        // The slot stays — it's a fixture of the tray — but it stops offering.
-        $component
-            ->assertSee('Bonus chest')
-            ->assertDontSee("Open today's bonus chest");
     }
 
-    public function test_the_quests_page_stops_offering_the_chest_once_opened(): void
+    public function test_home_shows_the_chest_as_banked_once_it_is_opened(): void
     {
         $kid = $this->kid();
 
@@ -295,9 +292,10 @@ class DailyChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.quests')
-            ->assertSee('Bonus chest')
-            ->assertSee('Back tomorrow')
-            ->assertDontSee("Open today's bonus chest");
+        // The card is still drawn — <x-chest> keeps both faces in the DOM and
+        // shows one — so what has to change is the status and the reveal.
+        Volt::test('kid.home')
+            ->assertSee('Opened today')
+            ->assertSee("Banked. There's another one tomorrow.", escape: false);
     }
 }

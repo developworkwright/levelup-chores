@@ -138,7 +138,8 @@ class MonsterPickerTest extends TestCase
     {
         $this->spawn('Weekend away');
 
-        Volt::test('kid.quests')
+        // The strip moved to Home; the Quests page keeps only the watcher.
+        Volt::test('kid.home')
             ->assertOk()
             ->assertSee('Boss Fight')
             ->assertSee('Weekend away');
