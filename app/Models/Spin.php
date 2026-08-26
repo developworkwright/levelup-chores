@@ -15,12 +15,14 @@ class Spin extends Model
         'spin_date',
         'chore_id',
         'multiplier',
+        'was_op',
     ];
 
     protected function casts(): array
     {
         return [
             'spin_date' => 'date',
+            'was_op' => 'boolean',
         ];
     }
 

@@ -438,7 +438,7 @@ new class extends Component
             ->map(fn (int $amount) => abs($amount));
 
         $spins = Spin::where('profile_id', $this->profile->id)->count();
-        $tripleSpins = Spin::where('profile_id', $this->profile->id)->where('multiplier', 3)->count();
+        $tripleSpins = Spin::where('profile_id', $this->profile->id)->where('multiplier', '>=', 3)->count();
 
         $rerolls = OwnedPerk::where('profile_id', $this->profile->id)
             ->where('effect', PerkEffect::QuestReroll)
@@ -604,7 +604,7 @@ new class extends Component
                 [
                     'label' => 'Wheel spins',
                     'value' => (string) $spins,
-                    'suffix' => $tripleSpins.' landed 3×',
+                    'suffix' => $tripleSpins.' landed 3× or better',
                     'color' => 'var(--fq-lime)',
                 ],
                 [

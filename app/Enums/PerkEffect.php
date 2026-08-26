@@ -18,6 +18,7 @@ enum PerkEffect: string
     case NameMonster = 'name_monster';
     case NightSaver = 'night_saver';
     case QuestCharm = 'quest_charm';
+    case OpSpin = 'op_spin';
 
     /**
      * How using this perk should celebrate — one of the styles in
@@ -36,9 +37,10 @@ enum PerkEffect: string
             self::StreakRestore, self::NightSaver => 'heart',
             // A clue is a small bright thing, not a party.
             self::MysteryHint => 'star',
-            // The charm is cast now and lands when the chest opens, so this is
-            // the sparkle of it taking hold rather than the payoff.
-            self::QuestCharm => 'star',
+            // Both are cast now and land later — the charm when the chest
+            // opens, the OP charge when the wheel stops — so this is the
+            // sparkle of one taking hold rather than the payoff.
+            self::QuestCharm, self::OpSpin => 'star',
             default => 'confetti',
         };
     }
@@ -101,6 +103,16 @@ enum PerkEffect: string
                 'description' => 'Charm the quest chest before you open it. More cards go bold, or the bold bonus grows — and if nothing shows on the cards, the charm pays out when you hand the quest in.',
                 'cost' => 3,
                 'glyph' => '✧',
+            ],
+            // A ticket, and the cheapest thing in the shop — it buys odds on
+            // one spin, not a result, and on most days it pays back less than
+            // it cost. Priced so a kid can charge the wheel on a whim rather
+            // than saving up for the privilege of a coin flip.
+            self::OpSpin => [
+                'name' => 'OP Spin',
+                'description' => 'Charge the wheel before you spin: a shot at 4x, and a better chance at 3x. Spent the moment the wheel goes.',
+                'cost' => 1,
+                'glyph' => '⚡',
             ],
         };
     }

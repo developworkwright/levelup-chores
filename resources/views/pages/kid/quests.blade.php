@@ -972,7 +972,7 @@ new class extends Component
                     $closesAt = $entry['closesAt'];
                     $boosted = $questBoosted === false && $boost && $boost->chore_id === $chore->id;
                     $payout = $chore->points * ($boosted ? $boost->multiplier : 1);
-                    $boostColor = $boosted && $boost->multiplier === 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)';
+                    $boostColor = $boosted && $boost->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)';
                     $labels = [
                         'ready' => 'Mark it done',
                         'pending' => 'Pending approval',

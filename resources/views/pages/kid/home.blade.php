@@ -276,12 +276,27 @@ new class extends Component
      */
     public function buyQuestCharm(): void
     {
+        $this->buyPerk(PerkEffect::QuestCharm, 'cast it before you open the chest!');
+    }
+
+    /**
+     * Sold from beside the wheel for the same reason the charm is sold from
+     * the hero: the window to use one closes the moment the wheel goes, and a
+     * kid who has to leave for the shop first comes back to a spent spin.
+     */
+    public function buyOpSpin(): void
+    {
+        $this->buyPerk(PerkEffect::OpSpin, 'charge the wheel before you spin!');
+    }
+
+    private function buyPerk(PerkEffect $effect, string $suffix): void
+    {
         $perk = BonusPerk::where('household_id', $this->profile->household_id)
             ->enabled()
-            ->where('effect', PerkEffect::QuestCharm)
+            ->where('effect', $effect)
             ->first();
 
-        // A parent can switch the charm off from the console, in which case the
+        // A parent can switch a perk off from the console, in which case the
         // button isn't rendered and this is a stale tab.
         if (! $perk) {
             return;
@@ -290,7 +305,7 @@ new class extends Component
         try {
             app(BonusShopService::class)->purchase($this->profile, $perk);
             $this->perkMessage = null;
-            $this->dispatch('celebrate', message: "{$perk->name} bought — cast it before you open the chest!", style: 'ticket', motion: 'burst', origin: 'tap');
+            $this->dispatch('celebrate', message: "{$perk->name} bought — {$suffix}", style: 'ticket', motion: 'burst', origin: 'tap');
         } catch (InsufficientTicketsException|PerkUnavailableException $e) {
             $this->perkMessage = $e->getMessage();
         }
@@ -345,7 +360,7 @@ new class extends Component
                 'celebrate',
                 message: "{$result->multiplier}x boost on {$result->chore->name}!",
                 style: 'confetti',
-                big: $result->multiplier === 3,
+                big: $result->multiplier >= 3,
             );
         }
 
@@ -683,6 +698,23 @@ new class extends Component
                     'blocked' => $inventory->blockedReason($this->profile, PerkEffect::WheelRespin),
                 ]
                 : null,
+            // The charge already on the wheel, the charge in their pocket, and
+            // the one they could buy — three states of the same control, and
+            // only ever one of them is on screen.
+            'wheelCharged' => $spins->isCharged($this->profile),
+            'opSpin' => $inventory->holds($this->profile, PerkEffect::OpSpin)
+                ? [
+                    'effect' => PerkEffect::OpSpin,
+                    'count' => $inventory->countOf($this->profile, PerkEffect::OpSpin),
+                    'blocked' => $inventory->blockedReason($this->profile, PerkEffect::OpSpin),
+                ]
+                : null,
+            'opSpinForSale' => $inventory->holds($this->profile, PerkEffect::OpSpin) || $spins->isCharged($this->profile)
+                ? null
+                : BonusPerk::where('household_id', $household->id)
+                    ->enabled()
+                    ->where('effect', PerkEffect::OpSpin)
+                    ->first(),
             // Whether there is a Lucky Block to point at. The strip above the
             // run needs one boolean and the ticket count already on the
             // profile — the block itself, its rules and its prize list all
@@ -1216,7 +1248,7 @@ new class extends Component
                     @php
                         // The landed panel and the Active Boost card are the same
                         // result stated twice, so they're tinted from one place.
-                        $boostIsBig = $boost && $boost->multiplier === 3;
+                        $boostIsBig = $boost && $boost->multiplier >= 3;
                         $boostTint = $boostIsBig
                             ? 'background: color-mix(in srgb, var(--fq-gold) 20%, transparent); border-color: color-mix(in srgb, var(--fq-gold) 55%, transparent)'
                             : 'background: color-mix(in srgb, var(--fq-magenta) 20%, transparent); border-color: color-mix(in srgb, var(--fq-magenta) 50%, transparent)';
@@ -1229,7 +1261,15 @@ new class extends Component
                             class="w-full max-w-[300px] rounded-[16px] border px-4 py-3 text-center"
                             style="animation: fq-pop .3s ease both; {{ $boostTint }}"
                         >
-                            <p class="font-mono-fq text-[10px] tracking-[0.2em] uppercase" style="color: {{ $boostColor }}">You landed on</p>
+                            <p class="font-mono-fq text-[10px] tracking-[0.2em] uppercase" style="color: {{ $boostColor }}">
+                                You landed on
+                                {{-- Said on the result, not just on the button that
+                                     bought it: the ticket is spent by now, and this
+                                     is the only place the kid gets to see it work. --}}
+                                @if ($boost->was_op)
+                                    <span style="color: var(--fq-gold)">&middot; &#9889; OP</span>
+                                @endif
+                            </p>
                             <p class="mt-1 font-baloo text-lg font-extrabold">{{ $boost->chore->name }} &mdash; {{ $boost->multiplier }}x</p>
                             {{-- The multiplier stated as the number it actually pays.
                                  "3x" is arithmetic homework; the total is the thing
@@ -1257,25 +1297,121 @@ new class extends Component
                                 Used today &mdash; back tomorrow
                             </button>
                         @else
+                            {{-- A charged wheel wears the gold rather than the
+                                 magenta: the button is the last thing a kid looks
+                                 at before spending the charge, so it is where the
+                                 charge has to be visible. --}}
                             <button
                                 type="button"
                                 wire:click="spin"
                                 class="w-full rounded-[18px] py-4 font-baloo text-[19px] font-extrabold text-fq-bg transition hover:brightness-110"
-                                style="background:var(--fq-magenta); box-shadow: var(--fq-shadow-glow-lg) var(--fq-magenta)"
-                            >SPIN</button>
+                                style="background:{{ $wheelCharged ? 'var(--fq-gold)' : 'var(--fq-magenta)' }}; box-shadow: var(--fq-shadow-glow-lg) {{ $wheelCharged ? 'var(--fq-gold)' : 'var(--fq-magenta)' }}"
+                            >{{ $wheelCharged ? '⚡ OP SPIN' : 'SPIN' }}</button>
                         @endif
 
                         <p class="text-[13px] text-fq-text-4">
                             @if ($spinRevealed)
                                 One spin a day. Your boost is locked in below.
+                            @elseif ($wheelCharged)
+                                Charged! This spin can land 4x, and 3x is far more likely — plus a sweet treat when you finish it.
                             @else
                                 Land on a chore, get 2x or 3x its points — plus a sweet treat when you finish it. Do it today.
                             @endif
                         </p>
 
+                        {{-- The charge, in whichever of its three states applies:
+                             already on the wheel, in the pocket, or for sale. Only
+                             ever one of them, and never once the wheel has gone —
+                             a charge bought after the spin would sit unseen until
+                             tomorrow. --}}
+                        @unless ($spinRevealed || $spinning)
+                            @if ($wheelCharged)
+                                <div
+                                    class="flex items-center gap-2 rounded-[12px] border px-[14px] py-[10px] text-xs font-semibold"
+                                    style="border-color: color-mix(in srgb, var(--fq-gold) 55%, transparent); background: color-mix(in srgb, var(--fq-gold) 16%, transparent); color: var(--fq-gold)"
+                                >
+                                    <span class="font-baloo text-sm">⚡</span>
+                                    <span>Wheel charged &mdash; 4x is in play</span>
+                                </div>
+                            @elseif ($opSpin)
+                                <div class="flex flex-col items-start gap-1">
+                                    <x-perk-button :entry="$opSpin" />
+                                    @if ($opSpin['blocked'])
+                                        <span class="font-mono-fq text-[10px] text-fq-text-5">{{ $opSpin['blocked'] }}</span>
+                                    @endif
+                                </div>
+                            @elseif ($opSpinForSale)
+                                @php $canAffordOp = $profile->bonus_tickets >= $opSpinForSale->cost; @endphp
+
+                                <button
+                                    type="button"
+                                    wire:click="buyOpSpin"
+                                    @disabled(! $canAffordOp)
+                                    title="{{ $opSpinForSale->description }}"
+                                    class="inline-flex h-[42px] items-center gap-2 self-start rounded-[12px] border px-[14px] text-xs font-semibold whitespace-nowrap transition hover:brightness-125 disabled:opacity-40"
+                                    style="border-color: var(--fq-steel-edge); color: var(--fq-steel-text); background: var(--fq-steel-panel)"
+                                >
+                                    <span class="font-baloo text-sm">{{ $opSpinForSale->glyph }}</span>
+                                    <span>Buy an {{ $opSpinForSale->name }}</span>
+                                    <span class="font-mono-fq text-[10px]" style="color: {{ $canAffordOp ? 'var(--fq-lime)' : 'var(--fq-text-5)' }}">
+                                        {{ $opSpinForSale->cost }}&#127903;
+                                    </span>
+                                </button>
+                            @endif
+                        @endunless
+
                         @if ($respin)
-                            <div class="flex flex-col items-start gap-1">
-                                <x-perk-button :entry="$respin" />
+                            {{-- The charge is spent by the spin, not by the result,
+                                 so a respin cannot hand it back — and the kid has
+                                 no way of knowing that from a button that just says
+                                 "respin". Asked once, and only on a spin the ticket
+                                 actually paid for. --}}
+                            @php $opAtRisk = $boost && $boost->was_op && ! $respin['blocked']; @endphp
+
+                            <div class="flex flex-col items-start gap-1" x-data="{ asking: false }">
+                                @if ($opAtRisk)
+                                    <div x-show="! asking">
+                                        <button
+                                            type="button"
+                                            x-on:click="asking = true"
+                                            class="inline-flex h-[42px] items-center gap-2 rounded-[12px] border px-[14px] text-xs font-semibold whitespace-nowrap transition hover:brightness-125"
+                                            style="border-color: var(--fq-steel-edge); color: var(--fq-steel-text); background: var(--fq-steel-panel)"
+                                        >
+                                            <span class="font-baloo text-sm">↻</span>
+                                            <span>Use Wheel Respin</span>
+                                            @if ($respin['count'] > 1)
+                                                <span class="font-mono-fq text-[10px]">×{{ $respin['count'] }}</span>
+                                            @endif
+                                        </button>
+                                    </div>
+
+                                    <div x-show="asking" x-cloak class="flex w-full flex-col gap-[9px]">
+                                        <p class="text-[13px] text-fq-notice-text">
+                                            You spent an <strong style="color: var(--fq-gold)">⚡ OP charge</strong> on this spin.
+                                            Respin and it's gone &mdash; the next one is an ordinary 2x or 3x.
+                                        </p>
+
+                                        <div class="flex gap-2">
+                                            <button
+                                                type="button"
+                                                wire:click="usePerk('{{ $respin['effect']->value }}')"
+                                                x-on:click="asking = false"
+                                                class="flex-1 rounded-[14px] py-[11px] font-baloo text-[15px] font-extrabold transition hover:brightness-110"
+                                                style="background: var(--fq-fill-gold-soft); color: var(--fq-ink)"
+                                            >Respin anyway</button>
+
+                                            <button
+                                                type="button"
+                                                x-on:click="asking = false"
+                                                class="shrink-0 rounded-[14px] border bg-fq-sunk px-[16px] py-[11px] font-baloo text-[15px] font-extrabold text-fq-text-2-b transition hover:brightness-125"
+                                                style="border-color: var(--fq-line-3)"
+                                            >Keep my {{ $boost->multiplier }}x</button>
+                                        </div>
+                                    </div>
+                                @else
+                                    <x-perk-button :entry="$respin" />
+                                @endif
+
                                 @if ($respin['blocked'])
                                     <span class="font-mono-fq text-[10px] text-fq-text-5">{{ $respin['blocked'] }}</span>
                                 @endif

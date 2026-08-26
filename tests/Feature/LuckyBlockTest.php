@@ -240,6 +240,25 @@ class LuckyBlockTest extends TestCase
             ->assertSee('Need 3 tickets');
     }
 
+    public function test_the_block_says_what_a_hit_costs_before_it_spends(): void
+    {
+        // The confirm is client-side, so what a test can pin is that the price
+        // and the way out are both on the card. A gold button on an exciting
+        // card gets hit before the line under it is read, and this is the one
+        // place the tap has to pass through.
+        $household = Household::factory()->create();
+        $this->loginKid($household, ['bonus_tickets' => 5]);
+
+        Volt::test('kid.loot')
+            ->assertSee('That costs')
+            // Counted in what they are left holding, not just in tickets —
+            // "3 tickets" means nothing to a kid who hasn't worked out how
+            // many they have.
+            ->assertSee("You'd have 2 left", false)
+            ->assertSee('Yes, hit it')
+            ->assertSee('Keep them');
+    }
+
     public function test_the_shop_offers_no_button_below_three_tickets(): void
     {
         $household = Household::factory()->create();

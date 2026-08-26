@@ -13,6 +13,17 @@ class SpinService
     /** 35% chance of a 3x boost, otherwise 2x — matches the design prototype's spin odds. */
     private const TRIPLE_CHANCE = 0.35;
 
+    /**
+     * A charged wheel's odds: 15% 4x, 45% 3x, 40% 2x.
+     *
+     * The charge doesn't just bolt a 4x onto the plain table — it lifts the 3x
+     * with it, so an OP spin can never be a worse bet than the free spin the
+     * ticket was spent on. Expected multiplier 2.75x against the plain 2.35x.
+     */
+    private const OP_QUAD_CHANCE = 0.15;
+
+    private const OP_TRIPLE_CHANCE = 0.45;
+
     /** Keeps the wheel legible and its segments tappable/readable at any household size. */
     public const MAX_WHEEL_CHORES = 10;
 
@@ -32,10 +43,37 @@ class SpinService
         return $this->today($profile) !== null;
     }
 
+    /** Whether an OP charge is sitting on the wheel, waiting for a spin. */
+    public function isCharged(Profile $profile): bool
+    {
+        return $profile->op_spin_armed_at !== null;
+    }
+
+    /**
+     * Arms the next spin with the OP odds. Returns false when a charge is
+     * already waiting — charges don't stack, and the caller uses that to keep
+     * the perk in the kid's pocket rather than spending it on nothing.
+     */
+    public function charge(Profile $profile): bool
+    {
+        if ($this->isCharged($profile)) {
+            return false;
+        }
+
+        $profile->update(['op_spin_armed_at' => now()]);
+
+        return true;
+    }
+
     /**
      * Drops today's spin so the wheel is available again. Returns the spin
      * that was cleared, or null if there wasn't one — callers use that to
      * avoid charging for a respin that had nothing to undo.
+     *
+     * An OP charge is **not** handed back with the spin. The charge buys the
+     * roll, and the roll happened; a respin that returned it would let a kid
+     * re-roll the 4x table until it paid. The wheel warns before it comes to
+     * that — see the respin confirm on the Home page.
      */
     public function clearToday(Profile $profile): ?Spin
     {
@@ -132,14 +170,24 @@ class SpinService
             throw new RuntimeException('No chores available to spin for.');
         }
 
+        $charged = $this->isCharged($profile);
+
         $chore = $eligible->random();
-        $multiplier = (mt_rand() / mt_getrandmax()) < self::TRIPLE_CHANCE ? 3 : 2;
+        $multiplier = $this->rollMultiplier($charged);
+
+        // Spent by the spin, not by the result. What the wheel landed on is
+        // already decided by the time the charge clears, so there is nothing
+        // left for it to improve.
+        if ($charged) {
+            $profile->update(['op_spin_armed_at' => null]);
+        }
 
         $spin = Spin::create([
             'profile_id' => $profile->id,
             'spin_date' => HouseholdClock::for($profile->household)->today(),
             'chore_id' => $chore->id,
             'multiplier' => $multiplier,
+            'was_op' => $charged,
         ]);
 
         // The wheel badges would otherwise wait for the next chore approval to
@@ -147,6 +195,26 @@ class SpinService
         $this->badges->evaluate($profile);
 
         return $spin;
+    }
+
+    /**
+     * 2x, 3x or 4x — one roll read against whichever table the spin was paid
+     * for. 4x exists only on the charged table, which is the whole of what the
+     * ticket buys.
+     */
+    private function rollMultiplier(bool $charged): int
+    {
+        $roll = mt_rand() / mt_getrandmax();
+
+        if (! $charged) {
+            return $roll < self::TRIPLE_CHANCE ? 3 : 2;
+        }
+
+        return match (true) {
+            $roll < self::OP_QUAD_CHANCE => 4,
+            $roll < self::OP_QUAD_CHANCE + self::OP_TRIPLE_CHANCE => 3,
+            default => 2,
+        };
     }
 
     public function multiplierFor(Profile $profile, Chore $chore): int

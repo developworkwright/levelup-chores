@@ -29,7 +29,24 @@
         wire:key="lucky-block"
         class="mt-4 flex flex-col gap-[13px]"
         x-data="{
+            {{-- Tapping the block asks before it spends. Three tickets is two
+                 days of journal entries, and a gold button on an exciting card
+                 gets hit before the price under it is read — so the price gets
+                 said out loud, in the one place the tap has to pass through.
+
+                 Client-side on purpose: it is a question about what the kid
+                 meant, not about what the server will allow, and a round trip
+                 to ask it would put a spinner between the tap and the answer.
+                 The server still re-checks the balance under a lock, so
+                 nothing here is load-bearing. --}}
+            confirming: false,
             hitting: false,
+            ask() {
+                if (! this.hitting) this.confirming = true;
+            },
+            cancel() {
+                this.confirming = false;
+            },
             {{-- The suspense runs *before* the server call, the same ordering
                  <x-chest> uses and for the same reason: the response swaps
                  this card for the reveal, so calling first would show the
@@ -46,6 +63,7 @@
                  animate is something the client already knows. --}}
             async hit() {
                 if (this.hitting) return;
+                this.confirming = false;
                 this.hitting = true;
                 await new Promise(resolve => setTimeout(resolve, 520));
                 await $wire.{{ $hitAction }}();
@@ -190,13 +208,54 @@
                 </div>
 
                 @if ($canHit)
-                    <button
-                        type="button"
-                        @click="hit()"
-                        :disabled="hitting"
-                        class="w-full rounded-[14px] py-[13px] font-baloo text-[17px] font-extrabold transition hover:brightness-110 disabled:opacity-70"
-                        style="background: var(--fq-fill-gold-soft); color: var(--fq-ink)"
-                    >Hit it</button>
+                    {{-- x-show goes on wrappers rather than on the buttons
+                         themselves. x-show hides by writing style.display, and
+                         these carry their fill in the style attribute — the
+                         same trap <x-overlays> documents. --}}
+                    <div x-show="! confirming && ! hitting">
+                        <button
+                            type="button"
+                            @click="ask()"
+                            class="w-full rounded-[14px] py-[13px] font-baloo text-[17px] font-extrabold transition hover:brightness-110"
+                            style="background: var(--fq-fill-gold-soft); color: var(--fq-ink)"
+                        >Hit it</button>
+                    </div>
+
+                    {{-- The price, in tickets they can count, and what they
+                         are left holding — "3 tickets" means nothing to a kid
+                         who hasn't worked out how many they have. --}}
+                    <div x-show="confirming" x-cloak class="flex flex-col gap-[9px]">
+                        <p class="text-center text-[13.5px] text-fq-notice-text">
+                            That costs <strong style="color: var(--fq-lime)">{{ $cost }} tickets</strong>.
+                            You'd have {{ $tickets - $cost }} left.
+                        </p>
+
+                        <div class="flex gap-2">
+                            <button
+                                type="button"
+                                @click="hit()"
+                                class="flex-1 rounded-[14px] py-[13px] font-baloo text-[17px] font-extrabold transition hover:brightness-110"
+                                style="background: var(--fq-fill-gold-soft); color: var(--fq-ink)"
+                            >Yes, hit it</button>
+
+                            <button
+                                type="button"
+                                @click="cancel()"
+                                class="shrink-0 rounded-[14px] border bg-fq-sunk px-[18px] py-[13px] font-baloo text-[17px] font-extrabold text-fq-text-2-b transition hover:brightness-125"
+                                style="border-color: var(--fq-line-3)"
+                            >Keep them</button>
+                        </div>
+                    </div>
+
+                    {{-- The 520ms the block is bouncing for. Something has to
+                         stand here or the card jumps a button's height while
+                         the animation runs. --}}
+                    <p
+                        x-show="hitting"
+                        x-cloak
+                        class="fq-pulsing py-[13px] text-center font-baloo text-[17px] font-extrabold"
+                        style="color: var(--fq-lime)"
+                    >Here it comes&hellip;</p>
                 @else
                     <button
                         type="button"

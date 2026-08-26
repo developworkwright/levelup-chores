@@ -78,6 +78,26 @@ class BadgeTest extends TestCase
         $this->assertTrue($kid->badges()->where('key', 'wheel_winner')->exists());
     }
 
+    /** A 4x is a 3x that went further — it can't be worth less to the badges. */
+    public function test_wheel_winner_awarded_after_landing_a_4x_spin(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        $chore = Chore::factory()->for($household)->create();
+
+        Spin::create([
+            'profile_id' => $kid->id,
+            'spin_date' => now(),
+            'chore_id' => $chore->id,
+            'multiplier' => 4,
+            'was_op' => true,
+        ]);
+
+        app(BadgeService::class)->evaluate($kid);
+
+        $this->assertTrue($kid->badges()->where('key', 'wheel_winner')->exists());
+    }
+
     public function test_wheel_winner_not_awarded_for_a_2x_spin(): void
     {
         $household = Household::factory()->create();

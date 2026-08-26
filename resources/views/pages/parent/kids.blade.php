@@ -759,7 +759,7 @@ new class extends Component
                                 <span class="truncate text-sm font-semibold">{{ $spin->chore->name }}</span>
                                 <span
                                     class="font-mono-fq text-[11px] font-semibold"
-                                    style="color: {{ $spin->multiplier === 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)' }}"
+                                    style="color: {{ $spin->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)' }}"
                                 >{{ $spin->multiplier }}x</span>
                             </p>
                         @else

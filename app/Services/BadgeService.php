@@ -303,11 +303,11 @@ class BadgeService
     private function evaluateBonusBadges(Profile $profile): void
     {
         $this->maybeAward($profile, 'wheel_winner', fn () => Spin::where('profile_id', $profile->id)
-            ->where('multiplier', 3)
+            ->where('multiplier', '>=', 3)
             ->exists());
 
         $this->maybeAward($profile, 'triple_threat', fn () => Spin::where('profile_id', $profile->id)
-            ->where('multiplier', 3)
+            ->where('multiplier', '>=', 3)
             ->count() >= self::TRIPLE_THREAT_SPINS);
 
         $this->awardMilestones($profile, self::SPIN_MILESTONES, fn () => Spin::where('profile_id', $profile->id)->count());

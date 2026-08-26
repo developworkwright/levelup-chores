@@ -118,6 +118,25 @@ class PerkInventoryService
                 : null,
             PerkEffect::NightSaver => $this->sleep->saveReason($profile),
             PerkEffect::QuestCharm => $this->questCharmReason($profile),
+            PerkEffect::OpSpin => $this->opSpinReason($profile),
+        };
+    }
+
+    /**
+     * A charge has to go on before the wheel does.
+     *
+     * Arming after the spin would quietly hold over to tomorrow, which reads
+     * as a ticket that did nothing — the same reason the charm refuses an open
+     * chest. A respin clears today's spin, so charging the second one is fair
+     * game and this stops refusing the moment the wheel is free again.
+     */
+    private function opSpinReason(Profile $profile): ?string
+    {
+        return match (true) {
+            ! $profile->household->spin_enabled => 'The wheel is switched off',
+            $this->spins->isCharged($profile) => 'The wheel is already charged',
+            $this->spins->hasSpunToday($profile) => 'Charge the wheel before you spin',
+            default => null,
         };
     }
 
@@ -154,7 +173,20 @@ class PerkInventoryService
             PerkEffect::NameMonster => $this->applyNameMonster($profile, $input),
             PerkEffect::NightSaver => $this->applyNightSaver($profile),
             PerkEffect::QuestCharm => $this->applyQuestCharm($profile),
+            PerkEffect::OpSpin => $this->applyOpSpin($profile),
         };
+    }
+
+    private function applyOpSpin(Profile $profile): string
+    {
+        if (! $this->spins->charge($profile)) {
+            throw new PerkUnavailableException('The wheel is already charged.');
+        }
+
+        // Says what the odds are rather than what will happen: the charge is a
+        // better table, not a better result, and promising 4x here would make
+        // the 40% of spins that land 2x feel like the app lied.
+        return 'Wheel charged — this spin can hit 4x!';
     }
 
     private function applyQuestCharm(Profile $profile): string

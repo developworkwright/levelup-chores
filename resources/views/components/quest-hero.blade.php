@@ -275,7 +275,7 @@
                         <span class="font-mono-fq text-xs" style="color: var(--fq-danger)">Sent back</span>
                     @endif
                 @endif
-                <span class="font-mono-fq text-xs" style="color: {{ $questBoosted ? ($boost->multiplier === 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)') : 'var(--fq-lime)' }}">
+                <span class="font-mono-fq text-xs" style="color: {{ $questBoosted ? ($boost->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)') : 'var(--fq-lime)' }}">
                     +{{ $questPoints }} PTS
                 </span>
 

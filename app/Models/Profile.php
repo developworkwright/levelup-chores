@@ -46,6 +46,7 @@ class Profile extends Model implements Authenticatable
         'xp',
         'xp_adjustment',
         'bonus_tickets',
+        'op_spin_armed_at',
         'tickets_granted_through_level',
         'streak',
         'pending_streak_chest',
@@ -81,6 +82,7 @@ class Profile extends Model implements Authenticatable
             'badges_seen_at' => 'datetime',
             'loot_seen_at' => 'datetime',
             'sleep_card_enabled' => 'boolean',
+            'op_spin_armed_at' => 'datetime',
         ];
     }
 
