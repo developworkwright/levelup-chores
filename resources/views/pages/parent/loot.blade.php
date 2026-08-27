@@ -8,6 +8,7 @@ use App\Models\BonusPerk;
 use App\Models\Profile;
 use App\Models\StoreItem;
 use App\Services\LedgerService;
+use App\Services\StoreService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
@@ -240,6 +241,10 @@ new class extends Component
             "Added to Loot Shop — {$item->name}",
             $item,
         );
+
+        // After the ledger, so a push that somehow throws its way past the
+        // service's own catch can't cost the shop its record of the addition.
+        app(StoreService::class)->announceNewItem($item);
 
         $this->dispatch('celebrate', message: "{$item->name} added to the shop!");
 

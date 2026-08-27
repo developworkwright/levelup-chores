@@ -98,10 +98,17 @@ new class extends Component
                 >
                     {{ mb_substr($kid->name, 0, 1) }}
 
-                    <span
-                        class="fq-avatar-chip absolute right-[-10px] bottom-[-10px] rounded-full border-2 bg-fq-bg px-[7px] py-[2px] font-mono-fq text-[10px] font-semibold"
-                        style="border-color: {{ $accent }}; color: {{ $accent }}"
-                    >{{ $kid->streak }}d</span>
+                    {{-- A run only shows once there is one. "0d" is the first
+                         thing a kid read off their own tile after a bad night,
+                         and a scoreboard that opens by telling you that isn't
+                         worth the reminder. The chip is absolutely positioned,
+                         so dropping it leaves the tile exactly as it was. --}}
+                    @if ($kid->streak > 0)
+                        <span
+                            class="fq-avatar-chip absolute right-[-10px] bottom-[-10px] rounded-full border-2 bg-fq-bg px-[7px] py-[2px] font-mono-fq text-[10px] font-semibold"
+                            style="border-color: {{ $accent }}; color: {{ $accent }}"
+                        >{{ $kid->streak }}d</span>
+                    @endif
                 </div>
 
                 {{-- The XP bar used to sit between the name and the level, and

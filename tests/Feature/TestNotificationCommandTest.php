@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Household;
 use App\Models\Profile;
+use App\Notifications\ChoreReviewed;
 use App\Notifications\ParentApprovalNeeded;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
@@ -44,12 +45,77 @@ class TestNotificationCommandTest extends TestCase
             ->assertFailed();
     }
 
-    public function test_it_fails_when_there_is_no_parent_at_all(): void
+    public function test_it_fails_when_there_are_no_profiles_at_all(): void
     {
-        Profile::factory()->for(Household::factory())->create();
-
         $this->artisan('notifications:test')
             ->expectsOutputToContain('nobody to notify')
+            ->assertFailed();
+    }
+
+    public function test_it_sends_to_a_subscribed_kid(): void
+    {
+        Notification::fake();
+
+        $kid = Profile::factory()->for(Household::factory())->create();
+        $kid->updatePushSubscription('https://fcm.googleapis.com/fcm/send/abc', 'key', 'token');
+
+        $this->artisan('notifications:test')->assertSuccessful();
+
+        Notification::assertSentTo($kid, ChoreReviewed::class);
+    }
+
+    /**
+     * A kid sent to /parent/approvals is bounced by the role middleware, which
+     * looks exactly like the broken delivery this command exists to rule out.
+     */
+    public function test_each_role_gets_a_notification_pointing_somewhere_they_can_go(): void
+    {
+        Notification::fake();
+
+        $household = Household::factory()->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $kid = Profile::factory()->for($household)->create();
+        $parent->updatePushSubscription('https://fcm.googleapis.com/fcm/send/a', 'key', 'token');
+        $kid->updatePushSubscription('https://fcm.googleapis.com/fcm/send/b', 'key', 'token');
+
+        $this->artisan('notifications:test')->assertSuccessful();
+
+        Notification::assertSentTo($parent, ParentApprovalNeeded::class);
+        Notification::assertNotSentTo($parent, ChoreReviewed::class);
+        Notification::assertSentTo($kid, ChoreReviewed::class);
+        Notification::assertNotSentTo($kid, ParentApprovalNeeded::class);
+    }
+
+    public function test_it_can_target_one_kid_by_name(): void
+    {
+        Notification::fake();
+
+        $household = Household::factory()->create();
+        $mia = Profile::factory()->for($household)->create(['name' => 'Mia']);
+        $noah = Profile::factory()->for($household)->create(['name' => 'Noah']);
+        $mia->updatePushSubscription('https://fcm.googleapis.com/fcm/send/a', 'key', 'token');
+        $noah->updatePushSubscription('https://fcm.googleapis.com/fcm/send/b', 'key', 'token');
+
+        $this->artisan('notifications:test', ['--kid' => 'mia'])->assertSuccessful();
+
+        Notification::assertSentTo($mia, ChoreReviewed::class);
+        Notification::assertNotSentTo($noah, ChoreReviewed::class);
+    }
+
+    public function test_it_refuses_to_target_a_parent_and_a_kid_at_once(): void
+    {
+        $this->artisan('notifications:test', ['--parent' => 'Alex', '--kid' => 'Mia'])
+            ->expectsOutputToContain('not both')
+            ->assertFailed();
+    }
+
+    /** A kid's name is not a parent's, and the error has to say which it looked for. */
+    public function test_it_fails_on_an_unknown_kid_name(): void
+    {
+        Profile::factory()->for(Household::factory())->create(['name' => 'Mia']);
+
+        $this->artisan('notifications:test', ['--kid' => 'Nobody'])
+            ->expectsOutputToContain('No kid named')
             ->assertFailed();
     }
 

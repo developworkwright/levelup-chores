@@ -930,8 +930,8 @@ function skyStops(worldY) {
 
 /*
  * Three noises, synthesised rather than loaded, so the login page stays one
- * request. Reads the same `fq-muted` key the kid header's speaker button
- * writes, so muting the app mutes the arcade and vice versa.
+ * request. Reads the same `fq-muted` key the arcade's own speaker button
+ * writes, so muting the arcade mutes the rest of the app too.
  */
 const Sfx = {
     ctx: null,

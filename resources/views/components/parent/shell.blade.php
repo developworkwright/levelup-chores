@@ -31,15 +31,13 @@
                 <h1 class="font-baloo text-2xl font-extrabold">{{ config('app.name') }} HQ</h1>
             </div>
 
-            {{-- Same 52px bank as the kid header, minus the two tiles a parent
-                 has no use for. --}}
+            {{-- Same 52px bank as the kid header, minus the tiles a parent has no
+                 use for. --}}
             <div class="flex flex-wrap items-center gap-2">
                 <div class="flex h-[52px] w-[92px] flex-col items-end justify-center rounded-[15px] border border-fq-line-2 bg-fq-sunk px-3">
                     <span class="font-baloo text-[19px] leading-none font-extrabold text-fq-gold">{{ $pendingCount }}</span>
                     <span class="font-mono-fq text-[9px] text-fq-text-4">PENDING</span>
                 </div>
-
-                <x-sound-toggle />
 
                 <form method="POST" action="{{ route('logout') }}" class="shrink-0">
                     @csrf

@@ -239,15 +239,13 @@ class QuestPageLayoutTest extends TestCase
             ->assertDontSee('Hire them');
     }
 
-    public function test_the_badge_grid_is_gone_and_the_header_counts_them_instead(): void
+    public function test_the_badge_grid_is_gone_from_the_quests_page(): void
     {
         $badge = Badge::where('key', 'first_quest')->firstOrFail();
         $this->kid->badges()->attach($badge->id, ['earned_at' => now()]);
 
         Volt::test('kid.quests')
             ->assertOk()
-            ->assertSee('BADGES')
-            ->assertSee(route('kid.badges'))
             // The wall itself lives on the page built for it. Two things the
             // old grid put on every render: the name of a badge nobody has
             // earned, and the placeholder a hidden one shows until they do.

@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\ProfileRole;
 use App\Models\Profile;
+use App\Notifications\ChoreReviewed;
 use App\Notifications\ParentApprovalNeeded;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Notification;
@@ -18,46 +19,60 @@ class TestNotificationCommand extends Command
 {
     protected $signature = 'notifications:test
         {--parent= : Only send to one parent, by name}
+        {--kid= : Only send to one kid, by name}
         {--queue : Push it through the queue instead of sending immediately}
         {--check : Report what is configured without sending anything}';
 
-    protected $description = 'Send a test push notification to the parents, reporting exactly which link in the chain is broken.';
+    protected $description = 'Send a test push notification to the household, reporting exactly which link in the chain is broken.';
 
     public function handle(): int
     {
         $ok = $this->reportConfig();
 
-        $parents = Profile::where('role', ProfileRole::Parent)->get();
+        if ($this->option('parent') !== null && $this->option('kid') !== null) {
+            $this->error('Pass --parent or --kid, not both.');
 
-        if ($name = $this->option('parent')) {
-            $parents = $parents->filter(fn (Profile $p) => strcasecmp($p->name, $name) === 0)->values();
+            return self::FAILURE;
+        }
 
-            if ($parents->isEmpty()) {
-                $this->error("No parent named \"{$name}\" found.");
+        $role = match (true) {
+            $this->option('parent') !== null => ProfileRole::Parent,
+            $this->option('kid') !== null => ProfileRole::Kid,
+            default => null,
+        };
+
+        $profiles = Profile::when($role, fn ($query) => $query->where('role', $role))->get();
+
+        if ($name = $this->option('parent') ?? $this->option('kid')) {
+            $profiles = $profiles->filter(fn (Profile $p) => strcasecmp($p->name, $name) === 0)->values();
+
+            if ($profiles->isEmpty()) {
+                $this->error(sprintf('No %s named "%s" found.', $role === ProfileRole::Kid ? 'kid' : 'parent', $name));
 
                 return self::FAILURE;
             }
         }
 
-        if ($parents->isEmpty()) {
-            $this->error('No parent profiles exist, so there is nobody to notify.');
+        if ($profiles->isEmpty()) {
+            $this->error('No profiles exist, so there is nobody to notify.');
 
             return self::FAILURE;
         }
 
         $this->newLine();
         $this->table(
-            ['Parent', 'Devices subscribed'],
-            $parents->map(fn (Profile $p) => [$p->name, $p->pushSubscriptions()->count()])->all(),
+            ['Profile', 'Role', 'Devices subscribed'],
+            $profiles->map(fn (Profile $p) => [$p->name, $p->role->value, $p->pushSubscriptions()->count()])->all(),
         );
 
-        $subscribed = $parents->filter(fn (Profile $p) => $p->pushSubscriptions()->exists());
+        $subscribed = $profiles->filter(fn (Profile $p) => $p->pushSubscriptions()->exists());
 
         if ($subscribed->isEmpty()) {
             $this->error('Nobody has subscribed a device yet — no push can be delivered.');
-            $this->line('  Sign in as a parent, open the Approvals tab, and press "Enable approval alerts".');
-            $this->line('  No button there? The browser reported no push support — on iOS the app must be');
-            $this->line('  installed to the Home Screen first, and the site must be served over HTTPS.');
+            $this->line('  A parent turns them on from the Approvals tab: "Enable approval alerts".');
+            $this->line('  A kid taps the bell in their header.');
+            $this->line('  Button dead or missing? The browser reported no push support — on iOS the app');
+            $this->line('  must be installed to the Home Screen first, and the site must be over HTTPS.');
 
             return self::FAILURE;
         }
@@ -73,14 +88,25 @@ class TestNotificationCommand extends Command
         }
 
         try {
-            $notification = new ParentApprovalNeeded(
-                'Test notification',
-                'If you can read this, push notifications are working.',
-            );
+            // Split by role so the notification a tap opens is a page that
+            // profile can actually reach — a kid sent to /parent/approvals
+            // would be bounced by the role middleware, which looks exactly
+            // like the broken delivery this command exists to rule out.
+            foreach ($subscribed->groupBy(fn (Profile $p) => $p->role->value) as $group) {
+                $notification = $group->first()->isParent()
+                    ? new ParentApprovalNeeded(
+                        'Test notification',
+                        'If you can read this, push notifications are working.',
+                    )
+                    : new ChoreReviewed(
+                        'Test notification',
+                        'If you can read this, your alerts are working.',
+                    );
 
-            $this->option('queue')
-                ? Notification::send($subscribed, $notification)
-                : Notification::sendNow($subscribed, $notification);
+                $this->option('queue')
+                    ? Notification::send($group, $notification)
+                    : Notification::sendNow($group, $notification);
+            }
         } catch (Throwable $e) {
             $this->error('The push failed: '.$e->getMessage());
 

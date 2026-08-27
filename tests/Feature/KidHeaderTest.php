@@ -26,15 +26,27 @@ class KidHeaderTest extends TestCase
         return $kid;
     }
 
-    public function test_the_header_shows_points_streak_and_tickets(): void
+    public function test_the_header_shows_points_and_tickets(): void
     {
         $this->loginKid(['points' => 250, 'streak' => 4, 'bonus_tickets' => 7]);
 
         Volt::test('kid.quests')
             ->assertSee('PTS')
-            ->assertSee('STREAK')
             ->assertSee('TICKETS')
             ->assertSee('7');
+    }
+
+    public function test_the_header_carries_no_streak_badge_or_sound_tiles(): void
+    {
+        // The bank had grown into a row of numbers a kid can't act on. The
+        // streak and the badge wall each have a page of their own, and the one
+        // mute button left is the arcade's, which writes the same key.
+        $this->loginKid(['streak' => 4]);
+
+        Volt::test('kid.quests')
+            ->assertDontSee('STREAK')
+            ->assertDontSee('BADGES')
+            ->assertDontSee('Sound on');
     }
 
     public function test_the_ticket_tile_links_to_the_bonus_shop(): void

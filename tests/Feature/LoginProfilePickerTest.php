@@ -61,6 +61,16 @@ class LoginProfilePickerTest extends TestCase
         Volt::test('login')->assertSee('4d');
     }
 
+    public function test_a_kid_with_no_run_going_is_not_told_so(): void
+    {
+        $household = Household::factory()->create();
+        Profile::factory()->for($household)->create(['name' => 'Nova', 'streak' => 0]);
+
+        // The chip itself, not the "0d" it would read: Livewire's checksum is
+        // hex and lands on that pair often enough to fail the test at random.
+        Volt::test('login')->assertDontSee('fq-avatar-chip');
+    }
+
     public function test_the_parent_is_a_console_link_rather_than_an_avatar_tile(): void
     {
         $household = Household::factory()->create();

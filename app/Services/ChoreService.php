@@ -17,6 +17,7 @@ use App\Models\Profile;
 use App\Models\StreakRepair;
 use App\Models\StreakRescue;
 use App\Notifications\ChoreClosingSoon;
+use App\Notifications\ChoreReviewed;
 use App\Notifications\ParentApprovalNeeded;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
@@ -1935,6 +1936,22 @@ class ChoreService
         // After badges, so a level crossed by badge XP is caught in the same
         // pass. Idempotent, so the badge path having already synced is fine.
         $this->tickets->syncLevelTickets($profile);
+
+        // Last, and reading points_awarded after awardMysteryBonus() has had
+        // its say — the number in the kid's pocket is the number they should
+        // be told about. Best-effort, like every other push in the app: an
+        // approval must never fail because a notification couldn't be sent.
+        try {
+            $profile->notify(new ChoreReviewed(
+                'Signed off!',
+                "+{$completion->points_awarded} points for {$completion->chore->name}.",
+            ));
+        } catch (Throwable $e) {
+            Log::error('Chore reviewed notification failed for approval.', [
+                'completion_id' => $completion->id,
+                'exception' => $e,
+            ]);
+        }
     }
 
     /**
@@ -2011,6 +2028,22 @@ class ChoreService
             // just got told off for would read as mockery.
             $quest->completed_at = null;
             $quest->save();
+        }
+
+        // Pointed at the board rather than Home: this one comes with something
+        // to do, and the whole reason the quest was just reopened above is that
+        // the kid is meant to go and do it again.
+        try {
+            $completion->profile->notify(new ChoreReviewed(
+                'Sent back',
+                "{$completion->chore->name} needs another go.",
+                '/kid/quests',
+            ));
+        } catch (Throwable $e) {
+            Log::error('Chore reviewed notification failed for send-back.', [
+                'completion_id' => $completion->id,
+                'exception' => $e,
+            ]);
         }
     }
 

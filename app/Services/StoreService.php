@@ -11,7 +11,9 @@ use App\Models\LootFavorite;
 use App\Models\Profile;
 use App\Models\Redemption;
 use App\Models\StoreItem;
+use App\Notifications\LootRestocked;
 use App\Notifications\ParentApprovalNeeded;
+use App\Notifications\RedemptionDecided;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -185,6 +187,53 @@ class StoreService
         $redemption->fulfilled_at = now();
         $redemption->fulfilled_by_profile_id = $approver->id;
         $redemption->save();
+
+        // The one moment in a cash-out the kid isn't in the room for. They
+        // spent the points days ago and have been waiting on a grown-up ever
+        // since; nothing on their side lists the request, so without this the
+        // reward being ready is something they have to happen to ask about.
+        try {
+            $redemption->profile->notify(new RedemptionDecided(
+                'Ready for you!',
+                "{$redemption->storeItem->name} is yours — go and collect it.",
+            ));
+        } catch (Throwable $e) {
+            Log::error('Redemption notification failed for fulfilment.', [
+                'redemption_id' => $redemption->id,
+                'exception' => $e,
+            ]);
+        }
+    }
+
+    /**
+     * Tells the kids a reward has landed on the shelves.
+     *
+     * Deliberately every kid, whatever their level — the same rule the count
+     * badge on the Spend tab follows. A locked reward is a thing to climb
+     * towards, and skipping it here would leave a badge on the tab with
+     * nothing behind it.
+     *
+     * Called by the parent Loot page rather than from an item's own creation,
+     * because a reward can be seeded, imported or fixed up without that being
+     * news — this is for a parent deliberately putting something out.
+     */
+    public function announceNewItem(StoreItem $item): void
+    {
+        $kids = Profile::where('household_id', $item->household_id)
+            ->where('role', ProfileRole::Kid)
+            ->get();
+
+        try {
+            Notification::send($kids, new LootRestocked(
+                'New in the shop!',
+                "{$item->name} — {$item->cost} points.",
+            ));
+        } catch (Throwable $e) {
+            Log::error('Loot restocked notification failed.', [
+                'store_item_id' => $item->id,
+                'exception' => $e,
+            ]);
+        }
     }
 
     /**
@@ -242,6 +291,23 @@ class StoreService
         // badges have to be looked at again rather than left where the
         // redemption put them.
         $this->badges->evaluate($redemption->profile->refresh());
+
+        // The reason travels with it. It already rides in the ledger
+        // description, but that is a line in a list a kid has to go and find —
+        // this is the app telling them what happened and why, unprompted.
+        try {
+            $redemption->profile->notify(new RedemptionDecided(
+                'Not this time',
+                "{$redemption->storeItem->name} was turned down"
+                    .($reason === null ? '' : " — {$reason}")
+                    .". Your {$redemption->cost_snapshot} points are back.",
+            ));
+        } catch (Throwable $e) {
+            Log::error('Redemption notification failed for rejection.', [
+                'redemption_id' => $redemption->id,
+                'exception' => $e,
+            ]);
+        }
 
         return true;
     }

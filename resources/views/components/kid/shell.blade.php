@@ -356,13 +356,8 @@
                     <span class="font-mono-fq text-[9px] text-fq-text-4">PTS · ${{ $dollars }}</span>
                 </div>
 
-                <div class="flex h-[52px] w-[86px] flex-col items-end justify-center rounded-[15px] border border-fq-line-2 bg-fq-sunk px-3">
-                    <span class="font-baloo text-[19px] leading-none font-extrabold text-fq-streak">{{ $profile->streak }}d</span>
-                    <span class="font-mono-fq text-[9px] text-fq-text-4">STREAK</span>
-                </div>
-
-                {{-- Same tile shape as the two above, but gold-rimmed and lit,
-                     because unlike them it's a door to somewhere. --}}
+                {{-- Same tile shape as the points tile, but gold-rimmed and lit,
+                     because unlike it this one is a door to somewhere. --}}
                 <a
                     href="{{ route('kid.bonus') }}"
                     wire:navigate
@@ -392,22 +387,7 @@
                     <span class="font-mono-fq text-[9px] text-fq-ticket-label">TICKETS</span>
                 </a>
 
-                {{-- The badge grid used to be a panel on the Quests page, where
-                     it competed with the day's work for room. As a count it says
-                     the same thing — you have three, there are more — and the
-                     wall itself is one tap away on the page built for it. --}}
-                <a
-                    href="{{ route('kid.badges') }}"
-                    wire:navigate
-                    title="Your badges"
-                    class="flex h-[52px] w-[86px] flex-col items-end justify-center rounded-[15px] border border-fq-badge-line px-3 transition hover:border-fq-magenta"
-                    style="background: var(--fq-badge-bg)"
-                >
-                    <span class="font-baloo text-[19px] leading-none font-extrabold" style="color: var(--fq-magenta)">{{ $profile->badges->count() }}</span>
-                    <span class="font-mono-fq text-[9px] text-fq-text-4">BADGES</span>
-                </a>
-
-                {{-- Pulls down points, streak, tickets and — on the Quests tab —
+                {{-- Pulls down points, tickets and — on the Quests tab —
                      the chore board. The page already refreshes itself when it
                      regains focus, but that's invisible; this is the version a
                      kid can reach for to check nobody beat them to a chore. --}}
@@ -427,7 +407,14 @@
                     >&#8635;</span>
                 </button>
 
-                <x-sound-toggle />
+                {{-- Alerts belong in the header rather than on a page of their
+                     own. Everything a kid can be notified about — work signed
+                     off, a trade, new loot on the shelves — happens while
+                     somebody else is acting and the app is shut, so there is no
+                     one page it is about; and like the refresh button beside
+                     it, this is a switch you want to see the state of from
+                     wherever you happen to be standing. --}}
+                <livewire:push-toggle audience="kid" />
 
                 <form method="POST" action="{{ route('logout') }}" class="shrink-0">
                     @csrf
