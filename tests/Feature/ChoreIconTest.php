@@ -72,6 +72,10 @@ class ChoreIconTest extends TestCase
             'a whole pasted tag' => ['<i class="fa-brands fa-github"></i>', 'fa-brands fa-github'],
             'stray whitespace and case' => ['  FA-Solid   FA-Rocket ', 'fa-solid fa-rocket'],
             'a style on its own has no glyph' => ['fa-solid', null],
+            // What a class looks like part-way through being typed, which the
+            // live previews normalise on every keystroke.
+            'a half-typed name' => ['fa-', null],
+            'a style and a half-typed name' => ['fa-solid fa-', null],
             'nothing font-awesome about it' => ['rocket', null],
             'blank' => ['   ', null],
             'null' => [null, null],

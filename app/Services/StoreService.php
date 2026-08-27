@@ -211,7 +211,10 @@ class StoreService
      * Deliberately every kid, whatever their level — the same rule the count
      * badge on the Spend tab follows. A locked reward is a thing to climb
      * towards, and skipping it here would leave a badge on the tab with
-     * nothing behind it.
+     * nothing behind it. The gate rides in the body when there is one, though:
+     * now that a parent sets it on the form that fires this, a push can
+     * announce something a kid can't buy yet, and finding that out by opening
+     * the shop is the part that stings.
      *
      * Called by the parent Loot page rather than from an item's own creation,
      * because a reward can be seeded, imported or fixed up without that being
@@ -224,10 +227,10 @@ class StoreService
             ->get();
 
         try {
-            Notification::send($kids, new LootRestocked(
-                'New in the shop!',
-                "{$item->name} — {$item->cost} points.",
-            ));
+            $body = "{$item->name} — {$item->cost} points."
+                .($item->min_level > 0 ? " Unlocks at level {$item->min_level}." : '');
+
+            Notification::send($kids, new LootRestocked('New in the shop!', $body));
         } catch (Throwable $e) {
             Log::error('Loot restocked notification failed.', [
                 'store_item_id' => $item->id,

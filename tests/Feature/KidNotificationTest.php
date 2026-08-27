@@ -133,7 +133,34 @@ class KidNotificationTest extends TestCase
 
         app(StoreService::class)->announceNewItem($item);
 
-        Notification::assertSentTo($kid, LootRestocked::class);
+        // Announced, but the gate is said out loud: a parent sets it on the
+        // form that fires this, so the alternative is a kid opening the shop
+        // to find the thing they were told about greyed out.
+        Notification::assertSentTo($kid, LootRestocked::class, function (LootRestocked $notification) use ($kid) {
+            return str_contains(
+                $notification->toWebPush($kid, $notification)->toArray()['body'],
+                'Unlocks at level 20.',
+            );
+        });
+    }
+
+    public function test_an_open_reward_is_announced_without_a_level(): void
+    {
+        Notification::fake();
+
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        $item = StoreItem::factory()->for($household)->create([
+            'name' => 'Skate deck',
+            'cost' => 3000,
+            'min_level' => 0,
+        ]);
+
+        app(StoreService::class)->announceNewItem($item);
+
+        Notification::assertSentTo($kid, LootRestocked::class, function (LootRestocked $notification) use ($kid) {
+            return $notification->toWebPush($kid, $notification)->toArray()['body'] === 'Skate deck — 3000 points.';
+        });
     }
 
     public function test_handing_a_reward_over_tells_the_kid_it_is_ready(): void

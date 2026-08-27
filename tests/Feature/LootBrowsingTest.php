@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Enums\AccentColor;
+use App\Enums\ChoreIcon;
 use App\Enums\LootCategory;
 use App\Enums\RedemptionStatus;
 use App\Models\Household;
@@ -389,5 +391,178 @@ class LootBrowsingTest extends TestCase
 
         $this->assertNull($theirs->fresh()->url);
         $this->assertNull($theirs->fresh()->category);
+    }
+
+    // --- Creating ----------------------------------------------------------
+
+    /**
+     * The whole reason these fields moved onto the create form: adding a
+     * reward sends a push to every kid in the household, so what the reward
+     * looks like when the button is tapped is what they are told to come and
+     * look at. There is no tidying up afterwards.
+     */
+    public function test_a_parent_can_set_every_field_when_they_add_a_reward(): void
+    {
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        Auth::guard('profile')->login($parent);
+
+        Volt::test('parent.loot')
+            ->set('newLootName', 'Skate deck')
+            ->set('newLootDesc', 'Pick your own graphic')
+            ->set('newLootCost', '3000')
+            ->set('newLootColor', 'cyan')
+            ->set('newLootUrl', 'skate.com/decks')
+            ->call('setNewLootCategory', 'things')
+            ->call('setNewLootIcon', 'fa-star')
+            ->call('adjustNewLootMinLevel', 10)
+            ->call('addItem');
+
+        $item = StoreItem::firstWhere('name', 'Skate deck');
+
+        $this->assertSame(LootCategory::Things, $item->category);
+        $this->assertSame('fa-solid fa-star', $item->icon);
+        $this->assertSame('https://skate.com/decks', $item->url);
+        $this->assertSame(10, $item->min_level);
+        $this->assertSame(AccentColor::Cyan, $item->color_tag);
+        $this->assertSame(3000, $item->cost);
+    }
+
+    public function test_a_reward_gets_a_face_from_its_own_words_when_nobody_picks_one(): void
+    {
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        Auth::guard('profile')->login($parent);
+
+        // The keyword pass still runs, so a parent who fills in the two fields
+        // they care about doesn't ship a faceless card to a push notification.
+        Volt::test('parent.loot')
+            ->set('newLootName', 'New toy')
+            ->call('addItem');
+
+        $this->assertSame(ChoreIcon::Toys->faClass(), StoreItem::firstWhere('name', 'New toy')->icon);
+    }
+
+    public function test_a_picked_pile_and_face_beat_the_guess(): void
+    {
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        Auth::guard('profile')->login($parent);
+
+        // 'Cinema' would file this under Days out on its own.
+        Volt::test('parent.loot')
+            ->set('newLootName', 'Cinema snacks')
+            ->call('setNewLootCategory', 'treats')
+            ->call('addItem');
+
+        $this->assertSame(LootCategory::Treats, StoreItem::firstWhere('name', 'Cinema snacks')->category);
+    }
+
+    public function test_tapping_a_chosen_pile_or_face_again_hands_it_back_to_the_guess(): void
+    {
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        Auth::guard('profile')->login($parent);
+
+        Volt::test('parent.loot')
+            ->call('setNewLootCategory', 'treats')
+            ->call('setNewLootCategory', 'treats')
+            ->assertSet('newLootCategory', '')
+            ->call('setNewLootIcon', 'fa-solid fa-star')
+            ->call('setNewLootIcon', 'fa-solid fa-star')
+            ->assertSet('newLootIcon', '');
+    }
+
+    public function test_a_typed_class_previews_before_the_reward_exists(): void
+    {
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        Auth::guard('profile')->login($parent);
+
+        // Typing a class from memory is choosing blind — nothing else on the
+        // form shows the face, and by the time the reward exists the push has
+        // gone out. A bare name previews with the style the normaliser adds.
+        Volt::test('parent.loot')
+            ->set('newLootIcon', 'fa-bicycle')
+            ->assertSee('fa-fw fa-solid fa-bicycle', escape: false);
+    }
+
+    public function test_a_class_with_nothing_usable_in_it_previews_as_a_question_mark(): void
+    {
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        Auth::guard('profile')->login($parent);
+
+        Volt::test('parent.loot')
+            ->set('newLootIcon', 'not a class')
+            ->assertSee('Type a class to see it here before the kids do.')
+            ->assertDontSee('fa-fw fa-not', escape: false);
+    }
+
+    public function test_a_half_typed_class_is_not_saved_as_the_face(): void
+    {
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        Auth::guard('profile')->login($parent);
+
+        // The box is bound live so the preview can follow it, which means it
+        // holds junk as often as a finished class. Junk falls back to the
+        // guess rather than landing in a class attribute.
+        Volt::test('parent.loot')
+            ->set('newLootName', 'New toy')
+            ->set('newLootIcon', 'fa-')
+            ->call('addItem');
+
+        $this->assertSame(ChoreIcon::Toys->faClass(), StoreItem::firstWhere('name', 'New toy')->icon);
+    }
+
+    public function test_a_dangerous_link_on_the_create_form_stores_nothing(): void
+    {
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        Auth::guard('profile')->login($parent);
+
+        Volt::test('parent.loot')
+            ->set('newLootName', 'Sketchy')
+            ->set('newLootUrl', 'javascript:alert(1)')
+            ->call('addItem');
+
+        $this->assertNull(StoreItem::firstWhere('name', 'Sketchy')->url);
+    }
+
+    public function test_the_level_gate_cannot_be_stepped_below_open(): void
+    {
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        Auth::guard('profile')->login($parent);
+
+        Volt::test('parent.loot')
+            ->call('adjustNewLootMinLevel', -5)
+            ->assertSet('newLootMinLevel', 0);
+    }
+
+    public function test_the_form_resets_to_auto_after_a_reward_is_added(): void
+    {
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        Auth::guard('profile')->login($parent);
+
+        // A picture or a gate left over from the last reward is worse than the
+        // guess — the next one goes out on a push with somebody else's face.
+        Volt::test('parent.loot')
+            ->set('newLootName', 'Skate deck')
+            ->set('newLootUrl', 'skate.com/decks')
+            ->call('setNewLootIcon', 'fa-star')
+            ->call('setNewLootCategory', 'things')
+            ->call('adjustNewLootMinLevel', 5)
+            ->call('addItem')
+            ->assertSet('newLootIcon', '')
+            ->assertSet('newLootCategory', '')
+            ->assertSet('newLootUrl', '')
+            ->assertSet('newLootMinLevel', 0);
+    }
+
+    public function test_a_quick_idea_clears_what_the_last_one_left_behind(): void
+    {
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        Auth::guard('profile')->login($parent);
+
+        Volt::test('parent.loot')
+            ->call('setNewLootIcon', 'fa-star')
+            ->call('adjustNewLootMinLevel', 5)
+            ->call('fillPreset', 0)
+            ->assertSet('newLootIcon', '')
+            ->assertSet('newLootMinLevel', 0)
+            ->assertSet('newLootName', 'Lego set');
     }
 }

@@ -33,6 +33,29 @@ new class extends Component
 
     public string $newLootColor = 'lime';
 
+    /**
+     * The rest of what a reward is, on the form that creates it.
+     *
+     * Everything here was editable but not settable: a reward landed with a
+     * colour and a guessed pile, and the picture, the link and the level gate
+     * were a second pass afterwards. That was survivable while adding
+     * something was a silent change to a shelf. It isn't now — the push goes
+     * out inside {@see self::addItem()}, so whatever the reward looks like at
+     * that moment is what the kids are told about and what they open the shop
+     * to find. There is no tidying up after a notification.
+     *
+     * Empty means *let the keyword pass decide* for the icon and the pile, not
+     * *leave it blank* — the guess is still better than nothing on a parent
+     * who fills in the two fields they care about and taps the button.
+     */
+    public string $newLootIcon = '';
+
+    public string $newLootCategory = '';
+
+    public string $newLootUrl = '';
+
+    public int $newLootMinLevel = 0;
+
     public ?string $flashMessage = null;
 
     public function mount(): void
@@ -191,6 +214,45 @@ new class extends Component
         $this->ownedItem($itemId)?->delete();
     }
 
+    /**
+     * The class the box currently holds, if there is a usable one in it.
+     *
+     * `$newLootIcon` is whatever the parent has typed so far, raw — the box is
+     * live-bound so the preview can keep up with it — so every reader goes
+     * through here rather than trusting the property.
+     */
+    public function newLootIconClass(): ?string
+    {
+        return ChoreIcon::normalizeClass($this->newLootIcon);
+    }
+
+    /** Picks the new reward's face, or drops back to the guess. */
+    public function setNewLootIcon(string $icon): void
+    {
+        $class = ChoreIcon::normalizeClass($icon);
+
+        // Same toggle as the row editor: tapping the chosen one clears it. An
+        // empty box is the auto state here rather than "no picture", which is
+        // the one thing the create form can't express — and doesn't need to,
+        // because a guess that misses files nothing anyway.
+        $this->newLootIcon = ($class === null || $class === $this->newLootIconClass()) ? '' : $class;
+    }
+
+    /** Files the new reward, or drops back to the guess. */
+    public function setNewLootCategory(string $category): void
+    {
+        $case = LootCategory::tryFrom($category);
+
+        $this->newLootCategory = ($case === null || $case->value === $this->newLootCategory)
+            ? ''
+            : $case->value;
+    }
+
+    public function adjustNewLootMinLevel(int $delta): void
+    {
+        $this->newLootMinLevel = max(0, $this->newLootMinLevel + $delta);
+    }
+
     public function fillPreset(int $index): void
     {
         $preset = self::PRESETS[$index] ?? null;
@@ -203,6 +265,14 @@ new class extends Component
         $this->newLootDesc = $preset['description'];
         $this->newLootCost = (string) $preset['cost'];
         $this->newLootColor = $preset['color'];
+
+        // Back to auto, so the preset's own words get the keyword pass. A
+        // picture left over from the last idea a parent tapped would be worse
+        // than the guess, and worse than nothing.
+        $this->newLootIcon = '';
+        $this->newLootCategory = '';
+        $this->newLootUrl = '';
+        $this->newLootMinLevel = 0;
     }
 
     public function addItem(): void
@@ -225,12 +295,22 @@ new class extends Component
             'description' => $description,
             'cost' => $cost,
             'color_tag' => $this->newLootColor,
-            // Filed and given a face from its own words, so a reward is
-            // browsable the moment it lands rather than waiting for someone to
-            // tidy up. Null when nothing fits: an item in the wrong pile is
-            // worse than one under "Everything else", because a kid hunting
-            // for it looks in the pile it should be in and gives up.
-            'category' => LootCategory::forText($name.' '.$description)?->value,
+            // Filed and given a face from its own words when the parent didn't
+            // say, so a reward is browsable the moment it lands rather than
+            // waiting for someone to tidy up. Null when nothing fits: an item
+            // in the wrong pile is worse than one under "Everything else",
+            // because a kid hunting for it looks in the pile it should be in
+            // and gives up.
+            'category' => $this->newLootCategory ?: LootCategory::forText($name.' '.$description)?->value,
+            // Normalised on the way out, not on the way in: the box is bound
+            // live so the preview can follow it, which means it holds a
+            // half-typed class as often as a finished one.
+            'icon' => $this->newLootIconClass() ?? ChoreIcon::classForName($name.' '.$description),
+            // Sanitised on the way in, exactly as the row editor does it —
+            // this column is written by a parent and rendered to a kid as a
+            // live link. See StoreItem::normalizeUrl().
+            'url' => StoreItem::normalizeUrl($this->newLootUrl),
+            'min_level' => max(0, $this->newLootMinLevel),
         ]);
 
         app(LedgerService::class)->record(
@@ -252,6 +332,10 @@ new class extends Component
         $this->newLootDesc = '';
         $this->newLootCost = '100';
         $this->newLootColor = 'lime';
+        $this->newLootIcon = '';
+        $this->newLootCategory = '';
+        $this->newLootUrl = '';
+        $this->newLootMinLevel = 0;
         $this->flashMessage = null;
     }
 
@@ -453,6 +537,19 @@ new class extends Component
                     </span>
                 </div>
 
+                {{-- The link, alongside the description rather than behind a
+                     picture picker — for the same reason it sits on the row:
+                     pasting the thing a kid asked for by name is half the job
+                     of adding it. --}}
+                <div class="flex items-center gap-2 rounded-[14px] border border-fq-line-2 bg-fq-sunk px-[14px]">
+                    <i
+                        aria-hidden="true"
+                        class="fa-fw fa-solid fa-link text-[12px]"
+                        style="color: {{ trim($newLootUrl) === '' ? 'var(--fq-text-5)' : 'var(--fq-cyan)' }}"
+                    ></i>
+                    <input type="text" wire:model="newLootUrl" placeholder="Link — lego.com/the-one-they-asked-for" class="w-full border-0 bg-transparent py-[13px] text-[14px] outline-none">
+                </div>
+
                 <div>
                     <p class="mb-2 font-mono-fq text-[10px] text-fq-text-4 uppercase">Tag</p>
                     <div class="flex gap-2">
@@ -469,9 +566,133 @@ new class extends Component
                     </div>
                 </div>
 
+                {{-- Shelf and picture, on the form rather than only in the row
+                     editor. The push goes out the moment this button is
+                     tapped, so a reward that lands unfiled and faceless is
+                     what the kids are told to come and look at. --}}
+                <div>
+                    <p class="mb-2 font-mono-fq text-[10px] text-fq-text-4 uppercase">
+                        Shelf
+                        @if ($newLootCategory === '')
+                            <span class="text-fq-text-5 normal-case">&middot; guessed from the name unless you pick one</span>
+                        @endif
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                        @foreach (\App\Enums\LootCategory::cases() as $option)
+                            <button
+                                type="button"
+                                wire:click="setNewLootCategory('{{ $option->value }}')"
+                                class="inline-flex items-center gap-2 rounded-full border px-[11px] py-[6px] text-[12px] transition hover:brightness-125"
+                                style="border-color: {{ $newLootCategory === $option->value ? $option->colorVar() : 'var(--fq-line-3)' }};
+                                       background: var(--fq-sunk);
+                                       color: {{ $newLootCategory === $option->value ? $option->colorVar() : 'var(--fq-text-3)' }}"
+                            >
+                                <x-chore-icon :icon="$option->faClass()" class="text-[13px]" />
+                                {{ $option->label() }}
+                            </button>
+                        @endforeach
+                    </div>
+                </div>
+
+                @php $iconPreview = \App\Enums\ChoreIcon::normalizeClass($newLootIcon); @endphp
+
+                <div>
+                    <p class="mb-2 font-mono-fq text-[10px] text-fq-text-4 uppercase">
+                        Picture
+                        @if ($iconPreview === null)
+                            <span class="text-fq-text-5 normal-case">&middot; guessed from the name unless you pick one</span>
+                        @endif
+                    </p>
+                    <div class="grid grid-cols-8 gap-2">
+                        @foreach (\App\Enums\ChoreIcon::cases() as $option)
+                            <button
+                                type="button"
+                                wire:click="setNewLootIcon('{{ $option->faClass() }}')"
+                                title="{{ $option->label() }}"
+                                class="grid aspect-square place-items-center rounded-[12px] border transition hover:border-fq-lime"
+                                style="border-color: {{ $iconPreview === $option->faClass() ? 'var(--fq-gold)' : 'var(--fq-line-3)' }};
+                                       background: var(--fq-sunk);
+                                       color: {{ $iconPreview === $option->faClass() ? 'var(--fq-gold)' : 'var(--fq-text-3)' }}"
+                            >
+                                <x-chore-icon :icon="$option" class="text-[18px]" />
+                            </button>
+                        @endforeach
+                    </div>
+
+                    {{-- The sixteen above are a shortlist. A rewards shop wants
+                         pictures a chore board never needs, so any free Font
+                         Awesome class is accepted — and typing one is choosing
+                         blind, so the box gets the same live preview the chore
+                         picker has. Nothing else on this form shows the face
+                         before the reward exists, and by then the push has
+                         already gone out. --}}
+                    <div class="mt-2 flex items-center gap-2">
+                        <span
+                            class="grid h-[42px] w-[42px] shrink-0 place-items-center rounded-[12px] border"
+                            title="{{ $iconPreview ?? 'Nothing usable in the box' }}"
+                            style="border-color: {{ $iconPreview ? 'var(--fq-gold)' : 'var(--fq-line-3)' }};
+                                   background: var(--fq-sunk);
+                                   color: {{ $iconPreview ? 'var(--fq-gold)' : 'var(--fq-text-5)' }}"
+                        >
+                            @if ($iconPreview)
+                                <x-chore-icon :icon="$iconPreview" class="text-[22px]" />
+                            @else
+                                <span class="font-mono-fq text-[13px] leading-none">?</span>
+                            @endif
+                        </span>
+
+                        <input
+                            type="text"
+                            wire:model.live.debounce.400ms="newLootIcon"
+                            placeholder="or paste any Font Awesome class — fa-solid fa-bicycle"
+                            maxlength="120"
+                            autocapitalize="off"
+                            autocomplete="off"
+                            spellcheck="false"
+                            class="min-w-0 flex-1 rounded-[12px] border border-dashed border-fq-line-2 bg-fq-sunk px-3 py-2 text-[13px] outline-none focus:border-fq-cyan"
+                        >
+                    </div>
+
+                    {{-- A gold box with nothing in it is the answer to the
+                         actual question: the class is *shaped* right, so it
+                         saved, but Font Awesome has no glyph by that name.
+                         Only the rendered picture can tell you that. --}}
+                    <p class="mt-2 font-mono-fq text-[10px] text-fq-text-5">
+                        @if ($iconPreview)
+                            No picture in the box? That class doesn&rsquo;t exist &mdash; check the spelling on fontawesome.com.
+                        @else
+                            Type a class to see it here before the kids do.
+                        @endif
+                    </p>
+                </div>
+
+                {{-- The level gate, stepped a rank at a time, same as the row.
+                     Set here it's a promise rather than a correction: a reward
+                     announced open and gated a minute later is one a kid has
+                     already gone looking for. --}}
+                <div>
+                    <p class="mb-2 font-mono-fq text-[10px] text-fq-text-4 uppercase">Unlocks at</p>
+                    <div class="flex items-center gap-2">
+                        <button type="button" wire:click="adjustNewLootMinLevel(-{{ \App\Enums\Rank::LEVELS_PER_RANK }})" class="h-[34px] w-[34px] shrink-0 rounded-[10px] border border-fq-line-3 bg-fq-sunk">&minus;</button>
+                        <div class="flex-1 text-center">
+                            <div class="font-baloo text-[15px] font-extrabold" style="color:{{ $newLootMinLevel > 0 ? \App\Enums\Rank::fromLevel($newLootMinLevel)->ringVar() : 'var(--fq-text-5)' }}">
+                                {{ $newLootMinLevel > 0 ? 'LVL '.$newLootMinLevel : 'Open to everyone' }}
+                            </div>
+                            <div class="font-mono-fq text-[9px] text-fq-text-4">
+                                {{ $newLootMinLevel > 0 ? \App\Enums\Rank::fromLevel($newLootMinLevel)->label() : 'no gate' }}
+                            </div>
+                        </div>
+                        <button type="button" wire:click="adjustNewLootMinLevel({{ \App\Enums\Rank::LEVELS_PER_RANK }})" class="h-[34px] w-[34px] shrink-0 rounded-[10px] border border-fq-line-3 bg-fq-sunk">+</button>
+                    </div>
+                </div>
+
                 <button type="button" wire:click="addItem" class="rounded-[15px] py-[13px] font-baloo text-[17px] font-extrabold text-fq-bg" style="background:var(--fq-gold)">
                     Put it in the shop
                 </button>
+
+                <p class="font-mono-fq text-[10px] text-fq-text-5">
+                    Every kid gets a notification the moment you do &mdash; so fill it in first.
+                </p>
             </div>
 
             <div class="rounded-[22px] p-5" style="background: var(--fq-wash-blue)">

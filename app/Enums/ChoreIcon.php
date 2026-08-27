@@ -148,7 +148,15 @@ enum ChoreIcon: string
         // Bare `fa-rocket` is what most people type, and a style on its own is
         // a font weight with no glyph behind it — both need spotting.
         $styles = ['fa', 'fas', 'far', 'fab', 'fa-solid', 'fa-regular', 'fa-brands', 'fa-classic'];
-        $named = array_values(array_diff($tokens, $styles));
+        $named = array_values(array_filter(
+            array_diff($tokens, $styles),
+            // A name needs something after the dash. `fa-` on its own passes
+            // the token filter above and is not a style, so without this it
+            // comes out as the class `fa-solid fa-` — a face with no glyph
+            // behind it. It is also what a half-typed class looks like at
+            // every keystroke, which the live previews render.
+            fn (string $token): bool => preg_match('/^fa-[a-z0-9]/', $token) === 1,
+        ));
 
         if ($named === []) {
             return null;
