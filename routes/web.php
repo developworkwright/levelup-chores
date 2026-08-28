@@ -72,6 +72,9 @@ Route::middleware(['auth:profile', 'role:parent'])->prefix('parent')->group(func
     // screen that leads with that reads differently from a shelf of prices.
     Volt::route('/lucky', 'parent.lucky')->name('parent.lucky');
     Volt::route('/monsters', 'parent.monsters')->name('parent.monsters');
+    // The one parent screen that isn't administration: it writes to a log the
+    // kids read rather than to anything they can spend.
+    Volt::route('/quotes', 'parent.quotes')->name('parent.quotes');
     Volt::route('/kids', 'parent.kids')->name('parent.kids');
     Volt::route('/standings', 'parent.standings')->name('parent.standings');
     Volt::route('/activity', 'parent.activity')->name('parent.activity');

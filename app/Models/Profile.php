@@ -52,6 +52,7 @@ class Profile extends Model implements Authenticatable
         'pending_streak_chest',
         'badges_seen_at',
         'loot_seen_at',
+        'quotes_seen_at',
         'level_seen',
         'pending_mystery_celebration',
         'saving_for_store_item_id',
@@ -81,6 +82,7 @@ class Profile extends Model implements Authenticatable
             'locked_until' => 'datetime',
             'badges_seen_at' => 'datetime',
             'loot_seen_at' => 'datetime',
+            'quotes_seen_at' => 'datetime',
             'sleep_card_enabled' => 'boolean',
             'op_spin_armed_at' => 'datetime',
         ];

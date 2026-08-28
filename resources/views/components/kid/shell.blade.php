@@ -239,6 +239,90 @@
         $markers['pending_monster_kills'] = null;
     }
 
+    /*
+     * Quotes. Two kinds of news off one marker, because from the kid's side
+     * they are the same question: what happened with the quotes while I wasn't
+     * looking? A quote written down anywhere in the house, and anybody reacting
+     * to one of *theirs*.
+     *
+     * A push already goes out the moment a quote is saved, and this is not a
+     * duplicate of it — it is what catches the kid with notifications off, or
+     * the one who was asleep. Without it the only way to find a new quote is to
+     * scroll to the bottom of Home, which is exactly where the card sits and
+     * exactly why nobody would.
+     *
+     * Reactions get the soft style; a new quote gets confetti. Neither is
+     * `big`: a level and a monster are set pieces, and a joke that took over
+     * the screen would be the app overselling itself.
+     */
+    $quoteNews = $profile->quotes_seen_at === null
+        ? ['quotes' => collect(), 'reactions' => collect()]
+        : app(App\Services\QuoteService::class)->newsFor($profile, $profile->quotes_seen_at);
+
+    if ($profile->quotes_seen_at === null || $quoteNews['quotes']->isNotEmpty() || $quoteNews['reactions']->isNotEmpty()) {
+        $markers['quotes_seen_at'] = now();
+    }
+
+    foreach ($quoteNews['quotes'] as $newQuote) {
+        $mine = $newQuote->profile_id === $profile->id;
+
+        $quietRewards->push([
+            // Being quoted is the better half of this feature, so it gets its
+            // own line rather than "Someone said something" with your own name
+            // in it.
+            'message' => $mine
+                ? 'Your line got written down!'
+                : $newQuote->attribution().' said something!',
+            'big' => false,
+            'style' => 'confetti',
+            'card' => [
+                'accent' => 'var(--fq-gold)',
+                // Always the feature's own name, whoever said it. The card's
+                // kicker is what the thing *is*, not who it happened to —
+                // that's the toast's job, one line above.
+                'sub' => 'Quote of the Day',
+                // Trimmed: the card draws its label at 28px, and a rambling
+                // three-line quote pushes the note off the bottom of it. The
+                // whole thing is a scroll away on the Quote Wall.
+                'label' => Str::limit($newQuote->text, 90),
+                'note' => '— '.$newQuote->attribution(),
+            ],
+        ]);
+    }
+
+    // Grouped by quote, so three siblings piling onto one line is one card
+    // rather than three. Keyed on the quote id because a kid can have several
+    // quotes reacted to between visits.
+    foreach ($quoteNews['reactions']->groupBy('quote_id') as $reactions) {
+        $quote = $reactions->first()->quote;
+
+        if (! $quote) {
+            continue;
+        }
+
+        $count = $reactions->count();
+
+        $quietRewards->push([
+            'message' => $count === 1
+                ? $reactions->first()->profile?->name.' reacted to your quote!'
+                : 'Your quote got '.$count.' reactions!',
+            'big' => false,
+            // Soft, and the one place in the app that voice is right: nothing
+            // was earned here, somebody just liked something you said.
+            'style' => 'heart',
+            'card' => [
+                'accent' => 'var(--fq-magenta)',
+                'sub' => 'Your Quote',
+                'label' => Str::limit($quote->text, 90),
+                // The faces and the names, which is the whole reward — knowing
+                // your sister laughed, not that a counter went up.
+                'note' => $reactions
+                    ->map(fn ($row) => $row->reaction->emoji().' '.($row->profile?->name ?? 'Someone'))
+                    ->implode(' · '),
+            ],
+        ]);
+    }
+
     // One write, and only when something actually moved — the shell renders on
     // every round trip and most of them have nothing to report.
     if ($markers !== []) {

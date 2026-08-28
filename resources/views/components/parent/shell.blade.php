@@ -7,6 +7,7 @@
         'loot' => ['label' => 'Loot Shop', 'route' => 'parent.loot'],
         'lucky' => ['label' => 'Lucky Block', 'route' => 'parent.lucky'],
         'monsters' => ['label' => 'Monsters', 'route' => 'parent.monsters'],
+        'quotes' => ['label' => 'Quotes', 'route' => 'parent.quotes'],
         'kids' => ['label' => 'Kids & Points', 'route' => 'parent.kids'],
         'standings' => ['label' => 'Standings', 'route' => 'parent.standings'],
         'activity' => ['label' => 'Activity', 'route' => 'parent.activity'],

@@ -19,6 +19,7 @@ use App\Services\HouseholdClock;
 use App\Services\LuckyBlockService;
 use App\Services\MonsterService;
 use App\Services\PerkInventoryService;
+use App\Services\QuoteService;
 use App\Services\SpinService;
 use App\Services\StreakService;
 use Illuminate\Support\Facades\Auth;
@@ -573,6 +574,16 @@ new class extends Component
         }
     }
 
+    /**
+     * Laugh at a quote, or take it back. The rule about who may react to what
+     * lives in the service — this page and the Journal both reach it, and a
+     * scope check written twice is a scope check that eventually differs.
+     */
+    public function react(int $quoteId, string $reaction): void
+    {
+        app(QuoteService::class)->react($this->profile, $quoteId, $reaction);
+    }
+
     public function with(): array
     {
         $service = app(ChoreService::class);
@@ -741,6 +752,11 @@ new class extends Component
             'pendingCount' => ChoreCompletion::where('profile_id', $this->profile->id)
                 ->where('status', CompletionStatus::Pending)
                 ->count(),
+            // Today's quotes, or the last day that had any. Null only when the
+            // household has never written one down, which is the one case where
+            // the card has nothing to say — see the service for why it falls
+            // back rather than emptying.
+            'quoteDay' => app(QuoteService::class)->latestDay($household),
         ];
     }
 }; ?>
@@ -1671,5 +1687,62 @@ new class extends Component
                 @endif
             </div>
         </div>
+
+        {{-- Quote of the Day. Dead last, and the only card here that isn't
+             about points: everything above is something to go and do, and this
+             is the one thing on the page that is just nice to find. It earns
+             the bottom of the page rather than the top for the same reason the
+             standings do — a kid opening the app to answer "what now?" should
+             not have to scroll past a joke to get to their quest.
+
+             The push notification lands on #quote-of-the-day, so a kid told
+             about a new one arrives here rather than at the top of the day.
+
+             Nothing is ranked. One quote is the Quote of the Day; several are
+             contenders, permanently — QuoteService::heading() owns that wording
+             for all three screens that say it.
+
+             Renders nothing at all until the house has written one down, which
+             is the only state where the card would be a promise instead of a
+             thing. --}}
+        @if ($quoteDay)
+            @php
+                $quotes = $quoteDay['quotes'];
+                $quoteIsToday = app(QuoteService::class)->isToday($household, $quoteDay['date']);
+            @endphp
+
+            <div id="quote-of-the-day" class="flex flex-col gap-3 scroll-mt-4">
+                <x-home-section
+                    :title="\App\Services\QuoteService::heading($quotes->count())"
+                    accent="var(--fq-gold)"
+                    :status="$quoteIsToday ? 'Said today' : $quoteDay['date']->diffForHumans()"
+                    :status-color="$quoteIsToday ? 'var(--fq-gold)' : 'var(--fq-text-4)'"
+                />
+
+                <div class="rounded-[24px] border border-fq-line bg-fq-panel p-[18px]">
+                    <div class="flex flex-col gap-[9px]">
+                        @foreach ($quotes as $quote)
+                            <x-quote-line :quote="$quote" :viewer="$profile" wire:key="quote-{{ $quote->id }}" />
+                        @endforeach
+                    </div>
+
+                    <div class="mt-[14px] flex flex-wrap items-center justify-between gap-3">
+                        <p class="text-[13px] text-fq-text-4">
+                            @if ($quotes->count() > 1)
+                                A good day for it — all of these are in the running.
+                            @else
+                                Say something ridiculous and a grown-up might write it down.
+                            @endif
+                        </p>
+
+                        <a
+                            href="{{ route('kid.journal') }}?tab=quotes&world=me"
+                            wire:navigate
+                            class="rounded-[13px] border border-fq-line-3 bg-fq-sunk px-[16px] py-[10px] text-[13px] whitespace-nowrap text-fq-text-2-b transition hover:border-fq-gold hover:text-fq-text"
+                        >Every quote ever &rarr;</a>
+                    </div>
+                </div>
+            </div>
+        @endif
     </div>
 </x-kid.shell>
