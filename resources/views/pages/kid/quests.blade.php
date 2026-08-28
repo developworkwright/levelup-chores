@@ -21,6 +21,7 @@ use App\Services\MonsterService;
 use App\Services\PerkInventoryService;
 use App\Services\SleepService;
 use App\Services\SpinService;
+use App\Services\StreakService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
@@ -534,7 +535,7 @@ new class extends Component
         // A Livewire round trip doesn't pass back through the route middleware
         // that expires a lapsed streak, and this is the page a kid is most
         // likely to be sitting on when the household day rolls over.
-        $service->syncStreak($this->profile);
+        app(StreakService::class)->syncStreak($this->profile);
 
         $board = $service->boardFor($this->profile);
 

@@ -21,6 +21,7 @@ class PerkInventoryService
     public function __construct(
         private SpinService $spins,
         private ChoreService $chores,
+        private StreakService $streaks,
         private BadgeService $badges,
         private MonsterService $monsters,
         private SleepService $sleep,
@@ -254,7 +255,7 @@ class PerkInventoryService
 
     private function applyStreakRestore(Profile $profile): string
     {
-        if (! $this->chores->repairStreak($profile)) {
+        if (! $this->streaks->repairStreak($profile)) {
             throw new PerkUnavailableException('There is no broken streak to repair.');
         }
 
@@ -273,19 +274,22 @@ class PerkInventoryService
     }
 
     /**
-     * A restore only saves a chain that's still hanging. Clearing today's
-     * quest starts a new one and closes the window, and saying so is worth a
-     * separate message — "no broken streak to fix" reads as a bug to a kid
-     * looking at a streak they know they just broke.
+     * A restore only saves a chain that's still hanging. Getting anything
+     * signed off today starts a new one and closes the window, and saying so is
+     * worth a separate message — "no broken streak to fix" reads as a bug to a
+     * kid looking at a streak they know they just broke.
      */
     private function streakRestoreReason(Profile $profile): ?string
     {
-        if ($this->chores->repairableStreakDate($profile)) {
+        if ($this->streaks->repairableStreakDate($profile)) {
             return null;
         }
 
-        return $this->chores->isQuestDoneToday($profile)
-            ? "Too late — today's quest is already done"
+        // Any chore closes the window now, not just the quest — see
+        // repairableStreakDate(). Naming the quest here would refuse a kid over
+        // a rule that isn't the one being applied.
+        return $this->streaks->streakDaySecuredToday($profile)
+            ? 'Too late — today already counts'
             : 'No broken streak to fix';
     }
 

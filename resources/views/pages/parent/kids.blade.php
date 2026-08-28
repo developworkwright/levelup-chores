@@ -19,6 +19,7 @@ use App\Services\MonsterService;
 use App\Services\PerkInventoryService;
 use App\Services\SleepService;
 use App\Services\SpinService;
+use App\Services\StreakService;
 use App\Services\TicketService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
@@ -450,7 +451,7 @@ new class extends Component
         // app, and the parent was looking at a different number from the one on
         // their kid's own header. O(1) per kid, which is what makes it fine on
         // a page that lists the household.
-        $kids->each(fn (Profile $kid) => $chores->syncStreak($kid));
+        $kids->each(fn (Profile $kid) => app(StreakService::class)->syncStreak($kid));
         $household = $this->profile->household;
         $mysteryChore = $chores->mysteryChoreFor($household);
         $mysteryClaimant = $mysteryChore ? $chores->claimantFor($mysteryChore) : null;

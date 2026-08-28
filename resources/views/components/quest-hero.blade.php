@@ -242,11 +242,11 @@
 
             <p class="mt-2 max-w-[420px] text-sm text-fq-text-2">
                 @if ($questDone)
-                    Quest cleared. Your streak keeps climbing tonight.
+                    Quest cleared. Tonight counts towards your run.
                 @elseif ($questSentBack)
                     A parent sent this one back — finish it off and mark it done again.
                 @else
-                    Clear this one to keep your streak — the side quests below are open whenever you want them.
+                    The biggest payout on the board today. Any chore keeps your run alive — this one pays best.
                 @endif
             </p>
 

@@ -15,6 +15,7 @@ use App\Models\Profile;
 use App\Services\BonusShopService;
 use App\Services\ChoreService;
 use App\Services\PerkInventoryService;
+use App\Services\StreakService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -78,7 +79,7 @@ class PerkStreakAndHintTest extends TestCase
 
         // The gap killed the chain, and the cached count says so without
         // waiting for an approval to notice.
-        app(ChoreService::class)->syncStreak($kid->refresh());
+        app(StreakService::class)->syncStreak($kid->refresh());
         $this->assertSame(0, $kid->refresh()->streak);
 
         $this->buyAndUse($kid, PerkEffect::StreakRestore);
@@ -120,7 +121,7 @@ class PerkStreakAndHintTest extends TestCase
         $this->assertSame(1, $kid->refresh()->streak);
 
         $this->expectException(PerkUnavailableException::class);
-        $this->expectExceptionMessage("Too late — today's quest is already done");
+        $this->expectExceptionMessage('Too late — today already counts');
 
         $this->buyAndUse($kid, PerkEffect::StreakRestore);
     }
@@ -173,7 +174,7 @@ class PerkStreakAndHintTest extends TestCase
         // Miss a day, come back, and buy the repair before touching today's
         // quest — the only order the restore is still allowed in.
         Carbon::setTestNow(now()->addDays(2));
-        app(ChoreService::class)->syncStreak($kid->refresh());
+        app(StreakService::class)->syncStreak($kid->refresh());
         $this->assertSame(0, $kid->refresh()->streak);
 
         $this->buyAndUse($kid, PerkEffect::StreakRestore);

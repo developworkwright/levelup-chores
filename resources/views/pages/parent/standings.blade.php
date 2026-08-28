@@ -7,6 +7,7 @@ use App\Models\Profile;
 use App\Services\ChoreService;
 use App\Services\HouseholdClock;
 use App\Services\MonsterService;
+use App\Services\StreakService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
@@ -144,7 +145,7 @@ new class extends Component
         // Same reason the Kids page does it: the SyncStreak middleware only
         // expires the signed-in kid's cached streak, so a dead run would sit on
         // the Streak leaderboard — and rank a kid above one who is still going.
-        $kids->each(fn (Profile $kid) => $chores->syncStreak($kid));
+        $kids->each(fn (Profile $kid) => app(StreakService::class)->syncStreak($kid));
 
         // One grouped query rather than a pair per kid — this page exists to be
         // glanced at, and every kid is on it at once.

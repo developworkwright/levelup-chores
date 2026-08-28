@@ -228,7 +228,7 @@ new class extends Component
                      neutral ring the lanes use. --}}
                 <span class="text-[34px]" @if ($stillOpen) style="color: var(--fq-text-3)" @endif>{{ $stillOpen === 0 ? '🔥' : '○' }}</span>
                 @if ($stillOpen === 0)
-                    <span class="font-baloo text-[28px] leading-[1.1] font-extrabold">Every quest cleared.</span>
+                    <span class="font-baloo text-[28px] leading-[1.1] font-extrabold">Every run is safe.</span>
                     <span class="font-mono-fq text-[11px] text-fq-text-4">
                         Nobody's run is on the line — the next one starts at {{ $rollLabel }}.
                     </span>
@@ -239,7 +239,7 @@ new class extends Component
                          sweep — the one claim on this panel that has to be
                          earned. This says what is actually true. --}}
                     <span class="font-baloo text-[28px] leading-[1.1] font-extrabold">
-                        {{ $stillOpen }} {{ Str::plural('quest', $stillOpen) }} still open.
+                        {{ $stillOpen }} {{ Str::plural('run', $stillOpen) }} still open.
                     </span>
                     <span class="font-mono-fq text-[11px] text-fq-text-4">
                         Nothing's on the line until {{ $watchLabel }} — plenty of day left.
@@ -314,11 +314,13 @@ new class extends Component
 
                             <div class="flex items-center gap-[9px] rounded-[10px] border px-[11px] py-2" style="border-color: #6b2033; background: #26101d">
                                 <span class="text-sm">⚑</span>
-                                {{-- States what is true — the quest, and how far
-                                     past the watch hour it is. Never a countdown
-                                     to a deadline that doesn't exist. --}}
+                                {{-- States what is true — nothing is in yet, and
+                                     how far past the watch hour it is. Never a
+                                     countdown to a deadline that doesn't exist.
+                                     Any chore closes this, so it can't name the
+                                     quest as the thing that's missing. --}}
                                 <span class="font-mono-fq text-[11px] leading-[1.5]" style="color: #f7c8d4; text-wrap: pretty">
-                                    Tonight's quest — {{ $kid['quest'] }} — still open,
+                                    Nothing signed off yet,
                                     {{ $kid['watchAt']->diffForHumans(null, true, true) }} past {{ $watchLabel }}
                                 </span>
                             </div>
@@ -423,9 +425,13 @@ new class extends Component
                     };
 
                     $subLabel = match (true) {
+                        // A night is safe on any chore now, so `clearedAt` —
+                        // the quest's own stamp — is null for plenty of safe
+                        // kids. Saying "Quest cleared" over one of them credits
+                        // work they didn't do and hides work they did.
                         $lane['state'] === ArenaService::STATE_SAFE => $lane['clearedAt']
                             ? 'Quest cleared '.$lane['clearedAt']->timezone($household->timezone)->format('g:ia')
-                            : 'Quest cleared',
+                            : 'Work in — night safe',
                         $lane['state'] === ArenaService::STATE_BROKEN => 'Run of '.$lane['brokenFrom'].' ended at '.$rollLabel,
                         default => $lane['quest'],
                     };

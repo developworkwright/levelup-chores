@@ -457,9 +457,34 @@ class BadgeService
         return $approvedOtherChoresToday >= ($totalChores - 1);
     }
 
+    /**
+     * Badge keys each profile already holds, for the life of this instance.
+     *
+     * `evaluate()` runs two dozen `maybeAward()` calls and every one of them
+     * used to ask the database whether that single badge was already earned —
+     * two dozen round trips to answer one question, on every approval and every
+     * perk spent. The whole set is one query.
+     *
+     * Safe to hold: `maybeAward()` below is the only thing in the app that ever
+     * attaches a badge, and it keeps this in step as it goes. The memo is keyed
+     * by profile, since `evaluateHouseholdGoal()` walks every kid in the house.
+     *
+     * @var array<int, array<string, true>>
+     */
+    private array $earnedKeys = [];
+
+    /** @return array<string, true> */
+    private function earnedKeysFor(Profile $profile): array
+    {
+        return $this->earnedKeys[$profile->id] ??= $profile->badges()
+            ->pluck('key')
+            ->mapWithKeys(fn (string $key) => [$key => true])
+            ->all();
+    }
+
     private function maybeAward(Profile $profile, string $key, Closure $condition): void
     {
-        if ($profile->badges()->where('key', $key)->exists()) {
+        if (isset($this->earnedKeysFor($profile)[$key])) {
             return;
         }
 
@@ -473,10 +498,25 @@ class BadgeService
             return;
         }
 
-        $profile->badges()->attach($badge->id, ['earned_at' => now()]);
+        // Confirmed against the database rather than trusted, and deliberately
+        // only here on the award path. The memo above is per *instance*, and
+        // eight services each hold their own BadgeService — so another instance
+        // in this same request could have awarded this badge since the memo was
+        // built. `profile_badges` is uniquely indexed, which makes losing that
+        // race a 500 rather than a no-op. This costs one query on the rare
+        // occasion a badge is actually won; the common path stays at one query
+        // for the whole set.
+        if ($profile->badges()->where('key', $key)->exists()) {
+            $this->earnedKeys[$profile->id][$key] = true;
 
-        // The exists() check above is what keeps this from paying twice —
-        // a badge can only ever be attached once, so its XP lands once.
+            return;
+        }
+
+        $profile->badges()->attach($badge->id, ['earned_at' => now()]);
+        $this->earnedKeys[$profile->id][$key] = true;
+
+        // The two checks above are what keep this from paying twice — a badge
+        // can only ever be attached once, so its XP lands once.
         if ($badge->xp_reward > 0) {
             $profile->xp += $badge->xp_reward;
             $profile->save();

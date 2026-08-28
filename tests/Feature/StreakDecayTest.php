@@ -9,6 +9,7 @@ use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Services\ChoreService;
+use App\Services\StreakService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -84,7 +85,7 @@ class StreakDecayTest extends TestCase
         $this->kid->update(['streak' => 3]);
         $this->onDay('2026-03-05');
 
-        app(ChoreService::class)->syncStreak($this->kid);
+        app(StreakService::class)->syncStreak($this->kid);
 
         $this->assertSame(0, $this->kid->refresh()->streak);
     }
@@ -99,7 +100,7 @@ class StreakDecayTest extends TestCase
 
         $this->onDay('2026-03-03');
 
-        app(ChoreService::class)->syncStreak($this->kid);
+        app(StreakService::class)->syncStreak($this->kid);
 
         $this->assertSame(2, $this->kid->refresh()->streak);
     }
@@ -115,7 +116,7 @@ class StreakDecayTest extends TestCase
 
         $this->onDay('2026-03-05');
 
-        app(ChoreService::class)->syncStreak($this->kid);
+        app(StreakService::class)->syncStreak($this->kid);
 
         $this->kid->refresh();
 
@@ -132,7 +133,7 @@ class StreakDecayTest extends TestCase
         // Missed the 5th; standing on the 6th with today's quest untouched.
         $this->onDay('2026-03-06');
 
-        $preview = app(ChoreService::class)->repairPreview($this->kid);
+        $preview = app(StreakService::class)->repairPreview($this->kid);
 
         $this->assertNotNull($preview);
         $this->assertSame('2026-03-05', $preview['date']->toDateString());
@@ -148,15 +149,16 @@ class StreakDecayTest extends TestCase
         $this->onDay('2026-03-05');
 
         $service = app(ChoreService::class);
-        $this->assertNotNull($service->repairableStreakDate($this->kid));
+        $streaks = app(StreakService::class);
+        $this->assertNotNull($streaks->repairableStreakDate($this->kid));
 
         // Today's quest goes in, which starts a fresh chain of one — the
         // broken day is now behind a live streak and no longer savable.
         $service->claimQuest($this->kid);
 
-        $this->assertNull($service->repairableStreakDate($this->kid));
-        $this->assertNull($service->repairPreview($this->kid));
-        $this->assertNull($service->repairStreak($this->kid));
+        $this->assertNull($streaks->repairableStreakDate($this->kid));
+        $this->assertNull($streaks->repairPreview($this->kid));
+        $this->assertNull($streaks->repairStreak($this->kid));
     }
 
     public function test_several_missed_days_cannot_be_bought_back(): void
@@ -168,10 +170,10 @@ class StreakDecayTest extends TestCase
 
         $this->onDay('2026-03-05');
 
-        $service = app(ChoreService::class);
+        $streaks = app(StreakService::class);
 
-        $this->assertNull($service->repairableStreakDate($this->kid));
-        $this->assertNull($service->repairPreview($this->kid));
+        $this->assertNull($streaks->repairableStreakDate($this->kid));
+        $this->assertNull($streaks->repairPreview($this->kid));
     }
 
     public function test_a_restore_used_in_time_rebuilds_the_whole_chain(): void
@@ -183,11 +185,11 @@ class StreakDecayTest extends TestCase
         $this->kid->update(['streak' => 3]);
         $this->onDay('2026-03-05');
 
-        $service = app(ChoreService::class);
-        $service->syncStreak($this->kid);
+        $streaks = app(StreakService::class);
+        $streaks->syncStreak($this->kid);
         $this->assertSame(0, $this->kid->refresh()->streak);
 
-        $service->repairStreak($this->kid);
+        $streaks->repairStreak($this->kid);
 
         // Four days: the three cleared, plus the bought-back 4th.
         $this->assertSame(4, $this->kid->refresh()->streak);

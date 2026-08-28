@@ -26,9 +26,12 @@ use Illuminate\Support\Str;
  * land on — whose run is on the line tonight is news, and their own board is
  * one tap away.
  *
- * The streak this page is about turns on **one thing: today's quest**. Not the
- * whole board. Chores earn points and land monster damage; the quest is what
- * keeps a run alive.
+ * The run this page is about turns on **any approved chore**, not the quest
+ * alone — see {@see StreakService::streakDayEarnedOn()}. That is why the lanes
+ * read their state through `streakDaySecuredToday()` rather than off the
+ * quest's own `completed_at`: a kid who cleared four side quests and left the
+ * chest shut is as safe as one who didn't, and this is the screen the whole
+ * house looks at.
  */
 class ArenaService
 {
@@ -64,7 +67,7 @@ class ArenaService
      * superlatives(), crown() (through superlatives *and* choresToday),
      * prizeStanding() and the ticker's broken-run rows all want tonightFor().
      * Unmemoised that ran the whole per-kid walk five times on the page every
-     * kid lands on: syncStreak, questFor, two questApprovedOn lookups each
+     * kid lands on: syncStreak, questFor, two streakDayEarnedOn lookups each
      * hitting five tables, and a day-by-day run walk, times every kid, times
      * five.
      *
@@ -90,6 +93,7 @@ class ArenaService
 
     public function __construct(
         private ChoreService $chores,
+        private StreakService $streaks,
         private TicketService $tickets,
     ) {}
 
@@ -111,9 +115,9 @@ class ArenaService
 
         $today = HouseholdClock::for($to->household)->today();
 
-        // Nothing on the line: the quest is in, so there is nothing to be poked
-        // about.
-        if ($this->chores->isQuestDoneToday($to)) {
+        // Nothing on the line: they have work in for today — any chore does it
+        // now, not just the quest — so there is nothing to be poked about.
+        if ($this->streaks->streakDaySecuredToday($to)) {
             return false;
         }
 
@@ -182,7 +186,7 @@ class ArenaService
      * Two things this deliberately does **not** do, and the button's copy
      * promises both: the night pays the rescued kid nothing, and it does not
      * advance their milestone ladder — see
-     * {@see ChoreService::refreshStreak()}. A rescue keeps a run alive; it
+     * {@see StreakService::refreshStreak()}. A rescue keeps a run alive; it
      * does not hand anybody a night they didn't work.
      *
      * @throws InsufficientTicketsException
@@ -195,10 +199,11 @@ class ArenaService
 
         $today = HouseholdClock::for($target->household)->today();
 
-        // Nothing to rescue: the quest is in, or somebody already rescued them
-        // tonight. The unique index backs the second one up against a race.
-        if ($this->chores->isQuestDoneToday($target)
-            || $this->chores->wasRescuedOn($target, $today)) {
+        // Nothing to rescue: they already have work in for today, or somebody
+        // rescued them tonight. The unique index backs the second one up
+        // against a race.
+        if ($this->streaks->streakDaySecuredToday($target)
+            || $this->streaks->wasRescuedOn($target, $today)) {
             return false;
         }
 
@@ -251,7 +256,13 @@ class ArenaService
         return match (true) {
             $rescuer->is($target) => 'You can\'t rescue your own run',
             $target->streak < 1 => 'No run to save yet',
-            $this->chores->wasRescuedOn($target, $today) => 'Already rescued tonight',
+            // rescue() has always refused a night that is already in the bag,
+            // but nothing here said so — the button rendered live and the tap
+            // did nothing. The lanes only offer it on an at-risk kid, so this
+            // was hard to reach; it is still the sort of gap that turns into a
+            // bug report about a button that "doesn't work".
+            $this->streaks->streakDaySecuredToday($target) => 'Their night is already safe',
+            $this->streaks->wasRescuedOn($target, $today) => 'Already rescued tonight',
             $rescuer->bonus_tickets < self::RESCUE_COST => 'Not enough tickets',
             default => null,
         };
@@ -286,15 +297,25 @@ class ArenaService
             ->where('role', ProfileRole::Kid)
             ->orderByDesc('age')
             ->get()
+            // We are holding the household these kids belong to, so hand it to
+            // each of them rather than letting the clock lazy-load it back out
+            // of the database once per kid per lookup.
+            ->each(fn (Profile $kid) => $kid->setRelation('household', $household))
             ->map(function (Profile $kid) use ($risk, $watch) {
                 // Expired here rather than trusted: `profiles.streak` is a
                 // cache that only the kid's own page load refreshes, and this
                 // page shows every kid at once — including the ones who
                 // haven't opened the app since their run died.
-                $this->chores->syncStreak($kid);
+                $this->streaks->syncStreak($kid);
 
                 $quest = $this->chores->questFor($kid);
-                $state = $this->stateFor($kid, $quest->completed_at !== null);
+
+                // Any chore in for today makes the night safe, so the lane can
+                // no longer read the quest's own stamp — a kid who cleared four
+                // side quests and left the chest shut is as safe as one who
+                // didn't, and the Arena is the screen that must not get that
+                // wrong in front of the whole house.
+                $state = $this->stateFor($kid, $this->streaks->streakDaySecuredToday($kid));
 
                 return [
                     'profile' => $kid,
@@ -311,10 +332,17 @@ class ArenaService
             });
     }
 
-    /** The four states, in the order they outrank each other. */
-    public function stateFor(Profile $kid, bool $questDone): string
+    /**
+     * The four states, in the order they outrank each other.
+     *
+     * `$dayDone` is "tonight is already in the bag" — see
+     * {@see StreakService::streakDaySecuredToday()}, which any approved *or*
+     * pending chore satisfies. It is passed in rather than looked up so the
+     * memoised walk in tonightFor() resolves it once per kid.
+     */
+    public function stateFor(Profile $kid, bool $dayDone): string
     {
-        if ($questDone) {
+        if ($dayDone) {
             return self::STATE_SAFE;
         }
 
@@ -376,29 +404,31 @@ class ArenaService
         }
 
         $today = HouseholdClock::for($kid->household)->today();
+        $yesterday = $today->copy()->subDay();
+        $before = $today->copy()->subDays(2);
 
-        return ! $this->chores->questApprovedOn($kid, $today->copy()->subDay())
-            && $this->chores->questApprovedOn($kid, $today->copy()->subDays(2));
+        // Both days out of one window. Asked separately this was two full
+        // lookups per kid, on the page that draws every kid in the house.
+        $earned = $this->streaks->earnedDaysBetween($kid, $before, $yesterday);
+
+        return ! isset($earned[$yesterday->toDateString()])
+            && isset($earned[$before->toDateString()]);
     }
 
     /**
      * How long the run that just ended was, for the obituary line.
      *
-     * Walks back from the day before yesterday, which is the last day it can
-     * have counted. Bounded by the same safety limit the streak walk uses, so
-     * odd data can't spin here either.
+     * The day before yesterday is the last day it can have counted, and
+     * `runLengthOn()` is the walk back from there. This used to be its own copy
+     * of that loop, with the 366-day bound hardcoded next to a constant that
+     * happened to hold the same number.
      */
     private function runThatEnded(Profile $kid): int
     {
-        $day = HouseholdClock::for($kid->household)->today()->subDays(2);
-        $run = 0;
-
-        while ($run < 366 && $this->chores->questApprovedOn($kid, $day)) {
-            $run++;
-            $day = $day->copy()->subDay();
-        }
-
-        return $run;
+        return $this->streaks->runLengthOn(
+            $kid,
+            HouseholdClock::for($kid->household)->today()->subDays(2),
+        );
     }
 
     /**
@@ -748,7 +778,7 @@ class ArenaService
                 // standing now. A kid who cleared Monday and missed Tuesday
                 // otherwise reads "cleared the day — 0 nights in a row" on
                 // Wednesday, directly above their own 💀 row.
-                $run = $clearedQuest ? $this->chores->runLengthOn($done->profile, $day) : 0;
+                $run = $clearedQuest ? $this->streaks->runLengthOn($done->profile, $day) : 0;
 
                 return $clearedQuest
                     ? [
@@ -903,9 +933,9 @@ class ArenaService
         $spacing = [14.0, 30.0, 46.0, 68.0, 94.0];
         $flags = [];
 
-        foreach (array_values(ChoreService::STREAK_BONUSES) as $i => $reward) {
+        foreach (array_values(StreakService::STREAK_BONUSES) as $i => $reward) {
             $flags[] = [
-                'nights' => array_keys(ChoreService::STREAK_BONUSES)[$i],
+                'nights' => array_keys(StreakService::STREAK_BONUSES)[$i],
                 'reward' => $reward,
                 'left' => $spacing[$i] ?? 94.0,
             ];

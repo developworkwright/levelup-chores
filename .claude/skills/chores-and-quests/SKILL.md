@@ -76,7 +76,7 @@ Three invariants worth not breaking:
 
 **The quest gates nothing.** `household.require_quest_first` and the `'locked'` board state are gone: side quests are claimable whether or not the main quest is done. The gate existed to stop kids cherry-picking the easy chores, but the bold card, the Quest Charm and the wheel already make the quest the better-paying move, and in practice the lock was the thing keeping kids from browsing the board at all. Don't reintroduce a claim-time check for it — `choreIsClaimable()` on the Quests page and `boostClaim()` on Home were the two second copies of that rule, and both are gone.
 
-`claimQuest()` calls `claim()` for the quest's chore, so it flows through the same points/mystery path as any other chore. The streak moves at parent approval, not here (see [[streaks]]) — clearing the quest is now the *only* thing the quest is for.
+`claimQuest()` calls `claim()` for the quest's chore, so it flows through the same points/mystery path as any other chore. The streak moves at parent approval, not here — and **any** approved chore now earns the day, so the quest has no special standing there either (see [[streaks]]). What the quest is for is the payout: the bold card, the charm and the chest reveal.
 
 ### A sent-back quest reopens
 
@@ -91,7 +91,7 @@ The hero's CTA stays live and reads "Mark it done again", with a separate `Sent 
 
 ### Auto-reroll of a blocked quest
 
-Because cooldowns are household-wide, a sibling can finish the chore that was handed to you as today's quest. That would dead-end the kid's day: no quest completion and no streak day.
+Because cooldowns are household-wide, a sibling can finish the chore that was handed to you as today's quest. That leaves the kid with no quest to clear and none of what it pays — the bold-card bonus, the charm, the chest.
 
 **Before the pick, the hand is what matters, not `chore_id`.** `rerollIfUnavailable()` branches on `isPicked()` first: an unpicked quest is only stuck when `handIsDead()` — every card claimed, expired or deleted — and re-deals then. A sibling taking the placeholder card leaves two perfectly good cards on the table, and re-dealing over a hand the kid may already be reading would be worse than the problem. Everything below applies to a quest that has been picked.
 

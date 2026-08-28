@@ -20,6 +20,7 @@ use App\Services\LuckyBlockService;
 use App\Services\MonsterService;
 use App\Services\PerkInventoryService;
 use App\Services\SpinService;
+use App\Services\StreakService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
@@ -128,7 +129,7 @@ new class extends Component
         // through streakBonusOn() rather than off the base map: past day 30 the
         // track repeats and the day no longer indexes it directly.
         $this->pendingChestPoints = $this->pendingChestDay
-            ? (app(ChoreService::class)->streakBonusOn($this->pendingChestDay) ?? 0) * $this->profile->household->points_per_dollar
+            ? (app(StreakService::class)->streakBonusOn($this->pendingChestDay) ?? 0) * $this->profile->household->points_per_dollar
             : null;
 
         $spins = app(SpinService::class);
@@ -166,7 +167,7 @@ new class extends Component
 
     public function openStreakChest(): void
     {
-        app(ChoreService::class)->openStreakChest($this->profile);
+        app(StreakService::class)->openStreakChest($this->profile);
     }
 
     /**
@@ -575,13 +576,14 @@ new class extends Component
     public function with(): array
     {
         $service = app(ChoreService::class);
+        $streaks = app(StreakService::class);
         $spins = app(SpinService::class);
         $inventory = app(PerkInventoryService::class);
 
         // A Livewire round trip doesn't pass back through the route middleware
         // that expires a lapsed streak, and a kid can sit on this page across
         // the household rollover.
-        $service->syncStreak($this->profile);
+        app(StreakService::class)->syncStreak($this->profile);
 
         $quest = $this->questOrNull();
         $boost = $spins->today($this->profile);
@@ -639,6 +641,11 @@ new class extends Component
             'questCharmPayout' => $quest ? $service->charmPayoutFor($this->profile) : 0,
             'questClosesAt' => $quest ? $service->deadlineFor($quest->chore) : null,
             'questDone' => $quest?->completed_at !== null,
+            // Distinct from questDone: the streak card asks whether *tonight*
+            // is in the bag, which any chore now settles. Guarded on $quest for
+            // the same reason as everything else here — a household with
+            // nothing to draw one from makes questFor() throw.
+            'daySecured' => $quest ? $streaks->streakDaySecuredToday($this->profile) : false,
             'questApproved' => $completion?->status === CompletionStatus::Approved,
             'questPending' => $completion?->status === CompletionStatus::Pending,
             'questSentBack' => $completion?->status === CompletionStatus::Rejected,
@@ -657,13 +664,13 @@ new class extends Component
             // chest itself — the tray slot there was the only thing that could
             // open one, so leaving the track behind would have split the reward
             // from the explanation of it.
-            'nextMilestone' => $quest ? $service->nextStreakMilestone($this->profile) : 0,
-            'streakBonuses' => collect($quest ? $service->streakTrackFor($this->profile)['milestones'] : []),
-            'streakLap' => $quest ? $service->streakTrackFor($this->profile)['lap'] : 1,
+            'nextMilestone' => $quest ? $streaks->nextStreakMilestone($this->profile) : 0,
+            'streakBonuses' => collect($quest ? $streaks->streakTrackFor($this->profile)['milestones'] : []),
+            'streakLap' => $quest ? $streaks->streakTrackFor($this->profile)['lap'] : 1,
             // Null unless a broken chain is still savable — which stops being
             // true the moment today's quest is cleared, so the offer has to be
             // on the page a kid is looking at when they decide.
-            'streakRepair' => $quest ? $service->repairPreview($this->profile) : null,
+            'streakRepair' => $quest ? $streaks->repairPreview($this->profile) : null,
             // Only with a quest to act on: a blocked reason is worked out by
             // asking what today's quest is, which is the call that throws in a
             // household with nothing to draw one from.
@@ -981,16 +988,16 @@ new class extends Component
                     <p class="mt-1 text-sm text-fq-text-2">
                         @if ($streakRepair)
                             Your streak ran out — but it isn't gone yet.
-                        @elseif ($profile->streak + 1 === $nextMilestone && ! $questDone)
+                        @elseif ($profile->streak + 1 === $nextMilestone && ! $daySecured)
                             {{-- The one day the general advice isn't the useful thing to
-                                 say: the chest is one cleared quest away, so say that
+                                 say: the chest is one signed-off chore away, so say that
                                  instead of explaining how streaks work. --}}
-                            Complete today's quest and come back tomorrow to open the chest!
+                            Get one chore signed off and come back tomorrow to open the chest!
                         @elseif ($profile->streak === 0)
                             {{-- Nothing to keep alive yet. "Keep the streak alive" to
                                  somebody on nought days is advice about a thing they
                                  don't have. --}}
-                            Clear today's quest to start a streak. Keep it going and the chests get bigger —
+                            Get any chore signed off to start a streak. Keep it going and the chests get bigger —
                             the first one is day {{ $nextMilestone }}.
                         @elseif ($streakLap > 1)
                             {{-- The reason the numbers on the track just changed. Worth
@@ -1649,9 +1656,9 @@ new class extends Component
                     <div class="mt-[14px] flex flex-wrap items-center justify-between gap-3">
                         <p class="text-[13px] text-fq-text-4">
                             @if ($mine && $mine['state'] === App\Services\ArenaService::STATE_SAFE)
-                                Your night is safe. Clear one every day and the run keeps climbing.
+                                Your night is safe. Do something every day and the run keeps climbing.
                             @else
-                                Clear today's quest and tonight counts towards your run.
+                                Get any chore signed off and tonight counts towards your run.
                             @endif
                         </p>
 

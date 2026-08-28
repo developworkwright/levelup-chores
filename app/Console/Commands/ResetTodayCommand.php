@@ -68,11 +68,17 @@ class ResetTodayCommand extends Command
                 ->whereDate('quest_date', $clock->today())
                 ->first();
 
-            $questWasClaimedToday = $quest && $quest->completed_at !== null;
-
             $completions = ChoreCompletion::where('profile_id', $kid->id)
                 ->where('submitted_at', '>=', $startOfToday)
                 ->get();
+
+            // Any approved chore earns the streak day now, not just the quest,
+            // and every one of today's completions is about to be deleted — so
+            // the run loses today exactly when one of them had been signed off.
+            // A pending claim never counted, so it costs nothing to undo.
+            $dayCountedToday = $completions->contains(
+                fn (ChoreCompletion $completion) => $completion->status === CompletionStatus::Approved,
+            );
 
             $pointsDelta = 0;
             $xpDelta = 0;
@@ -99,7 +105,7 @@ class ResetTodayCommand extends Command
             $kid->points = max(0, $kid->points + $pointsDelta);
             $kid->xp = max(0, $kid->xp + $xpDelta);
 
-            if ($questWasClaimedToday) {
+            if ($dayCountedToday) {
                 $kid->streak = max(0, $kid->streak - 1);
             }
 
@@ -161,7 +167,7 @@ class ResetTodayCommand extends Command
             $kid->name,
             "{$pointsBefore} → ".max(0, $pointsBefore + $pointsDelta),
             "{$xpBefore} → ".max(0, $xpBefore + $xpDelta),
-            "{$streakBefore} → ".($questWasClaimedToday ? max(0, $streakBefore - 1) : $streakBefore),
+            "{$streakBefore} → ".($dayCountedToday ? max(0, $streakBefore - 1) : $streakBefore),
             $quest ? 'yes' : 'no',
             $spinsCleared > 0 ? 'yes' : 'no',
             $completions->count(),

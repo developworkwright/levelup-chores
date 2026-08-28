@@ -14,6 +14,7 @@ use App\Models\StreakRescue;
 use App\Services\ArenaService;
 use App\Services\ChoreService;
 use App\Services\HouseholdClock;
+use App\Services\StreakService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -120,7 +121,7 @@ class ArenaPageTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         Volt::test('kid.arena')
-            ->assertSee('1 quest still open.')
+            ->assertSee('1 run still open.')
             ->assertSee('Nothing\'s on the line until 7:00pm', escape: false)
             ->assertDontSee('still on the line');
     }
@@ -137,8 +138,8 @@ class ArenaPageTest extends TestCase
         // kids to decide this read every untouched morning as a clean sweep —
         // the one claim on this panel that has to be earned.
         Volt::test('kid.arena')
-            ->assertSee('2 quests still open.')
-            ->assertDontSee('Every quest cleared.');
+            ->assertSee('2 runs still open.')
+            ->assertDontSee('Every run is safe.');
     }
 
     public function test_a_genuinely_finished_day_still_says_so(): void
@@ -153,7 +154,7 @@ class ArenaPageTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         Volt::test('kid.arena')
-            ->assertSee('Every quest cleared.')
+            ->assertSee('Every run is safe.')
             ->assertDontSee('still open.');
     }
 
@@ -169,8 +170,8 @@ class ArenaPageTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         Volt::test('kid.arena')
-            ->assertSee('1 quest still open.')
-            ->assertDontSee('Every quest cleared.');
+            ->assertSee('1 run still open.')
+            ->assertDontSee('Every run is safe.');
     }
 
     public function test_the_same_quest_reads_as_at_risk_once_the_watch_hour_passes(): void
@@ -392,7 +393,7 @@ class ArenaPageTest extends TestCase
 
         $this->assertSame(5 - ArenaService::RESCUE_COST, $nova->refresh()->bonus_tickets);
         // The night now counts toward the run, exactly as a repair does.
-        $this->assertTrue(app(ChoreService::class)->questApprovedOn($rex, $today));
+        $this->assertTrue(app(StreakService::class)->streakDayEarnedOn($rex, $today));
     }
 
     public function test_a_rescued_night_keeps_the_run_but_not_the_ladder(): void
@@ -415,11 +416,11 @@ class ArenaPageTest extends TestCase
         $chores = app(ChoreService::class);
 
         // The run stands at three nights — tonight now counts.
-        $this->assertTrue($chores->questApprovedOn($rex, $today));
+        $this->assertTrue(app(StreakService::class)->streakDayEarnedOn($rex, $today));
         // One of those three was bought, so the ladder is standing at two. The
         // rescue button's copy promises exactly this, and a day-3 milestone
         // paid off the back of it would make that copy a lie.
-        $this->assertSame(1, $chores->rescuedNightsInRun($rex));
+        $this->assertSame(1, app(StreakService::class)->rescuedNightsInRun($rex));
         $this->assertSame(0, $rex->refresh()->streak_milestone_paid_through);
         $this->assertNull($rex->pending_streak_chest);
     }
@@ -1005,7 +1006,7 @@ class ArenaPageTest extends TestCase
         // Cleared two days ago, missed yesterday: the run is dead now, but
         // that day's row still has to say what was true then.
         $this->approveQuestOn($kid, $today->copy()->subDays(2));
-        app(ChoreService::class)->syncStreak($kid);
+        app(StreakService::class)->syncStreak($kid);
 
         $this->assertSame(0, $kid->refresh()->streak);
 
@@ -1021,7 +1022,7 @@ class ArenaPageTest extends TestCase
         $flags = $this->arena()->flags();
 
         $this->assertSame(
-            array_keys(ChoreService::STREAK_BONUSES),
+            array_keys(StreakService::STREAK_BONUSES),
             array_column($flags, 'nights'),
         );
 

@@ -43,7 +43,7 @@ Everything is scoped to one household. There's no public sign-up, no email/passw
 
 ```mermaid
 flowchart LR
-    A["🎁 Open the chest<br/><i>deals today's quest hand</i>"] --> B["✅ Clear the quest<br/><i>keeps the streak alive</i>"]
+    A["🎁 Open the chest<br/><i>deals today's quest hand</i>"] --> B["✅ Clear the quest<br/><i>the best-paying card</i>"]
     A --> D["🎯 Claim any side quest<br/><i>one is secretly the Mystery</i>"]
     B --> D
     D --> E["🧑‍⚖️ Parent approves"]
@@ -58,7 +58,7 @@ flowchart LR
     style H fill:#4d1f2a,stroke:#ec4899,color:#fff
 ```
 
-**Nothing on the board waits on the main quest.** Side quests are claimable from the moment a kid opens the app — the quest chest earns its place by paying better (bold cards, charms, the wheel) rather than by holding the rest hostage. Clearing the quest is what feeds the streak.
+**Nothing on the board waits on the main quest, and nothing about the streak does either.** Side quests are claimable from the moment a kid opens the app, and any one of them approved keeps the run alive. The quest chest earns its place by paying better — bold cards, charms, the wheel — rather than by holding anything hostage.
 
 The board also **moves on the claim, not the approval** — a chore locks for the whole household the second someone taps it, so nobody is blocked waiting on a parent to check their phone. Points, streaks and monster damage, however, only land once a parent signs off.
 
@@ -70,10 +70,10 @@ The board also **moves on the claim, not the approval** — a chore locks for th
 
 | | Feature | How it works |
 |---|---|---|
-| 🎁 | **Daily Quest** | A hand of chores per kid per day, hidden inside a chest. Opening it is the reveal moment. Clearing it is what feeds the streak — the rest of the board is open regardless. |
+| 🎁 | **Daily Quest** | A hand of chores per kid per day, hidden inside a chest. Opening it is the reveal moment. It's the best-paying card on the board — bold-card bonus, charms, the wheel — but nothing waits on it. |
 | 🕵️ | **Mystery Chore** | Each day one chore is secretly worth **+500 points**. Nobody knows which. The first kid in the household to finish it wins — then everyone sees who got it. |
 | 🎡 | **Bonus Wheel** | One spin a day. Lands on a chore and multiplies it **2×**, or **3×** on a 35% roll. |
-| 🔥 | **Streak Chest** | Consecutive days of approved quests build a streak. Milestones pay real money and unlock a chest with a reveal animation. |
+| 🔥 | **Streak Chest** | Consecutive days with **any** approved chore build a streak. Milestones pay real money and unlock a chest with a reveal animation. |
 | 🛒 | **Loot Shop** | Spend points on rewards the parent defines — screen time, Robux, dessert pick, a family outing. |
 | 🏅 | **Badges** | 13 achievements on their own tab, each with what unlocks it and the XP it pays. 5 are secret — name and description stay hidden until earned. |
 | 🎟️ | **Bonus Shop** | Levelling up, earning badges and beating monsters mint **tickets**. Spend them on wheel respins, quest rerolls, streak repairs, Mystery Chore hints, quest charms, or the right to name a monster. Spending never costs XP — your level is permanent. |
@@ -142,7 +142,9 @@ The pick is persisted per household per day, so it stays the same chore for ever
 
 <br>
 
-A day counts toward the streak only if that day's quest was **approved**. The streak is *recomputed* by walking back over approved days rather than incremented — so a parent clearing several days of backlog can approve them in any order and still land on the right number.
+**Any approved chore earns the day** — the main quest has no special standing. A kid who works the board and never opens the chest keeps their run. What a day needs is one chore a parent actually signed off: a claim sitting in the approvals queue keeps the kid off the Arena's at-risk lane, but it doesn't bank the day until it's approved.
+
+The streak is *recomputed* by walking back over earned days rather than incremented — so a parent clearing several days of backlog can approve them in any order and still land on the right number.
 
 | Streak | Bonus |
 |:---:|:---:|

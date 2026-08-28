@@ -1,25 +1,53 @@
 ---
 name: streaks
-description: This skill should be used when the user asks to change streak counting, streak bonus amounts, the streak chest reveal, or mentions "bumpStreak", "STREAK_BONUSES", "pending_streak_chest", or "openStreakChest".
+description: This skill should be used when the user asks to change streak counting, streak bonus amounts, the streak chest reveal, or mentions "streakDayEarnedOn", "STREAK_BONUSES", "pending_streak_chest", or "openStreakChest".
 ---
 
 # Streaks
 
-Covers daily-quest streak counting and milestone bonuses, owned by `app/Services/ChoreService.php` (not a separate service — streak logic is private methods on `ChoreService` since it only ever fires from the daily quest flow).
+Covers streak counting and milestone bonuses, owned by `app/Services/StreakService.php`.
+
+It lived on `ChoreService` for as long as the streak was a property of the daily quest. Once any approved chore started earning the day, nothing in it reached back into chores, quests or the board any more — it needs `HouseholdClock`, three tables and `LedgerService`, and that is all — so it moved out. **The dependency runs one way**: `ChoreService::approve()` calls `StreakService::recordApproval()`, never the reverse. Keep it that way; a call back into `ChoreService` from here would create the cycle the split exists to avoid.
 
 ## Core files
 
-- `app/Services/ChoreService.php` — `bumpStreak()` (private), `openStreakChest()`, `nextStreakMilestone()`.
+- `app/Services/StreakService.php` — `streakDayEarnedOn()`, `streakDaySecuredToday()`, `earnedDaysBetween()`, `recordApproval()`, `syncStreak()`, `repairStreak()`, `openStreakChest()`, `nextStreakMilestone()`, plus the private `refreshStreak()`, `currentStreak()` and `walkBackFrom()`.
 - `App\Models\Profile` — `streak` (int) and `pending_streak_chest` (nullable int, the milestone day awaiting reveal) columns.
 - `resources/views/pages/kid/quests.blade.php` — chest UI.
+- Tests: `ChoreStreakTest` is the one that pins **what earns a day**; `StreakCycleTest`, `StreakDecayTest` and `StreakRestoreOfferTest` cover the track, decay and repairs.
 
 ## Mechanics
 
-`bumpStreak()` runs only from `claimQuest()` — completing the **daily quest**, and only the daily quest, advances the streak. Completing side chores does not touch it.
+### Any approved chore earns the day
 
-Logic: look up whether *yesterday's* `DailyQuest` (by `quest_date`) for this profile has `completed_at` set. If so, `streak = streak + 1`; otherwise the streak resets to `1` (not `0` — completing today's quest always counts as at least a 1-day streak).
+**`streakDayEarnedOn(Profile, Carbon): bool` is the single chokepoint.** Every walk — `currentStreak()`, `runLengthOn()`, `rescuedNightsInRun()`, `repairPreview()`, `syncStreak()`, and the Arena's `brokeAtLastRollover()` — goes through it, so the rule for what counts lives in exactly one place. It returns true when the day has a `streak_repairs` row, a `streak_rescues` row, or **any** `ChoreCompletion` for that profile with status `Approved`.
 
-`ChoreService::STREAK_BONUSES` maps milestone day → dollar bonus for **one lap** of the track:
+The main quest has **no special standing**. It used to: the walk looked up that day's `DailyQuest` and required an approved completion of *that specific chore*, so a kid could clear six side quests and still lose their run overnight. The quest keeps its pull through the chest, the bold card and the charm; it no longer holds the streak hostage.
+
+Two things that follow and are easy to break:
+
+- **The day is keyed on `submitted_at`, not `decided_at`.** The day belongs to the kid who did the work, not to the evening a parent got round to signing it off. A chore submitted at bedtime and approved over breakfast still counts for the night it was done.
+- **A day with no `DailyQuest` row at all can still count.** The old code returned false early when the quest lookup missed; that guard is gone, and removing it is the whole point.
+
+### `streakDaySecuredToday()` is the generous twin
+
+Same question for *today*, but a **`Pending`** completion also counts. The kid has done their part, and a screen that shows them at risk over a parent's response time is blaming them for somebody else's inbox.
+
+Use it for anything kid-facing — the Arena's safe/at-risk lanes, nudge and rescue refusals, the repair window, the streak card's copy. Use `streakDayEarnedOn()` for the walk-back itself: letting a pending claim into the run would prop up a chain nobody ever signed off.
+
+### One query window, not one per day
+
+Every walk goes through `earnedDaysBetween($profile, $from, $to)`, which returns the earned days in a window as a `Y-m-d` set. `walkBackFrom()` then counts backwards **in memory**. That is the shape to preserve: asking day by day meant three queries per day walked, so a single approval on a 60-day run cost 622 and a parent clearing a backlog paid it per chore. It is now 44, flat, however long the run.
+
+Days are bucketed in PHP, not SQL — the boundary hour belongs to the household and `HouseholdClock::dayFor()` is what knows how it combines with the timezone. And the date columns are filtered with **`whereDate`, never `whereBetween`** on raw strings: Laravel writes a `date` column through the model's datetime format, so the stored value carries a `00:00:00` and `'2026-05-01 00:00:00' BETWEEN '2026-05-01' AND '2026-05-01'` is false. That silently dropped every repair and rescue when it was written the obvious way.
+
+### Recompute, never increment
+
+`refreshStreak()` sets `streak = currentStreak()` rather than incrementing: a parent clearing a backlog can approve days in any order and every path has to land on the same number.
+
+`ChoreService::approve()` offers **every** approval to `recordApproval()`, which recomputes only when the completion's day was not already earned — otherwise the walk is guaranteed to land on the number already stored. That guard is safe precisely because the first approval of any day always recomputes and nothing else raises a streak (`syncStreak()` only ever drops one). Milestone payouts are gated on the `streak_milestone_paid_through` high-water mark on top of that, so a recompute can never double-pay.
+
+`StreakService::STREAK_BONUSES` maps milestone day → dollar bonus for **one lap** of the track:
 
 ```php
 3 => 1, 5 => 3, 7 => 5, 14 => 15, 30 => 40
@@ -57,11 +85,11 @@ It runs from the `sync-streak` middleware on the whole `kid` route group (`App\H
 
 ## Streak restore
 
-The Bonus Shop's Streak Restore perk writes a `streak_repairs` row for the missed day. `questApprovedOn()` treats a repaired date exactly like an approved one, so the existing walk-back recompute needs no special casing.
+The Bonus Shop's Streak Restore perk writes a `streak_repairs` row for the missed day. `streakDayEarnedOn()` treats a repaired date exactly like an approved one, so the existing walk-back recompute needs no special casing.
 
 `repairableStreakDate()` only offers yesterday, and only when the day before it counted — repairing a day with nothing behind it would just manufacture a one-day streak rather than saving a real run. Two or more missed days therefore can't be bought back at all.
 
-**The window closes the moment today's quest is cleared.** `repairableStreakDate()` returns null once `isQuestDoneToday()` is true: clearing today starts a fresh chain of one, and buying the broken day back there would splice a finished run onto it. `PerkInventoryService::streakRestoreReason()` says exactly that instead of falling back to "no broken streak to fix", which reads as a bug to a kid who knows they just broke one.
+**The window closes the moment today is secured.** `repairableStreakDate()` returns null once `streakDaySecuredToday()` is true — any chore claimed or approved today, not just the quest: today starts a fresh chain of one, and buying the broken day back there would splice a finished run onto it. `PerkInventoryService::streakRestoreReason()` says exactly that instead of falling back to "no broken streak to fix", which reads as a bug to a kid who knows they just broke one.
 
 `repairPreview(Profile)` returns `['date' => Carbon, 'restoresTo' => int]` — the day a restore buys back and the streak it would leave behind — so the Quests page's "Streak Rescue" card can quote the number before a perk is spent on it.
 

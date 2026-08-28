@@ -8,7 +8,7 @@ use App\Models\ChoreCompletion;
 use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\Profile;
-use App\Services\ChoreService;
+use App\Services\StreakService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -39,9 +39,9 @@ class StreakCycleTest extends TestCase
         $this->travelTo(Carbon::parse('2026-05-01 12:00', $this->household->timezone));
     }
 
-    private function service(): ChoreService
+    private function service(): StreakService
     {
-        return app(ChoreService::class);
+        return app(StreakService::class);
     }
 
     /**
@@ -82,7 +82,7 @@ class StreakCycleTest extends TestCase
 
     public function test_the_first_lap_pays_the_base_amounts(): void
     {
-        foreach (ChoreService::STREAK_BONUSES as $day => $dollars) {
+        foreach (StreakService::STREAK_BONUSES as $day => $dollars) {
             $this->assertSame($dollars, $this->service()->streakBonusOn($day), "Day {$day}");
         }
     }

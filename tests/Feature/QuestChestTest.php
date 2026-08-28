@@ -134,7 +134,7 @@ class QuestChestTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         Volt::test('kid.home')
-            ->assertSee("Complete today's quest and come back tomorrow to open the chest", false);
+            ->assertSee('Get one chore signed off and come back tomorrow to open the chest', false);
     }
 
     public function test_an_outstanding_quest_still_gets_the_full_hero(): void
@@ -206,7 +206,7 @@ class QuestChestTest extends TestCase
         Volt::test('kid.quests')
             ->call('revealQuest')
             ->call('claimQuest')
-            ->assertSee('Quest cleared. Your streak keeps climbing tonight.', false);
+            ->assertSee('Quest cleared. Tonight counts towards your run.', false);
     }
 
     public function test_a_sent_back_quest_is_not_credited_as_cleared(): void

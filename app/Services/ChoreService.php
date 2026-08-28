@@ -14,8 +14,6 @@ use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\MysteryHintPurchase;
 use App\Models\Profile;
-use App\Models\StreakRepair;
-use App\Models\StreakRescue;
 use App\Notifications\ChoreClosingSoon;
 use App\Notifications\ChoreReviewed;
 use App\Notifications\ParentApprovalNeeded;
@@ -24,42 +22,11 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
-use LogicException;
 use RuntimeException;
 use Throwable;
 
 class ChoreService
 {
-    /**
-     * Streak-day milestone => dollar bonus, credited the moment a kid hits it.
-     *
-     * This is one lap. The chests repeat every {@see self::STREAK_CYCLE_DAYS}
-     * days rather than stopping at the last one — a kid who reached day 30 used
-     * to find the track had simply run out, which is the worst possible moment
-     * to stop paying attention to them.
-     */
-    public const STREAK_BONUSES = [
-        3 => 1,
-        5 => 3,
-        7 => 5,
-        14 => 15,
-        30 => 40,
-    ];
-
-    /** Length of one lap of the chest track — the last milestone in the map. */
-    public const STREAK_CYCLE_DAYS = 30;
-
-    /**
-     * What every lap after the first pays, against the base map above.
-     *
-     * Flat rather than compounding, deliberately. Doubling per lap is the
-     * obvious reading of "the chests get bigger each time round" and it is a
-     * money bug: points are backed by `points_per_dollar`, so a year-long
-     * streak would reach five figures on a single chest. One step up, held
-     * there, keeps the day-33 "it got bigger" moment without the tail.
-     */
-    public const STREAK_REPEAT_MULTIPLIER = 2;
-
     /** Bonus paid on top of whatever chore gets picked as the day's mystery. */
     public const MYSTERY_BONUS_POINTS = 500;
 
@@ -119,9 +86,6 @@ class ChoreService
      */
     public const XP_PER_CHORE = 50;
 
-    /** Safety bound on the streak walk-back so odd data can't loop forever. */
-    private const MAX_STREAK_DAYS = 366;
-
     /** How many finished household days a pace figure averages over. */
     public const PACE_DAYS = 7;
 
@@ -131,6 +95,7 @@ class ChoreService
         private BadgeService $badges,
         private TicketService $tickets,
         private MonsterService $monsters,
+        private StreakService $streaks,
     ) {}
 
     public function questFor(Profile $profile): DailyQuest
@@ -1381,314 +1346,6 @@ class ChoreService
         return $quest;
     }
 
-    /**
-     * Drops a cached streak that has quietly died.
-     *
-     * `profiles.streak` is a cache, and only an approval used to refresh it —
-     * so a kid who skipped a day carried yesterday's number on their header
-     * until they next got something signed off, and a repair bought at that
-     * point stapled the old run onto the new one.
-     *
-     * This is the read-side half, and it's O(1) on purpose so it can run on
-     * every page load: a live chain always ends on today or yesterday, so if
-     * neither day counts there is nothing left to walk back through.
-     *
-     * The milestone high-water mark is deliberately left alone — it is what
-     * stops a lapse-and-repair cycle from paying every bonus twice.
-     */
-    public function syncStreak(Profile $profile): void
-    {
-        if ($profile->streak === 0) {
-            return;
-        }
-
-        $today = HouseholdClock::for($profile->household)->today();
-
-        if (
-            $this->questApprovedOn($profile, $today)
-            || $this->questApprovedOn($profile, $today->copy()->subDay())
-        ) {
-            return;
-        }
-
-        $profile->streak = 0;
-        $profile->save();
-    }
-
-    /**
-     * The day a streak repair would actually buy back, or null when there's
-     * nothing worth fixing — yesterday already counts, today's quest has
-     * already been cleared, or there was no live chain to save.
-     */
-    public function repairableStreakDate(Profile $profile): ?Carbon
-    {
-        // A restore is a rescue, not a top-up. Once today's quest is in, the
-        // kid is on a fresh one-day streak and the broken day sits behind it;
-        // buying it back there would splice a finished run onto a new one and
-        // hand over days that were never saved.
-        if ($this->isQuestDoneToday($profile)) {
-            return null;
-        }
-
-        $yesterday = HouseholdClock::for($profile->household)->today()->subDay();
-
-        if ($this->questApprovedOn($profile, $yesterday)) {
-            return null;
-        }
-
-        // Only a break in a running chain is worth buying back; repairing a
-        // day with nothing behind it just manufactures a one-day streak.
-        return $this->questApprovedOn($profile, $yesterday->copy()->subDay())
-            ? $yesterday
-            : null;
-    }
-
-    /**
-     * What a Streak Restore is worth right now: the day it buys back and the
-     * streak the kid would be left holding, so the offer can say so before
-     * they spend a perk on it.
-     *
-     * @return array{date: Carbon, restoresTo: int}|null
-     */
-    public function repairPreview(Profile $profile): ?array
-    {
-        $date = $this->repairableStreakDate($profile);
-
-        if (! $date) {
-            return null;
-        }
-
-        // The bought-back day, plus the unbroken run behind it. Today's quest
-        // is undone — that's a precondition for offering this at all — so the
-        // restored chain ends on the day being repaired.
-        $restoresTo = 1;
-        $cursor = $date->copy()->subDay();
-
-        while ($restoresTo < self::MAX_STREAK_DAYS && $this->questApprovedOn($profile, $cursor)) {
-            $restoresTo++;
-            $cursor = $cursor->copy()->subDay();
-        }
-
-        return ['date' => $date, 'restoresTo' => $restoresTo];
-    }
-
-    /** Buys back the missed day and recomputes. Null when there was nothing to repair. */
-    public function repairStreak(Profile $profile): ?Carbon
-    {
-        $date = $this->repairableStreakDate($profile);
-
-        if (! $date) {
-            return null;
-        }
-
-        StreakRepair::create([
-            'profile_id' => $profile->id,
-            'repaired_date' => $date,
-        ]);
-
-        $this->refreshStreak($profile);
-
-        return $date;
-    }
-
-    /**
-     * Recomputes the streak and pays out any milestone bonus newly crossed.
-     * Driven by approval, not by claiming, so a kid can't bank a bonus for
-     * work a parent hasn't signed off on.
-     *
-     * Deliberately a recompute rather than an increment: a parent working
-     * through several days of backlog can approve them in any order, and
-     * every one of those approvals still has to land on the same number.
-     */
-    private function refreshStreak(Profile $profile): void
-    {
-        // A high-water mark, not the current streak. Gating on the live value
-        // would let a kid lapse a streak and buy a repair to collect every
-        // milestone a second time.
-        $paidThrough = $profile->streak_milestone_paid_through;
-        $profile->streak = $this->currentStreak($profile);
-
-        $reached = null;
-
-        // The ladder is climbed on *earned* nights only. A sibling's rescue
-        // keeps the run standing — questApprovedOn() says so — but buying
-        // somebody a milestone is a different thing entirely, and the copy on
-        // the rescue button promises it doesn't happen. A repair is deliberately
-        // not subtracted here: it is bought by the kid whose run it is, out of
-        // their own tickets, and has always counted.
-        $ladder = $profile->streak - $this->rescuedNightsInRun($profile);
-
-        // Walked day by day rather than over a fixed map, because the track
-        // repeats and the milestone days are unbounded. The high-water mark is
-        // still what gates a payout, so recomputing — or repairing — can never
-        // double-credit one already banked.
-        for ($day = $paidThrough + 1; $day <= $ladder; $day++) {
-            $bonusDollars = $this->streakBonusOn($day);
-
-            if ($bonusDollars === null) {
-                continue;
-            }
-
-            $this->ledger->record(
-                $profile->household,
-                $profile,
-                LedgerKind::Earn,
-                $bonusDollars * $profile->household->points_per_dollar,
-                "{$profile->name} — {$day}-day streak bonus (\${$bonusDollars})",
-            );
-
-            $reached = $day;
-        }
-
-        if ($reached !== null) {
-            // Credited immediately above, but the reveal waits for the kid
-            // to open the streak chest — that's the surprise moment.
-            $profile->pending_streak_chest = $reached;
-            $profile->streak_milestone_paid_through = $reached;
-        }
-
-        $profile->save();
-    }
-
-    /**
-     * How long the run was that ended on a given household day — the number
-     * that was true *then*, not now.
-     *
-     * `profiles.streak` is only ever the current figure, so anything narrating
-     * a past day has to ask for that day. Bounded like every other walk here.
-     */
-    public function runLengthOn(Profile $profile, Carbon $day): int
-    {
-        $cursor = $day->copy();
-        $run = 0;
-
-        while ($run < self::MAX_STREAK_DAYS && $this->questApprovedOn($profile, $cursor)) {
-            $run++;
-            $cursor = $cursor->copy()->subDay();
-        }
-
-        return $run;
-    }
-
-    /** Whether a sibling bought this night to keep the run alive. */
-    public function wasRescuedOn(Profile $profile, Carbon $date): bool
-    {
-        return StreakRescue::where('profile_id', $profile->id)
-            ->whereDate('rescued_date', $date)
-            ->exists();
-    }
-
-    /**
-     * Rescued nights inside the run currently standing.
-     *
-     * Subtracted from the milestone walk so a rescue keeps the run and not the
-     * ladder. Walks the same days `currentStreak()` does, for the same reason
-     * it recomputes rather than increments: a parent clearing a backlog can
-     * approve days in any order and every path has to land on one number.
-     *
-     * Public because it is the honest answer to "how far along the ladder am
-     * I really" — a run of six with two rescues in it is four nights' worth of
-     * progress, and anything showing a kid their position needs to be able to
-     * say so rather than implying they bought their way up it.
-     */
-    public function rescuedNightsInRun(Profile $profile): int
-    {
-        $cursor = HouseholdClock::for($profile->household)->today();
-
-        if (! $this->questApprovedOn($profile, $cursor)) {
-            $cursor = $cursor->copy()->subDay();
-        }
-
-        $rescued = 0;
-        $walked = 0;
-
-        while ($walked < self::MAX_STREAK_DAYS && $this->questApprovedOn($profile, $cursor)) {
-            if ($this->wasRescuedOn($profile, $cursor)) {
-                $rescued++;
-            }
-
-            $walked++;
-            $cursor = $cursor->copy()->subDay();
-        }
-
-        return $rescued;
-    }
-
-    /**
-     * Consecutive household-days ending today (or yesterday, if today's
-     * quest isn't approved yet) that have an approved quest completion.
-     */
-    private function currentStreak(Profile $profile): int
-    {
-        $cursor = HouseholdClock::for($profile->household)->today();
-
-        // Today being unapproved doesn't end a streak — it just means the
-        // chain is still anchored on yesterday.
-        if (! $this->questApprovedOn($profile, $cursor)) {
-            $cursor = $cursor->copy()->subDay();
-        }
-
-        $streak = 0;
-
-        while ($streak < self::MAX_STREAK_DAYS && $this->questApprovedOn($profile, $cursor)) {
-            $streak++;
-            $cursor = $cursor->copy()->subDay();
-        }
-
-        return $streak;
-    }
-
-    /**
-     * Whether the quest assigned for a given household-day counts toward the
-     * streak — either it was approved, or the day was bought back with a
-     * streak repair, which the walk-back treats identically.
-     */
-    /**
-     * Whether the quest for a given household day was signed off.
-     *
-     * Public for the Arena, which has to tell a run that is merely *young*
-     * from one that died at the last rollover — the difference between a kid
-     * on nothing and a kid who just lost nine nights, and the two must never
-     * read the same on a screen the whole house is looking at.
-     */
-    public function questApprovedOn(Profile $profile, Carbon $date): bool
-    {
-        $repaired = StreakRepair::where('profile_id', $profile->id)
-            ->whereDate('repaired_date', $date)
-            ->exists();
-
-        // A sibling's rescue counts here exactly as a repair does. It keeps the
-        // run alive, and it is excluded from the milestone ladder separately —
-        // see refreshStreak(). Answering "no" here instead would end the run,
-        // which is the one thing a rescue is bought to prevent.
-        if ($repaired || $this->wasRescuedOn($profile, $date)) {
-            return true;
-        }
-
-        $quest = DailyQuest::where('profile_id', $profile->id)
-            ->whereDate('quest_date', $date)
-            ->first();
-
-        if (! $quest) {
-            return false;
-        }
-
-        $clock = HouseholdClock::for($profile->household);
-
-        return ChoreCompletion::where('profile_id', $profile->id)
-            ->where('chore_id', $quest->chore_id)
-            ->where('status', CompletionStatus::Approved)
-            ->where('submitted_at', '>=', $clock->startOf($date))
-            ->where('submitted_at', '<', $clock->startOf($date->copy()->addDay()))
-            ->exists();
-    }
-
-    /** Whether this completion is the one that clears its day's main quest. */
-    private function isQuestCompletion(ChoreCompletion $completion, Profile $profile): bool
-    {
-        return $this->questForCompletion($completion, $profile) !== null;
-    }
-
     /** The quest this completion clears, if it clears one. */
     private function questForCompletion(ChoreCompletion $completion, Profile $profile): ?DailyQuest
     {
@@ -1699,125 +1356,6 @@ class ChoreService
             ->first();
 
         return $quest?->chore_id === $completion->chore_id ? $quest : null;
-    }
-
-    /**
-     * Marks the pending streak-milestone chest as opened. The bonus was
-     * already credited to the ledger when the milestone was reached — this
-     * just unlocks the reveal animation and returns what to show for it.
-     *
-     * @return array{day: int, dollars: int}|null
-     */
-    public function openStreakChest(Profile $profile): ?array
-    {
-        $day = $profile->pending_streak_chest;
-
-        if ($day === null) {
-            return null;
-        }
-
-        $profile->pending_streak_chest = null;
-        $profile->save();
-
-        return ['day' => $day, 'dollars' => $this->streakBonusOn($day) ?? 0];
-    }
-
-    /**
-     * The dollar bonus paid for reaching exactly this streak day, or null on a
-     * day that isn't a milestone.
-     *
-     * Days are absolute across every lap — day 33 is the second lap's first
-     * chest — which is what lets `streak_milestone_paid_through` stay a plain
-     * high-water mark and keep doing its job unchanged.
-     */
-    public function streakBonusOn(int $day): ?int
-    {
-        if ($day < 1) {
-            return null;
-        }
-
-        // Day 30 closes the first lap rather than opening the second, so a day
-        // landing exactly on the boundary belongs to the lap behind it.
-        $offset = $day % self::STREAK_CYCLE_DAYS;
-        $lap = $offset === 0
-            ? intdiv($day, self::STREAK_CYCLE_DAYS)
-            : intdiv($day, self::STREAK_CYCLE_DAYS) + 1;
-
-        $offset = $offset === 0 ? self::STREAK_CYCLE_DAYS : $offset;
-
-        $base = self::STREAK_BONUSES[$offset] ?? null;
-
-        if ($base === null) {
-            return null;
-        }
-
-        return $lap === 1 ? $base : $base * self::STREAK_REPEAT_MULTIPLIER;
-    }
-
-    /**
-     * Smallest streak-bonus milestone day still ahead of the profile's current
-     * streak. Never null now that the track repeats — there is always another
-     * chest inside the next lap.
-     */
-    public function nextStreakMilestone(Profile $profile): int
-    {
-        $streak = max(0, $profile->streak);
-
-        for ($day = $streak + 1; $day <= $streak + self::STREAK_CYCLE_DAYS; $day++) {
-            if ($this->streakBonusOn($day) !== null) {
-                return $day;
-            }
-        }
-
-        // Unreachable while the base map has any entry in it, but a silent
-        // wrong answer here would show up as a nonsense number on the track.
-        throw new LogicException('No streak milestone found within a full cycle.');
-    }
-
-    /**
-     * The lap of the chest track this kid is currently working through, and the
-     * five milestones on it.
-     *
-     * Only the current lap is ever shown. The track is otherwise endless, and a
-     * rail of fifteen chests says far less about "keep going" than five chests
-     * with the next one lit.
-     *
-     * The lap turns over when the *chest* is opened rather than when the streak
-     * ticks past the boundary: hitting day 30 and finding the track already
-     * showing days 33-60 would swap the reward out from under the moment that
-     * earned it.
-     *
-     * @return array{lap: int, milestones: array<int, array{day: int, dollars: int, points: int, reached: bool}>}
-     */
-    public function streakTrackFor(Profile $profile): array
-    {
-        $streak = max(0, $profile->streak);
-        $lap = intdiv($streak, self::STREAK_CYCLE_DAYS) + 1;
-
-        $closingDay = ($lap - 1) * self::STREAK_CYCLE_DAYS;
-
-        if ($lap > 1 && $profile->pending_streak_chest === $closingDay) {
-            $lap--;
-        }
-
-        $pointsPerDollar = $profile->household->points_per_dollar;
-        $offsetToDay = ($lap - 1) * self::STREAK_CYCLE_DAYS;
-
-        $milestones = [];
-
-        foreach (array_keys(self::STREAK_BONUSES) as $offset) {
-            $day = $offsetToDay + $offset;
-            $dollars = (int) $this->streakBonusOn($day);
-
-            $milestones[] = [
-                'day' => $day,
-                'dollars' => $dollars,
-                'points' => $dollars * $pointsPerDollar,
-                'reached' => $streak >= $day,
-            ];
-        }
-
-        return ['lap' => $lap, 'milestones' => $milestones];
     }
 
     /**
@@ -1926,9 +1464,12 @@ class ChoreService
 
         // Before badges, not after — the streak_3/7/14 badges read the
         // profile's streak, so it has to be current by the time they run.
-        if ($this->isQuestCompletion($completion, $profile)) {
-            $this->refreshStreak($profile);
-        }
+        //
+        // Every approval is offered, not just the quest's: any approved chore
+        // earns the day now, so a side quest signed off is as much a reason to
+        // recompute as the main one. StreakService decides whether it actually
+        // changes anything — see StreakService::recordApproval().
+        $this->streaks->recordApproval($completion, $profile);
 
         $this->badges->evaluate($profile);
         $this->badges->evaluateHouseholdGoal($household);

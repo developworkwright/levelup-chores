@@ -16,6 +16,7 @@ use App\Services\ChestService;
 use App\Services\ChoreService;
 use App\Services\MonsterService;
 use App\Services\SpinService;
+use App\Services\StreakService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -387,7 +388,7 @@ class KidHomePageTest extends TestCase
         // than an echoed variable, so Blade leaves the apostrophe alone.
         Volt::test('kid.home')
             ->assertOk()
-            ->assertSee("Clear today's quest to start a streak", escape: false)
+            ->assertSee('Get any chore signed off to start a streak', escape: false)
             ->assertDontSee('Keep the streak alive');
     }
 
@@ -414,7 +415,7 @@ class KidHomePageTest extends TestCase
 
         $widths = array_map('intval', $matches[1]);
 
-        $this->assertCount(count(ChoreService::STREAK_BONUSES), $widths, 'One chest per milestone.');
+        $this->assertCount(count(StreakService::STREAK_BONUSES), $widths, 'One chest per milestone.');
         $this->assertSame($widths, array_values(array_unique($widths)), 'No two chests the same size.');
 
         $sorted = $widths;

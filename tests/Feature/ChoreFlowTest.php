@@ -14,6 +14,7 @@ use App\Notifications\ParentApprovalNeeded;
 use App\Services\ChoreService;
 use App\Services\HouseholdClock;
 use App\Services\MonsterService;
+use App\Services\StreakService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Notification;
@@ -297,7 +298,7 @@ class ChoreFlowTest extends TestCase
         $this->clearQuest($kid, $parent); // Day 3 milestone.
         Carbon::setTestNow();
 
-        $result = $this->service()->openStreakChest($kid->refresh());
+        $result = app(StreakService::class)->openStreakChest($kid->refresh());
 
         $this->assertSame(['day' => 3, 'dollars' => 1], $result);
         $this->assertNull($kid->refresh()->pending_streak_chest);
@@ -308,7 +309,7 @@ class ChoreFlowTest extends TestCase
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
 
-        $this->assertNull($this->service()->openStreakChest($kid));
+        $this->assertNull(app(StreakService::class)->openStreakChest($kid));
     }
 
     public function test_next_streak_milestone_reports_the_smallest_day_ahead_of_the_current_streak(): void
@@ -316,7 +317,7 @@ class ChoreFlowTest extends TestCase
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['streak' => 3]);
 
-        $this->assertSame(5, $this->service()->nextStreakMilestone($kid));
+        $this->assertSame(5, app(StreakService::class)->nextStreakMilestone($kid));
     }
 
     public function test_streak_bonuses_accumulate_correctly_through_day_seven(): void

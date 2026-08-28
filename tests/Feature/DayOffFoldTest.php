@@ -7,8 +7,8 @@ use App\Models\DailyChest;
 use App\Models\Household;
 use App\Models\OwnedPerk;
 use App\Models\Profile;
-use App\Services\ChoreService;
 use App\Services\PerkInventoryService;
+use App\Services\StreakService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -147,13 +147,13 @@ class DayOffFoldTest extends TestCase
         $bought = now()->subDays(2)->startOfDay();
         $this->buyDayOffOn($bought);
 
-        // `questApprovedOn()` used to read quest_skips beside streak_repairs.
+        // The streak walk used to read quest_skips beside streak_repairs.
         // It only reads repairs now, so a day the kid paid for keeps counting
         // only if the migration moved it across — drop the table without that
         // and a live run is a night shorter the morning after deploy.
         $this->fold();
 
-        $this->assertTrue(app(ChoreService::class)->questApprovedOn($this->kid, $bought));
+        $this->assertTrue(app(StreakService::class)->streakDayEarnedOn($this->kid, $bought));
     }
 
     public function test_a_day_that_was_both_bought_and_repaired_does_not_collide(): void

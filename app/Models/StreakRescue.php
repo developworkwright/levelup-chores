@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * A night one kid bought to keep another kid's run alive.
  *
  * Counts toward the run exactly as a {@see StreakRepair} does, and toward the
- * milestone ladder not at all — see `ChoreService::refreshStreak()`. Nothing
+ * milestone ladder not at all — see `StreakService::refreshStreak()`. Nothing
  * anywhere may describe a rescued night as earned.
  */
 class StreakRescue extends Model

@@ -3,7 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\Profile;
-use App\Services\ChoreService;
+use App\Services\StreakService;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -17,20 +17,20 @@ use Symfony\Component\HttpFoundation\Response;
  * running per household timezone — so the boundary is noticed on the way in
  * instead, before any page has a chance to render a number that isn't true.
  *
- * {@see ChoreService::syncStreak()} is a constant-cost check, not a walk back
+ * {@see StreakService::syncStreak()} is a constant-cost check, not a walk back
  * through the whole chain, which is what makes this cheap enough to sit in
  * front of every kid page.
  */
 class SyncStreak
 {
-    public function __construct(private ChoreService $chores) {}
+    public function __construct(private StreakService $streaks) {}
 
     public function handle(Request $request, Closure $next): Response
     {
         $profile = $request->user();
 
         if ($profile instanceof Profile && $profile->isKid()) {
-            $this->chores->syncStreak($profile);
+            $this->streaks->syncStreak($profile);
         }
 
         return $next($request);
