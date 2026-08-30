@@ -294,20 +294,13 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        /**
+         * Click only. Hover was tried and taken out: it opens an album as the
+         * pointer crosses it on the way somewhere else, and does nothing at all
+         * on the phones this is mostly used from.
+         */
         toggleAlbum(album) {
             this.openAlbum = this.openAlbum === album ? null : album;
-        },
-
-        /**
-         * Hover opens an album too — but only where hovering is a thing that
-         * exists. On a touch screen the browser fires hover from a tap, so
-         * without this check the tap would open the album and the click that
-         * follows it would immediately close it again.
-         */
-        hoverAlbum(album) {
-            if (window.matchMedia('(hover: hover)').matches) {
-                this.openAlbum = album;
-            }
         },
 
         get label() {

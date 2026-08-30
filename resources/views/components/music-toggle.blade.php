@@ -98,15 +98,14 @@
 
                 <template x-for="album in albums" :key="album">
                     <div>
-                        {{-- Tap to open, and hover as well on anything with a
-                             real pointer. Tap has to be the one that works:
-                             the kids are on phones, where hover does not
-                             exist. See hoverAlbum() for what a touch browser
-                             does with a hover handler if you let it. --}}
+                        {{-- Click only, deliberately. An album that opens on
+                             hover opens itself as the pointer crosses it on
+                             the way to somewhere else, and on a phone it does
+                             not open at all — so the two behave differently on
+                             the two devices this runs on, for no gain. --}}
                         <button
                             type="button"
                             @click="toggleAlbum(album)"
-                            @mouseenter="hoverAlbum(album)"
                             :aria-expanded="openAlbum === album"
                             class="flex w-full items-center gap-2 rounded-[10px] px-2 py-[9px] text-left text-[13px] transition hover:text-fq-text"
                             :class="openAlbum === album ? 'text-fq-text' : 'text-fq-text-3'"

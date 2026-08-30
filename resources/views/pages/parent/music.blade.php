@@ -356,8 +356,12 @@ new class extends Component
                                 wire:click="openAlbum(@js($name))"
                                 class="flex items-center gap-2 rounded-[14px] border border-fq-line-2 bg-fq-panel px-3 py-[11px] text-left transition hover:border-fq-line-focus"
                             >
+                                {{-- The characters themselves, not entities:
+                                     these go through {{ }}, which escapes, so
+                                     an entity here reaches the page as its own
+                                     source text. --}}
                                 <span class="w-[12px] shrink-0 text-[10px] text-fq-text-4">
-                                    {{ $openAlbum === $name ? '&#9660;' : '&#9654;' }}
+                                    {{ $openAlbum === $name ? '▼' : '▶' }}
                                 </span>
                                 <span class="font-baloo text-[15px] font-bold">{{ $name }}</span>
                                 <span class="ml-auto shrink-0 font-mono-fq text-[10px] text-fq-text-5">

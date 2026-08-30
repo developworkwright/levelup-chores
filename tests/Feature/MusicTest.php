@@ -111,6 +111,54 @@ class MusicTest extends TestCase
         );
     }
 
+    public function test_it_ignores_livewire_s_own_upload_scratch_folder(): void
+    {
+        /*
+         * The bucket is not ours alone. Livewire parks in-flight uploads in a
+         * directory at the top of the default disk, which on Laravel Cloud is
+         * the attached bucket — the same one the music is in. A deep listing
+         * walked into it and half-finished uploads showed up as an album named
+         * "livewire-tmp", on the parent screen *and* in the kids' picker.
+         */
+        $this->library([
+            'Pixel_Run.mp3',
+            FileUploadConfiguration::directory().'/half-an-upload.mp3',
+            FileUploadConfiguration::directory().'/another.mp3',
+        ]);
+
+        $tracks = app(MusicService::class)->tracks();
+
+        $this->assertSame(['Pixel Run'], array_column($tracks, 'title'));
+        $this->assertSame([null], array_column($tracks, 'album'));
+    }
+
+    public function test_the_kid_picker_is_never_offered_the_scratch_folder(): void
+    {
+        $this->library([
+            'Pixel_Run.mp3',
+            FileUploadConfiguration::directory().'/half-an-upload.mp3',
+        ]);
+        $this->loginKid();
+
+        Volt::test('kid.quests')
+            ->assertSee('Pixel Run')
+            ->assertDontSee(FileUploadConfiguration::directory());
+    }
+
+    public function test_the_album_chevron_is_a_character_and_not_its_own_source(): void
+    {
+        // It goes through {{ }}, which escapes — so an HTML entity there
+        // reaches the page as the literal text "&#9654;". Asserted positively:
+        // the escaped form is "&amp;#9654;", which does not contain the entity
+        // as a substring, so looking for its absence proves nothing.
+        $this->library(['Undertale/Ruins.mp3']);
+        $this->loginParent();
+
+        Volt::test('parent.music')
+            ->assertSee('▶', false)
+            ->assertDontSee('amp;#9654', false);
+    }
+
     public function test_a_folder_nested_deeper_still_belongs_to_the_album_at_the_top(): void
     {
         // Otherwise the picker would need a third level, and a menu a kid has

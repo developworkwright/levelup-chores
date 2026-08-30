@@ -7,6 +7,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Livewire\Features\SupportFileUploads\FileUploadConfiguration;
 use RuntimeException;
 use Throwable;
 
@@ -291,7 +292,8 @@ class MusicService
         // its size, where the shallow-plus-HEAD form is a request per song.
         $tracks = collect($disk->getDriver()->listContents('', true)->toArray())
             ->filter(fn ($item): bool => $item->isFile()
-                && strtolower(pathinfo($item->path(), PATHINFO_EXTENSION)) === 'mp3')
+                && strtolower(pathinfo($item->path(), PATHINFO_EXTENSION)) === 'mp3'
+                && ! $this->isScratch($item->path()))
             ->map(function ($item) use ($disk): array {
                 $path = $item->path();
 
@@ -324,6 +326,24 @@ class MusicService
             ->all();
 
         return $tracks;
+    }
+
+    /**
+     * Whether a path belongs to something other than the music library.
+     *
+     * The bucket is not ours alone. Livewire parks every in-flight upload in
+     * its own directory at the top of the *default* disk, which on Laravel
+     * Cloud is the attached bucket — the same one the music sits in. A deep
+     * listing walks straight into it, and half-finished uploads turned up as an
+     * album called "livewire-tmp", on the parent screen and in the kids' picker
+     * alike.
+     *
+     * Asked of Livewire rather than hardcoded, since the directory is
+     * configurable and a renamed one would put the folder straight back.
+     */
+    private function isScratch(string $path): bool
+    {
+        return str_starts_with($path, FileUploadConfiguration::directory().'/');
     }
 
     /**
