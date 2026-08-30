@@ -263,16 +263,36 @@
         $markers['quotes_seen_at'] = now();
     }
 
-    foreach ($quoteNews['quotes'] as $newQuote) {
-        $mine = $newQuote->profile_id === $profile->id;
+    /*
+     * One card, however many quotes are waiting.
+     *
+     * A kid back after a weekend can have four of these, and four cards fired
+     * one after another turns a nice surprise into something to sit through —
+     * the queue holds each for three seconds, so the fourth joke lands on a kid
+     * who stopped looking at the second. The single-quote card is unchanged;
+     * everything past one collapses into a card that leads with the newest and
+     * says how many more are behind it.
+     *
+     * The newest rather than the oldest, because it is the one most likely to
+     * be about today, and because the rest are a scroll away on the Quote Wall.
+     * `newsFor()` orders by id, so last() is the freshest.
+     */
+    $newQuotes = $quoteNews['quotes'];
+    $newest = $newQuotes->last();
+    $mineCount = $newQuotes->filter(fn ($row) => $row->profile_id === $profile->id)->count();
 
+    if ($newQuotes->isNotEmpty()) {
         $quietRewards->push([
-            // Being quoted is the better half of this feature, so it gets its
+            // Being quoted is the better half of this feature, so it keeps its
             // own line rather than "Someone said something" with your own name
-            // in it.
-            'message' => $mine
-                ? 'Your line got written down!'
-                : $newQuote->attribution().' said something!',
+            // in it — and the combined card still says when one of them is
+            // yours, which is the part a kid actually wants to know.
+            'message' => match (true) {
+                $newQuotes->count() > 1 && $mineCount > 0 => $newQuotes->count().' new quotes, including yours!',
+                $newQuotes->count() > 1 => $newQuotes->count().' new quotes!',
+                $mineCount > 0 => 'Your line got written down!',
+                default => $newest->attribution().' said something!',
+            },
             'big' => false,
             'style' => 'confetti',
             'card' => [
@@ -284,8 +304,9 @@
                 // Trimmed: the card draws its label at 28px, and a rambling
                 // three-line quote pushes the note off the bottom of it. The
                 // whole thing is a scroll away on the Quote Wall.
-                'label' => Str::limit($newQuote->text, 90),
-                'note' => '— '.$newQuote->attribution(),
+                'label' => Str::limit($newest->text, 90),
+                'note' => '— '.$newest->attribution()
+                    .($newQuotes->count() > 1 ? ' · +'.($newQuotes->count() - 1).' more on the Quote Wall' : ''),
             ],
         ]);
     }
@@ -490,6 +511,11 @@
                         class="block"
                     >&#8635;</span>
                 </button>
+
+                {{-- Background music, next to the bell because both are the
+                     same question: how much noise is this app allowed to make
+                     while a kid is somewhere else in the house. --}}
+                <x-music-toggle />
 
                 {{-- Alerts belong in the header rather than on a page of their
                      own. Everything a kid can be notified about — work signed

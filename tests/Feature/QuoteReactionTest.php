@@ -237,6 +237,60 @@ class QuoteReactionTest extends TestCase
         }
     }
 
+    /**
+     * A kid back after a weekend gets one card, not a queue of them. Four
+     * celebrations fired in sequence is something to sit through rather than a
+     * surprise, and the fourth joke lands on a kid who stopped watching.
+     */
+    public function test_several_new_quotes_collapse_into_one_celebration(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create(['quotes_seen_at' => now()->subDay()]);
+
+        foreach (['Angry milk', 'Moon follows us', 'Dogs have no elbows'] as $text) {
+            Quote::factory()->for($household)->create(['text' => $text, 'said_by' => 'Granny']);
+        }
+
+        Auth::guard('profile')->login($kid);
+
+        Volt::test('kid.home')
+            ->assertSee('3 new quotes!', escape: false)
+            // The newest leads, and the card says what is still waiting.
+            ->assertSee('Dogs have no elbows', escape: false)
+            ->assertSee('+2 more on the Quote Wall', escape: false)
+            // The single-quote wording must not also fire.
+            ->assertDontSee('Granny said something!', escape: false);
+    }
+
+    /** The combined card still flags one of them being the kid's own. */
+    public function test_a_combined_celebration_says_when_one_of_them_is_yours(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create(['quotes_seen_at' => now()->subDay()]);
+
+        Quote::factory()->for($household)->create(['text' => 'Theirs', 'said_by' => 'Granny']);
+        Quote::factory()->for($household)->create(['text' => 'Mine', 'profile_id' => $kid->id, 'said_by' => null]);
+
+        Auth::guard('profile')->login($kid);
+
+        Volt::test('kid.home')->assertSee('2 new quotes, including yours!', escape: false);
+    }
+
+    /** One quote still reads exactly as it did — no "+0 more" tacked on. */
+    public function test_a_single_new_quote_is_unchanged(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create(['quotes_seen_at' => now()->subDay()]);
+        Quote::factory()->for($household)->create(['text' => 'Angry milk', 'said_by' => 'Granny']);
+
+        Auth::guard('profile')->login($kid);
+
+        Volt::test('kid.home')
+            ->assertSee('Granny said something!', escape: false)
+            ->assertDontSee('more on the Quote Wall', escape: false)
+            ->assertDontSee('new quotes', escape: false);
+    }
+
     /** A profile created after the feature shipped still starts quiet. */
     public function test_a_brand_new_profile_does_not_inherit_the_backlog(): void
     {

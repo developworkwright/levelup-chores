@@ -72,14 +72,42 @@ class BonusChestTimingTest extends TestCase
         // The stop is <x-chest>'s own 'confirming' phase now that the chest is
         // a card on Home rather than a tile in the Quests tray — a tile was too
         // small to hold a two-button question and had to raise an event for it.
+        //
+        // Asserted on the attribute rather than on the branch in x-data, which
+        // is now always present: the decision has to be re-readable by a
+        // component Alpine already initialised. See the test below.
         $html = Volt::test('kid.home')->html();
-        $this->assertStringContainsString("this.phase = 'confirming'", $html);
+        $this->assertStringContainsString('data-fq-confirm="1"', $html);
 
         $this->clearQuest();
 
         // Nothing left to ask: the chest is already on the good table.
         $cleared = Volt::test('kid.home')->html();
-        $this->assertStringNotContainsString("this.phase = 'confirming'", $cleared);
+        $this->assertStringNotContainsString('data-fq-confirm="1"', $cleared);
+    }
+
+    public function test_the_chest_survives_the_quest_being_cleared_underneath_it(): void
+    {
+        // The dead end: tap the chest, get told to do the quest first, then go
+        // and do exactly that on the card directly above it — and come back to
+        // a chest with no button on it. The panel that answers the question is
+        // rendered by the page and disappears along with the question, which
+        // left the chest stuck in a 'confirming' phase it could not leave.
+        //
+        // Nothing here is a page load, so the client cannot re-read the markup
+        // it was built from; the question stopping has to reach it as an
+        // attribute change on the same element.
+        $page = Volt::test('kid.home')
+            ->assertSee('data-fq-confirm="1"', escape: false)
+            ->assertSee('Hold on')
+            ->call('dealHand');
+
+        $page->call('chooseQuest', app(ChoreService::class)->offeredChoresFor($this->kid)->first()->id)
+            ->call('claimQuest')
+            ->assertOk()
+            ->assertSee('Your chest is OP today')
+            ->assertDontSee('Hold on')
+            ->assertDontSee('data-fq-confirm="1"', escape: false);
     }
 
     public function test_a_cleared_quest_flags_the_chest_as_op_on_the_shut_tile(): void

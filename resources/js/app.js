@@ -17,6 +17,13 @@ import './monsters.js';
  */
 import './arcade.js';
 
+/*
+ * Background music: the header's play button and song picker, and the Audio
+ * object that survives `wire:navigate` between them. Registers `fqMusic` and
+ * the `music` Alpine store.
+ */
+import './music.js';
+
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js').catch(() => {});

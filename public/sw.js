@@ -14,6 +14,20 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+    // Cross-origin requests are left alone entirely — not proxied, not even
+    // observed. Since the background music moved to a bucket it is served from
+    // another origin, and re-issuing a multi-megabyte media request through
+    // fetch() pulls the whole body through JavaScript: it defeats the browser's
+    // own streaming, and range requests (seeking, re-buffering a looped track)
+    // stop behaving. Returning without calling respondWith hands the request
+    // back to the browser to do natively.
+    //
+    // A fetch handler still exists, which is all the installability check in
+    // the comment above asks for.
+    if (new URL(event.request.url).origin !== self.location.origin) {
+        return;
+    }
+
     event.respondWith(fetch(event.request));
 });
 

@@ -44,6 +44,11 @@
 
 <div
     wire:key="{{ $wireKey }}"
+    {{-- Read at open() time rather than compiled into the expression below.
+         Alpine evaluates x-data once and Livewire morphs attributes in place,
+         so a confirm that stops applying mid-visit has to reach the component
+         through an attribute. See init(). --}}
+    data-fq-confirm="{{ $confirm ? '1' : '0' }}"
     x-data="{
         phase: @js($revealed ? 'revealed' : 'closed'),
         label: @js($prizeLabel),
@@ -52,6 +57,36 @@
              prize overlay on the phase alone re-fires the whole celebration
              every time a kid navigates back to the tab. --}}
         justOpened: false,
+        {{-- Whether this chest still has something to ask before it opens. It
+             is a server fact and it changes underneath a chest nobody has
+             touched: the bonus chest asks "do your quest first", and the kid
+             can then go and clear the quest from the card directly above it
+             without ever leaving the page. --}}
+        confirmable: false,
+        init() {
+            this.readConfirm();
+
+            {{-- Alpine only ever evaluates x-data once, so the new server
+                 value never reaches an expression — but it does reach the
+                 attribute. Same reason fqTicker watches data-fq-value. --}}
+            this.observer = new MutationObserver(() => this.readConfirm());
+            this.observer.observe(this.$el, { attributes: true, attributeFilter: ['data-fq-confirm'] });
+        },
+        destroy() {
+            this.observer?.disconnect();
+        },
+        readConfirm() {
+            this.confirmable = this.$el.dataset.fqConfirm === '1';
+
+            {{-- The panel that answers the question is rendered by the caller
+                 and disappears with the question. A chest left sitting in
+                 'confirming' after that has no panel and no button: the exact
+                 dead end a kid hit by tapping the bonus chest, being asked to
+                 do their quest first, and then doing exactly that. --}}
+            if (! this.confirmable && this.phase === 'confirming') {
+                this.phase = 'closed';
+            }
+        },
         {{-- The suspense runs *before* the server call, not alongside it.
              Opening banks the reward, and the response re-renders the header
              with the new balance — so calling first meant the points and
@@ -67,11 +102,13 @@
              else and then calls it. --}}
         async open() {
             if (this.phase !== 'closed') return;
-            @if ($confirm)
+
+            if (this.confirmable) {
                 this.phase = 'confirming';
 
                 return;
-            @endif
+            }
+
             await this.begin();
         },
         async begin() {
