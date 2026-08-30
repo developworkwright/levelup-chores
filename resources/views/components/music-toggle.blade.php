@@ -92,7 +92,13 @@
         <div
             x-show="open"
             x-cloak
-            class="fixed inset-x-0 bottom-0 z-40 flex max-h-[72vh] flex-col rounded-t-[18px] border-t border-fq-line-2 bg-fq-panel p-3 pb-[max(12px,env(safe-area-inset-bottom))] shadow-lg sm:absolute sm:inset-x-auto sm:top-[58px] sm:bottom-auto sm:w-[288px] sm:rounded-[14px] sm:border sm:pb-3"
+            {{-- `sm:left-auto` with `sm:right-0`, never `sm:inset-x-auto`:
+                 an absolutely positioned box with neither edge pinned falls
+                 back to its *static* position, so the panel started at the
+                 button and ran off the right of the screen. The two properties
+                 are set separately here so nothing depends on which of two
+                 same-specificity utilities Tailwind happens to emit last. --}}
+            class="fixed inset-x-0 bottom-0 z-40 flex max-h-[72vh] flex-col rounded-t-[18px] border-t border-fq-line-2 bg-fq-panel p-3 pb-[max(12px,env(safe-area-inset-bottom))] shadow-lg sm:absolute sm:top-[58px] sm:right-0 sm:bottom-auto sm:left-auto sm:w-[288px] sm:rounded-[14px] sm:border sm:pb-3"
         >
             <p class="mb-2 shrink-0 font-mono-fq text-[10px] tracking-wide text-fq-text-4">MUSIC</p>
 
