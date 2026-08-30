@@ -14,6 +14,9 @@ use Illuminate\Support\Facades\Storage;
 use Livewire\Features\SupportFileUploads\FileUploadConfiguration;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\Volt\Volt;
+use ReflectionClass;
+use ReflectionMethod;
+use ReflectionProperty;
 use Tests\TestCase;
 
 class MusicTest extends TestCase
@@ -157,6 +160,56 @@ class MusicTest extends TestCase
         Volt::test('parent.music')
             ->assertSee('▶', false)
             ->assertDontSee('amp;#9654', false);
+    }
+
+    public function test_a_parent_can_expand_an_album_to_see_its_songs(): void
+    {
+        // The playlist only draws the open album's rows, so if this control
+        // does nothing the songs inside an album are unreachable — no rename,
+        // no delete, no listen.
+        $this->library(['Undertale/Ruins.mp3', 'Pixel_Run.mp3']);
+        $this->loginParent();
+
+        Volt::test('parent.music')
+            ->assertDontSee('Ruins')
+            ->call('toggleAlbum', 'Undertale')
+            ->assertSee('Ruins')
+            // And closes again.
+            ->call('toggleAlbum', 'Undertale')
+            ->assertDontSee('Ruins');
+    }
+
+    public function test_no_control_on_the_music_screen_is_named_after_one_of_its_properties(): void
+    {
+        /*
+         * A public method and a public property sharing a name is legal PHP,
+         * works from a test, and is broken in the browser — which is the only
+         * place it matters. `wire:click="openAlbum('Undertale')"` becomes
+         * `$wire.openAlbum(...)`, and $wire resolves a name to the *property*
+         * where one exists, so the click called null and the album never
+         * opened. Nothing that goes through ->call() can catch it, because
+         * ->call() never touches $wire. Reflection can.
+         */
+        $this->loginParent();
+
+        $component = Volt::test('parent.music')->instance();
+        $class = new ReflectionClass($component);
+
+        $declaredHere = fn (array $members): array => array_map(
+            fn ($member) => $member->getName(),
+            array_filter($members, fn ($member) => $member->getDeclaringClass()->getName() === $class->getName()),
+        );
+
+        $collisions = array_intersect(
+            $declaredHere($class->getProperties(ReflectionProperty::IS_PUBLIC)),
+            $declaredHere($class->getMethods(ReflectionMethod::IS_PUBLIC)),
+        );
+
+        $this->assertSame(
+            [],
+            array_values($collisions),
+            'These are both a property and a method, so wire:click on them silently does nothing.',
+        );
     }
 
     public function test_a_folder_nested_deeper_still_belongs_to_the_album_at_the_top(): void

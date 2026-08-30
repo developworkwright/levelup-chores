@@ -126,7 +126,17 @@ new class extends Component
         $this->openAlbum = $album !== '' ? str_replace('_', ' ', $album) : null;
     }
 
-    public function openAlbum(?string $album): void
+    /**
+     * Named so it does not collide with the $openAlbum property above.
+     *
+     * A method and a property sharing a name works perfectly from PHP — and
+     * breaks silently in the browser, which is the only place it matters.
+     * `wire:click="openAlbum('Undertale')"` becomes `$wire.openAlbum(...)`, and
+     * $wire resolves a name to the *property* when one exists: the click called
+     * null and the album simply never opened. Nothing in the server-side test
+     * suite can see it, because ->call() never goes through $wire.
+     */
+    public function toggleAlbum(?string $album): void
     {
         $this->openAlbum = $this->openAlbum === $album ? null : $album;
     }
@@ -353,7 +363,7 @@ new class extends Component
                         <div wire:key="album-{{ Str::slug($name) }}" class="flex flex-col gap-2">
                             <button
                                 type="button"
-                                wire:click="openAlbum(@js($name))"
+                                wire:click="toggleAlbum(@js($name))"
                                 class="flex items-center gap-2 rounded-[14px] border border-fq-line-2 bg-fq-panel px-3 py-[11px] text-left transition hover:border-fq-line-focus"
                             >
                                 {{-- The characters themselves, not entities:
