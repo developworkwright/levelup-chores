@@ -109,7 +109,10 @@ new class extends Component
 
     public function with(): array
     {
-        $tracks = app(MusicService::class)->tracks();
+        // One instance, because the failure below is recorded on it by the
+        // tracks() call — a second app() resolve would come back clean.
+        $service = app(MusicService::class);
+        $tracks = $service->tracks();
 
         return [
             'tracks' => $tracks,
@@ -119,6 +122,11 @@ new class extends Component
             // Named on the page so a bucket that is not wired up is visible
             // here, rather than as silence on a kid's phone.
             'diskName' => config('filesystems.music_disk'),
+            // Storage that cannot be read no longer takes pages down, which
+            // means an empty playlist is now ambiguous: no songs, or no bucket.
+            // This is the difference, and it is on the one screen whose job is
+            // to answer it.
+            'storageFailure' => $service->failure(),
         ];
     }
 }; ?>
@@ -189,7 +197,23 @@ new class extends Component
                 </span>
             </div>
 
-            @if (! $tracks)
+            @if ($storageFailure)
+                <div
+                    class="rounded-[14px] border px-3 py-[10px]"
+                    style="border-color: var(--fq-danger); background: var(--fq-sunk)"
+                >
+                    <p class="font-baloo text-[15px] font-bold" style="color: var(--fq-danger)">
+                        The music storage cannot be read.
+                    </p>
+                    <p class="mt-[3px] text-[13px] text-fq-text-3">
+                        The kids see no music button at all until this is fixed. Everything else
+                        in the app is unaffected.
+                    </p>
+                    <p class="mt-2 font-mono-fq text-[11px] leading-relaxed break-words text-fq-text-5">
+                        {{ $storageFailure }}
+                    </p>
+                </div>
+            @elseif (! $tracks)
                 <p class="text-[13px] text-fq-text-5">
                     Nothing here yet, so the music button stays off the kid header entirely.
                 </p>

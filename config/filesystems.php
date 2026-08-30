@@ -65,15 +65,20 @@ return [
         | Background Music
         |----------------------------------------------------------------------
         |
-        | The mp3s the kid header plays. Two disks for one job: locally the
-        | files sit in public/ and are served straight off disk, and in
-        | production they live in the attached bucket. 'music_disk' below picks
-        | between them, so nothing in the app names a driver.
+        | The mp3s the kid header plays, on a disk of their own rather than in
+        | the repository: git keeps every version of a binary forever, and a
+        | music library gets re-encoded, renamed and replaced. Adding a song is
+        | content, not a deploy.
         |
-        | They are on a disk of their own rather than in the repository because
-        | git keeps every version of a binary forever, and a music library gets
-        | re-encoded, renamed and replaced. Adding a song is content, not a
-        | deploy.
+        | Neither disk below is the one production uses. Laravel Cloud builds
+        | its own from LARAVEL_CLOUD_DISK_CONFIG — see Illuminate\Foundation\
+        | Cloud::configureDisks() — under whatever name the bucket has in the
+        | dashboard, and it never reads the AWS_* variables at all. So on Cloud,
+        | MUSIC_DISK names *that* disk and neither of these is touched.
+        |
+        | 'music' is the local folder, which is what lets development run with
+        | no bucket at all. 'music_cloud' is for any other S3-compatible setup
+        | wired up by hand — Herd's MinIO, or a host that isn't Cloud.
         |
         */
 
@@ -95,8 +100,10 @@ return [
             'url' => env('AWS_URL'),
             'endpoint' => env('AWS_ENDPOINT'),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
-            // Its own prefix, so the bucket stays usable for anything else.
-            'root' => 'music',
+            // No 'root' prefix, so this disk holds songs exactly where a
+            // Cloud-built disk does — at the top of the bucket. A prefix here
+            // and none there would mean the library moved depending on the
+            // host, and the listing already ignores everything but mp3s.
             // Deliberately no 'visibility' => 'public'. The bucket itself stays
             // private and reads go through the domain the platform puts in
             // front of it, which arrives here as AWS_URL. Asking for a public
@@ -117,9 +124,15 @@ return [
     | Music Disk
     |--------------------------------------------------------------------------
     |
-    | Which of the two disks above the music library actually uses. Left alone
-    | it is the local folder, which is what keeps `npm run dev` working with no
-    | bucket credentials; production sets MUSIC_DISK=music_cloud.
+    | Which disk the music library actually reads and writes. Left alone it is
+    | the local folder, which is what keeps development running with no bucket
+    | credentials.
+    |
+    | On Laravel Cloud this is the name of the attached bucket's disk as it
+    | appears in the dashboard, *not* 'music_cloud' — Cloud registers that disk
+    | itself, fully configured, and pointing this at a hand-rolled s3 disk
+    | reading empty AWS_* variables is how every page that draws the kid header
+    | ends up throwing.
     |
     */
 

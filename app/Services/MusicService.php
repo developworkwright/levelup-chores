@@ -7,6 +7,8 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use RuntimeException;
+use Throwable;
 
 /**
  * The background music library — the mp3s the kid header plays.
@@ -31,6 +33,9 @@ class MusicService
     public const MAX_UPLOAD_KB = 20480;
 
     private const CACHE_KEY = 'music.tracks';
+
+    /** Set by tracks() when the library could not be read at all. */
+    private ?string $failure = null;
 
     /**
      * How long a bucket listing is trusted.
@@ -58,16 +63,53 @@ class MusicService
      */
     public function tracks(): array
     {
-        // A local folder scan is free; a bucket listing is a network round trip
-        // on a method the kid header calls on every render and every Livewire
-        // round trip. Only the second one is worth a cache — and caching the
-        // first would mean a song dropped into public/music during development
-        // not showing up for an hour.
-        if ($this->isLocal()) {
-            return $this->readTracks();
-        }
+        try {
+            // A local folder scan is free; a bucket listing is a network round
+            // trip on a method the kid header calls on every render and every
+            // Livewire round trip. Only the second one is worth a cache — and
+            // caching the first would mean a song dropped into public/music
+            // during development not showing up for an hour.
+            if ($this->isLocal()) {
+                return $this->readTracks();
+            }
 
-        return Cache::remember(self::CACHE_KEY, now()->addMinutes(self::CACHE_MINUTES), fn () => $this->readTracks());
+            // The catch sits outside remember() on purpose: a closure that
+            // throws stores nothing, so a bucket that is briefly unreachable
+            // does not leave an empty library cached for the next hour.
+            return Cache::remember(self::CACHE_KEY, now()->addMinutes(self::CACHE_MINUTES), fn () => $this->readTracks());
+        } catch (Throwable $e) {
+            /*
+             * A library that cannot be read is a house with no music in it, not
+             * a broken app.
+             *
+             * This method runs in the kid header, which renders on every page
+             * of the kid console and on every Livewire round trip within it. A
+             * misconfigured bucket throwing out of here took the whole console
+             * down — every quest, every chore, every balance — over the one
+             * feature nobody needs to get their jobs done.
+             *
+             * The failure is not swallowed, though: it is reported, and the
+             * music admin screen asks for it by name so the reason is on a page
+             * a grown-up can actually reach.
+             */
+            report($e);
+
+            $this->failure = $e->getMessage();
+
+            return [];
+        }
+    }
+
+    /**
+     * Why the last read of the library came back empty, if it did.
+     *
+     * Null covers both "it worked" and "there are genuinely no songs" — the
+     * caller can tell those apart by whether it got any tracks. Read it off the
+     * same instance that called tracks(), since this is not a singleton.
+     */
+    public function failure(): ?string
+    {
+        return $this->failure;
     }
 
     /**
@@ -80,7 +122,17 @@ class MusicService
     {
         $filename = $this->filename($title !== '' ? $title : $file->getClientOriginalName());
 
-        $this->disk()->putFileAs('', $file, $filename);
+        // A write that fails comes back either way depending on the disk: as an
+        // exception where 'throw' is on, and as a plain false where it is not —
+        // which is how Laravel Cloud builds its own disks. Normalising to an
+        // exception is what stops the upload screen announcing a song that was
+        // never written.
+        if ($this->disk()->putFileAs('', $file, $filename) === false) {
+            throw new RuntimeException(
+                'Could not write '.$filename.' to the '.config('filesystems.music_disk').' disk.'
+            );
+        }
+
         $this->forget();
 
         return $filename;
@@ -95,7 +147,10 @@ class MusicService
             return false;
         }
 
-        $this->disk()->move($path, $target);
+        if ($this->disk()->move($path, $target) === false) {
+            return false;
+        }
+
         $this->forget();
 
         return true;

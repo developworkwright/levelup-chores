@@ -222,6 +222,68 @@ class MusicTest extends TestCase
         Storage::disk('music')->assertMissing('Suspense.mp3');
     }
 
+    /**
+     * Point the library at a bucket that cannot be reached at all.
+     *
+     * Nothing is faked here — a real s3 disk aimed at an endpoint with nothing
+     * behind it, which is the shape of every way this goes wrong in production:
+     * a bucket that does not exist, credentials that are blank because the
+     * platform never set the variables they were read from, a wrong region.
+     */
+    private function useUnreachableBucket(): void
+    {
+        config([
+            'filesystems.music_disk' => 'music_cloud',
+            'filesystems.disks.music_cloud.key' => 'nobody',
+            'filesystems.disks.music_cloud.secret' => 'nothing',
+            'filesystems.disks.music_cloud.region' => 'us-east-1',
+            'filesystems.disks.music_cloud.bucket' => 'no-such-bucket',
+            'filesystems.disks.music_cloud.endpoint' => 'http://127.0.0.1:1',
+            'filesystems.disks.music_cloud.use_path_style_endpoint' => true,
+            // Straight to the failure. The SDK's default is three retries with
+            // backoff, which turned these three tests into half a minute of
+            // waiting for a connection that was refused on the first attempt.
+            'filesystems.disks.music_cloud.retries' => 0,
+            'filesystems.disks.music_cloud.http' => ['connect_timeout' => 1, 'timeout' => 2],
+        ]);
+    }
+
+    public function test_a_library_that_cannot_be_read_comes_back_empty_rather_than_throwing(): void
+    {
+        $this->useUnreachableBucket();
+
+        $service = app(MusicService::class);
+
+        $this->assertSame([], $service->tracks());
+        $this->assertNotNull($service->failure());
+    }
+
+    public function test_unreachable_storage_does_not_take_the_kid_console_down(): void
+    {
+        // The whole kid console draws the header, so a throwing library took
+        // every quest, chore and balance down with it — over the one feature
+        // nobody needs in order to get their jobs done.
+        $this->useUnreachableBucket();
+        $this->loginKid();
+
+        Volt::test('kid.quests')
+            ->assertOk()
+            ->assertDontSee('Choose a song');
+    }
+
+    public function test_the_music_screen_says_why_the_playlist_is_empty(): void
+    {
+        // Now that a broken library is silent, an empty playlist is ambiguous:
+        // no songs, or no bucket. This screen is where that gets answered.
+        $this->useUnreachableBucket();
+        $this->loginParent();
+
+        Volt::test('parent.music')
+            ->assertOk()
+            ->assertSee('The music storage cannot be read.')
+            ->assertDontSee('Nothing here yet');
+    }
+
     public function test_the_music_library_is_closed_to_kids(): void
     {
         $this->loginKid();
