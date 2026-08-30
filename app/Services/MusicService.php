@@ -380,6 +380,18 @@ class MusicService
      */
     private function urlFor(Filesystem $disk, string $path): string
     {
+        /*
+         * A plain, permanent URL, which means the bucket has to stay publicly
+         * readable. A private one answers a kid's <audio> element with 403 and
+         * says nothing about it — so the songs already in the browser cache go
+         * on playing while every other one is silently dead, which reads as
+         * random songs being broken.
+         *
+         * Signed URLs are the alternative and were tried: they work on a
+         * private bucket, but they bypass the platform's own access domain and
+         * have to be rotated, so a browser re-downloads several megabytes of
+         * mp3 whenever the signature changes. Public is the better trade here.
+         */
         $base = config('filesystems.disks.'.config('filesystems.music_disk').'.url');
 
         if (! is_string($base) || $base === '') {

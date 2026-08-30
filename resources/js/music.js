@@ -30,6 +30,21 @@ const KEY_VOLUME = 'fq-music-volume';
 const KEY_SEEN = 'fq-music-seen';
 
 /**
+ * Which tab is allowed to be making noise.
+ *
+ * Two tabs — or the installed app and a browser tab, which is the easy way for
+ * a kid to end up with two — each build their own player, and each resumes on
+ * load because the "music is on" flag is shared between them. The result is two
+ * songs at once, and a stop button that only silences the one you are looking
+ * at. Whoever presses play last writes their id here; every other tab sees the
+ * storage event and pauses.
+ */
+const KEY_OWNER = 'fq-music-owner';
+
+/** This tab, for the lifetime of this page. */
+const SESSION = Math.random().toString(36).slice(2);
+
+/**
  * Quiet by default. This plays *underneath* a kid doing chores on a phone
  * speaker, and mastered mp3s at 1.0 are loud enough that the first thing
  * anyone does is turn it off and never come back.
@@ -52,6 +67,16 @@ function write(key, value) {
 }
 
 document.addEventListener('alpine:init', () => {
+    /*
+     * Registering twice would replace this object with a fresh one while the
+     * old one's Audio carried on playing, unreachable — an orphan nothing can
+     * pause, overlapping whatever the new store goes on to play. Cheap to rule
+     * out, and impossible to debug from a screenshot.
+     */
+    if (window.Alpine.store('music')) {
+        return;
+    }
+
     window.Alpine.store('music', {
         /** @type {Array<{id: string, title: string, url: string}>} */
         tracks: [],
@@ -117,6 +142,7 @@ document.addEventListener('alpine:init', () => {
 
             if (! this.resumed) {
                 this.resumed = true;
+                this.listenForOtherTabs();
                 this.resume();
             }
         },
@@ -158,8 +184,23 @@ document.addEventListener('alpine:init', () => {
             this.playing = true;
             this.blocked = false;
             write(KEY_ON, '1');
+            // Claim the sound. Every other tab is listening for this and will
+            // pause itself, so a house never has two songs going at once.
+            write(KEY_OWNER, SESSION);
 
-            audio.play().catch(() => {
+            audio.play().then(() => {
+                /*
+                 * Stopped while this was still starting.
+                 *
+                 * play() resolves a beat after it is called, and a stop in that
+                 * gap pauses an element that has not begun — so the playback
+                 * starts anyway, a moment after being told not to, and the
+                 * music is on with the button saying off.
+                 */
+                if (! this.playing) {
+                    audio.pause();
+                }
+            }).catch(() => {
                 // Only reachable from resume() in practice — a click has
                 // already satisfied the autoplay policy everywhere else.
                 this.blocked = true;
@@ -170,7 +211,31 @@ document.addEventListener('alpine:init', () => {
             this.playing = false;
             this.blocked = false;
             write(KEY_ON, '0');
+            write(KEY_OWNER, '');
             this.el?.pause();
+        },
+
+        /**
+         * Go quiet when another tab takes over, or when the music is switched
+         * off anywhere.
+         *
+         * The storage event only fires in the tabs that did *not* make the
+         * change, which is exactly the audience. Nothing in here writes back:
+         * two tabs answering each other's writes would ping-pong forever.
+         */
+        listenForOtherTabs() {
+            window.addEventListener('storage', (event) => {
+                const takenOver = event.key === KEY_OWNER
+                    && event.newValue
+                    && event.newValue !== SESSION;
+
+                const switchedOff = event.key === KEY_ON && event.newValue === '0';
+
+                if (takenOver || switchedOff) {
+                    this.playing = false;
+                    this.el?.pause();
+                }
+            });
         },
 
         /**

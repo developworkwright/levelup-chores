@@ -77,15 +77,24 @@
             </button>
         </div>
 
-        {{-- Anchored right so it cannot run off the edge of a phone from a
-             control this far along the row, and capped at the viewport width
-             so a long album name cannot push it off either. --}}
+        {{-- A sheet on a phone, a dropdown from `sm` up.
+
+             It used to be a dropdown at every size, anchored to the right edge
+             of the button it hangs from — which is fine until the header wraps
+             and puts that button near the left of the row. Then 288px of panel
+             extends leftwards from it and most of the menu is off the screen,
+             which is exactly what happened. A capped max-width does not save
+             it: the width was never the problem, the anchor was.
+
+             Pinned to the bottom of the viewport there is no anchor to get
+             wrong, it is the pattern the kid nav already uses on a phone, and
+             the songs end up under the thumb rather than up by the header. --}}
         <div
             x-show="open"
             x-cloak
-            class="absolute top-[58px] right-0 z-30 w-[288px] max-w-[calc(100vw-28px)] rounded-[14px] border border-fq-line-2 bg-fq-panel p-3 shadow-lg"
+            class="fixed inset-x-0 bottom-0 z-40 flex max-h-[72vh] flex-col rounded-t-[18px] border-t border-fq-line-2 bg-fq-panel p-3 pb-[max(12px,env(safe-area-inset-bottom))] shadow-lg sm:absolute sm:inset-x-auto sm:top-[58px] sm:bottom-auto sm:w-[288px] sm:rounded-[14px] sm:border sm:pb-3"
         >
-            <p class="mb-2 font-mono-fq text-[10px] tracking-wide text-fq-text-4">MUSIC</p>
+            <p class="mb-2 shrink-0 font-mono-fq text-[10px] tracking-wide text-fq-text-4">MUSIC</p>
 
             {{-- The list scrolls, the volume slider below it does not. A
                  soundtrack is a hundred songs and the panel is anchored to a
