@@ -14,6 +14,10 @@ use Livewire\WithFileUploads;
  * The filename is the title a kid reads, so naming is the substance of this
  * page: everything else is upload, rename, delete.
  *
+ * Songs can sit in a folder, which the picker shows as an album. That exists
+ * because a bought soundtrack is a hundred tracks, and a hundred tracks in one
+ * flat list is not a menu anybody can use.
+ *
  * @see MusicService for why the library is a folder rather than a table, and
  *      why stored filenames carry underscores instead of spaces.
  */
@@ -23,11 +27,25 @@ new class extends Component
 
     public Profile $profile;
 
-    /** The song being added. Held only until addSong() runs. */
-    public $upload = null;
+    /**
+     * The songs being added. An array because an album arrives all at once —
+     * one at a time is not a way to add a soundtrack.
+     *
+     * @var array<int, mixed>
+     */
+    public array $uploads = [];
 
-    /** What to call it. Blank falls back to the uploaded file's own name. */
+    /** Which folder to put them in. Blank leaves them loose at the top. */
+    public string $newAlbum = '';
+
+    /**
+     * What to call it. Only offered for a single file: naming a hundred songs
+     * in one box is not a thing, so a batch keeps the names it arrived with.
+     */
     public string $newTitle = '';
+
+    /** Which album's songs are drawn. One at a time, so the page stays short. */
+    public ?string $openAlbum = null;
 
     public ?string $flashMessage = null;
 
@@ -47,11 +65,13 @@ new class extends Component
     public function rules(): array
     {
         return [
+            'uploads' => ['required', 'array', 'min:1'],
             // mimetypes as well as the extension: the extension is what the
             // library keys off, and a renamed .wav would be silently unplayable
             // on exactly the browsers nobody in the house is testing on.
-            'upload' => ['required', 'file', 'mimetypes:audio/mpeg', 'extensions:mp3', 'max:'.MusicService::MAX_UPLOAD_KB],
+            'uploads.*' => ['file', 'mimetypes:audio/mpeg', 'extensions:mp3', 'max:'.MusicService::MAX_UPLOAD_KB],
             'newTitle' => ['nullable', 'string', 'max:'.MusicService::MAX_TITLE],
+            'newAlbum' => ['nullable', 'string', 'max:'.MusicService::MAX_TITLE],
         ];
     }
 
@@ -59,40 +79,65 @@ new class extends Component
     public function messages(): array
     {
         return [
-            'upload.required' => 'Pick an mp3 first.',
-            'upload.mimetypes' => 'That has to be an mp3.',
-            'upload.extensions' => 'That has to be an mp3.',
-            'upload.max' => 'That song is over '.round(MusicService::MAX_UPLOAD_KB / 1024).'MB.',
+            'uploads.required' => 'Pick at least one mp3 first.',
+            'uploads.*.mimetypes' => 'Those have to be mp3s.',
+            'uploads.*.extensions' => 'Those have to be mp3s.',
+            'uploads.*.max' => 'One of those is over '.round(MusicService::MAX_UPLOAD_KB / 1024).'MB.',
         ];
     }
 
-    public function addSong(): void
+    public function addSongs(): void
     {
         $this->validate();
 
         $service = app(MusicService::class);
+        $stored = [];
 
         try {
-            $stored = $service->store($this->upload, $this->newTitle);
+            foreach ($this->uploads as $index => $upload) {
+                // The typed title only applies when there is one file to apply
+                // it to. Everything else keeps its own name.
+                $title = count($this->uploads) === 1 ? $this->newTitle : '';
+
+                $stored[] = $service->store($upload, $title, $this->newAlbum);
+            }
         } catch (\Throwable $e) {
             // Whether the disk throws or quietly returns false, store() ends up
             // here — a bucket that rejected the write must not leave this page
             // claiming the song was added.
             report($e);
 
-            $this->errorMessage = 'That did not save — the music storage turned it down.';
-            // The reason as well as the fact, for the same purpose the read
-            // failure prints one: whoever is looking at this screen is the only
-            // person who can fix it, and "turned it down" is not something you
-            // can act on.
+            $this->errorMessage = count($stored) > 0
+                ? 'Saved '.count($stored).' before this one stopped it.'
+                : 'That did not save — the music storage turned it down.';
             $this->errorDetail = $e->getMessage();
             $this->flashMessage = null;
+
+            // Whatever did land is still worth announcing.
+            $service->announceNewSongs($this->profile, $stored);
 
             return;
         }
 
-        $this->reset('upload', 'newTitle', 'errorMessage', 'errorDetail');
-        $this->flashMessage = $service->title($stored).' is on the list.';
+        // After the writes, so a push that somehow throws its way past the
+        // service's own catch cannot cost the library the songs it just saved.
+        $service->announceNewSongs($this->profile, $stored);
+
+        $album = $service->folder($this->newAlbum);
+
+        $this->reset('uploads', 'newTitle', 'errorMessage', 'errorDetail');
+
+        $this->flashMessage = count($stored) === 1
+            ? $service->title($stored[0]).' is on the list. Everyone has been told.'
+            : count($stored).' songs added. Everyone has been told.';
+
+        // Left where they were put, so the rows they just made are on screen.
+        $this->openAlbum = $album !== '' ? str_replace('_', ' ', $album) : null;
+    }
+
+    public function openAlbum(?string $album): void
+    {
+        $this->openAlbum = $this->openAlbum === $album ? null : $album;
     }
 
     public function renameSong(string $path, string $title): void
@@ -115,16 +160,43 @@ new class extends Component
         $service->delete($path);
     }
 
+    /**
+     * Drop the cached listing.
+     *
+     * A bucket listing is held for an hour, so songs put there any other way —
+     * dropped in from the platform's own dashboard, or copied up in bulk with
+     * an S3 client, which is how anybody sane adds a hundred-track album —
+     * would otherwise not show up until it expired.
+     */
+    public function rescan(): void
+    {
+        app(MusicService::class)->forget();
+
+        $this->flashMessage = 'Had another look at the music storage.';
+    }
+
     public function with(): array
     {
         // One instance, because the failure below is recorded on it by the
         // tracks() call — a second app() resolve would come back clean.
         $service = app(MusicService::class);
-        $tracks = $service->tracks();
+        $tracks = collect($service->tracks());
+
+        $albums = $tracks->whereNotNull('album')
+            ->groupBy('album')
+            ->map(fn ($songs) => ['count' => $songs->count(), 'bytes' => $songs->sum('bytes')]);
 
         return [
-            'tracks' => $tracks,
-            'totalBytes' => array_sum(array_column($tracks, 'bytes')),
+            'loose' => $tracks->whereNull('album')->all(),
+            'albums' => $albums,
+            // Only the open one is drawn. A hundred rows, each with its own
+            // audio element, is a page that takes a visible moment to appear.
+            'openTracks' => $this->openAlbum === null
+                ? []
+                : $tracks->where('album', $this->openAlbum)->all(),
+            'total' => $tracks->count(),
+            'totalBytes' => $tracks->sum('bytes'),
+            'knownAlbums' => $service->albums(),
             'maxTitle' => MusicService::MAX_TITLE,
             'maxMb' => (int) round(MusicService::MAX_UPLOAD_KB / 1024),
             // Named on the page so a bucket that is not wired up is visible
@@ -149,44 +221,73 @@ new class extends Component
     <div class="flex flex-col gap-3">
         <div class="flex flex-col gap-3 rounded-[28px] border border-fq-line bg-fq-bg p-[16px_14px]">
             <div>
-                <h2 class="font-baloo text-xl font-extrabold">Add a song</h2>
+                <h2 class="font-baloo text-xl font-extrabold">Add songs</h2>
                 <p class="mt-[3px] text-xs text-fq-text-3">
-                    mp3 only, up to {{ $maxMb }}MB. What you call it here is what the kids
-                    see in the header menu.
+                    mp3 only, up to {{ $maxMb }}MB each. Give them an album and the kids get
+                    them as a folder in the header menu instead of loose in one long list.
                 </p>
             </div>
 
             <div class="flex flex-wrap items-center gap-2">
                 <input
                     type="file"
-                    wire:model="upload"
+                    wire:model="uploads"
+                    multiple
                     accept="audio/mpeg,.mp3"
-                    aria-label="Song file"
+                    aria-label="Song files"
                     class="min-w-[200px] flex-1 rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[11px] py-[9px] text-[13px] text-fq-text-2-b file:mr-3 file:rounded-[8px] file:border-0 file:bg-fq-panel-alt file:px-3 file:py-[5px] file:text-[12px] file:text-fq-text-2-b focus:border-fq-line-4 focus:outline-none"
                 />
 
+                {{-- A list rather than a free-text box alone: adding the second
+                     song to an album is far more common than starting a new
+                     one, and retyping is how you end up with an "Undertale"
+                     and an "undertale" side by side. --}}
                 <input
-                    wire:model="newTitle"
+                    wire:model="newAlbum"
                     type="text"
+                    list="known-albums"
                     maxlength="{{ $maxTitle }}"
-                    placeholder="Call it something"
-                    class="w-[190px] rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[11px] py-[9px] text-[13px] text-fq-text placeholder:text-fq-text-5 focus:border-fq-line-4 focus:outline-none"
+                    placeholder="Album (optional)"
+                    class="w-[170px] rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[11px] py-[9px] text-[13px] text-fq-text placeholder:text-fq-text-5 focus:border-fq-line-4 focus:outline-none"
                 />
+                <datalist id="known-albums">
+                    @foreach ($knownAlbums as $album)
+                        <option value="{{ $album }}"></option>
+                    @endforeach
+                </datalist>
+
+                {{-- Only useful for a single file, so it only appears for one.
+                     Offering it against a batch would imply it renames all of
+                     them, which it cannot. --}}
+                @if (count($uploads) === 1)
+                    <input
+                        wire:model="newTitle"
+                        type="text"
+                        maxlength="{{ $maxTitle }}"
+                        placeholder="Call it something"
+                        class="w-[170px] rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[11px] py-[9px] text-[13px] text-fq-text placeholder:text-fq-text-5 focus:border-fq-line-4 focus:outline-none"
+                    />
+                @endif
 
                 <button
                     type="button"
-                    wire:click="addSong"
+                    wire:click="addSongs"
                     wire:loading.attr="disabled"
-                    wire:target="upload,addSong"
+                    wire:target="uploads,addSongs"
                     class="ml-auto shrink-0 rounded-[11px] px-4 py-[9px] font-baloo text-[13px] font-extrabold transition hover:brightness-110 disabled:opacity-60"
                     style="background: var(--fq-fill-gold-soft); color: var(--fq-ink)"
                 >
-                    <span wire:loading.remove wire:target="upload,addSong">Add song</span>
-                    <span wire:loading wire:target="upload,addSong">Uploading&hellip;</span>
+                    <span wire:loading.remove wire:target="uploads,addSongs">
+                        {{ count($uploads) > 1 ? 'Add '.count($uploads).' songs' : 'Add song' }}
+                    </span>
+                    <span wire:loading wire:target="uploads,addSongs">Uploading&hellip;</span>
                 </button>
             </div>
 
-            @error('upload')
+            @error('uploads')
+                <p class="text-[13px]" style="color: var(--fq-danger)">{{ $message }}</p>
+            @enderror
+            @error('uploads.*')
                 <p class="text-[13px]" style="color: var(--fq-danger)">{{ $message }}</p>
             @enderror
 
@@ -209,12 +310,20 @@ new class extends Component
             <div class="flex flex-wrap items-baseline gap-2">
                 <h2 class="font-baloo text-xl font-extrabold">The playlist</h2>
                 <span class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
-                    {{ count($tracks) }} {{ Str::plural('SONG', count($tracks)) }}
-                    @if ($tracks)
+                    {{ $total }} {{ Str::plural('SONG', $total) }}
+                    @if ($total)
                         &middot; {{ number_format($totalBytes / 1048576, 1) }} MB
                     @endif
                     &middot; {{ $diskName }}
                 </span>
+
+                {{-- For songs put in the bucket some other way, which for a
+                     hundred-track album is the sane way. --}}
+                <button
+                    type="button"
+                    wire:click="rescan"
+                    class="ml-auto shrink-0 rounded-[10px] border border-fq-line-2 px-[10px] py-[6px] text-[12px] text-fq-text-4 transition hover:text-fq-text"
+                >Rescan storage</button>
             </div>
 
             @if ($storageFailure)
@@ -241,43 +350,40 @@ new class extends Component
                         {{ implode(' · ', $availableDisks) }}
                     </p>
                 </div>
-            @elseif (! $tracks)
+            @elseif (! $total)
                 <p class="text-[13px] text-fq-text-5">
                     Nothing here yet, so the music button stays off the kid header entirely.
                 </p>
             @else
                 <div class="flex flex-col gap-2">
-                    @foreach ($tracks as $track)
-                        <div
-                            wire:key="track-{{ $track['id'] }}"
-                            class="flex flex-wrap items-center gap-2 rounded-[14px] border border-fq-line-2 bg-fq-panel px-3 py-[10px]"
-                        >
-                            <input
-                                type="text"
-                                value="{{ $track['title'] }}"
-                                maxlength="{{ $maxTitle }}"
-                                wire:change="renameSong(@js($track['path']), $event.target.value)"
-                                aria-label="Song title"
-                                class="min-w-[160px] flex-1 rounded-[10px] border border-transparent bg-transparent px-[6px] py-[4px] font-baloo text-[15px] font-bold text-fq-text hover:border-fq-line-2 focus:border-fq-line-4 focus:bg-fq-sunk focus:outline-none"
-                            />
+                    @foreach ($loose as $track)
+                        <x-music-row :track="$track" :max-title="$maxTitle" />
+                    @endforeach
 
-                            {{-- A parent should be able to hear what they just
-                                 named without signing in as a kid and turning
-                                 the header music on. --}}
-                            <audio controls preload="none" src="{{ $track['url'] }}" class="h-[34px] max-w-[260px]"></audio>
-
-                            <span class="font-mono-fq text-[10px] whitespace-nowrap text-fq-text-5">
-                                {{ number_format($track['bytes'] / 1048576, 1) }} MB
-                            </span>
-
+                    @foreach ($albums as $name => $album)
+                        <div wire:key="album-{{ Str::slug($name) }}" class="flex flex-col gap-2">
                             <button
                                 type="button"
-                                wire:click="removeSong(@js($track['path']))"
-                                wire:confirm="Delete {{ $track['title'] }}?"
-                                title="Delete {{ $track['title'] }}"
-                                aria-label="Delete {{ $track['title'] }}"
-                                class="shrink-0 rounded-[10px] border border-fq-line-2 px-[10px] py-[6px] text-[12px] text-fq-text-4 transition hover:text-fq-text"
-                            >Delete</button>
+                                wire:click="openAlbum(@js($name))"
+                                class="flex items-center gap-2 rounded-[14px] border border-fq-line-2 bg-fq-panel px-3 py-[11px] text-left transition hover:border-fq-line-focus"
+                            >
+                                <span class="w-[12px] shrink-0 text-[10px] text-fq-text-4">
+                                    {{ $openAlbum === $name ? '&#9660;' : '&#9654;' }}
+                                </span>
+                                <span class="font-baloo text-[15px] font-bold">{{ $name }}</span>
+                                <span class="ml-auto shrink-0 font-mono-fq text-[10px] text-fq-text-5">
+                                    {{ $album['count'] }} {{ Str::plural('SONG', $album['count']) }}
+                                    &middot; {{ number_format($album['bytes'] / 1048576, 1) }} MB
+                                </span>
+                            </button>
+
+                            @if ($openAlbum === $name)
+                                <div class="flex flex-col gap-2 pl-4">
+                                    @foreach ($openTracks as $track)
+                                        <x-music-row :track="$track" :max-title="$maxTitle" />
+                                    @endforeach
+                                </div>
+                            @endif
                         </div>
                     @endforeach
                 </div>

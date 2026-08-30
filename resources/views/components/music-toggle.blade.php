@@ -13,7 +13,12 @@
     // path and size, which are the music admin screen's business and have no
     // reason to be in markup a kid's browser receives.
     $tracks = array_map(
-        fn (array $track): array => ['id' => $track['id'], 'title' => $track['title'], 'url' => $track['url']],
+        fn (array $track): array => [
+            'id' => $track['id'],
+            'title' => $track['title'],
+            'album' => $track['album'],
+            'url' => $track['url'],
+        ],
         app(App\Services\MusicService::class)->tracks(),
     );
 @endphp
@@ -43,7 +48,7 @@
 
             <button
                 type="button"
-                @click="open = ! open"
+                @click="togglePanel()"
                 :aria-expanded="open"
                 title="Choose a song"
                 aria-label="Choose a song"
@@ -53,33 +58,58 @@
         </div>
 
         {{-- Anchored right so it cannot run off the edge of a phone from a
-             control this far along the row. --}}
+             control this far along the row, and capped at the viewport width
+             so a long album name cannot push it off either. --}}
         <div
             x-show="open"
             x-cloak
-            class="absolute top-[58px] right-0 z-30 w-[236px] rounded-[14px] border border-fq-line-2 bg-fq-panel p-3 shadow-lg"
+            class="absolute top-[58px] right-0 z-30 w-[288px] max-w-[calc(100vw-28px)] rounded-[14px] border border-fq-line-2 bg-fq-panel p-3 shadow-lg"
         >
             <p class="mb-2 font-mono-fq text-[10px] tracking-wide text-fq-text-4">MUSIC</p>
 
-            <div class="flex flex-col gap-[3px]">
-                <template x-for="track in music.tracks" :key="track.id">
-                    <button
-                        type="button"
-                        {{-- Picking a song while the music is off selects it
-                             without starting anything — the picker is also how
-                             you choose what will play next time. --}}
-                        @click="music.select(track.id)"
-                        class="flex items-center gap-2 rounded-[10px] px-2 py-[9px] text-left text-[13px] transition"
-                        :class="track.id === music.trackId
-                            ? 'bg-fq-sunk font-semibold text-fq-text'
-                            : 'text-fq-text-3 hover:text-fq-text'"
-                    >
-                        <span
-                            class="w-[12px] shrink-0 text-[11px]"
-                            :class="track.id === music.trackId ? 'text-fq-gold' : 'text-transparent'"
-                        >&#9835;</span>
-                        <span x-text="track.title"></span>
-                    </button>
+            {{-- The list scrolls, the volume slider below it does not. A
+                 soundtrack is a hundred songs and the panel is anchored to a
+                 header — without a cap it would run off the bottom of a phone
+                 and take the volume control with it. --}}
+            <div class="-mr-1 flex max-h-[46vh] flex-col gap-[3px] overflow-y-auto pr-1">
+                <template x-for="track in loose" :key="track.id">
+                    <x-music-song />
+                </template>
+
+                <template x-for="album in albums" :key="album">
+                    <div>
+                        {{-- Tap to open, and hover as well on anything with a
+                             real pointer. Tap has to be the one that works:
+                             the kids are on phones, where hover does not
+                             exist. See hoverAlbum() for what a touch browser
+                             does with a hover handler if you let it. --}}
+                        <button
+                            type="button"
+                            @click="toggleAlbum(album)"
+                            @mouseenter="hoverAlbum(album)"
+                            :aria-expanded="openAlbum === album"
+                            class="flex w-full items-center gap-2 rounded-[10px] px-2 py-[9px] text-left text-[13px] transition hover:text-fq-text"
+                            :class="openAlbum === album ? 'text-fq-text' : 'text-fq-text-3'"
+                        >
+                            <span
+                                class="w-[12px] shrink-0 text-[9px] transition-transform"
+                                :class="openAlbum === album ? 'rotate-90' : ''"
+                            >&#9654;</span>
+
+                            <span class="truncate font-semibold" x-text="album"></span>
+
+                            <span
+                                class="ml-auto shrink-0 font-mono-fq text-[10px] text-fq-text-5"
+                                x-text="songsIn(album).length"
+                            ></span>
+                        </button>
+
+                        <div x-show="openAlbum === album" class="flex flex-col gap-[3px]">
+                            <template x-for="track in songsIn(album)" :key="track.id">
+                                <x-music-song indent />
+                            </template>
+                        </div>
+                    </div>
                 </template>
             </div>
 

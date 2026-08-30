@@ -2,9 +2,14 @@
 
 namespace App\Services;
 
+use App\Enums\ProfileRole;
+use App\Models\Profile;
+use App\Notifications\NewSongAdded;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -118,9 +123,10 @@ class MusicService
      * Returns the stored filename. The caller has already validated the file;
      * what happens here is the naming, which is the part a kid sees.
      */
-    public function store(UploadedFile $file, string $title): string
+    public function store(UploadedFile $file, string $title, string $album = ''): string
     {
         $filename = $this->filename($title !== '' ? $title : $file->getClientOriginalName());
+        $folder = $this->folder($album);
 
         $disk = config('filesystems.music_disk');
 
@@ -138,7 +144,7 @@ class MusicService
          * production and never once the case on a laptop. storeAs() streams
          * from wherever the temporary file actually lives.
          */
-        $stored = $file->storeAs('', $filename, ['disk' => $disk]);
+        $stored = $file->storeAs($folder, $filename, ['disk' => $disk]);
 
         // Still checked: this comes back false rather than throwing on a disk
         // built with 'throw' => false, which is how Laravel Cloud builds its
@@ -150,13 +156,120 @@ class MusicService
 
         $this->forget();
 
-        return $filename;
+        return $stored;
+    }
+
+    /**
+     * An album name turned into the folder it is stored under.
+     *
+     * Same rules as filename() and for the same reason — it becomes a path
+     * segment and then part of a URL. Blank means the top of the library,
+     * which is where a song with no album belongs.
+     */
+    public function folder(string $album): string
+    {
+        $album = str_replace('_', ' ', $album);
+        $album = preg_replace('/[^\p{L}\p{N} \'&-]+/u', '', $album) ?? '';
+        $album = trim(preg_replace('/\s+/', ' ', $album) ?? '');
+
+        return str_replace(' ', '_', mb_substr($album, 0, self::MAX_TITLE));
+    }
+
+    /**
+     * Every album in the library, by name.
+     *
+     * For the picker on the upload form: adding the second song to an album is
+     * far more common than starting a new one, and retyping the name is how you
+     * end up with an "Undertale" and an "undertale".
+     *
+     * @return array<int, string>
+     */
+    public function albums(): array
+    {
+        return collect($this->tracks())
+            ->pluck('album')
+            ->filter()
+            ->unique()
+            ->sort(fn (string $a, string $b): int => strcasecmp($a, $b))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Tell the kids a song has landed.
+     *
+     * Separate from store() rather than folded into it, for the reason
+     * StoreService::announceNewItem() is separate from creating an item: a file
+     * can be re-uploaded, restored or fixed up without that being news. This is
+     * for a parent deliberately putting a song out.
+     *
+     * The library is one folder for the whole application while households are
+     * not, so "the kids" means the uploading parent's own. A second household
+     * would quietly share the music and hear nothing about it — worth knowing
+     * before this ever runs anywhere but one family's phone.
+     */
+    /**
+     * @param  array<int, string>  $paths  Everything added in this one go.
+     */
+    public function announceNewSongs(Profile $addedBy, array $paths): void
+    {
+        if ($paths === []) {
+            return;
+        }
+
+        $kids = Profile::where('household_id', $addedBy->household_id)
+            ->where('role', ProfileRole::Kid)
+            ->get();
+
+        try {
+            Notification::send($kids, new NewSongAdded($this->announcement($paths)));
+        } catch (Throwable $e) {
+            // Never at the cost of the upload itself. The songs are already on
+            // the disk by the time this runs, and a push that fails is music
+            // nobody was told about rather than music nobody has.
+            Log::error('New song notification failed.', [
+                'songs' => $paths,
+                'exception' => $e,
+            ]);
+        }
+    }
+
+    /**
+     * What one push says about a batch.
+     *
+     * One notification per batch, never per file — a soundtrack is a hundred
+     * songs, and a hundred buzzes in a row is how a kid turns notifications off
+     * for good. A whole album is named as an album, because "101 new songs" is
+     * a number and "101 songs from Undertale" is news.
+     *
+     * @param  array<int, string>  $paths
+     */
+    private function announcement(array $paths): string
+    {
+        if (count($paths) === 1) {
+            return $this->title($paths[0]).' is in the music menu';
+        }
+
+        $albums = collect($paths)->map(fn (string $path): ?string => $this->album($path))->unique();
+
+        if ($albums->count() === 1 && $albums->first() !== null) {
+            return count($paths).' songs from '.$albums->first().' are in the music menu';
+        }
+
+        return count($paths).' new songs are in the music menu';
     }
 
     /** Retitle a song. The filename *is* the title, so this is a move. */
     public function rename(string $path, string $title): bool
     {
-        $target = $this->filename($title);
+        // Back into the folder it came out of. The raw first segment, not
+        // album(), which has already turned underscores into spaces for
+        // reading — renaming a song must not quietly move it to a new album
+        // named after the old one with the underscores taken out.
+        $segments = explode('/', $path);
+        $folder = count($segments) > 1 ? $segments[0].'/' : '';
+
+        $target = $folder.$this->filename($title);
 
         if ($target === $path || $title === '' || ! $this->disk()->exists($path)) {
             return false;
@@ -222,33 +335,91 @@ class MusicService
     }
 
     /**
-     * @return array<int, array{id: string, title: string, url: string, path: string, bytes: int}>
+     * @return array<int, array{id: string, title: string, album: string|null, url: string, path: string, bytes: int}>
      */
     private function readTracks(): array
     {
         $disk = $this->disk();
 
-        // Through Flysystem's listing rather than files() plus size(): the
-        // sizes come back with the listing, where the second form is one
-        // HEAD request per song against the bucket.
-        $tracks = collect($disk->getDriver()->listContents('', false)->toArray())
+        // Deep, and through Flysystem's listing rather than files() plus
+        // size(): one call brings back every song in every folder along with
+        // its size, where the shallow-plus-HEAD form is a request per song.
+        $tracks = collect($disk->getDriver()->listContents('', true)->toArray())
             ->filter(fn ($item): bool => $item->isFile()
                 && strtolower(pathinfo($item->path(), PATHINFO_EXTENSION)) === 'mp3')
             ->map(function ($item) use ($disk): array {
-                $title = $this->title($item->path());
+                $path = $item->path();
 
                 return [
-                    'id' => Str::slug($title),
-                    'title' => $title,
-                    'url' => $disk->url($item->path()),
-                    'path' => $item->path(),
+                    // Slugged from the whole path, not the title: two albums
+                    // are each entitled to a song called Ruins, and this id is
+                    // what a kid's browser remembers their choice by. A song at
+                    // the top still slugs to exactly what it did before folders
+                    // existed, so nobody's saved choice is forgotten.
+                    'id' => Str::slug(str_replace('/', ' ', preg_replace('/\.mp3$/i', '', $path) ?? $path)),
+                    'title' => $this->title($path),
+                    'album' => $this->album($path),
+                    'url' => $this->urlFor($disk, $path),
+                    'path' => $path,
                     'bytes' => $item->fileSize() ?? 0,
                 ];
             })
-            ->sortBy('title', SORT_NATURAL | SORT_FLAG_CASE)
+            // Loose songs first, then albums alphabetically, then the songs
+            // within each album by title. Natural order, so a filename that
+            // does carry a track number sorts 2 before 10 rather than after it.
+            ->sort(function (array $a, array $b): int {
+                $album = strcasecmp($a['album'] ?? '', $b['album'] ?? '');
+
+                return $album !== 0 ? $album : strnatcasecmp($a['title'], $b['title']);
+            })
             ->values()
             ->all();
 
         return $tracks;
+    }
+
+    /**
+     * The folder a song sits in, or null for one loose at the top.
+     *
+     * Only ever the first segment. A folder nested inside a folder still
+     * belongs to the album at the top of it, which keeps the picker two levels
+     * deep however deep the files go — a menu a kid has to walk down four
+     * times is not a menu.
+     */
+    private function album(string $path): ?string
+    {
+        if (! str_contains($path, '/')) {
+            return null;
+        }
+
+        return str_replace('_', ' ', explode('/', $path)[0]);
+    }
+
+    /**
+     * A song's public URL, with every path segment encoded exactly once.
+     *
+     * Storage::url() cannot be trusted with this on its own, because what it
+     * does depends on how the disk is configured. Given a base url — which the
+     * local disk has, and which is how every hosted bucket reaches a browser —
+     * it concatenates the path on raw, spaces and all. Given no base url, the
+     * S3 driver builds the URL through the SDK, which encodes properly. So
+     * encoding unconditionally would produce %2520 in the second case, and
+     * encoding never leaves broken URLs in the first.
+     *
+     * It matters now because a folder dropped in by hand carries whatever
+     * filenames it came with, spaces included, rather than the underscored
+     * ones store() writes.
+     */
+    private function urlFor(Filesystem $disk, string $path): string
+    {
+        $base = config('filesystems.disks.'.config('filesystems.music_disk').'.url');
+
+        if (! is_string($base) || $base === '') {
+            return $disk->url($path);
+        }
+
+        $encoded = implode('/', array_map(rawurlencode(...), explode('/', $path)));
+
+        return rtrim($base, '/').'/'.$encoded;
     }
 }

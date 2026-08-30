@@ -198,12 +198,69 @@ document.addEventListener('alpine:init', () => {
     window.Alpine.data('fqMusic', (tracks = []) => ({
         open: false,
 
+        /**
+         * Which album is expanded, if any. One at a time: a soundtrack is a
+         * hundred songs, and two open at once is a scroll with no landmarks.
+         */
+        openAlbum: null,
+
         init() {
             this.$store.music.load(tracks);
         },
 
         get music() {
             return this.$store.music;
+        },
+
+        /** Songs sitting loose at the top of the library, outside any album. */
+        get loose() {
+            return this.music.tracks.filter((track) => ! track.album);
+        },
+
+        /** Album names, in the order the server sorted the songs into. */
+        get albums() {
+            const names = [];
+
+            for (const track of this.music.tracks) {
+                if (track.album && ! names.includes(track.album)) {
+                    names.push(track.album);
+                }
+            }
+
+            return names;
+        },
+
+        songsIn(album) {
+            return this.music.tracks.filter((track) => track.album === album);
+        },
+
+        /**
+         * Opening the picker jumps to wherever the current song lives, so a kid
+         * playing track 60 of a soundtrack is not dropped at the top of a list
+         * of a hundred with no idea where they were.
+         */
+        togglePanel() {
+            this.open = ! this.open;
+
+            if (this.open) {
+                this.openAlbum = this.music.current()?.album ?? null;
+            }
+        },
+
+        toggleAlbum(album) {
+            this.openAlbum = this.openAlbum === album ? null : album;
+        },
+
+        /**
+         * Hover opens an album too — but only where hovering is a thing that
+         * exists. On a touch screen the browser fires hover from a tap, so
+         * without this check the tap would open the album and the click that
+         * follows it would immediately close it again.
+         */
+        hoverAlbum(album) {
+            if (window.matchMedia('(hover: hover)').matches) {
+                this.openAlbum = album;
+            }
         },
 
         get label() {

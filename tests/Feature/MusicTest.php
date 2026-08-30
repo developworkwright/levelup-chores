@@ -5,29 +5,22 @@ namespace Tests\Feature;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\Profile;
+use App\Notifications\NewSongAdded;
 use App\Services\MusicService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Features\SupportFileUploads\FileUploadConfiguration;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\Volt\Volt;
+use RuntimeException;
 use Tests\TestCase;
 
 class MusicTest extends TestCase
 {
     use RefreshDatabase;
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        // Every test here runs against a faked music disk rather than whatever
-        // songs happen to be shipped or uploaded today.
-        Storage::fake('music');
-        config(['filesystems.music_disk' => 'music']);
-    }
 
     /** @param  array<int, string>  $filenames */
     private function library(array $filenames): void
@@ -70,13 +63,120 @@ class MusicTest extends TestCase
 
     public function test_a_stored_filename_never_needs_encoding(): void
     {
-        // A URL is built by concatenating a configured base onto the path, and
-        // neither the local disk nor the S3 disk encodes what it is handed. A
-        // space in a filename survived that only on browser leniency.
+        // Belt as well as braces. urlFor() encodes now, because a folder
+        // dropped in by hand brings whatever names it came with — but what this
+        // app writes itself still needs no encoding at all.
         $stored = app(MusicService::class)->filename('Mossy Save Point');
 
         $this->assertSame('Mossy_Save_Point.mp3', $stored);
         $this->assertSame($stored, rawurlencode($stored));
+    }
+
+    public function test_it_encodes_a_hand_placed_filename_that_does_need_it(): void
+    {
+        /*
+         * A bought soundtrack arrives as a folder of files named however the
+         * shop named them, spaces and all — nothing this app wrote.
+         *
+         * Storage::url() cannot be left to deal with that: given a base url,
+         * which the local disk has and every hosted bucket has, it concatenates
+         * the path on raw. The space reaches the browser unencoded and the
+         * bucket never matches the key.
+         */
+        $this->library(['Undertale/toby fox - 02 Start Menu.mp3']);
+
+        $url = app(MusicService::class)->tracks()[0]['url'];
+
+        $this->assertStringNotContainsString(' ', $url);
+        $this->assertStringContainsString('Undertale/toby%20fox%20-%2002%20Start%20Menu.mp3', $url);
+    }
+
+    public function test_it_groups_songs_into_the_folders_they_sit_in(): void
+    {
+        $this->library([
+            'Pixel_Run.mp3',
+            'Undertale/Ruins.mp3',
+            'Undertale/Fallen_Down.mp3',
+            'Celeste/Resurrections.mp3',
+        ]);
+
+        $tracks = app(MusicService::class)->tracks();
+
+        // Loose songs first, then albums alphabetically, then songs within each.
+        $this->assertSame(
+            [null, 'Celeste', 'Undertale', 'Undertale'],
+            array_column($tracks, 'album'),
+        );
+        $this->assertSame(
+            ['Pixel Run', 'Resurrections', 'Fallen Down', 'Ruins'],
+            array_column($tracks, 'title'),
+        );
+    }
+
+    public function test_a_folder_nested_deeper_still_belongs_to_the_album_at_the_top(): void
+    {
+        // Otherwise the picker would need a third level, and a menu a kid has
+        // to walk down three times is not a menu.
+        $this->library(['Undertale/Disc One/Ruins.mp3']);
+
+        $this->assertSame('Undertale', app(MusicService::class)->tracks()[0]['album']);
+    }
+
+    public function test_two_albums_can_each_have_a_song_of_the_same_name(): void
+    {
+        // The id is what a kid's browser remembers their choice by, so a
+        // collision here would have one album's song select the other's.
+        $this->library(['Undertale/Ruins.mp3', 'Celeste/Ruins.mp3']);
+
+        $ids = array_column(app(MusicService::class)->tracks(), 'id');
+
+        $this->assertSame($ids, array_unique($ids));
+    }
+
+    public function test_a_song_at_the_top_keeps_the_id_it_had_before_folders_existed(): void
+    {
+        // Kids have a chosen song in localStorage keyed by this. Changing the
+        // shape of it would silently forget every one of them.
+        $this->library(['Pixel_Run.mp3']);
+
+        $this->assertSame('pixel-run', app(MusicService::class)->tracks()[0]['id']);
+    }
+
+    public function test_a_parent_can_upload_into_an_album(): void
+    {
+        $this->loginParent();
+
+        Volt::test('parent.music')
+            ->set('uploads', [UploadedFile::fake()->create('track01.mp3', 200, 'audio/mpeg')])
+            ->set('newTitle', 'Fallen Down')
+            ->set('newAlbum', 'Undertale')
+            ->call('addSongs')
+            ->assertHasNoErrors();
+
+        Storage::disk('music')->assertExists('Undertale/Fallen_Down.mp3');
+    }
+
+    public function test_renaming_a_song_leaves_it_in_its_album(): void
+    {
+        $this->library(['Undertale/Ruins.mp3']);
+        $this->loginParent();
+
+        Volt::test('parent.music')->call('renameSong', 'Undertale/Ruins.mp3', 'Home');
+
+        Storage::disk('music')->assertExists('Undertale/Home.mp3');
+        Storage::disk('music')->assertMissing('Home.mp3');
+    }
+
+    public function test_the_kid_picker_offers_the_album_as_a_folder(): void
+    {
+        $this->library(['Undertale/Ruins.mp3', 'Pixel_Run.mp3']);
+        $this->loginKid();
+
+        Volt::test('kid.quests')
+            ->assertSee('Undertale')
+            ->assertSee('Ruins')
+            // The folder is a real control, not a heading.
+            ->assertSee('toggleAlbum(album)', false);
     }
 
     public function test_a_title_keeps_its_own_capitalisation_through_the_round_trip(): void
@@ -129,9 +229,9 @@ class MusicTest extends TestCase
         $this->loginParent();
 
         Volt::test('parent.music')
-            ->set('upload', UploadedFile::fake()->create('track01.mp3', 200, 'audio/mpeg'))
+            ->set('uploads', [UploadedFile::fake()->create('track01.mp3', 200, 'audio/mpeg')])
             ->set('newTitle', 'Mossy Save Point')
-            ->call('addSong')
+            ->call('addSongs')
             ->assertHasNoErrors()
             ->assertSee('Mossy Save Point is on the list.');
 
@@ -179,9 +279,9 @@ class MusicTest extends TestCase
         $this->loginParent();
 
         Volt::test('parent.music')
-            ->set('upload', UploadedFile::fake()->create('track01.mp3', 200, 'audio/mpeg'))
+            ->set('uploads', [UploadedFile::fake()->create('track01.mp3', 200, 'audio/mpeg')])
             ->set('newTitle', 'Pixel Run')
-            ->call('addSong')
+            ->call('addSongs')
             ->assertHasNoErrors();
 
         $this->loginKid();
@@ -194,9 +294,9 @@ class MusicTest extends TestCase
         $this->loginParent();
 
         Volt::test('parent.music')
-            ->set('upload', UploadedFile::fake()->create('sneaky.wav', 200, 'audio/wav'))
-            ->call('addSong')
-            ->assertHasErrors('upload');
+            ->set('uploads', [UploadedFile::fake()->create('sneaky.wav', 200, 'audio/wav')])
+            ->call('addSongs')
+            ->assertHasErrors('uploads.0');
 
         $this->assertSame([], Storage::disk('music')->files());
     }
@@ -321,6 +421,112 @@ class MusicTest extends TestCase
         Storage::disk('music')->assertExists('Pixel_Run.mp3');
     }
 
+    public function test_adding_a_song_tells_the_kids_what_it_is_called(): void
+    {
+        Notification::fake();
+
+        $parent = $this->loginParent();
+        $kid = Profile::factory()->for($parent->household)->create();
+
+        Volt::test('parent.music')
+            ->set('uploads', [UploadedFile::fake()->create('track01.mp3', 200, 'audio/mpeg')])
+            ->set('newTitle', 'Mossy Save Point')
+            ->call('addSongs')
+            ->assertHasNoErrors()
+            ->assertSee('Everyone has been told.');
+
+        Notification::assertSentTo($kid, NewSongAdded::class, function (NewSongAdded $notification) use ($kid) {
+            // The name is the whole of what is new — there is no page to go and
+            // look at, so a push that only said "new music" would be a dead end.
+            return str_contains($notification->toWebPush($kid, $notification)->toArray()['body'], 'Mossy Save Point');
+        });
+    }
+
+    public function test_a_whole_album_is_one_push_and_not_one_per_song(): void
+    {
+        /*
+         * The thing that would ruin this feature. A bought soundtrack is a
+         * hundred tracks; a hundred buzzes in a row is how a kid turns
+         * notifications off and never turns them back on — taking the chore
+         * approvals and the trade offers with them.
+         */
+        Notification::fake();
+
+        $parent = $this->loginParent();
+        $kid = Profile::factory()->for($parent->household)->create();
+
+        Volt::test('parent.music')
+            ->set('uploads', [
+                UploadedFile::fake()->create('01.mp3', 200, 'audio/mpeg'),
+                UploadedFile::fake()->create('02.mp3', 200, 'audio/mpeg'),
+                UploadedFile::fake()->create('03.mp3', 200, 'audio/mpeg'),
+            ])
+            ->set('newAlbum', 'Undertale')
+            ->call('addSongs')
+            ->assertHasNoErrors();
+
+        Notification::assertSentToTimes($kid, NewSongAdded::class, 1);
+
+        Notification::assertSentTo($kid, NewSongAdded::class, function (NewSongAdded $n) use ($kid) {
+            // And it says which album, because "3 new songs" is a number where
+            // "3 songs from Undertale" is news.
+            return str_contains($n->toWebPush($kid, $n)->toArray()['body'], '3 songs from Undertale');
+        });
+    }
+
+    public function test_only_the_kids_are_told_about_a_new_song(): void
+    {
+        Notification::fake();
+
+        $parent = $this->loginParent();
+        $other = Profile::factory()->for($parent->household)->parent()->create();
+        $elsewhere = Profile::factory()->for(Household::factory()->create())->create();
+
+        Volt::test('parent.music')
+            ->set('uploads', [UploadedFile::fake()->create('track01.mp3', 200, 'audio/mpeg')])
+            ->set('newTitle', 'Pixel Run')
+            ->call('addSongs');
+
+        Notification::assertNotSentTo($parent, NewSongAdded::class);
+        Notification::assertNotSentTo($other, NewSongAdded::class);
+        Notification::assertNotSentTo($elsewhere, NewSongAdded::class);
+    }
+
+    public function test_renaming_a_song_is_not_announced_as_a_new_one(): void
+    {
+        // A retitle is the same song. Announcing it would train the kids to
+        // ignore the one push that is worth reading.
+        Notification::fake();
+
+        $this->library(['Snowy_Save_Point.mp3']);
+        $parent = $this->loginParent();
+        Profile::factory()->for($parent->household)->create();
+
+        Volt::test('parent.music')->call('renameSong', 'Snowy_Save_Point.mp3', 'Snowglobe Ruins');
+
+        Notification::assertNothingSent();
+    }
+
+    public function test_a_song_still_lands_when_the_push_cannot_be_sent(): void
+    {
+        // The file is already written by the time anybody is told about it, so
+        // a broken push is a song nobody heard about — never a song nobody has.
+        Notification::fake();
+        Notification::shouldReceive('send')->andThrow(new RuntimeException('push is down'));
+
+        $parent = $this->loginParent();
+        Profile::factory()->for($parent->household)->create();
+
+        Volt::test('parent.music')
+            ->set('uploads', [UploadedFile::fake()->create('track01.mp3', 200, 'audio/mpeg')])
+            ->set('newTitle', 'Suspense')
+            ->call('addSongs')
+            ->assertHasNoErrors()
+            ->assertDontSee('That did not save');
+
+        Storage::disk('music')->assertExists('Suspense.mp3');
+    }
+
     public function test_a_failed_upload_says_why_and_not_just_that(): void
     {
         // "The storage turned it down" is not something anybody can act on, and
@@ -329,8 +535,8 @@ class MusicTest extends TestCase
         $this->loginParent();
 
         Volt::test('parent.music')
-            ->set('upload', UploadedFile::fake()->create('track01.mp3', 200, 'audio/mpeg'))
-            ->call('addSong')
+            ->set('uploads', [UploadedFile::fake()->create('track01.mp3', 200, 'audio/mpeg')])
+            ->call('addSongs')
             ->assertSee('That did not save')
             ->assertSee('no-such-bucket');
     }
