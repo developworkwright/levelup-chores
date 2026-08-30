@@ -9,9 +9,11 @@
      resources/js/music.js for why the audio is deliberately not an element on
      the page. --}}
 @php
+    $music = app(App\Services\MusicService::class);
+
     // Only what the player needs. The library also carries each song's storage
-    // path and size, which are the music admin screen's business and have no
-    // reason to be in markup a kid's browser receives.
+    // path, size and age, which are the music admin screen's business and have
+    // no reason to be in markup a kid's browser receives.
     $tracks = array_map(
         fn (array $track): array => [
             'id' => $track['id'],
@@ -19,13 +21,17 @@
             'album' => $track['album'],
             'url' => $track['url'],
         ],
-        app(App\Services\MusicService::class)->tracks(),
+        $music->tracks(),
     );
+
+    // One number instead of a per-song date: the marker says "there is new
+    // music", not which songs, so a high-water mark is the whole question.
+    $latestAt = $music->latestChangeAt();
 @endphp
 
 @if ($tracks !== [])
     <div
-        x-data="fqMusic(@js($tracks))"
+        x-data="fqMusic(@js($tracks), {{ $latestAt }})"
         {{-- On the wrapper so a tap on either button counts as inside;
              hung off the panel it would race its own opening. --}}
         @click.outside="open = false"
@@ -46,15 +52,29 @@
                 class="flex w-[52px] items-center justify-center text-[18px] transition hover:text-fq-text"
             >&#9835;</button>
 
+            {{-- `relative` so the marker can sit on its corner. --}}
             <button
                 type="button"
                 @click="togglePanel()"
                 :aria-expanded="open"
-                title="Choose a song"
-                aria-label="Choose a song"
-                class="flex w-[30px] items-center justify-center border-l border-fq-line-2 text-[11px] text-fq-text-4 transition hover:text-fq-text"
+                :title="music.hasNew ? 'New music — choose a song' : 'Choose a song'"
+                :aria-label="music.hasNew ? 'New music — choose a song' : 'Choose a song'"
+                class="relative flex w-[30px] items-center justify-center border-l border-fq-line-2 text-[11px] text-fq-text-4 transition hover:text-fq-text"
                 :class="open ? 'text-fq-text' : ''"
-            >&#9662;</button>
+            >
+                &#9662;
+
+                {{-- The whole of how a kid finds out. Deliberately a dot and
+                     not a count: the marker's job is "look in here", and a
+                     number invites counting rather than listening. It goes the
+                     moment the picker opens. --}}
+                <span
+                    x-show="music.hasNew"
+                    x-cloak
+                    class="pointer-events-none absolute top-[9px] right-[5px] h-[7px] w-[7px] rounded-full"
+                    style="background: var(--fq-lime); box-shadow: 0 0 0 2px var(--fq-sunk)"
+                ></span>
+            </button>
         </div>
 
         {{-- Anchored right so it cannot run off the edge of a phone from a

@@ -28,20 +28,26 @@ new class extends Component
     public Profile $profile;
 
     /**
-     * The songs being added. An array because an album arrives all at once —
-     * one at a time is not a way to add a soundtrack.
+     * The song being added. One at a time, and deliberately untyped.
      *
-     * @var array<int, mixed>
+     * Not `multiple`, however much a hundred-track album wants it to be:
+     * Livewire's S3 temporary-upload driver refuses a multiple input outright
+     * — see S3DoesntSupportMultipleFileUploads, thrown from _startUpload the
+     * instant a file is chosen, before any of this component's own code runs.
+     * It throws on a single file too, because it goes off the attribute rather
+     * than the number of files. Locally it never fires, because a local
+     * temporary disk is not S3; in production it always does.
+     *
+     * Untyped because Livewire assigns a bare TemporaryUploadedFile here, and
+     * a typed array property would refuse it. Bulk imports go through storage
+     * directly and then Rescan — see rescan().
      */
-    public array $uploads = [];
+    public $upload = null;
 
     /** Which folder to put them in. Blank leaves them loose at the top. */
     public string $newAlbum = '';
 
-    /**
-     * What to call it. Only offered for a single file: naming a hundred songs
-     * in one box is not a thing, so a batch keeps the names it arrived with.
-     */
+    /** What to call it. Blank falls back to the uploaded file's own name. */
     public string $newTitle = '';
 
     /** Which album's songs are drawn. One at a time, so the page stays short. */
@@ -65,11 +71,10 @@ new class extends Component
     public function rules(): array
     {
         return [
-            'uploads' => ['required', 'array', 'min:1'],
             // mimetypes as well as the extension: the extension is what the
             // library keys off, and a renamed .wav would be silently unplayable
             // on exactly the browsers nobody in the house is testing on.
-            'uploads.*' => ['file', 'mimetypes:audio/mpeg', 'extensions:mp3', 'max:'.MusicService::MAX_UPLOAD_KB],
+            'upload' => ['required', 'file', 'mimetypes:audio/mpeg', 'extensions:mp3', 'max:'.MusicService::MAX_UPLOAD_KB],
             'newTitle' => ['nullable', 'string', 'max:'.MusicService::MAX_TITLE],
             'newAlbum' => ['nullable', 'string', 'max:'.MusicService::MAX_TITLE],
         ];
@@ -79,59 +84,45 @@ new class extends Component
     public function messages(): array
     {
         return [
-            'uploads.required' => 'Pick at least one mp3 first.',
-            'uploads.*.mimetypes' => 'Those have to be mp3s.',
-            'uploads.*.extensions' => 'Those have to be mp3s.',
-            'uploads.*.max' => 'One of those is over '.round(MusicService::MAX_UPLOAD_KB / 1024).'MB.',
+            'upload.required' => 'Pick an mp3 first.',
+            'upload.mimetypes' => 'That has to be an mp3.',
+            'upload.extensions' => 'That has to be an mp3.',
+            'upload.max' => 'That song is over '.round(MusicService::MAX_UPLOAD_KB / 1024).'MB.',
         ];
     }
 
-    public function addSongs(): void
+    public function addSong(): void
     {
         $this->validate();
 
         $service = app(MusicService::class);
-        $stored = [];
 
         try {
-            foreach ($this->uploads as $index => $upload) {
-                // The typed title only applies when there is one file to apply
-                // it to. Everything else keeps its own name.
-                $title = count($this->uploads) === 1 ? $this->newTitle : '';
-
-                $stored[] = $service->store($upload, $title, $this->newAlbum);
-            }
+            $stored = $service->store($this->upload, $this->newTitle, $this->newAlbum);
         } catch (\Throwable $e) {
             // Whether the disk throws or quietly returns false, store() ends up
             // here — a bucket that rejected the write must not leave this page
             // claiming the song was added.
             report($e);
 
-            $this->errorMessage = count($stored) > 0
-                ? 'Saved '.count($stored).' before this one stopped it.'
-                : 'That did not save — the music storage turned it down.';
+            $this->errorMessage = 'That did not save — the music storage turned it down.';
             $this->errorDetail = $e->getMessage();
             $this->flashMessage = null;
-
-            // Whatever did land is still worth announcing.
-            $service->announceNewSongs($this->profile, $stored);
 
             return;
         }
 
-        // After the writes, so a push that somehow throws its way past the
-        // service's own catch cannot cost the library the songs it just saved.
-        $service->announceNewSongs($this->profile, $stored);
-
         $album = $service->folder($this->newAlbum);
 
-        $this->reset('uploads', 'newTitle', 'errorMessage', 'errorDetail');
+        $this->reset('upload', 'newTitle', 'errorMessage', 'errorDetail');
 
-        $this->flashMessage = count($stored) === 1
-            ? $service->title($stored[0]).' is on the list. Everyone has been told.'
-            : count($stored).' songs added. Everyone has been told.';
+        // Nothing is sent to anybody. Adding a song used to fire a push, which
+        // is unusable when an album is a hundred separate uploads — the kids
+        // find out from the marker on the header music button instead, which
+        // costs them nothing and can never arrive a hundred times.
+        $this->flashMessage = $service->title($stored).' is on the list.';
 
-        // Left where they were put, so the rows they just made are on screen.
+        // Left where it was put, so the row it just made is on screen.
         $this->openAlbum = $album !== '' ? str_replace('_', ' ', $album) : null;
     }
 
@@ -221,20 +212,28 @@ new class extends Component
     <div class="flex flex-col gap-3">
         <div class="flex flex-col gap-3 rounded-[28px] border border-fq-line bg-fq-bg p-[16px_14px]">
             <div>
-                <h2 class="font-baloo text-xl font-extrabold">Add songs</h2>
+                <h2 class="font-baloo text-xl font-extrabold">Add a song</h2>
                 <p class="mt-[3px] text-xs text-fq-text-3">
-                    mp3 only, up to {{ $maxMb }}MB each. Give them an album and the kids get
-                    them as a folder in the header menu instead of loose in one long list.
+                    mp3 only, up to {{ $maxMb }}MB. Give it an album and the kids get it as a
+                    folder in the header menu instead of loose in one long list.
+                </p>
+                {{-- One at a time is a hard limit, not a choice: Livewire's S3
+                     temporary-upload driver rejects a `multiple` input, and in
+                     production the temporary disk is the bucket. A whole album
+                     goes into storage directly, which is faster anyway — none
+                     of it passes through the app. --}}
+                <p class="mt-[6px] text-xs text-fq-text-5">
+                    Adding a whole album? Copy the folder straight into music storage, then
+                    press <span class="text-fq-text-3">Rescan storage</span> below.
                 </p>
             </div>
 
             <div class="flex flex-wrap items-center gap-2">
                 <input
                     type="file"
-                    wire:model="uploads"
-                    multiple
+                    wire:model="upload"
                     accept="audio/mpeg,.mp3"
-                    aria-label="Song files"
+                    aria-label="Song file"
                     class="min-w-[200px] flex-1 rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[11px] py-[9px] text-[13px] text-fq-text-2-b file:mr-3 file:rounded-[8px] file:border-0 file:bg-fq-panel-alt file:px-3 file:py-[5px] file:text-[12px] file:text-fq-text-2-b focus:border-fq-line-4 focus:outline-none"
                 />
 
@@ -256,38 +255,28 @@ new class extends Component
                     @endforeach
                 </datalist>
 
-                {{-- Only useful for a single file, so it only appears for one.
-                     Offering it against a batch would imply it renames all of
-                     them, which it cannot. --}}
-                @if (count($uploads) === 1)
-                    <input
-                        wire:model="newTitle"
-                        type="text"
-                        maxlength="{{ $maxTitle }}"
-                        placeholder="Call it something"
-                        class="w-[170px] rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[11px] py-[9px] text-[13px] text-fq-text placeholder:text-fq-text-5 focus:border-fq-line-4 focus:outline-none"
-                    />
-                @endif
+                <input
+                    wire:model="newTitle"
+                    type="text"
+                    maxlength="{{ $maxTitle }}"
+                    placeholder="Call it something"
+                    class="w-[170px] rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[11px] py-[9px] text-[13px] text-fq-text placeholder:text-fq-text-5 focus:border-fq-line-4 focus:outline-none"
+                />
 
                 <button
                     type="button"
-                    wire:click="addSongs"
+                    wire:click="addSong"
                     wire:loading.attr="disabled"
-                    wire:target="uploads,addSongs"
+                    wire:target="upload,addSong"
                     class="ml-auto shrink-0 rounded-[11px] px-4 py-[9px] font-baloo text-[13px] font-extrabold transition hover:brightness-110 disabled:opacity-60"
                     style="background: var(--fq-fill-gold-soft); color: var(--fq-ink)"
                 >
-                    <span wire:loading.remove wire:target="uploads,addSongs">
-                        {{ count($uploads) > 1 ? 'Add '.count($uploads).' songs' : 'Add song' }}
-                    </span>
-                    <span wire:loading wire:target="uploads,addSongs">Uploading&hellip;</span>
+                    <span wire:loading.remove wire:target="upload,addSong">Add song</span>
+                    <span wire:loading wire:target="upload,addSong">Uploading&hellip;</span>
                 </button>
             </div>
 
-            @error('uploads')
-                <p class="text-[13px]" style="color: var(--fq-danger)">{{ $message }}</p>
-            @enderror
-            @error('uploads.*')
+            @error('upload')
                 <p class="text-[13px]" style="color: var(--fq-danger)">{{ $message }}</p>
             @enderror
 

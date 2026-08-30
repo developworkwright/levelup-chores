@@ -19,6 +19,17 @@ const KEY_TRACK = 'fq-music-track';
 const KEY_VOLUME = 'fq-music-volume';
 
 /**
+ * The newest song this browser has been shown, as a unix timestamp.
+ *
+ * The whole of "is there new music": the server sends the library's high-water
+ * mark, and anything higher than what is stored here means songs arrived since
+ * the picker was last opened. Per browser rather than per kid, which is the
+ * honest thing for a marker whose only job is to say "you have not looked in
+ * here yet" — and it costs no column, no round trip and no migration.
+ */
+const KEY_SEEN = 'fq-music-seen';
+
+/**
  * Quiet by default. This plays *underneath* a kid doing chores on a phone
  * speaker, and mastered mp3s at 1.0 are loud enough that the first thing
  * anyone does is turn it off and never come back.
@@ -61,13 +72,37 @@ document.addEventListener('alpine:init', () => {
         /** Guards resume() to the first header that mounts, not every one. */
         resumed: false,
 
+        /** The library's newest song, as a unix timestamp, from the server. */
+        latestAt: 0,
+
+        /** The newest this browser has been shown. Null until it has looked. */
+        seenAt: null,
+
         /**
          * Handed the catalogue by whichever header drew itself. Runs again on
          * every navigation, so it must not disturb a song already playing —
          * only the list and a selection that has gone stale.
          */
-        load(tracks) {
+        load(tracks, latestAt = 0) {
             this.tracks = tracks;
+            this.latestAt = latestAt;
+
+            if (this.seenAt === null) {
+                const stored = read(KEY_SEEN);
+
+                /*
+                 * A browser that has never looked is caught up, not a hundred
+                 * songs behind. Marking the whole existing library as new the
+                 * first time anybody opens the app would put a permanent dot on
+                 * the header of every kid who has been listening for weeks.
+                 */
+                if (stored === null) {
+                    write(KEY_SEEN, String(latestAt));
+                    this.seenAt = latestAt;
+                } else {
+                    this.seenAt = Number(stored) || 0;
+                }
+            }
 
             if (! tracks.length) {
                 return;
@@ -167,6 +202,17 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        /** True while songs have arrived that this browser has not been shown. */
+        get hasNew() {
+            return this.seenAt !== null && this.latestAt > this.seenAt;
+        },
+
+        /** Opening the picker is looking, so the marker comes off. */
+        markSeen() {
+            this.seenAt = this.latestAt;
+            write(KEY_SEEN, String(this.latestAt));
+        },
+
         /**
          * After a full page load, pick the music back up where it was.
          *
@@ -195,7 +241,7 @@ document.addEventListener('alpine:init', () => {
      * state a song has is on the store, so the control can be destroyed and
      * rebuilt by a navigation without the music noticing.
      */
-    window.Alpine.data('fqMusic', (tracks = []) => ({
+    window.Alpine.data('fqMusic', (tracks = [], latestAt = 0) => ({
         open: false,
 
         /**
@@ -205,7 +251,7 @@ document.addEventListener('alpine:init', () => {
         openAlbum: null,
 
         init() {
-            this.$store.music.load(tracks);
+            this.$store.music.load(tracks, latestAt);
         },
 
         get music() {
@@ -244,6 +290,7 @@ document.addEventListener('alpine:init', () => {
 
             if (this.open) {
                 this.openAlbum = this.music.current()?.album ?? null;
+                this.music.markSeen();
             }
         },
 

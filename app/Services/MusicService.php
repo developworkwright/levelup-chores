@@ -2,14 +2,9 @@
 
 namespace App\Services;
 
-use App\Enums\ProfileRole;
-use App\Models\Profile;
-use App\Notifications\NewSongAdded;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -176,6 +171,20 @@ class MusicService
     }
 
     /**
+     * When the library last changed, as a unix timestamp, or 0 when it is empty.
+     *
+     * One number is the whole of what a kid's browser needs to work out whether
+     * there is anything new: it keeps the last value it saw, and anything
+     * higher means songs have arrived since. Deliberately not per song — the
+     * marker on the header says "there is new music", not "these four are new",
+     * so a single high-water mark is the entire question.
+     */
+    public function latestChangeAt(): int
+    {
+        return collect($this->tracks())->max('modified') ?? 0;
+    }
+
+    /**
      * Every album in the library, by name.
      *
      * For the picker on the upload form: adding the second song to an album is
@@ -193,70 +202,6 @@ class MusicService
             ->sort(fn (string $a, string $b): int => strcasecmp($a, $b))
             ->values()
             ->all();
-    }
-
-    /**
-     * Tell the kids a song has landed.
-     *
-     * Separate from store() rather than folded into it, for the reason
-     * StoreService::announceNewItem() is separate from creating an item: a file
-     * can be re-uploaded, restored or fixed up without that being news. This is
-     * for a parent deliberately putting a song out.
-     *
-     * The library is one folder for the whole application while households are
-     * not, so "the kids" means the uploading parent's own. A second household
-     * would quietly share the music and hear nothing about it — worth knowing
-     * before this ever runs anywhere but one family's phone.
-     */
-    /**
-     * @param  array<int, string>  $paths  Everything added in this one go.
-     */
-    public function announceNewSongs(Profile $addedBy, array $paths): void
-    {
-        if ($paths === []) {
-            return;
-        }
-
-        $kids = Profile::where('household_id', $addedBy->household_id)
-            ->where('role', ProfileRole::Kid)
-            ->get();
-
-        try {
-            Notification::send($kids, new NewSongAdded($this->announcement($paths)));
-        } catch (Throwable $e) {
-            // Never at the cost of the upload itself. The songs are already on
-            // the disk by the time this runs, and a push that fails is music
-            // nobody was told about rather than music nobody has.
-            Log::error('New song notification failed.', [
-                'songs' => $paths,
-                'exception' => $e,
-            ]);
-        }
-    }
-
-    /**
-     * What one push says about a batch.
-     *
-     * One notification per batch, never per file — a soundtrack is a hundred
-     * songs, and a hundred buzzes in a row is how a kid turns notifications off
-     * for good. A whole album is named as an album, because "101 new songs" is
-     * a number and "101 songs from Undertale" is news.
-     *
-     * @param  array<int, string>  $paths
-     */
-    private function announcement(array $paths): string
-    {
-        if (count($paths) === 1) {
-            return $this->title($paths[0]).' is in the music menu';
-        }
-
-        $albums = collect($paths)->map(fn (string $path): ?string => $this->album($path))->unique();
-
-        if ($albums->count() === 1 && $albums->first() !== null) {
-            return count($paths).' songs from '.$albums->first().' are in the music menu';
-        }
-
-        return count($paths).' new songs are in the music menu';
     }
 
     /** Retitle a song. The filename *is* the title, so this is a move. */
@@ -362,6 +307,9 @@ class MusicService
                     'url' => $this->urlFor($disk, $path),
                     'path' => $path,
                     'bytes' => $item->fileSize() ?? 0,
+                    // What makes "new music" answerable without storing
+                    // anything: the library carries its own age.
+                    'modified' => $item->lastModified() ?? 0,
                 ];
             })
             // Loose songs first, then albums alphabetically, then the songs
