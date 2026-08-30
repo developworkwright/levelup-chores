@@ -122,33 +122,30 @@ class MusicService
     {
         $filename = $this->filename($title !== '' ? $title : $file->getClientOriginalName());
 
-        // A write that fails comes back either way depending on the disk: as an
-        // exception where 'throw' is on, and as a plain false where it is not —
-        // which is how Laravel Cloud builds its own disks. Normalising to an
-        // exception is what stops the upload screen announcing a song that was
-        // never written.
-        if ($this->disk()->putFileAs('', $file, $filename) === false) {
-            // ...but `false` on its own is useless to whoever has to fix it.
-            // Flysystem always throws, so going back through the driver turns
-            // the bare failure into the reason for it. Through $this->disk()
-            // rather than a rebuilt one, so a faked disk stays faked.
-            $stream = fopen($file->getRealPath(), 'rb');
+        $disk = config('filesystems.music_disk');
 
-            try {
-                $this->disk()->getDriver()->writeStream($filename, $stream, []);
-            } finally {
-                if (is_resource($stream)) {
-                    fclose($stream);
-                }
-            }
+        /*
+         * The file's own storeAs(), never the disk's putFileAs().
+         *
+         * They look interchangeable and are not. putFileAs() opens the source
+         * with fopen($file->getRealPath()) — and an upload still sitting on
+         * Livewire's temporary disk has no real path when *that* disk is itself
+         * remote: getRealPath() hands back a bucket key, fopen() cannot open it,
+         * and the upload dies on a missing file it can see the name of.
+         *
+         * Anywhere with more than one application container has to put those
+         * temporary uploads somewhere shared, so this is the normal case in
+         * production and never once the case on a laptop. storeAs() streams
+         * from wherever the temporary file actually lives.
+         */
+        $stored = $file->storeAs('', $filename, ['disk' => $disk]);
 
-            // Reachable only if the retry succeeded where putFileAs did not,
-            // which would be its own kind of interesting.
-            if (! $this->disk()->exists($filename)) {
-                throw new RuntimeException(
-                    'Could not write '.$filename.' to the '.config('filesystems.music_disk').' disk.'
-                );
-            }
+        // Still checked: this comes back false rather than throwing on a disk
+        // built with 'throw' => false, which is how Laravel Cloud builds its
+        // own. A page that only catches exceptions would announce a song that
+        // was never written.
+        if ($stored === false) {
+            throw new RuntimeException('Could not write '.$filename.' to the '.$disk.' disk.');
         }
 
         $this->forget();

@@ -10,6 +10,8 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
+use Livewire\Features\SupportFileUploads\FileUploadConfiguration;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\Volt\Volt;
 use Tests\TestCase;
 
@@ -282,6 +284,41 @@ class MusicTest extends TestCase
             ->assertOk()
             ->assertSee('The music storage cannot be read.')
             ->assertDontSee('Nothing here yet');
+    }
+
+    public function test_it_stores_an_upload_that_has_no_readable_path_on_this_machine(): void
+    {
+        /*
+         * Livewire holds an upload on a temporary disk between the browser
+         * sending it and the action using it, and anywhere running more than
+         * one application container has to make that disk a shared, remote one.
+         * A temporary file sitting in a bucket has no local path: getRealPath()
+         * returns a bucket key, and anything that tries to fopen() it dies on a
+         * missing file whose name it can print.
+         *
+         * The suite cannot reproduce that directly — Livewire pins the
+         * temporary disk to a local fake whenever tests are running, which is
+         * precisely why every test here passed while production could not store
+         * a single song. So the condition is reproduced instead: a real
+         * temporary upload whose real path leads nowhere.
+         */
+        // First: it is this call that registers the temporary disk, and
+        // constructing the upload below resolves that disk in its constructor.
+        FileUploadConfiguration::storage()->put('livewire-tmp/song.mp3', 'not really an mp3');
+
+        // Bare filename: the constructor prefixes the temporary directory for
+        // you, so passing the full path lands it under livewire-tmp twice.
+        $temporary = new class('song.mp3', 'tmp-for-tests') extends TemporaryUploadedFile
+        {
+            public function getRealPath(): string
+            {
+                return 'livewire-tmp/there-is-no-such-file.mp3';
+            }
+        };
+
+        app(MusicService::class)->store($temporary, 'Pixel Run');
+
+        Storage::disk('music')->assertExists('Pixel_Run.mp3');
     }
 
     public function test_a_failed_upload_says_why_and_not_just_that(): void
