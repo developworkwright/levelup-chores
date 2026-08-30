@@ -127,6 +127,12 @@ new class extends Component
             // This is the difference, and it is on the one screen whose job is
             // to answer it.
             'storageFailure' => $service->failure(),
+            // Names only, never the credentials behind them. The platform
+            // registers its own disks at boot from its own environment, so the
+            // one MUSIC_DISK is supposed to name cannot be known when this file
+            // is written — but it *is* in this list at runtime, and reading it
+            // off the screen beats hunting through a dashboard.
+            'availableDisks' => array_keys(config('filesystems.disks')),
         ];
     }
 }; ?>
@@ -211,6 +217,14 @@ new class extends Component
                     </p>
                     <p class="mt-2 font-mono-fq text-[11px] leading-relaxed break-words text-fq-text-5">
                         {{ $storageFailure }}
+                    </p>
+
+                    <p class="mt-3 text-[12px] text-fq-text-4">
+                        MUSIC_DISK is set to <span class="font-mono-fq text-fq-text-2-b">{{ $diskName }}</span>.
+                        The disks this app actually has are:
+                    </p>
+                    <p class="mt-1 font-mono-fq text-[11px] break-words text-fq-text-2-b">
+                        {{ implode(' · ', $availableDisks) }}
                     </p>
                 </div>
             @elseif (! $tracks)

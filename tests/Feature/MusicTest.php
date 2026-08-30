@@ -284,6 +284,25 @@ class MusicTest extends TestCase
             ->assertDontSee('Nothing here yet');
     }
 
+    public function test_the_music_screen_lists_the_disks_it_could_have_been_pointed_at(): void
+    {
+        // The disk MUSIC_DISK is meant to name is registered at boot by the
+        // host, so it cannot be written down in advance — but it is in this
+        // list at runtime, which is the whole point of printing it.
+        $this->useUnreachableBucket();
+        $this->loginParent();
+
+        // Not the exact list — that is config order and would break the first
+        // time a disk is added. What matters is that the names are printed
+        // after the prompt telling you to go and read them.
+        Volt::test('parent.music')
+            ->assertSeeInOrder([
+                'MUSIC_DISK is set to',
+                'The disks this app actually has are:',
+                'music_cloud',
+            ]);
+    }
+
     public function test_the_music_library_is_closed_to_kids(): void
     {
         $this->loginKid();
