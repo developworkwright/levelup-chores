@@ -33,6 +33,9 @@ new class extends Component
 
     public ?string $errorMessage = null;
 
+    /** The storage layer's own words, under the friendly line. */
+    public ?string $errorDetail = null;
+
     public function mount(): void
     {
         $this->profile = Auth::guard('profile')->user();
@@ -72,18 +75,23 @@ new class extends Component
         try {
             $stored = $service->store($this->upload, $this->newTitle);
         } catch (\Throwable $e) {
-            // The music disk is configured to throw, which is the point: a
-            // bucket that rejected the write must not leave this page claiming
-            // the song was added. Parents get the short version.
+            // Whether the disk throws or quietly returns false, store() ends up
+            // here — a bucket that rejected the write must not leave this page
+            // claiming the song was added.
             report($e);
 
             $this->errorMessage = 'That did not save — the music storage turned it down.';
+            // The reason as well as the fact, for the same purpose the read
+            // failure prints one: whoever is looking at this screen is the only
+            // person who can fix it, and "turned it down" is not something you
+            // can act on.
+            $this->errorDetail = $e->getMessage();
             $this->flashMessage = null;
 
             return;
         }
 
-        $this->reset('upload', 'newTitle', 'errorMessage');
+        $this->reset('upload', 'newTitle', 'errorMessage', 'errorDetail');
         $this->flashMessage = $service->title($stored).' is on the list.';
     }
 
@@ -184,6 +192,12 @@ new class extends Component
 
             @if ($errorMessage)
                 <p class="text-[13px]" style="color: var(--fq-danger)">{{ $errorMessage }}</p>
+
+                @if ($errorDetail)
+                    <p class="font-mono-fq text-[11px] leading-relaxed break-words text-fq-text-5">
+                        {{ $errorDetail }}
+                    </p>
+                @endif
             @endif
 
             @if ($flashMessage)

@@ -284,6 +284,20 @@ class MusicTest extends TestCase
             ->assertDontSee('Nothing here yet');
     }
 
+    public function test_a_failed_upload_says_why_and_not_just_that(): void
+    {
+        // "The storage turned it down" is not something anybody can act on, and
+        // the person reading it is the only person who can fix it.
+        $this->useUnreachableBucket();
+        $this->loginParent();
+
+        Volt::test('parent.music')
+            ->set('upload', UploadedFile::fake()->create('track01.mp3', 200, 'audio/mpeg'))
+            ->call('addSong')
+            ->assertSee('That did not save')
+            ->assertSee('no-such-bucket');
+    }
+
     public function test_the_music_screen_lists_the_disks_it_could_have_been_pointed_at(): void
     {
         // The disk MUSIC_DISK is meant to name is registered at boot by the

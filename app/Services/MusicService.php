@@ -128,9 +128,27 @@ class MusicService
         // exception is what stops the upload screen announcing a song that was
         // never written.
         if ($this->disk()->putFileAs('', $file, $filename) === false) {
-            throw new RuntimeException(
-                'Could not write '.$filename.' to the '.config('filesystems.music_disk').' disk.'
-            );
+            // ...but `false` on its own is useless to whoever has to fix it.
+            // Flysystem always throws, so going back through the driver turns
+            // the bare failure into the reason for it. Through $this->disk()
+            // rather than a rebuilt one, so a faked disk stays faked.
+            $stream = fopen($file->getRealPath(), 'rb');
+
+            try {
+                $this->disk()->getDriver()->writeStream($filename, $stream, []);
+            } finally {
+                if (is_resource($stream)) {
+                    fclose($stream);
+                }
+            }
+
+            // Reachable only if the retry succeeded where putFileAs did not,
+            // which would be its own kind of interesting.
+            if (! $this->disk()->exists($filename)) {
+                throw new RuntimeException(
+                    'Could not write '.$filename.' to the '.config('filesystems.music_disk').' disk.'
+                );
+            }
         }
 
         $this->forget();
