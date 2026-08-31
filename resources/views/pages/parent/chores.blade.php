@@ -1,6 +1,8 @@
 <?php
 
 use App\Enums\ChoreCadence;
+use App\Enums\ChoreCategory;
+use App\Enums\ChoreEffort;
 use App\Enums\ChoreIcon;
 use App\Models\Chore;
 use App\Models\Profile;
@@ -145,6 +147,43 @@ new class extends Component
 
         if ($chore) {
             $chore->wheel_eligible = ! $chore->wheel_eligible;
+            $chore->save();
+        }
+    }
+
+    /**
+     * How hard the job is, cycled "not said" → easy going → hard work → back.
+     *
+     * Three states rather than a switch, because "nobody has said" is a real
+     * answer and a parent has to be able to get back to it — the same shape as
+     * the min-age stepper's "Any age". Only Hard work is load-bearing: it's
+     * what the kid board's Muscle chip collects, and it's the one thing no
+     * keyword pass could ever guess (see {@see ChoreEffort}).
+     */
+    public function cycleEffort(int $choreId): void
+    {
+        $chore = $this->ownedChore($choreId);
+
+        if ($chore) {
+            $chore->effort = ChoreEffort::next($chore->effort);
+            $chore->save();
+        }
+    }
+
+    /**
+     * Which chip a chore browses under on the kids' board.
+     *
+     * A dropdown rather than a cycle button like the two beside it: eleven
+     * options is nine taps too many, and unlike cadence or effort there is no
+     * natural order to walk through. An empty value clears it back to "not
+     * said", which collects under Other — never a silent disappearance.
+     */
+    public function setCategory(int $choreId, string $category): void
+    {
+        $chore = $this->ownedChore($choreId);
+
+        if ($chore) {
+            $chore->category = ChoreCategory::tryFrom($category);
             $chore->save();
         }
     }
@@ -467,6 +506,10 @@ new class extends Component
                             @unless ($chore->wheel_eligible)
                                 · <span class="text-fq-coral">Excluded from wheel</span>
                             @endunless
+                            @if ($chore->effort)
+                                · {{ $chore->effort->label() }}
+                            @endif
+                            · {{ $chore->category?->label() ?? 'No category' }}
                         </p>
                         {{-- Whether the family can actually do this job right
                              now, and who's holding it if not. The one line on
@@ -565,6 +608,39 @@ new class extends Component
                         class="rounded-[12px] border px-3 py-2 text-xs {{ $chore->quest_eligible ? 'border-fq-line-3 bg-fq-sunk text-fq-text-3' : 'border-fq-coral bg-fq-sunk text-fq-coral' }}"
                     >
                         {{ $chore->quest_eligible ? 'Exclude from quest' : 'Allow as quest' }}
+                    </button>
+
+                    {{-- Which chip this browses under on the kids' board.
+
+                         A dropdown, not a pill row: eleven options would be a
+                         second line of buttons on every chore, and unlike the
+                         cadence beside it there is no order to cycle through.
+                         Deliberately not read off the icon — that is a card
+                         face for a kid who can't read the name, and letting it
+                         pick the category made choosing a nicer picture move
+                         the chore to a different chip. --}}
+                    <select
+                        wire:change="setCategory({{ $chore->id }}, $event.target.value)"
+                        title="Which chip this chore shows under when a kid browses the board"
+                        class="rounded-[12px] border px-3 py-2 text-xs {{ $chore->category ? 'border-fq-line-3 bg-fq-sunk text-fq-text-3' : 'border-fq-line-3 bg-fq-sunk text-fq-text-5' }}"
+                    >
+                        <option value="" @selected($chore->category === null)>No category</option>
+                        @foreach (ChoreCategory::cases() as $case)
+                            <option value="{{ $case->value }}" @selected($chore->category === $case)>{{ $case->label() }}</option>
+                        @endforeach
+                    </select>
+
+                    {{-- The one filter on the kid's board that can't be
+                         derived from anything already stored. Cycles rather
+                         than toggles so "nobody has said" stays reachable. --}}
+                    <button
+                        type="button"
+                        wire:click="cycleEffort({{ $chore->id }})"
+                        title="How hard is this job? Kids can browse for the hard ones."
+                        class="flex items-center gap-2 rounded-[12px] border px-3 py-2 text-xs {{ $chore->effort === \App\Enums\ChoreEffort::Heavy ? 'border-fq-cyan bg-fq-sunk text-fq-cyan' : 'border-fq-line-3 bg-fq-sunk text-fq-text-3' }}"
+                    >
+                        <i class="fa-solid fa-dumbbell text-[11px]" aria-hidden="true"></i>
+                        {{ $chore->effort?->label() ?? 'Effort not said' }}
                     </button>
 
                     <button

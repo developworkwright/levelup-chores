@@ -498,7 +498,9 @@ class MysteryChoreTest extends TestCase
         Volt::test('kid.quests')
             ->assertSee("One of today's chores is worth a bonus", false)
             ->assertSee('Sweep the porch')
-            ->assertSeeInOrder(['Sweep the porch', '+100'])
+            // The board row writes its payout in dollars now, with the points
+            // beneath it — so the ordinary 100 is what follows the name.
+            ->assertSeeInOrder(['Sweep the porch', '100 PTS'])
             ->assertSee('+'.ChoreService::MYSTERY_BONUS_POINTS.' pts');
     }
 

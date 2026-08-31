@@ -1359,6 +1359,26 @@ class ChoreService
     }
 
     /**
+     * Chores this kid has finished before, for the board's "Done before" chip.
+     *
+     * A query, not a column — `chore_completions` already knows. Scoped to
+     * **approved** completions on purpose: a pending claim is work a parent
+     * hasn't looked at yet, and a chip promising "you've done this one" should
+     * mean somebody agreed you had. Ever, not today; the point of the chip is
+     * a kid reaching for something familiar.
+     *
+     * @return array<int, int> Chore ids
+     */
+    public function choresDoneBefore(Profile $profile): array
+    {
+        return ChoreCompletion::where('profile_id', $profile->id)
+            ->where('status', CompletionStatus::Approved)
+            ->distinct()
+            ->pluck('chore_id')
+            ->all();
+    }
+
+    /**
      * Points this kid has banked so far today — what the daily target on the
      * Quests page is measured against.
      *

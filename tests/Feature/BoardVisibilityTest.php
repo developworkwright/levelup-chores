@@ -197,8 +197,9 @@ class BoardVisibilityTest extends TestCase
 
     public function test_the_search_counter_measures_against_what_is_on_screen(): void
     {
-        // "1 / 3" while two of the three are hidden compares the search to a
-        // board the kid can't see.
+        // "1 of 3" while two of the three are hidden compares the search to a
+        // board the kid can't see. The counter now lives in the section header
+        // beside "Side Quests", and reads "n open" until something narrows it.
         $household = $this->household(withDecoy: false);
         $taken = $this->chore($household, 'Feed animals');
         $this->claimedBy($taken, Profile::factory()->for($household)->create(['name' => 'Nova']));
@@ -209,7 +210,7 @@ class BoardVisibilityTest extends TestCase
         Volt::test('kid.quests')
             ->call('toggleUnavailable')
             ->set('search', 'floor')
-            ->assertSee('1 / 2');
+            ->assertSee('1 of 2');
     }
 
     public function test_the_count_offered_survives_the_toggle_being_on(): void

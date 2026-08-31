@@ -3,6 +3,9 @@
 namespace App\Models;
 
 use App\Enums\ChoreCadence;
+use App\Enums\ChoreCategory;
+use App\Enums\ChoreEffort;
+use App\Enums\ChoreIcon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -19,6 +22,8 @@ class Chore extends Model
         'name',
         'hint',
         'icon',
+        'effort',
+        'category',
         'points',
         'cadence',
         'min_age',
@@ -36,6 +41,13 @@ class Chore extends Model
             // `icon` is deliberately uncast. It holds a Font Awesome class,
             // and a parent can type any of them — ChoreIcon lists the presets
             // the picker offers, not the set of legal values. See ChoreIcon.
+            //
+            // These two are the opposite case, and cast: nothing outside the
+            // listed cases means anything, and null already carries "nobody has
+            // said". Neither is derived from `icon` — a category is not a
+            // collection of icon types, see ChoreCategory.
+            'effort' => ChoreEffort::class,
+            'category' => ChoreCategory::class,
             'quest_eligible' => 'boolean',
             'wheel_eligible' => 'boolean',
             'used_at' => 'datetime',
@@ -52,6 +64,12 @@ class Chore extends Model
     public function completions(): HasMany
     {
         return $this->hasMany(ChoreCompletion::class);
+    }
+
+    /** A job a parent has flagged as real work — the board's Muscle chip. */
+    public function isHeavy(): bool
+    {
+        return $this->effort === ChoreEffort::Heavy;
     }
 
     public function cooldownDays(): int

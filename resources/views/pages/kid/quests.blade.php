@@ -1,7 +1,9 @@
 <?php
 
+use App\Enums\ChoreCategory;
 use App\Enums\CompletionStatus;
 use App\Enums\PerkEffect;
+use App\Enums\PriceBand;
 use App\Enums\SleepOutcome;
 use App\Exceptions\BountyUnavailableException;
 use App\Exceptions\InsufficientPointsException;
@@ -96,6 +98,249 @@ new class extends Component
     }
 
     /**
+     * Which price band is showing, as a {@see PriceBand} value — null for all.
+     *
+     * A six-year-old asks a parent for "a $2 job" over and over, and until now
+     * the board could not answer him: no ordering control at all, and the only
+     * filter a typed search, which is unusable by exactly the kid who needs it
+     * most. Transient like the search beside it, for the same reason — a board
+     * half-taken looks very different an hour later.
+     */
+    public ?int $band = null;
+
+    /**
+     * The live chip: a {@see ChoreCategory} value, or one of the three special
+     * chips ('done', 'muscle'). Null for all.
+     */
+    public ?string $category = null;
+
+    /** Open by default — see the adder's note in the template. */
+    public bool $adderOpen = true;
+
+    /** What the adding-up card is aiming at, in points. Set in mount(). */
+    public int $target = 0;
+
+    /**
+     * The two chores the adder is holding, as ids. Never more, never fewer —
+     * two copies of one job is not a plan, and a third slot is a shopping list.
+     *
+     * Empty until the first render fills it, which is also the repair path for
+     * a chore a sibling claims mid-build: see syncSlots().
+     *
+     * **Not `$slots`.** Livewire reserves that name — `SupportSlots` reads
+     * `$component->slots` and calls `getName()` on whatever it finds, so a
+     * public `$slots` of anything else fataly breaks every render of the page.
+     *
+     * @var array<int, int>
+     */
+    public array $adderSlots = [];
+
+    /**
+     * Which job left a slot, and what took its place.
+     *
+     * A property rather than a local in with(), because **Livewire renders
+     * twice per round trip**: the first render repairs the slots and has the
+     * news, the second finds them already repaired and would drop it on the
+     * floor. Cleared in hydrate(), so it lives for exactly the one request
+     * that made it.
+     */
+    public ?string $slotNotice = null;
+
+    /** @see $slotNotice */
+    public function hydrate(): void
+    {
+        $this->slotNotice = null;
+    }
+
+    /** Dollars. The stepper clamps here, one dollar per tap. */
+    private const TARGET_MIN_DOLLARS = 1;
+
+    private const TARGET_MAX_DOLLARS = 20;
+
+    private const TARGET_DEFAULT_DOLLARS = 4;
+
+    /** Tapping the live band clears it — the control is its own off switch. */
+    public function pickBand(int $band): void
+    {
+        $this->band = $this->band === $band ? null : $band;
+    }
+
+    public function pickCategory(string $category): void
+    {
+        $this->category = $this->category === $category ? null : $category;
+    }
+
+    public function toggleAdder(): void
+    {
+        $this->adderOpen = ! $this->adderOpen;
+    }
+
+    /**
+     * A dollar more or less, clamped both ends.
+     *
+     * Presets ($2 / $5 / $10) were built and rejected: a kid who wants $4 had
+     * to work out which button got him nearest and then do the sum anyway,
+     * which is the exact arithmetic this card exists to remove.
+     */
+    public function stepTarget(int $dollars): void
+    {
+        $rate = $this->pointsPerDollar();
+
+        $this->target = min(
+            self::TARGET_MAX_DOLLARS * $rate,
+            max(self::TARGET_MIN_DOLLARS * $rate, $this->target + $dollars * $rate),
+        );
+    }
+
+    /** Steps one slot along the pool, wrapping, skipping whatever the other holds. */
+    public function stepSlot(int $slot, int $direction): void
+    {
+        $pool = $this->adderPool();
+        $this->syncSlots($pool);
+
+        if ($this->adderSlots === []) {
+            return;
+        }
+
+        $ids = $pool->pluck('id')->all();
+        $at = array_search($this->adderSlots[$slot], $ids, true);
+
+        if ($at === false) {
+            return;
+        }
+
+        $other = $this->adderSlots[1 - $slot];
+
+        // Terminates because syncSlots() guarantees at least two chores in the
+        // pool, so there is always somewhere else to land.
+        do {
+            $at = ($at + $direction + count($ids)) % count($ids);
+        } while ($ids[$at] === $other);
+
+        $this->adderSlots[$slot] = $ids[$at];
+    }
+
+    /**
+     * The cheapest pair that clears the target.
+     *
+     * O(n²) over the board, which at ~20 chores is nothing. Leaves the slots
+     * alone when nothing reaches — the shortfall line then says how far off it
+     * is, which is more use than silently rearranging two jobs that still
+     * don't add up.
+     */
+    public function pickTwo(): void
+    {
+        $pool = $this->adderPool();
+        $this->syncSlots($pool);
+
+        if ($this->adderSlots === []) {
+            return;
+        }
+
+        $chores = $pool->values()->all();
+        $best = null;
+
+        for ($i = 0; $i < count($chores); $i++) {
+            for ($j = $i + 1; $j < count($chores); $j++) {
+                $total = $chores[$i]->points + $chores[$j]->points;
+
+                if ($total < $this->target || ($best !== null && $total >= $best['total'])) {
+                    continue;
+                }
+
+                $best = ['total' => $total, 'pair' => [$chores[$i]->id, $chores[$j]->id]];
+            }
+        }
+
+        if ($best !== null) {
+            $this->adderSlots = $best['pair'];
+        }
+    }
+
+    private function pointsPerDollar(): int
+    {
+        return max(1, (int) $this->profile->household->points_per_dollar);
+    }
+
+    /**
+     * The chores the adder can put in a slot: everything claimable right now,
+     * cheapest first.
+     *
+     * Cheapest first rather than in board order, because the arrows are used to
+     * walk a total up and down — urgency ordering would make the running total
+     * jump about at random. Deliberately ignores the band and the chip: the
+     * adder answers a question the filtered list has already failed to answer.
+     */
+    private function adderPool(): \Illuminate\Support\Collection
+    {
+        return app(ChoreService::class)->boardFor($this->profile)
+            ->filter(fn (array $entry) => $entry['state'] === 'ready')
+            ->map(fn (array $entry) => $entry['chore'])
+            ->sortBy(fn (Chore $chore) => [$chore->points, $chore->id])
+            ->values();
+    }
+
+    /**
+     * Repairs the slots against the pool, and says so when it had to.
+     *
+     * Cooldowns are household-wide, so a sibling can claim a chore sitting in a
+     * slot while the kid is still adding up. Leaving a dead job there would
+     * quote them a total they can't earn, so the slot steps to the next
+     * available chore — and gets a line saying which job went, because a card
+     * that rearranges itself silently reads as a bug.
+     *
+     * Empties the slots entirely on a board with fewer than two claimable
+     * chores, which is how the template knows to leave the adder out.
+     *
+     * @param  \Illuminate\Support\Collection<int, Chore>  $pool
+     */
+    private function syncSlots(\Illuminate\Support\Collection $pool): void
+    {
+        $ids = $pool->pluck('id')->all();
+
+        if (count($ids) < 2) {
+            $this->adderSlots = [];
+
+            return;
+        }
+
+        $gone = [];
+        $chosen = [];
+
+        foreach ([0, 1] as $slot) {
+            $id = $this->adderSlots[$slot] ?? null;
+
+            if ($id !== null && ! in_array($id, $ids, true)) {
+                $gone[] = $id;
+                $id = null;
+            }
+
+            // A duplicate is the same problem as a missing one, and worth no
+            // notice: nothing was taken, the card just has to hold two jobs.
+            $chosen[$slot] = $id !== null && ! in_array($id, $chosen, true) ? $id : null;
+        }
+
+        foreach ([0, 1] as $slot) {
+            $chosen[$slot] ??= collect($ids)->first(fn (int $id) => ! in_array($id, $chosen, true));
+        }
+
+        $this->adderSlots = $chosen;
+
+        if ($gone === []) {
+            return;
+        }
+
+        $names = $this->profile->household->chores
+            ->whereIn('id', $gone)
+            ->pluck('name')
+            ->all();
+
+        $this->slotNotice = count($names) === 1
+            ? "{$names[0]} just went — swapped in another job."
+            : 'Those two just went — swapped in another pair.';
+    }
+
+    /**
      * The three boxes of the gratitude quest. Deferred rather than live —
      * nothing on the page reacts to a half-typed answer, so there's no reason
      * to spend a round trip per keystroke.
@@ -173,6 +418,12 @@ new class extends Component
         abort_unless($this->profile->isKid(), 403);
 
         $this->questDoneOnArrival = app(ChoreService::class)->isQuestDoneToday($this->profile);
+
+        // $4 in this household's own money. The bands and the stepper are
+        // declared in dollars and resolved against points_per_dollar, so a
+        // household that rates a chore differently still gets a "$2–5" button
+        // that means $2 to $5.
+        $this->target = self::TARGET_DEFAULT_DOLLARS * $this->pointsPerDollar();
     }
 
     /**
@@ -599,6 +850,82 @@ new class extends Component
 
         $earnedToday = $service->pointsEarnedToday($this->profile);
 
+        // --- The side-quest board: price bands, chips and the adding-up card.
+        //
+        // All of it filtered in PHP over the collection boardFor() already
+        // returned, never re-queried — same reasoning as the search below it.
+        $rate = $this->pointsPerDollar();
+        $doneBefore = $service->choresDoneBefore($this->profile);
+
+        // Resolved once per chore so the row's tags, the chips and the filter
+        // can't disagree about what a job is.
+        $flagged = $shown->map(fn (array $entry) => $entry + [
+            'muscle' => $entry['chore']->isHeavy(),
+            'doneBefore' => in_array($entry['chore']->id, $doneBefore, true),
+            'category' => ChoreCategory::forChore($entry['chore']),
+        ]);
+
+        $band = $this->band === null ? null : PriceBand::tryFrom($this->band);
+
+        $matchesChip = fn (array $entry): bool => match ($this->category) {
+            null => true,
+            'done' => $entry['doneBefore'],
+            'muscle' => $entry['muscle'],
+            default => $entry['category']->value === $this->category,
+        };
+
+        $filtered = $flagged
+            ->filter(fn (array $entry) => $entry['chore']->matches($this->search))
+            ->filter(fn (array $entry) => $band === null || $band->contains($entry['chore']->points, $rate))
+            ->filter($matchesChip)
+            ->values();
+
+        // A chip that leads nowhere is worse than no chip, so every one of them
+        // — the two special ones included — has to have something behind it.
+        // Muscle is empty on every board until a parent flags a chore, since
+        // effort is the one axis nothing guesses at. Outside used to sit here
+        // as a third; it is a category now, so a chore is Outside *or* Garden
+        // rather than both, and a parent decides which.
+        $chips = collect([
+            ['id' => 'done', 'label' => 'Done before', 'fa' => 'fa-solid fa-rotate-left', 'has' => fn (array $e) => $e['doneBefore']],
+            ['id' => 'muscle', 'label' => 'Muscle', 'fa' => 'fa-solid fa-dumbbell', 'has' => fn (array $e) => $e['muscle']],
+        ])
+            ->filter(fn (array $chip) => $flagged->contains($chip['has']))
+            ->concat(
+                // Enum order, not board order, so the row doesn't reshuffle
+                // itself as chores are claimed through the day.
+                collect(ChoreCategory::cases())
+                    ->filter(fn (ChoreCategory $case) => $flagged->contains(fn (array $e) => $e['category'] === $case))
+                    ->map(fn (ChoreCategory $case) => [
+                        'id' => $case->value,
+                        'label' => $case->label(),
+                        'fa' => $case->faClass(),
+                    ]),
+            )
+            ->map(fn (array $chip) => [
+                'id' => $chip['id'],
+                'label' => $chip['label'],
+                'fa' => $chip['fa'],
+                'selected' => $this->category === $chip['id'],
+            ])
+            ->values();
+
+        // Counted off the whole board rather than the filtered one: these are
+        // what the buttons *offer* to show, so they have to survive being on.
+        $bands = collect(PriceBand::cases())->map(fn (PriceBand $case) => [
+            'band' => $case,
+            'count' => $flagged->filter(fn (array $entry) => $case->contains($entry['chore']->points, $rate))->count(),
+            'selected' => $this->band === $case->value,
+        ]);
+
+        $adderPool = $this->adderPool();
+        $this->syncSlots($adderPool);
+        $slotChores = collect($this->adderSlots)
+            ->map(fn (int $id) => $adderPool->firstWhere('id', $id))
+            ->filter()
+            ->values();
+        $slotTotal = (int) $slotChores->sum('points');
+
         return [
             'quest' => $quest,
             // A quest chore that expires is rerolled by questFor() rather than
@@ -631,8 +958,22 @@ new class extends Component
             // Filtered in PHP rather than re-queried — the board is already
             // loaded, and Chore::matches() is the in-memory twin of the
             // scope the parent admin searches with.
-            'board' => $shown->filter(fn (array $entry) => $entry['chore']->matches($this->search))->values(),
-            'boardTotal' => $shown->count(),
+            'board' => $filtered,
+            // "18 open" when nothing is filtered, "6 of 18" when something is.
+            // The first is a board to browse; the second is a board with a
+            // question asked of it, and the denominator is what says so.
+            'boardCount' => $this->band !== null || $this->category !== null || trim($this->search) !== ''
+                ? $filtered->count().' of '.$flagged->count()
+                : $flagged->count().' open',
+            'bands' => $bands,
+            'chips' => $chips,
+            'pointsPerDollar' => $rate,
+            // Two chores, or none at all — a board with fewer than two
+            // claimable jobs has nothing to add up.
+            'slotChores' => $slotChores,
+            'slotTotal' => $slotTotal,
+            'slotNotice' => $this->slotNotice,
+            'targetMin' => self::TARGET_MIN_DOLLARS * $rate,
             // Counted off the whole board, never off $shown — it's the number
             // the toggle offers to bring back, so it has to survive being on.
             'unavailableCount' => $board->filter($isUnavailable)->count(),
@@ -863,206 +1204,582 @@ new class extends Component
             @endif
         </div>
 
-        {{-- 4. Side quests --}}
-        <div class="flex flex-wrap items-center justify-between gap-2">
-            <h3 class="font-baloo text-xl font-bold">Side Quests</h3>
-            {{-- The board no longer waits on the main quest, so there is no
-                 lock state left to report — this says what is true instead of
-                 labelling the only condition there is. --}}
-            <span class="font-mono-fq text-[10px] tracking-[0.14em] uppercase" style="color: var(--fq-lime)">
-                Any of them, any order
-            </span>
-        </div>
+        {{-- 4. Side quests — the price bands, the chips and the adding-up card.
 
-        <div class="flex flex-wrap items-center gap-2">
-            <input
-                type="search"
-                wire:model.live.debounce.300ms="search"
-                placeholder="Find a chore"
-                class="min-w-[160px] flex-1 rounded-[14px] border border-fq-line-2 bg-fq-sunk px-4 py-[10px] text-sm outline-none focus:border-fq-cyan"
-            >
-            @if (trim($search) !== '')
-                <span class="font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4">
-                    {{ $board->count() }} / {{ $boardTotal }}
+             A six-year-old asks for "a $2 job" over and over, and the board
+             used to have no answer: no ordering control at all, one typed
+             search that the kid who needs it most cannot use, and payouts
+             written in points. Two questions came out of that, and they need
+             two different controls — "what can I do for about $2?" is a band,
+             and "I need exactly $4" is the card at the bottom, because a band
+             cannot answer it without the kid doing sums on top of sums. --}}
+        @php
+            // Always two decimal places. He is learning money, and "$2" on one
+            // row beside "$2.50" on the next is noise. The rate is the
+            // household's own, the same one the shell's points tile uses.
+            $money = fn (int $points) => '$'.number_format($points / $pointsPerDollar, 2);
+            $bandDim = 'color-mix(in srgb, var(--fq-lime) 70%, var(--fq-text-4))';
+            $selectedFill = 'linear-gradient(180deg, #2a2405, var(--fq-sunk))';
+        @endphp
+
+        {{-- Full width, deliberately — no max-width, whatever the handoff's
+             430px says.
+
+             That 430px is the *phone*. What the handoff's desktop note
+             actually rules out is a second column — "a two-column grid of
+             these rows reads as a table" — and one full-width column honours
+             that. Capping it was tried at 430px and at 640px and both were
+             worse in the same way: the board became a narrow strip sitting
+             under the full-width Quest Chest and Gratitude cards, and 430px
+             also clipped the chip row mid-word, which the handoff says must
+             never happen. Matching the page it lives on beats matching a
+             number drawn for a phone. **Don't re-cap this.**
+
+             The wrapper stays for the gap: 13px between blocks here, not the
+             page's 16px. --}}
+        <div class="flex flex-col gap-[13px]">
+            <div class="flex items-baseline justify-between gap-[10px]">
+                <h3 class="font-baloo text-[22px] font-extrabold">Side Quests</h3>
+                <span class="font-mono-fq text-[10px] tracking-[0.14em] whitespace-nowrap uppercase" style="color: var(--fq-lime)">
+                    {{ $boardCount }}
                 </span>
-                <button
-                    type="button"
-                    wire:click="clearSearch"
-                    class="rounded-[14px] border border-fq-line-3 bg-fq-sunk px-3 py-[10px] text-xs text-fq-text-3"
-                >Clear</button>
-            @endif
-
-            {{-- Only offered when there's actually something to hide. An
-                 always-on switch that does nothing on a clear board is one
-                 more control to wonder about. --}}
-            @if ($unavailableCount > 0)
-                <button
-                    type="button"
-                    wire:click="toggleUnavailable"
-                    class="rounded-[14px] border px-3 py-[10px] text-xs whitespace-nowrap transition"
-                    style="{{ $hideUnavailable
-                        ? 'border-color: var(--fq-lime); color: var(--fq-lime); background: var(--fq-sunk)'
-                        : 'border-color: var(--fq-line-3); color: var(--fq-text-3); background: var(--fq-sunk)' }}"
-                >
-                    {{ $hideUnavailable
-                        ? 'Show '.$unavailableCount.' more'
-                        : "Hide {$unavailableCount} I can't do" }}
-                </button>
-            @endif
-        </div>
-
-        @if ($board->isEmpty() && trim($search) !== '')
-            <div class="rounded-[18px] border border-dashed border-fq-line-3 bg-fq-panel p-6 text-center text-sm text-fq-text-5">
-                Nothing matches "{{ $search }}".
             </div>
-        @elseif ($board->isEmpty() && $hideUnavailable)
-            {{-- Hiding everything leaves a blank column that reads as a bug.
-                 Say where the chores went, and how to get them back. --}}
-            <div class="rounded-[18px] border border-dashed border-fq-line-3 bg-fq-panel p-6 text-center text-sm text-fq-text-5">
-                Everything else is taken or closed for today.
-            </div>
-        @endif
 
-        {{-- The backstop for the seconds between polls. Polling narrows that
-             window but can't close it, so the tap still has to explain itself
-             rather than silently doing nothing. --}}
-        @if ($boardMessage)
-            <div
-                class="flex items-center gap-[10px] rounded-[16px] border px-[14px] py-3"
-                style="border-color: var(--fq-ticket-line); background: var(--fq-ticket-bg)"
-            >
-                <span class="text-[15px] text-fq-lime">&#8635;</span>
-                <span class="flex-1 text-sm" style="color: var(--fq-notice-text)">{{ $boardMessage }}</span>
-                <button
-                    type="button"
-                    wire:click="refreshBoard"
-                    class="rounded-[11px] border bg-fq-sunk px-[13px] py-[7px] text-xs font-semibold text-fq-lime transition hover:brightness-115"
-                    style="border-color: var(--fq-ticket-line)"
-                >Refresh</button>
-            </div>
-        @endif
-
-        {{-- Refreshed when the kid comes back to the page, not on a timer. The
-             server scales to zero when idle, so a poll on a tablet left open all
-             afternoon would keep it awake and billing for nothing. This fires
-             one request at the only moment a stale board can actually mislead
-             someone: when they look at it. --}}
-        <div
-            x-data="{
-                last: 0,
-                refresh() {
-                    if (document.visibilityState !== 'visible') return;
-
-                    // Returning to a tab fires focus and visibilitychange
-                    // together; one refresh covers both.
-                    if (Date.now() - this.last < 2000) return;
-
-                    this.last = Date.now();
-                    $wire.$refresh();
-                },
-            }"
-            x-on:visibilitychange.window="refresh()"
-            x-on:focus.window="refresh()"
-            class="grid grid-cols-1 gap-3 sm:grid-cols-2"
-        >
-            @foreach ($board as $entry)
-                @php
-                    $chore = $entry['chore'];
-                    $state = $entry['state'];
-                    $takenBy = $entry['takenBy'];
-                    $closesAt = $entry['closesAt'];
-                    $boosted = $questBoosted === false && $boost && $boost->chore_id === $chore->id;
-                    $payout = $chore->points * ($boosted ? $boost->multiplier : 1);
-                    $boostColor = $boosted && $boost->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)';
-                    $labels = [
-                        'ready' => 'Mark it done',
-                        'pending' => 'Pending approval',
-                        // "Back tomorrow" on a chore a sibling took reads as
-                        // "you already did this" — the one wording that could
-                        // send a kid off to redo it. Name them instead.
-                        'done' => $takenBy
-                            ? $takenBy->name.' got this one'
-                            : match ($chore->cadence) {
-                                \App\Enums\ChoreCadence::Weekly => 'Back in 7 days',
-                                \App\Enums\ChoreCadence::Once => 'Gone for now',
-                                default => 'Back tomorrow',
-                            },
-                        // Not "Locked" and not "Back tomorrow" — the clock ran
-                        // out and a parent has it now. Saying so is what makes
-                        // the countdown mean anything next time.
-                        'expired' => "Time's up",
-                    ];
-                @endphp
-                <div
-                    wire:key="chore-{{ $chore->id }}"
-                    class="flex flex-col rounded-[18px] border bg-fq-panel p-[15px] {{ $takenBy || $state === 'expired' ? 'opacity-70' : '' }} {{ $chore->isOneTime() || $closesAt ? 'border-2' : 'border border-fq-line' }}"
-                    style="{{ $state === 'pending' ? 'border-color: var(--fq-success-border)' : ($closesAt ? 'border-color: color-mix(in srgb, var(--fq-cyan) 55%, transparent)' : ($chore->isOneTime() ? 'border-color: color-mix(in srgb, var(--fq-gold) 55%, transparent); background: var(--fq-wash-gold)' : '')) }}"
-                >
-                    <div class="flex items-start justify-between gap-2">
-                        {{-- The same face the chore wears everywhere else. A
-                             board of fourteen identical text rows is unusable
-                             to a kid who can't read them; a picture per row is
-                             the only thing that makes it scannable. --}}
-                        @if ($chore->icon)
+            {{-- Price bands. Four constants over chores.points, declared in
+                 dollars and resolved against the household's rate. The top one is
+                 open-ended and usually empty — that's deliberate. It's where an
+                 occasional big one-time job lands, and an empty band that
+                 sometimes fills is a promise; hiding it costs the eldest kid the
+                 one place he goes looking. --}}
+            <div class="flex flex-col gap-2">
+                <span class="font-mono-fq text-[9.5px] tracking-[0.2em] text-fq-text-4 uppercase">How much do you want?</span>
+                <div class="flex gap-[6px]">
+                    @foreach ($bands as $entry)
+                        @php
+                            $priceBand = $entry['band'];
+                            $on = $entry['selected'];
+                        @endphp
+                        {{-- Selected loses a pixel of padding top and bottom,
+                             absorbing the extra border so the row doesn't shift
+                             under a thumb that just tapped it. --}}
+                        <button
+                            type="button"
+                            wire:click="pickBand({{ $priceBand->value }})"
+                            class="flex min-w-0 flex-1 flex-col items-center gap-1 rounded-[16px] px-[3px] {{ $on ? 'border-2 pt-[10px] pb-2' : 'border pt-[11px] pb-[9px]' }}"
+                            style="{{ $on
+                                ? 'border-color: var(--fq-lime); background: '.$selectedFill
+                                : 'border-color: var(--fq-line-2); background: var(--fq-sunk)' }}"
+                        >
                             <span
-                                class="mt-[2px] grid h-[34px] w-[34px] shrink-0 place-items-center rounded-[10px] border"
-                                style="border-color: var(--fq-line-3);
-                                       background: var(--fq-sunk);
-                                       color: {{ $takenBy || $state === 'expired' ? 'var(--fq-text-5)' : 'var(--fq-text-3)' }}"
-                            >
-                                <x-chore-icon :icon="$chore->icon" class="text-[17px]" />
-                            </span>
-                        @endif
+                                class="font-baloo text-[19px] leading-none font-extrabold whitespace-nowrap"
+                                style="color: {{ $on ? 'var(--fq-lime)' : 'var(--fq-text)' }}"
+                            >{{ $priceBand->label() }}</span>
+                            <span
+                                class="font-mono-fq text-[8px] tracking-[0.06em] whitespace-nowrap uppercase"
+                                style="color: {{ $on ? $bandDim : 'var(--fq-text-4)' }}"
+                            >{{ $priceBand->sub() }}</span>
+                            <span
+                                class="font-mono-fq text-[9px] whitespace-nowrap"
+                                style="color: {{ $on ? $bandDim : 'var(--fq-text-4)' }}"
+                            >{{ $entry['count'] }} jobs</span>
+                        </button>
+                    @endforeach
+                </div>
+            </div>
 
-                        <div class="min-w-0 flex-1">
-                            {{-- Flagged, not just sorted: a card sitting at the
-                                 top of the list only reads as urgent if you can
-                                 see why it's there. --}}
+            {{-- Category chips, single-select with the same tap-to-clear rule as
+                 the bands — the control is its own off switch, so there's no
+                 separate "All" chip to explain.
+
+                 The row scrolls rather than clipping: a chip cut mid-word with no
+                 way to reach it reads as broken rather than as a bleed.
+
+                 Drawn at a 38px minimum with 7px/13px/7px/10px of padding,
+                 built at 44px with more room on every side. The handoff sets
+                 the floor and then says outright that if the chip lands under
+                 44px the padding is what goes up and nothing else shrinks — it
+                 landed at 38, a thumb target under the line, and read as a
+                 squat lozenge beside the 42px search box below it. The extra
+                 costs a chip or so of visible row on a narrow phone, which the
+                 row already scrolls for. --}}
+            @if ($chips->isNotEmpty())
+                <div
+                    class="flex gap-[6px] overflow-x-auto overflow-y-hidden pb-[2px]"
+                    style="scrollbar-width: none; -webkit-overflow-scrolling: touch"
+                >
+                    @foreach ($chips as $chip)
+                        <button
+                            type="button"
+                            wire:key="chip-{{ $chip['id'] }}"
+                            wire:click="pickCategory('{{ $chip['id'] }}')"
+                            class="flex min-h-[44px] flex-none items-center gap-[8px] rounded-full border py-[11px] pr-[18px] pl-[15px] whitespace-nowrap"
+                            style="{{ $chip['selected']
+                                ? 'border-color: var(--fq-lime); background: '.$selectedFill
+                                : 'border-color: var(--fq-line); background: var(--fq-panel)' }}"
+                        >
+                            <x-chore-icon
+                                :icon="$chip['fa']"
+                                class="text-[12px]"
+                                style="color: {{ $chip['selected'] ? 'var(--fq-lime)' : 'var(--fq-text-4)' }}"
+                            />
+                            <span
+                                class="text-[12px] {{ $chip['selected'] ? 'font-semibold' : '' }}"
+                                style="color: {{ $chip['selected'] ? 'var(--fq-lime)' : 'var(--fq-text-3)' }}"
+                            >{{ $chip['label'] }}</span>
+                            @if ($chip['selected'])
+                                <span class="font-baloo text-[13px] font-extrabold" style="color: {{ $bandDim }}">&times;</span>
+                            @endif
+                        </button>
+                    @endforeach
+                </div>
+            @endif
+
+            {{-- The typed search and the hide toggle, kept from the shipped board
+                 and moved down here: the bands and chips are what a kid reaches
+                 for, and these are the fine print above the list they narrow. --}}
+            <div class="flex flex-wrap items-center gap-2">
+                <input
+                    type="search"
+                    wire:model.live.debounce.300ms="search"
+                    placeholder="Find a chore"
+                    class="min-w-[160px] flex-1 rounded-[14px] border border-fq-line-2 bg-fq-sunk px-4 py-[10px] text-sm outline-none focus:border-fq-cyan"
+                >
+                @if (trim($search) !== '')
+                    <button
+                        type="button"
+                        wire:click="clearSearch"
+                        class="rounded-[14px] border border-fq-line-3 bg-fq-sunk px-3 py-[10px] text-xs text-fq-text-3"
+                    >Clear</button>
+                @endif
+
+                {{-- Only offered when there's actually something to hide. An
+                     always-on switch that does nothing on a clear board is one
+                     more control to wonder about. --}}
+                @if ($unavailableCount > 0)
+                    <button
+                        type="button"
+                        wire:click="toggleUnavailable"
+                        class="rounded-[14px] border px-3 py-[10px] text-xs whitespace-nowrap transition"
+                        style="{{ $hideUnavailable
+                            ? 'border-color: var(--fq-lime); color: var(--fq-lime); background: var(--fq-sunk)'
+                            : 'border-color: var(--fq-line-3); color: var(--fq-text-3); background: var(--fq-sunk)' }}"
+                    >
+                        {{ $hideUnavailable
+                            ? 'Show '.$unavailableCount.' more'
+                            : "Hide {$unavailableCount} I can't do" }}
+                    </button>
+                @endif
+            </div>
+
+            {{-- The backstop for the seconds between polls. Polling narrows that
+                 window but can't close it, so the tap still has to explain itself
+                 rather than silently doing nothing. --}}
+            @if ($boardMessage)
+                <div
+                    class="flex items-center gap-[10px] rounded-[16px] border px-[14px] py-3"
+                    style="border-color: var(--fq-ticket-line); background: var(--fq-ticket-bg)"
+                >
+                    <span class="text-[15px] text-fq-lime">&#8635;</span>
+                    <span class="flex-1 text-sm" style="color: var(--fq-notice-text)">{{ $boardMessage }}</span>
+                    <button
+                        type="button"
+                        wire:click="refreshBoard"
+                        class="rounded-[11px] border bg-fq-sunk px-[13px] py-[7px] text-xs font-semibold text-fq-lime transition hover:brightness-115"
+                        style="border-color: var(--fq-ticket-line)"
+                    >Refresh</button>
+                </div>
+            @endif
+
+            {{-- The board list. One row per chore, and the row *is* the button —
+                 refreshed when the kid comes back to the page, not on a timer. The
+                 server scales to zero when idle, so a poll on a tablet left open
+                 all afternoon would keep it awake and billing for nothing. This
+                 fires one request at the only moment a stale board can actually
+                 mislead someone: when they look at it. --}}
+            <div
+                x-data="{
+                    last: 0,
+                    refresh() {
+                        if (document.visibilityState !== 'visible') return;
+
+                        // Returning to a tab fires focus and visibilitychange
+                        // together; one refresh covers both.
+                        if (Date.now() - this.last < 2000) return;
+
+                        this.last = Date.now();
+                        $wire.$refresh();
+                    },
+                }"
+                x-on:visibilitychange.window="refresh()"
+                x-on:focus.window="refresh()"
+                class="flex flex-col gap-2"
+            >
+                @foreach ($board as $entry)
+                    @php
+                        $chore = $entry['chore'];
+                        $state = $entry['state'];
+                        $takenBy = $entry['takenBy'];
+                        $closesAt = $entry['closesAt'];
+                        $boosted = $questBoosted === false && $boost && $boost->chore_id === $chore->id;
+                        $payout = $chore->points * ($boosted ? $boost->multiplier : 1);
+                        $boostColor = $boosted && $boost->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)';
+                        $dimmed = $takenBy || $state === 'expired';
+                        // Cadence first, then only what a kid browses by. Built the
+                        // same way the chips filter, off the flags resolved once in
+                        // with(), so a row can't say "Muscle" under a chip that
+                        // didn't show it. The category itself is not a tag — the
+                        // face already says Kitchen, and repeating the chip you
+                        // filtered by on every row it returned is noise.
+                        $tags = [$chore->cadence->kidLabel()];
+                        // Whatever a parent said, not only the hard ones. The
+                        // Muscle *chip* collects Heavy alone, but a chore
+                        // deliberately marked easy going is worth saying on the
+                        // row — it is the answer to "is this a big one?", which
+                        // is the question the effort control exists for.
+                        if ($chore->effort) {
+                            $tags[] = $chore->effort->kidLabel();
+                        }
+                        if ($entry['doneBefore']) {
+                            $tags[] = 'Done before';
+                        }
+                        $status = match ($state) {
+                            'pending' => 'Pending approval',
+                            // "Back tomorrow" on a chore a sibling took reads as
+                            // "you already did this" — the one wording that could
+                            // send a kid off to redo it. Name them instead.
+                            'done' => $takenBy
+                                ? $takenBy->name.' got this one'
+                                : match ($chore->cadence) {
+                                    \App\Enums\ChoreCadence::Weekly => 'Back in 7 days',
+                                    \App\Enums\ChoreCadence::Once => 'Gone for now',
+                                    default => 'Back tomorrow',
+                                },
+                            // Not "Locked" and not "Back tomorrow" — the clock ran
+                            // out and a parent has it now. Saying so is what makes
+                            // the countdown mean anything next time.
+                            'expired' => "Time's up",
+                            default => null,
+                        };
+                        // The whole row claims, so the label the button used to
+                        // carry lives in its tooltip and its accessible name — the
+                        // one place it can say what a tap does without putting a
+                        // second call to action on a 40px row.
+                        $rowTitle = match (true) {
+                            $state === 'ready' => 'Mark it done',
+                            (bool) $takenBy => 'Taken by '.$takenBy->name,
+                            $state === 'expired' => 'A parent took this one',
+                            default => $status,
+                        };
+                    @endphp
+                    <button
+                        type="button"
+                        wire:key="chore-{{ $chore->id }}"
+                        title="{{ $chore->name }} &mdash; {{ $rowTitle }}"
+                        @if ($state === 'ready')
+                            wire:click="claimChore({{ $chore->id }})"
+                        @else
+                            disabled
+                        @endif
+                        class="flex items-center gap-[11px] rounded-[17px] px-[13px] py-[11px] text-left {{ $dimmed ? 'opacity-70' : '' }} {{ $chore->isOneTime() || $closesAt ? 'border-2' : 'border border-fq-line' }} {{ $state === 'ready' ? 'transition hover:brightness-115' : 'cursor-default' }}"
+                        style="background: var(--fq-panel); {{ $state === 'pending' ? 'border-color: var(--fq-success-border)' : ($closesAt ? 'border-color: color-mix(in srgb, var(--fq-cyan) 55%, transparent)' : ($chore->isOneTime() ? 'border-color: color-mix(in srgb, var(--fq-gold) 55%, transparent); background: var(--fq-wash-gold)' : '')) }}"
+                    >
+                        {{-- The same face the chore wears everywhere else. A board
+                             of fourteen identical text rows is unusable to a kid
+                             who can't read them; a picture per row is the only
+                             thing that makes it scannable. --}}
+                        <span
+                            class="grid h-10 w-10 flex-none place-items-center rounded-[12px] border"
+                            style="border-color: var(--fq-line-2);
+                                   background: var(--fq-sunk);
+                                   color: {{ $dimmed ? 'var(--fq-text-5)' : 'var(--fq-text-3)' }}"
+                        >
+                            @if ($chore->icon)
+                                <x-chore-icon :icon="$chore->icon" class="text-[18px]" />
+                            @else
+                                <span class="font-baloo text-[17px] font-extrabold">{{ mb_substr($chore->name, 0, 1) }}</span>
+                            @endif
+                        </span>
+
+                        <div class="flex min-w-0 flex-1 flex-col gap-[2px]">
+                            {{-- Flagged, not just sorted: a row sitting at the top
+                                 of the list only reads as urgent if you can see why
+                                 it's there. --}}
                             @if ($chore->isOneTime())
-                                <span class="mb-1 inline-block rounded-[8px] px-[10px] py-1 font-mono-fq text-[10px] tracking-[0.14em] uppercase" style="background: color-mix(in srgb, var(--fq-gold) 22%, transparent); color: var(--fq-gold)">
+                                <span class="mb-[2px] inline-block self-start rounded-[8px] px-[8px] py-[2px] font-mono-fq text-[9px] tracking-[0.14em] uppercase" style="background: color-mix(in srgb, var(--fq-gold) 22%, transparent); color: var(--fq-gold)">
                                     &#9889; One-time
                                 </span>
                             @endif
-                            <p class="text-[15px] font-semibold {{ $takenBy || $state === 'expired' ? 'line-through decoration-2' : '' }}">{{ $chore->name }}</p>
-                            <p class="font-mono-fq text-[10px] text-fq-text-4 uppercase">
-                                {{ $chore->cadence->kidLabel() }}
-                            </p>
+                            <span class="text-[14.5px] leading-[1.2] font-semibold {{ $dimmed ? 'line-through decoration-2' : '' }}">{{ $chore->name }}</span>
+                            <span class="font-mono-fq text-[9px] tracking-[0.06em] text-fq-text-4 uppercase">
+                                {{ implode(' · ', $tags) }}
+                                @if ($boosted)
+                                    · <span style="color: {{ $boostColor }}">{{ $boost->multiplier }}x wheel boost</span>
+                                @endif
+                            </span>
+                            @if ($status)
+                                <span
+                                    class="font-mono-fq text-[9px] tracking-[0.06em] uppercase"
+                                    style="color: {{ $state === 'expired' ? 'var(--fq-danger)' : ($state === 'pending' ? 'var(--fq-lime)' : 'var(--fq-gold)') }}"
+                                >{{ $status }}</span>
+                            @endif
+                            @if ($closesAt)
+                                {{-- The race, spelled out. It has to be read on the
+                                     row, because the whole point is deciding to go
+                                     and do it right now. --}}
+                                <x-chore-countdown wire:key="closes-{{ $chore->id }}" :closes-at="$closesAt" class="mt-[3px] self-start" />
+                            @endif
                         </div>
-                        <span class="font-baloo text-[17px] font-extrabold whitespace-nowrap" style="color: {{ $takenBy ? 'var(--fq-text-5)' : ($boosted ? $boostColor : 'var(--fq-lime)') }}">
-                            +{{ $payout }}
-                        </span>
-                    </div>
 
-                    {{-- Loud on purpose: this has to be readable at a glance,
-                         from across the room, before any work starts. --}}
-                    @if ($takenBy)
-                        <span class="mt-2 inline-block self-start rounded-[8px] px-[10px] py-1 font-mono-fq text-[10px]" style="background: color-mix(in srgb, var(--fq-gold) 22%, transparent); color: var(--fq-gold)">
-                            Taken by {{ $takenBy->name }}
-                        </span>
-                    @elseif ($closesAt)
-                        {{-- The race, spelled out. It has to be the first thing
-                             read on the card, because the whole point is
-                             deciding to go and do it right now. --}}
-                        <x-chore-countdown wire:key="closes-{{ $chore->id }}" :closes-at="$closesAt" class="mt-2" />
-                    @elseif ($state === 'expired')
-                        <span class="mt-2 inline-block self-start rounded-[8px] px-[10px] py-1 font-mono-fq text-[10px]" style="background: color-mix(in srgb, var(--fq-danger) 20%, transparent); color: var(--fq-danger)">
-                            A parent took this one
-                        </span>
-                    @elseif ($boosted)
-                        <span class="mt-2 inline-block self-start rounded-[8px] px-[10px] py-1 font-mono-fq text-[10px]" style="background: color-mix(in srgb, {{ $boostColor }} 28%, transparent); color: {{ $boostColor }}">
-                            {{ $boost->multiplier }}x wheel boost
-                        </span>
-                    @endif
+                        {{-- Money big, points small. He thinks in dollars; the
+                             points are what the rest of the app is counted in, so
+                             both have to be on the row. Gold means a bonus and
+                             nothing else — the bands and chips use gold for
+                             *selection*, so a wheel-boosted payout keeps its own
+                             colour and no filter ever paints a row. --}}
+                        <div class="flex flex-none flex-col items-end">
+                            <span
+                                class="font-baloo text-[19px] leading-none font-extrabold whitespace-nowrap"
+                                style="color: {{ $takenBy ? 'var(--fq-text-5)' : ($boosted ? $boostColor : 'var(--fq-lime)') }}"
+                            >{{ $money($payout) }}</span>
+                            <span class="font-mono-fq text-[8.5px] text-fq-text-4">{{ $payout }} PTS</span>
+                        </div>
 
-                    <button
-                        type="button"
-                        @if ($state === 'ready') wire:click="claimChore({{ $chore->id }})" @else disabled @endif
-                        class="mt-auto w-full rounded-[12px] pt-[10px] pb-[10px] text-[13px] font-semibold {{ $state === 'ready' ? 'text-fq-bg transition hover:brightness-110' : 'cursor-default text-fq-text-5' }}"
-                        style="margin-top: 12px; background: {{ $state === 'ready' ? 'var(--fq-lime)' : 'var(--fq-panel-alt)' }}"
-                    >{{ $labels[$state] }}</button>
+                        {{-- What the tap does, said out loud.
+
+                             The whole row is the button, which is the design —
+                             but a row that claims a chore and shows no sign of
+                             it is a trap, and the tooltip this replaces is
+                             worth nothing to a six-year-old on a tablet. A tick
+                             in a ring is the one affordance that needs no
+                             reading: it is how every list of things to do says
+                             "tick this off".
+
+                             Not a nested <button> — that is invalid inside one
+                             and would swallow the tap. The row stays the
+                             control; this is its face. The sr-only text is what
+                             a screen reader announces in place of it. --}}
+                        {{-- Always rendered, in all three states, so the money
+                             above it lines up down the whole board rather than
+                             sliding as rows are claimed. --}}
+                        <span
+                            class="grid h-[34px] w-[34px] flex-none place-items-center rounded-full border-2 text-[13px]"
+                            style="border-color: {{ $state === 'ready'
+                                ? 'color-mix(in srgb, var(--fq-lime) 45%, transparent)'
+                                : 'var(--fq-line-2)' }};
+                                   color: {{ $state === 'ready' ? 'var(--fq-lime)' : 'var(--fq-text-5)' }}"
+                        >
+                            @if ($state === 'ready')
+                                <i class="fa-solid fa-check" aria-hidden="true"></i>
+                                <span class="sr-only">Mark it done</span>
+                            @elseif ($state === 'pending')
+                                {{-- Ticked, and waiting on a parent. Their own
+                                     tap is the one thing on a dimmed row worth
+                                     still showing. --}}
+                                <i class="fa-solid fa-check" aria-hidden="true"></i>
+                            @endif
+                        </span>
+                    </button>
+                @endforeach
+            </div>
+
+            @if ($board->isEmpty())
+                {{-- One panel, three headlines. Hiding everything leaves a blank
+                     column that reads as a bug, so whichever control emptied the
+                     board has to say so — and then point at the adder below, which
+                     is the one thing on the page that can still answer. --}}
+                <div class="flex flex-col items-center gap-[9px] rounded-[18px] border border-dashed p-[20px] px-4 text-center" style="border-color: var(--fq-line-2); background: var(--fq-panel)">
+                    <span class="text-sm leading-[1.4]" style="color: var(--fq-text-2)">
+                        @if (trim($search) !== '')
+                            Nothing matches "{{ $search }}".
+                        @elseif ($hideUnavailable)
+                            Everything else is taken or closed for today.
+                        @else
+                            Nothing on the board matches that right now.
+                        @endif
+                    </span>
+                    <span class="max-w-[280px] text-[13px] leading-[1.45] text-fq-text-4 text-pretty">
+                        {{ $band !== null
+                            ? 'Try a different amount, or add two smaller jobs together below.'
+                            : 'Try another kind, or add two jobs together below.' }}
+                    </span>
                 </div>
-            @endforeach
-        </div>
+            @endif
+
+            {{-- 4b. The adding-up card.
+
+                 "I need exactly $4." A band can't answer that — he'd be doing sums
+                 on top of sums — so this does the arithmetic for him. It sits
+                 *below* the list on purpose: it answers a question the list has
+                 already failed to answer, so it reads as the thing you reach for
+                 last. Above the board, a kid had to step over a calculator to get
+                 to the jobs. --}}
+            @if ($slotChores->count() === 2)
+                @php
+                    $target = $target;
+                    $short = $target - $slotTotal;
+                @endphp
+                <div wire:key="quest-adder" class="overflow-hidden rounded-[22px] border" style="border-color: var(--fq-line-3); background: linear-gradient(160deg, #1d0b2f, var(--fq-panel))">
+                    @unless ($adderOpen)
+                        <button
+                            type="button"
+                            wire:click="toggleAdder"
+                            class="flex w-full items-center gap-[11px] px-[15px] py-[14px] text-left"
+                        >
+                            <span class="grid h-9 w-9 flex-none place-items-center rounded-[11px] font-baloo text-[17px] font-extrabold" style="background: var(--fq-sunk); color: var(--fq-lime)">+</span>
+                            <span class="min-w-0 flex-1 text-[13.5px] leading-[1.35]" style="color: var(--fq-text-2)">
+                                Want an exact amount? <span style="color: var(--fq-magenta)">Add two jobs up &rarr;</span>
+                            </span>
+                        </button>
+                    @else
+                        <div class="flex flex-col gap-[13px] p-[15px]">
+                            <div class="flex items-center justify-between gap-[10px]">
+                                <span class="font-mono-fq text-[9.5px] tracking-[0.2em] text-fq-text-4 uppercase">I want to make</span>
+                                <button
+                                    type="button"
+                                    wire:click="toggleAdder"
+                                    class="min-h-[32px] flex-none rounded-[10px] border px-[11px] py-[6px] font-mono-fq text-[9.5px] tracking-[0.1em] text-fq-text-4 uppercase"
+                                    style="border-color: var(--fq-line-2); background: var(--fq-sunk)"
+                                >Hide</button>
+                            </div>
+
+                            {{-- One dollar per tap, clamped both ends. At the floor
+                                 the minus greys *in place* rather than
+                                 disappearing, so the control never reflows under
+                                 his thumb mid-tap. --}}
+                            <div class="flex items-stretch gap-[9px]">
+                                @if ($target > $targetMin)
+                                    <button
+                                        type="button"
+                                        wire:click="stepTarget(-1)"
+                                        title="A dollar less"
+                                        class="grid w-[60px] flex-none place-items-center rounded-[17px] border font-baloo text-[30px] leading-none font-extrabold"
+                                        style="border-color: var(--fq-line-3); background: var(--fq-sunk); color: var(--fq-magenta)"
+                                    >&minus;</button>
+                                @else
+                                    <span
+                                        aria-hidden="true"
+                                        class="grid w-[60px] flex-none place-items-center rounded-[17px] border font-baloo text-[30px] leading-none font-extrabold"
+                                        style="border-color: #241539; background: #0c0716; color: var(--fq-line-2)"
+                                    >&minus;</span>
+                                @endif
+
+                                <div
+                                    class="flex min-w-0 flex-1 flex-col items-center justify-center gap-[1px] rounded-[17px] border-2 px-1 pt-[11px] pb-[9px]"
+                                    style="border-color: var(--fq-lime); background: {{ $selectedFill }}"
+                                >
+                                    <span class="font-baloo text-[38px] leading-none font-extrabold" style="color: var(--fq-lime)">${{ (int) round($target / $pointsPerDollar) }}</span>
+                                    <span class="font-mono-fq text-[8.5px] tracking-[0.14em] uppercase" style="color: {{ $bandDim }}">{{ $money($target) }}</span>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    wire:click="stepTarget(1)"
+                                    title="A dollar more"
+                                    class="grid w-[60px] flex-none place-items-center rounded-[17px] border font-baloo text-[30px] leading-none font-extrabold"
+                                    style="border-color: var(--fq-line-3); background: var(--fq-sunk); color: var(--fq-magenta)"
+                                >+</button>
+                            </div>
+
+                            {{-- Two slots, never more and never fewer. Stepping
+                                 skips whatever the other slot holds — two copies of
+                                 one job is not a plan, it's a bug the kid has to
+                                 work out for himself. --}}
+                            <div class="flex flex-col gap-2">
+                                @foreach ($slotChores as $slot => $slotChore)
+                                    <div wire:key="slot-{{ $slot }}" class="flex items-center gap-2 rounded-[18px] border border-fq-line p-[9px]" style="background: var(--fq-panel)">
+                                        <button
+                                            type="button"
+                                            wire:click="stepSlot({{ $slot }}, -1)"
+                                            title="Something else"
+                                            class="grid h-[52px] w-[38px] flex-none place-items-center rounded-[13px] border font-baloo text-[20px] font-extrabold"
+                                            style="border-color: var(--fq-line-2); background: var(--fq-sunk); color: var(--fq-magenta)"
+                                        >&lsaquo;</button>
+
+                                        <div class="flex min-w-0 flex-1 items-center gap-[10px]">
+                                            {{-- Brighter than the board list: this
+                                                 is the active thing on screen. --}}
+                                            <span
+                                                class="grid h-10 w-10 flex-none place-items-center rounded-[12px] border"
+                                                style="border-color: var(--fq-line-2); background: var(--fq-sunk); color: var(--fq-cyan)"
+                                            >
+                                                @if ($slotChore->icon)
+                                                    <x-chore-icon :icon="$slotChore->icon" class="text-[18px]" />
+                                                @else
+                                                    <span class="font-baloo text-[17px] font-extrabold">{{ mb_substr($slotChore->name, 0, 1) }}</span>
+                                                @endif
+                                            </span>
+                                            <div class="flex min-w-0 flex-1 flex-col gap-[1px]">
+                                                <span class="truncate text-[13.5px] leading-[1.2] font-semibold">{{ $slotChore->name }}</span>
+                                                <span class="font-baloo text-[17px] leading-[1.1] font-extrabold" style="color: var(--fq-lime)">{{ $money($slotChore->points) }}</span>
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            wire:click="stepSlot({{ $slot }}, 1)"
+                                            title="Something else"
+                                            class="grid h-[52px] w-[38px] flex-none place-items-center rounded-[13px] border font-baloo text-[20px] font-extrabold"
+                                            style="border-color: var(--fq-line-2); background: var(--fq-sunk); color: var(--fq-magenta)"
+                                        >&rsaquo;</button>
+                                    </div>
+                                @endforeach
+                            </div>
+
+                            @if ($slotNotice)
+                                {{-- A slot that rearranges itself silently reads as
+                                     a bug. Cooldowns are household-wide, so this is
+                                     a sibling claiming a job mid-sum. --}}
+                                <p class="font-mono-fq text-[9.5px] tracking-[0.06em] uppercase" style="color: var(--fq-gold)">{{ $slotNotice }}</p>
+                            @endif
+
+                            <div class="flex flex-col gap-[10px]">
+                                <div class="flex items-end justify-between gap-[10px]">
+                                    <div class="flex flex-col gap-[2px]">
+                                        <span class="font-mono-fq text-[9px] tracking-[0.2em] text-fq-text-4 uppercase">Both together</span>
+                                        <span class="font-baloo text-[34px] leading-none font-extrabold" style="color: var(--fq-lime)">{{ $money($slotTotal) }}</span>
+                                    </div>
+                                    <span class="flex-none font-mono-fq text-[10px] tracking-[0.1em] text-fq-text-4 uppercase">Want {{ $money($target) }}</span>
+                                </div>
+
+                                <div class="h-[10px] overflow-hidden rounded-full" style="background: var(--fq-sunk)">
+                                    <div
+                                        class="h-full rounded-full"
+                                        style="width: {{ min(100, (int) round($slotTotal / max(1, $target) * 100)) }}%; background: linear-gradient(90deg, var(--fq-magenta), var(--fq-lime))"
+                                    ></div>
+                                </div>
+
+                                {{-- Three branches, not two. "Pick two for me"
+                                     lands dead on target for nearly every amount
+                                     the stepper can reach, so without the exact
+                                     branch the normal success message would read
+                                     "and $0.00 spare" — arithmetically true and
+                                     meaningless to the kid it's written for. --}}
+                                @if ($slotTotal === $target)
+                                    <span class="text-[13.5px] leading-[1.4]" style="color: var(--fq-lime)">
+                                        That's exactly <span class="font-bold">{{ $money($target) }}</span> &mdash; perfect.
+                                    </span>
+                                @elseif ($slotTotal > $target)
+                                    <span class="text-[13.5px] leading-[1.4]" style="color: var(--fq-lime)">
+                                        That's enough &mdash; and <span class="font-bold">{{ $money($slotTotal - $target) }}</span> spare.
+                                    </span>
+                                @else
+                                    <span class="text-[13.5px] leading-[1.4]" style="color: var(--fq-text-3)">
+                                        Still <span class="font-bold" style="color: var(--fq-coral)">{{ $money($short) }}</span> to go &mdash; try the arrows.
+                                    </span>
+                                @endif
+
+                                <button
+                                    type="button"
+                                    wire:click="pickTwo"
+                                    class="rounded-[14px] py-[13px] font-baloo text-[15px] font-extrabold transition hover:brightness-110"
+                                    style="background: var(--fq-lime); color: var(--fq-bg)"
+                                >Pick two for me</button>
+                            </div>
+                        </div>
+                    @endunless
+                </div>
+            @endif
+        </div>{{-- /Side Quests --}}
 
         {{-- 5. Bounty board — a window onto Trades & Jobs showing only what
              this kid could take right now. --}}
