@@ -19,6 +19,11 @@ use Livewire\WithFileUploads;
  * because a bought soundtrack is a hundred tracks, and a hundred tracks in one
  * flat list is not a menu anybody can use.
  *
+ * The parent's own playlists live at the foot of this page rather than on a tab
+ * of their own — it is the music screen, and a grown-up who has just added an
+ * album is one tap from putting it in a list. The builder itself is the same
+ * component the kids get; see resources/views/livewire/playlist-builder.
+ *
  * @see MusicService for why the library is a folder rather than a table, and
  *      why stored filenames carry underscores instead of spaces.
  */
@@ -125,6 +130,21 @@ new class extends Component
 
         // Left where it was put, so the row it just made is on screen.
         $this->openAlbum = $album !== '' ? str_replace('_', ' ', $album) : null;
+
+        $this->announceLibrary();
+    }
+
+    /**
+     * Tell the playlist builder below that the library moved under it.
+     *
+     * The two are separate Livewire components on the same screen, so nothing
+     * redraws the lower one when this one uploads, renames or deletes a song —
+     * and a song offered down there that is no longer up here is a + Add button
+     * that fails with nothing to say for itself.
+     */
+    private function announceLibrary(): void
+    {
+        $this->dispatch('music-library-changed');
     }
 
     /**
@@ -169,6 +189,8 @@ new class extends Component
         }
 
         $this->flashMessage = null;
+
+        $this->announceLibrary();
     }
 
     /**
@@ -187,6 +209,8 @@ new class extends Component
         // outlive a song — see PlaylistService — but not when the app knows
         // perfectly well that the song was deleted on purpose.
         app(PlaylistService::class)->untrack($service->idFor($path));
+
+        $this->announceLibrary();
     }
 
     /**
@@ -202,6 +226,8 @@ new class extends Component
         app(MusicService::class)->forget();
 
         $this->flashMessage = 'Had another look at the music storage.';
+
+        $this->announceLibrary();
     }
 
     public function with(): array
@@ -335,7 +361,10 @@ new class extends Component
 
         <div class="flex flex-col gap-3 rounded-[28px] border border-fq-line bg-fq-bg p-[16px_14px]">
             <div class="flex flex-wrap items-baseline gap-2">
-                <h2 class="font-baloo text-xl font-extrabold">The playlist</h2>
+                {{-- "The playlist" until parents had real ones. Two things on
+                     one page called the same thing is one of them being read as
+                     the other. --}}
+                <h2 class="font-baloo text-xl font-extrabold">The library</h2>
                 <span class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
                     {{ $total }} {{ Str::plural('SONG', $total) }}
                     @if ($total)
@@ -420,5 +449,11 @@ new class extends Component
                 </div>
             @endif
         </div>
+
+        {{-- The same builder the kids get, on the parent's own lists. Under the
+             library rather than on a tab of its own: this is the music screen,
+             and the album that was just added is the one anybody is about to
+             make a list out of. --}}
+        <livewire:playlist-builder audience="parent" />
     </div>
 </x-parent.shell>

@@ -41,6 +41,12 @@
                     <span class="font-mono-fq text-[9px] text-fq-text-4">PENDING</span>
                 </div>
 
+                {{-- Background music, the same control the kids have. A parent
+                     signing off a board of chores at nine at night is doing the
+                     same kind of thing they are, and the playlist it plays is
+                     the parent's own — see the music page. --}}
+                <x-music-toggle :profile="$profile" />
+
                 <form method="POST" action="{{ route('logout') }}" class="shrink-0">
                     @csrf
                     <button

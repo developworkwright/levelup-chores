@@ -1,9 +1,12 @@
 {{-- The header's background music control: one 52px square that starts and
-     stops the song, and a narrow tab beside it that opens the picker.
+     stops the song, and a narrow tab beside it that opens the picker. The same
+     control in both consoles — the library is the house's, and the playlists it
+     offers are whoever is signed in.
 
-     Two targets rather than one, because these are two different questions. A
-     kid who wants quiet should not have to read a menu to get it, and a kid
-     browsing for a song should not have to stop the music to see the list.
+     Two targets rather than one, because these are two different questions.
+     Somebody who wants quiet should not have to read a menu to get it, and
+     somebody browsing for a song should not have to stop the music to see the
+     list.
 
      Everything it knows lives in the `music` Alpine store — see
      resources/js/music.js for why the audio is deliberately not an element on
@@ -30,7 +33,7 @@
     // music", not which songs, so a high-water mark is the whole question.
     $latestAt = $music->latestChangeAt();
 
-    // This kid's own lists, ids only — the catalogue above already carries
+    // This profile's own lists, ids only — the catalogue above already carries
     // every title and url, so sending them twice would be the same payload
     // again on every page. Never anybody else's: a playlist belongs to whoever
     // made it, and the header only ever draws for the profile signed in.
@@ -234,12 +237,16 @@
                 >
             </label>
 
-            @if ($profile?->isKid())
+            @if ($profile !== null)
                 {{-- The way in to making one. The panel is a picker and stays a
                      picker: building a list in a box this size, on a phone,
-                     would be a worse version of the page this points at. --}}
+                     would be a worse version of the page this points at.
+
+                     Both consoles build lists the same way; the parent's is a
+                     section of the music screen rather than a page of its
+                     own. --}}
                 <a
-                    href="{{ route('kid.music') }}"
+                    href="{{ $profile->isParent() ? route('parent.music') : route('kid.music') }}"
                     wire:navigate
                     @click="open = false"
                     class="mt-2 shrink-0 rounded-[10px] px-2 py-[7px] text-center text-[12px] text-fq-text-4 transition hover:text-fq-text"

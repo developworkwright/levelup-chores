@@ -19,11 +19,14 @@ use ReflectionProperty;
 use Tests\TestCase;
 
 /**
- * Playlists — a kid's own running order through the music library.
+ * Playlists — one profile's own running order through the music library.
  *
  * The library is a folder of mp3s with no table behind it, so most of what is
  * worth testing here is the seam between the two: what happens to a list when
  * the song it names is renamed, deleted, or was never there.
+ *
+ * The builder is one component drawn in both consoles, so it is driven here by
+ * its own name rather than through whichever page happens to host it.
  */
 class PlaylistTest extends TestCase
 {
@@ -68,7 +71,7 @@ class PlaylistTest extends TestCase
         $this->library(['Mossy_Save_Point.mp3', 'Snowglobe_Ruins.mp3']);
         $kid = $this->loginKid();
 
-        Volt::test('kid.music')
+        Volt::test('playlist-builder')
             ->set('newName', 'Bangers')
             ->call('createPlaylist')
             ->call('addSong', 'snowglobe-ruins')
@@ -119,11 +122,11 @@ class PlaylistTest extends TestCase
             $this->service()->add($playlist, $id);
         }
 
-        Volt::test('kid.music')->call('moveSong', $playlist->id, 'three', -1);
+        Volt::test('playlist-builder')->call('moveSong', $playlist->id, 'three', -1);
 
         $this->assertSame(['One', 'Three', 'Two'], $playlist->fresh()->tracks->pluck('title')->all());
 
-        Volt::test('kid.music')->call('moveSong', $playlist->id, 'one', 1);
+        Volt::test('playlist-builder')->call('moveSong', $playlist->id, 'one', 1);
 
         $this->assertSame(['Three', 'One', 'Two'], $playlist->fresh()->tracks->pluck('title')->all());
     }
@@ -152,7 +155,7 @@ class PlaylistTest extends TestCase
             $this->service()->add($playlist, $id);
         }
 
-        Volt::test('kid.music')->call('removeSong', $playlist->id, 'two');
+        Volt::test('playlist-builder')->call('removeSong', $playlist->id, 'two');
 
         // Positions stay 1..n, so nothing is ordered by a number that drifts
         // further from its row every time something is taken out.
@@ -168,7 +171,7 @@ class PlaylistTest extends TestCase
 
         $theirs = Playlist::factory()->create(['profile_id' => $sibling->id, 'name' => 'Not Yours']);
 
-        Volt::test('kid.music')
+        Volt::test('playlist-builder')
             ->call('renamePlaylist', $theirs->id, 'Mine Now')
             ->call('deletePlaylist', $theirs->id);
 
@@ -184,7 +187,7 @@ class PlaylistTest extends TestCase
         Playlist::factory()->create(['profile_id' => $kid->id, 'name' => 'Mine']);
         Playlist::factory()->create(['profile_id' => $sibling->id, 'name' => 'Theirs']);
 
-        Volt::test('kid.music')
+        Volt::test('playlist-builder')
             ->assertSee('Mine')
             ->assertDontSee('Theirs');
     }
@@ -197,7 +200,7 @@ class PlaylistTest extends TestCase
 
         $this->service()->add($playlist, 'mossy-save-point');
 
-        Volt::test('kid.music')->call('deletePlaylist', $playlist->id);
+        Volt::test('playlist-builder')->call('deletePlaylist', $playlist->id);
 
         // There are no foreign keys on these tables, so nothing cascades — the
         // rows are cleaned up in code or not at all.
@@ -212,7 +215,7 @@ class PlaylistTest extends TestCase
 
         Playlist::factory()->create(['profile_id' => $kid->id, 'name' => 'Bangers']);
 
-        Volt::test('kid.music')
+        Volt::test('playlist-builder')
             // Case-insensitively: "bangers" and "Bangers" are the same list to
             // everybody except the database.
             ->set('newName', 'bangers')
@@ -229,7 +232,7 @@ class PlaylistTest extends TestCase
 
         Playlist::factory()->count(PlaylistService::MAX_PER_PROFILE)->create(['profile_id' => $kid->id]);
 
-        Volt::test('kid.music')
+        Volt::test('playlist-builder')
             ->set('newName', 'One More')
             ->call('createPlaylist')
             ->assertSee('delete one to make room');
@@ -306,7 +309,7 @@ class PlaylistTest extends TestCase
 
         // No showPlaylist call: a kid's only list is open from mount, and
         // toggling it here would close it.
-        Volt::test('kid.music')
+        Volt::test('playlist-builder')
             ->assertSee('Mossy Save Point')
             ->assertSee('GONE');
     }
@@ -343,14 +346,90 @@ class PlaylistTest extends TestCase
             ->assertDontSee('Sibling Sounds');
     }
 
-    public function test_the_music_page_is_closed_to_parents(): void
+    public function test_both_consoles_draw_the_same_builder(): void
     {
+        $this->library(['Mossy_Save_Point.mp3']);
+
+        $this->loginKid();
+        $this->get(route('kid.music'))->assertSeeLivewire('playlist-builder');
+
+        $this->loginParent();
+        $this->get(route('parent.music'))->assertSeeLivewire('playlist-builder');
+    }
+
+    public function test_the_kid_music_page_is_closed_to_parents(): void
+    {
+        // Parents build their lists in the same component, on their own music
+        // screen. The kid page is still the kid console's.
         $this->loginParent();
 
         $this->get('/kid/music')->assertForbidden();
     }
 
-    public function test_no_control_on_the_kid_music_page_is_named_after_one_of_its_properties(): void
+    public function test_a_parent_has_playlists_of_their_own(): void
+    {
+        $this->library(['Mossy_Save_Point.mp3']);
+        $parent = $this->loginParent();
+
+        Volt::test('playlist-builder', ['audience' => 'parent'])
+            ->set('newName', 'Dishes At Nine')
+            ->call('createPlaylist')
+            ->call('addSong', 'mossy-save-point');
+
+        $playlist = Playlist::where('profile_id', $parent->id)->firstOrFail();
+
+        $this->assertSame('Dishes At Nine', $playlist->name);
+        $this->assertSame(['Mossy Save Point'], $playlist->tracks->pluck('title')->all());
+    }
+
+    public function test_a_parents_music_screen_shows_only_their_own_lists(): void
+    {
+        $this->library(['Mossy_Save_Point.mp3']);
+        $parent = $this->loginParent();
+        $kid = Profile::factory()->for($parent->household)->create();
+
+        Playlist::factory()->create(['profile_id' => $parent->id, 'name' => 'Dishes At Nine']);
+        Playlist::factory()->create(['profile_id' => $kid->id, 'name' => 'Kid Bangers']);
+
+        // The builder and the header picker are both on this page, and neither
+        // is allowed to be a way of reading a kid's list.
+        Volt::test('parent.music')
+            ->assertSee('Dishes At Nine')
+            ->assertDontSee('Kid Bangers');
+    }
+
+    public function test_a_parent_cannot_touch_a_kids_playlist(): void
+    {
+        $this->library(['Mossy_Save_Point.mp3']);
+        $parent = $this->loginParent();
+        $kid = Profile::factory()->for($parent->household)->create();
+
+        // A parent administers the library, not the lists made out of it. The
+        // ids arrive from the browser, so being on the parent console buys
+        // nothing here.
+        $theirs = Playlist::factory()->create(['profile_id' => $kid->id, 'name' => 'Not Yours']);
+
+        Volt::test('playlist-builder', ['audience' => 'parent'])
+            ->call('renamePlaylist', $theirs->id, 'Mine Now')
+            ->call('deletePlaylist', $theirs->id);
+
+        $this->assertSame('Not Yours', $theirs->fresh()->name);
+    }
+
+    public function test_changing_the_library_tells_the_builder_below_it(): void
+    {
+        $this->library(['Mossy_Save_Point.mp3']);
+        $this->loginParent();
+
+        // The library admin and the builder are separate components on one
+        // screen: without this, a song deleted up top is still offered down
+        // below until the page is loaded again.
+        Volt::test('parent.music')
+            ->call('removeSong', 'Mossy_Save_Point.mp3')
+            ->assertDispatched('music-library-changed');
+    }
+
+    public function test_no_control_on_the_playlist_builder_is_named_after_one_of_its_properties(): void
     {
         /*
          * The same trap the parent music screen fell into: a public method and
@@ -361,7 +440,7 @@ class PlaylistTest extends TestCase
          */
         $this->loginKid();
 
-        $component = Volt::test('kid.music')->instance();
+        $component = Volt::test('playlist-builder')->instance();
         $class = new ReflectionClass($component);
 
         $declaredHere = fn (array $members): array => array_map(
@@ -392,7 +471,7 @@ class PlaylistTest extends TestCase
          * x-data — so a new playlist reaches it by event or not until the next
          * full page load.
          */
-        Volt::test('kid.music')
+        Volt::test('playlist-builder')
             ->set('newName', 'Bangers')
             ->call('createPlaylist')
             ->assertDispatched('playlists-updated');

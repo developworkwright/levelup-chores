@@ -164,19 +164,22 @@ class MusicTest extends TestCase
 
     public function test_a_parent_can_expand_an_album_to_see_its_songs(): void
     {
-        // The playlist only draws the open album's rows, so if this control
-        // does nothing the songs inside an album are unreachable — no rename,
-        // no delete, no listen.
+        // The library only draws the open album's rows, so if this control does
+        // nothing the songs inside an album are unreachable — no rename, no
+        // delete, no listen.
         $this->library(['Undertale/Ruins.mp3', 'Pixel_Run.mp3']);
         $this->loginParent();
 
+        // On the song's own delete control rather than its title: the parent
+        // header now carries the whole library in the picker's x-data, so
+        // "Ruins" is on this page whether the album is open or not.
         Volt::test('parent.music')
-            ->assertDontSee('Ruins')
+            ->assertDontSee('Delete Ruins?')
             ->call('toggleAlbum', 'Undertale')
-            ->assertSee('Ruins')
+            ->assertSee('Delete Ruins?')
             // And closes again.
             ->call('toggleAlbum', 'Undertale')
-            ->assertDontSee('Ruins');
+            ->assertDontSee('Delete Ruins?');
     }
 
     public function test_no_control_on_the_music_screen_is_named_after_one_of_its_properties(): void
@@ -321,6 +324,20 @@ class MusicTest extends TestCase
         $this->loginKid();
 
         Volt::test('kid.quests')->assertDontSee('Choose a song');
+    }
+
+    public function test_the_parent_header_offers_the_songs_too(): void
+    {
+        // The same control, on the console where the approvals get done. Music
+        // is background to whatever you are doing, and a parent signing off a
+        // board of chores is doing something.
+        $this->library(['Mossy_Save_Point.mp3']);
+        $this->loginParent();
+
+        Volt::test('parent.approvals')
+            ->assertSee('fqMusic', false)
+            ->assertSee('Mossy Save Point')
+            ->assertSee('Choose a song');
     }
 
     public function test_a_parent_can_add_a_song_and_name_it(): void

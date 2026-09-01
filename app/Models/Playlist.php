@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * A kid's own running order through the music library.
+ * One profile's own running order through the music library — kid or parent.
  *
  * @see PlaylistService for why a song can be in here and not on the disk.
  */

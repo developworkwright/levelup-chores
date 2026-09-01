@@ -9,7 +9,11 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Playlists — a kid's own running order through the music library.
+ * Playlists — one profile's own running order through the music library.
+ *
+ * Kids and parents alike: the library is the house's, and a list made out of it
+ * belongs to whoever made it. Nothing in here asks which console it is serving,
+ * because none of the rules differ.
  *
  * The library is a folder of mp3s and has no table (see MusicService); a
  * playlist is a list of ids pointing into it. That split is the whole of what
@@ -28,7 +32,7 @@ use Illuminate\Support\Facades\DB;
 class PlaylistService
 {
     /**
-     * How many lists a kid may keep.
+     * How many lists one profile may keep.
      *
      * Not a storage limit — twelve rows is nothing. It is a limit on the mess:
      * the picker in the header is a panel on a phone, and past a dozen entries
