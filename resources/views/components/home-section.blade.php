@@ -1,11 +1,11 @@
 {{-- The header on one of Home's cards.
 
      Home reads top to bottom in the order the day usually goes — quest, chests,
-     spin, standings — but that is a habit rather than a rule, and nothing on the
-     page is gated on anything above it. So these are headers, not steps: no
+     prize, standings — but that is a habit rather than a rule, and nothing on
+     the page is gated on anything above it. So these are headers, not steps: no
      numbers to imply a sequence a kid has to obey, just a coloured mark, the
      name of the thing, and the one-line answer to "where am I on this" out on
-     the right where the four of them line up as a column. --}}
+     the right where they line up as a column. --}}
 @props([
     'title',
     'accent' => 'var(--fq-lime)',

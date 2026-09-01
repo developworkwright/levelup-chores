@@ -9,9 +9,7 @@ use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyQuest;
 use App\Models\Profile;
-use App\Models\Spin;
 use App\Services\ArenaService;
-use App\Services\BadgeService;
 use App\Services\BonusShopService;
 use App\Services\ChestService;
 use App\Services\ChoreService;
@@ -28,17 +26,17 @@ use Livewire\Volt\Component;
 /**
  * Home — the day, in the order it usually goes.
  *
- * The daily quest, the bonus chest, the streak chest and the spin — the four a
- * kid does themselves — then the two the house does together: the weekly prize
- * and the boss fight. The standings go last, because they are the only card
- * that ranks the kids against each other. Every other kid page is organised by
- * *what kind of thing* it holds, which works fine once you know what you're
- * looking for and is no help at all to a kid asking "what now?" — this one is
- * organised by when.
+ * The daily quest, the bonus chest and the streak chest — the three a kid does
+ * themselves — then the two the house does together: the weekly prize and the
+ * boss fight. The standings go last, because they are the only card that ranks
+ * the kids against each other. Every other kid page is organised by *what kind
+ * of thing* it holds, which works fine once you know what you're looking for
+ * and is no help at all to a kid asking "what now?" — this one is organised by
+ * when.
  *
  * Deliberately not numbered. The order is the habit, not a rule: nothing here is
- * gated on anything above it, and a kid who wants to spin before they open
- * anything is not doing it wrong.
+ * gated on anything above it, and a kid who wants to open the second chest
+ * first is not doing it wrong.
  *
  * Everything acts in place. The quest chest deals, the cards are picked and the
  * quest is claimed from here exactly as they are from the Quests page, because
@@ -47,32 +45,14 @@ use Livewire\Volt\Component;
  * the charm can only be cast on a shut chest, and a second copy that quietly
  * dropped the charm buttons would cost a kid a ticket they had already spent.
  *
- * Quests keeps what this page doesn't: the rest of the board, the mystery chore,
- * the bounty board, gratitude, the sleep card.
+ * Quests keeps what this page doesn't: the bonus wheel, the rest of the board,
+ * the mystery chore, the bounty board, gratitude, the sleep card.
  */
 new class extends Component
 {
     public Profile $profile;
 
-    /**
-     * Where the wheel is pointing, in degrees. Restored at mount from a spin
-     * already taken today so a kid coming back finds the wheel parked on what
-     * they landed on rather than reset to the top.
-     */
-    public float $wheelDeg = 0;
-
-    public bool $spinning = false;
-
-    public bool $spinRevealed = false;
-
     public ?string $perkMessage = null;
-
-    /**
-     * Why a tap on the boosted chore didn't take. Cooldowns are household-wide,
-     * so a page left open goes stale, and a button that silently no-ops reads
-     * as broken.
-     */
-    public ?string $boostMessage = null;
 
     /**
      * Snapshotted at mount, NOT recomputed in with(): opening banks the reward
@@ -127,23 +107,12 @@ new class extends Component
         $this->pendingChestDay = $this->profile->pending_streak_chest;
         // Milestone bonuses are denominated in dollars, but every other number a
         // kid sees is points — so convert once here and never show dollars. Read
-        // through streakBonusOn() rather than off the base map: past day 30 the
-        // track repeats and the day no longer indexes it directly.
+        // through pendingStreakChestDollars() rather than off the base map or
+        // even off the day on the lid: the track repeats past day 30, and a
+        // chest can be holding more than one milestone.
         $this->pendingChestPoints = $this->pendingChestDay
-            ? (app(StreakService::class)->streakBonusOn($this->pendingChestDay) ?? 0) * $this->profile->household->points_per_dollar
+            ? app(StreakService::class)->pendingStreakChestDollars($this->profile) * $this->profile->household->points_per_dollar
             : null;
-
-        $spins = app(SpinService::class);
-        $spinToday = $spins->today($this->profile);
-
-        if ($spinToday) {
-            $chores = $this->wheelChores();
-            $slice = 360 / max(1, $chores->count());
-            $index = $chores->search(fn ($chore) => $chore->id === $spinToday->chore_id);
-
-            $this->wheelDeg = $this->restingDeg((int) $index, $slice);
-            $this->spinRevealed = true;
-        }
     }
 
     public function openDailyChest(): void
@@ -281,16 +250,6 @@ new class extends Component
         $this->buyPerk(PerkEffect::QuestCharm, 'cast it before you open the chest!');
     }
 
-    /**
-     * Sold from beside the wheel for the same reason the charm is sold from
-     * the hero: the window to use one closes the moment the wheel goes, and a
-     * kid who has to leave for the shop first comes back to a spent spin.
-     */
-    public function buyOpSpin(): void
-    {
-        $this->buyPerk(PerkEffect::OpSpin, 'charge the wheel before you spin!');
-    }
-
     private function buyPerk(PerkEffect $effect, string $suffix): void
     {
         $perk = BonusPerk::where('household_id', $this->profile->household_id)
@@ -313,76 +272,9 @@ new class extends Component
         }
     }
 
-    public function spin(): void
-    {
-        if ($this->spinning || $this->spinRevealed || ! $this->profile->household->spin_enabled) {
-            return;
-        }
-
-        $spins = app(SpinService::class);
-
-        if ($spins->hasSpunToday($this->profile)) {
-            $this->spinRevealed = true;
-
-            return;
-        }
-
-        // The family can clear the board before a kid gets round to spinning.
-        // SpinService throws on an empty pool, and nothing here catches it, so
-        // the guard has to be in front of the call rather than around it.
-        if ($this->wheelChores()->isEmpty()) {
-            return;
-        }
-
-        $result = $spins->spin($this->profile);
-
-        $chores = $this->wheelChores();
-        $slice = 360 / max(1, $chores->count());
-        $index = $chores->search(fn ($chore) => $chore->id === $result->chore_id);
-
-        $target = $this->restingDeg((int) $index, $slice);
-
-        while ($target <= $this->wheelDeg) {
-            $target += 360;
-        }
-
-        $this->wheelDeg = $target + 360 * 6;
-        $this->spinning = true;
-    }
-
-    public function finishSpin(): void
-    {
-        $this->spinning = false;
-        $this->spinRevealed = true;
-
-        $result = app(SpinService::class)->today($this->profile);
-
-        if ($result) {
-            $this->dispatch(
-                'celebrate',
-                message: "{$result->multiplier}x boost on {$result->chore->name}!",
-                style: 'confetti',
-                big: $result->multiplier >= 3,
-            );
-        }
-
-        app(BadgeService::class)->evaluate($this->profile);
-    }
-
     /**
-     * The pointer sits at the top of the wheel. Segment 0 starts at local
-     * angle 0° (3 o'clock, before any rotation) and runs clockwise — same
-     * convention as the segment/label markup below — so resting here is
-     * what actually brings a chore's slice under the pointer at the top.
-     */
-    private function restingDeg(int $index, float $slice): float
-    {
-        return -90 - ($index * $slice + $slice / 2);
-    }
-
-    /**
-     * Every perk with a button on this page: the quest charm and reroll on the
-     * hero, and the wheel respin beside the spin.
+     * Every perk with a button on this page: the quest charm and the reroll,
+     * both on the hero. The wheel respin moved to Quests with the wheel.
      */
     public function usePerk(string $effect): void
     {
@@ -397,18 +289,6 @@ new class extends Component
             $this->perkMessage = null;
         } catch (PerkUnavailableException $e) {
             $this->perkMessage = $e->getMessage();
-
-            return;
-        }
-
-        if ($case === PerkEffect::WheelRespin) {
-            // Put the wheel back where it started so the second spin happens in
-            // place rather than on a wheel still parked on the first result.
-            $this->spinRevealed = false;
-            $this->spinning = false;
-            $this->wheelDeg = 0;
-
-            $this->dispatch('celebrate', message: 'Wheel reset — take another spin!', style: $case->celebrationStyle());
 
             return;
         }
@@ -431,112 +311,6 @@ new class extends Component
         } catch (\RuntimeException) {
             return null;
         }
-    }
-
-    /**
-     * What the wheel can land on, or nothing at all.
-     *
-     * Guarded for the same reason as questOrNull(): the eligible pool is built
-     * by excluding today's quest hand, so asking for it *deals* one — and a
-     * household with no chores at all makes that throw. Every entry point to
-     * the wheel goes through here so none of them can be the one that breaks
-     * the landing page.
-     *
-     * @return \Illuminate\Support\Collection<int, \App\Models\Chore>
-     */
-    private function wheelChores(): \Illuminate\Support\Collection
-    {
-        try {
-            return app(SpinService::class)->eligibleChoresFor($this->profile);
-        } catch (\RuntimeException) {
-            return collect();
-        }
-    }
-
-    /**
-     * What the Active Boost card can offer for the chore the wheel landed on:
-     * the claim itself, or the reason it isn't available.
-     *
-     * @return ?array{claimable: bool, label: string, note: ?string, toQuests: bool}
-     */
-    private function boostClaim(?Spin $boost): ?array
-    {
-        if (! $boost) {
-            return null;
-        }
-
-        $service = app(ChoreService::class);
-        $chore = $boost->chore;
-        $quest = $this->questOrNull();
-
-        // The chest reveal is the whole ceremony of the main quest, so a boost
-        // that landed on it gets pointed back there rather than quietly
-        // claiming it from under an unopened chest.
-        if ($quest && $quest->chore_id === $chore->id) {
-            return [
-                'claimable' => false,
-                'label' => 'This is your main quest',
-                'note' => 'Open the chest on the Quests page to claim it.',
-                'toQuests' => true,
-            ];
-        }
-
-        $state = $service->stateFor($this->profile, $chore);
-        $claimant = $service->claimantFor($chore);
-
-        return match (true) {
-            $state === 'ready' => ['claimable' => true, 'label' => 'Mark it done', 'note' => null, 'toQuests' => false],
-            $state === 'pending' => ['claimable' => false, 'label' => 'Waiting on a parent', 'note' => null, 'toQuests' => false],
-            $state === 'expired' => ['claimable' => false, 'label' => "Time's up", 'note' => 'A parent is taking that one.', 'toQuests' => false],
-            $claimant && $claimant->profile_id !== $this->profile->id => [
-                'claimable' => false,
-                'label' => $claimant->profile->name.' got this one',
-                'note' => null,
-                'toQuests' => false,
-            ],
-            default => ['claimable' => false, 'label' => 'Already done today', 'note' => null, 'toQuests' => false],
-        };
-    }
-
-    /**
-     * Claims the boosted chore without leaving the page. Every guard the Quests
-     * board applies is re-run here — a disabled button in a browser is never
-     * the thing standing between a kid and a double claim.
-     */
-    public function claimBoostedChore(): void
-    {
-        $this->boostMessage = null;
-
-        $boost = app(SpinService::class)->today($this->profile);
-        $claim = $this->boostClaim($boost);
-
-        if (! $claim) {
-            return;
-        }
-
-        if (! $claim['claimable']) {
-            $this->boostMessage = $claim['note'] ?? $claim['label'].'.';
-
-            return;
-        }
-
-        $chore = $boost->chore;
-
-        if (! $chore->isAppropriateFor($this->profile)) {
-            return;
-        }
-
-        // Silent about the mystery chore on purpose — the find is announced
-        // once a parent approves the work, by the card the kid shell queues.
-        $this->dispatch(
-            'celebrate',
-            message: "{$chore->name} claimed at {$boost->multiplier}x! Bonus wheel treat earned.",
-            treat: 'cookie',
-            motion: 'burst',
-            origin: 'tap',
-        );
-
-        app(ChoreService::class)->claim($this->profile, $chore);
     }
 
     /** The monster standing, as the boss strip and the watcher want it. */
@@ -598,7 +372,6 @@ new class extends Component
 
         $quest = $this->questOrNull();
         $boost = $spins->today($this->profile);
-        $wheelChores = $this->wheelChores();
 
         // Claiming sets completed_at immediately, but the points don't land
         // until a parent approves — so "done" and "waiting" are different
@@ -706,33 +479,6 @@ new class extends Component
             // there is a chest to animate at all.
             'chestAvailable' => app(ChestService::class)->isAvailable($this->profile),
             'boost' => $boost,
-            'boostClaim' => $this->boostClaim($boost),
-            'wheelChores' => $wheelChores,
-            'wheelSlice' => 360 / max(1, $wheelChores->count()),
-            'respin' => $inventory->holds($this->profile, PerkEffect::WheelRespin)
-                ? [
-                    'effect' => PerkEffect::WheelRespin,
-                    'count' => $inventory->countOf($this->profile, PerkEffect::WheelRespin),
-                    'blocked' => $inventory->blockedReason($this->profile, PerkEffect::WheelRespin),
-                ]
-                : null,
-            // The charge already on the wheel, the charge in their pocket, and
-            // the one they could buy — three states of the same control, and
-            // only ever one of them is on screen.
-            'wheelCharged' => $spins->isCharged($this->profile),
-            'opSpin' => $inventory->holds($this->profile, PerkEffect::OpSpin)
-                ? [
-                    'effect' => PerkEffect::OpSpin,
-                    'count' => $inventory->countOf($this->profile, PerkEffect::OpSpin),
-                    'blocked' => $inventory->blockedReason($this->profile, PerkEffect::OpSpin),
-                ]
-                : null,
-            'opSpinForSale' => $inventory->holds($this->profile, PerkEffect::OpSpin) || $spins->isCharged($this->profile)
-                ? null
-                : BonusPerk::where('household_id', $household->id)
-                    ->enabled()
-                    ->where('effect', PerkEffect::OpSpin)
-                    ->first(),
             // Whether there is a Lucky Block to point at. The strip above the
             // run needs one boolean and the ticket count already on the
             // profile — the block itself, its rules and its prize list all
@@ -1170,335 +916,56 @@ new class extends Component
             </div>
         @endif
 
-        {{-- The spin. This is the whole of the old Bonus Wheel page: the
-             wheel, the button, and what to do with what it lands on. --}}
-        <div class="flex flex-col gap-3">
-            <x-home-section
-                title="Bonus Wheel"
-                accent="var(--fq-magenta)"
-                :done="$spinRevealed"
-                :status="$spinRevealed ? 'Spun today' : 'One spin waiting'"
-                :status-color="$spinRevealed ? 'var(--fq-lime)' : 'var(--fq-magenta)'"
-            />
+        {{-- The spin, which lives on the Quests page now.
 
-            <div
-                x-data
-                x-init="$watch('$wire.spinning', (value) => { if (value) setTimeout(() => $wire.finishSpin(), 6100) })"
-                class="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] items-stretch gap-4"
+             It was a full section here and the kids went looking for it on
+             Quests anyway — which was them being right. The wheel lands on a
+             side quest and multiplies it, and every one of those rows is over
+             there, so that is where the wheel went too.
+
+             What's left is a strip rather than a section, for the same reason
+             the Lucky Block above the run is one: it points at something on
+             another page. It still carries the news, which is the half worth
+             having here — a spin waiting, or the boost that's live. --}}
+        <a
+            href="{{ route('kid.quests') }}#bonus-wheel"
+            wire:navigate
+            class="flex min-h-[64px] items-center gap-3 rounded-[16px] border px-[14px] py-[13px] transition hover:brightness-110"
+            style="border-color: {{ $boost ? 'var(--fq-line-2)' : 'var(--fq-magenta)' }};
+                   background: {{ $boost ? 'var(--fq-sunk)' : 'color-mix(in srgb, var(--fq-magenta) 14%, transparent)' }}"
+        >
+            {{-- The wheel at strip size: the same palette the segments cycle
+                 through, run round once, with the hub pin in the middle. Small
+                 enough that a face of real segments would just be noise. --}}
+            <span
+                class="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-full"
+                style="background: conic-gradient(var(--fq-lime), var(--fq-cyan), var(--fq-gold), var(--fq-magenta), var(--fq-coral), var(--fq-violet), var(--fq-lime));
+                       box-shadow: 0 0 0 2px var(--fq-wheel-ring)"
+                aria-hidden="true"
             >
-                <div class="flex flex-col items-center justify-center gap-[18px] rounded-[24px] border border-fq-line bg-fq-panel p-[22px] text-center">
-                    <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-magenta uppercase">One Spin Per Day</p>
+                <span
+                    class="h-[12px] w-[12px] rounded-full"
+                    style="background: var(--fq-wheel-hub); box-shadow: inset 0 0 0 2px var(--fq-wheel-hub-line)"
+                ></span>
+            </span>
 
-                    <div class="relative h-[290px] w-[290px]">
-                        <div
-                            class="absolute top-0 left-1/2 z-[3] -translate-x-1/2 drop-shadow-[0_3px_6px_#000]"
-                            style="width:0;height:0;border-left:12px solid transparent;border-right:12px solid transparent;border-top:20px solid var(--fq-gold)"
-                        ></div>
+            <span class="min-w-0 flex-1">
+                @if ($boost)
+                    <span
+                        class="block font-baloo text-base leading-tight font-extrabold"
+                        style="color: {{ $boost->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)' }}"
+                    >{{ $boost->multiplier }}x on {{ $boost->chore->name }}</span>
+                    <span class="mt-[2px] block text-xs text-fq-text-4">Claim it on the Quests page.</span>
+                @else
+                    <span class="block font-baloo text-base leading-tight font-extrabold" style="color: var(--fq-magenta)">
+                        Your Bonus Wheel spin is waiting
+                    </span>
+                    <span class="mt-[2px] block text-xs text-fq-text-4">It's on the Quests page, above the board.</span>
+                @endif
+            </span>
 
-                        {{-- Shadow lives on this static wrapper — box-shadow rotates along with
-                             its element, so it has to stay off the div that spins. --}}
-                        <div class="absolute inset-0 rounded-full" style="box-shadow:0 0 0 3px var(--fq-wheel-ring), var(--fq-shadow-wheel);">
-                            <div
-                                class="absolute inset-0 rounded-full"
-                                style="
-                                    background: var(--fq-wheel-rim);
-                                    transform: rotate({{ $wheelDeg }}deg);
-                                    transition: transform 6s cubic-bezier(.11,.85,.1,1);
-                                "
-                            >
-                                {{-- Colorful cookie face — a wedge per chore, cycling through the
-                                     app's accent palette, muted under a dark cookie-toned overlay so
-                                     it still reads as chocolatey rather than a plain rainbow. --}}
-                                @php
-                                    $wheelPalette = ['var(--fq-lime)', 'var(--fq-cyan)', 'var(--fq-gold)', 'var(--fq-magenta)', 'var(--fq-coral)', 'var(--fq-violet)', 'var(--fq-sky)'];
-                                    $wheelStops = $wheelChores->values()->map(
-                                        fn ($wc, $i) => $wheelPalette[$i % count($wheelPalette)] . ' ' . ($i * $wheelSlice) . 'deg ' . (($i + 1) * $wheelSlice) . 'deg'
-                                    )->implode(', ');
-                                @endphp
-                                <div class="absolute inset-[13px] rounded-full" style="background: conic-gradient(from 90deg, {{ $wheelStops }})"></div>
-                                <div class="absolute inset-[13px] rounded-full" style="background: radial-gradient(circle at 38% 32%, rgba(40,25,12,.45), rgba(20,12,6,.72) 75%)"></div>
-
-                                {{-- Segment dividers — one per chore boundary, radiating from the
-                                     center plate out to the rim, so it reads as an actual wheel
-                                     of distinct outcomes instead of plain decoration. --}}
-                                @for ($i = 0; $i < $wheelChores->count(); $i++)
-                                    @php $boundaryDeg = $i * $wheelSlice; @endphp
-                                    <div
-                                        class="absolute"
-                                        style="
-                                            left:145px; top:145px; width:2px; height:132px;
-                                            background: color-mix(in srgb, var(--fq-wheel-label) 40%, transparent);
-                                            transform-origin: top center;
-                                            transform: translateX(-1px) rotate({{ $boundaryDeg - 90 }}deg);
-                                        "
-                                    ></div>
-                                @endfor
-
-                                {{-- Chore name per segment, running from the center plate out to
-                                     the rim along its slice — reads outward, tilt-your-head style,
-                                     which fits far more of each name than a horizontal label would.
-
-                                     The name and nothing else. The points were tried here and
-                                     taken back out: a slice is 98px of 9px type, so a number on
-                                     the end is bought with the name's last few characters — and
-                                     the payout is stated in full the moment the wheel stops,
-                                     which is the only point at which one of these numbers is the
-                                     one that matters. --}}
-                                @foreach ($wheelChores as $i => $wheelChore)
-                                    @php $midDeg = $i * $wheelSlice + $wheelSlice / 2; @endphp
-                                    <div
-                                        class="absolute overflow-hidden text-ellipsis whitespace-nowrap font-mono-fq font-semibold"
-                                        style="
-                                            left:145px; top:145px; margin-top:-6px; width:98px; height:12px;
-                                            transform-origin: left center;
-                                            transform: rotate({{ $midDeg }}deg) translateX(30px);
-                                            font-size:9px; letter-spacing:.01em; color: var(--fq-wheel-label);
-                                            text-shadow: 0 1px 1px rgba(0,0,0,.5);
-                                        "
-                                    >{{ $wheelChore->name }}</div>
-                                @endforeach
-
-                                {{-- Small decorative hub — just the wheel's center pin, not a
-                                     click target (the real spin action is the button below). --}}
-                                <div
-                                    class="absolute top-1/2 left-1/2 z-[2] rounded-full"
-                                    style="width:22px; height:22px; transform: translate(-50%, -50%); background: var(--fq-wheel-hub); border: 2px solid var(--fq-wheel-hub-line); box-shadow: inset 0 1px 3px rgba(0,0,0,.5)"
-                                ></div>
-                            </div>
-                        </div>
-                    </div>
-
-                    @php
-                        // The landed panel and the Active Boost card are the same
-                        // result stated twice, so they're tinted from one place.
-                        $boostIsBig = $boost && $boost->multiplier >= 3;
-                        $boostTint = $boostIsBig
-                            ? 'background: color-mix(in srgb, var(--fq-gold) 20%, transparent); border-color: color-mix(in srgb, var(--fq-gold) 55%, transparent)'
-                            : 'background: color-mix(in srgb, var(--fq-magenta) 20%, transparent); border-color: color-mix(in srgb, var(--fq-magenta) 50%, transparent)';
-                        $boostColor = $boostIsBig ? 'var(--fq-gold)' : 'var(--fq-magenta)';
-                    @endphp
-
-                    @if ($spinRevealed && $boost && ! $spinning)
-                        <div
-                            wire:key="landed-{{ $boost->id }}"
-                            class="w-full max-w-[300px] rounded-[16px] border px-4 py-3 text-center"
-                            style="animation: fq-pop .3s ease both; {{ $boostTint }}"
-                        >
-                            <p class="font-mono-fq text-[10px] tracking-[0.2em] uppercase" style="color: {{ $boostColor }}">
-                                You landed on
-                                {{-- Said on the result, not just on the button that
-                                     bought it: the ticket is spent by now, and this
-                                     is the only place the kid gets to see it work. --}}
-                                @if ($boost->was_op)
-                                    <span style="color: var(--fq-gold)">&middot; &#9889; OP</span>
-                                @endif
-                            </p>
-                            <p class="mt-1 font-baloo text-lg font-extrabold">{{ $boost->chore->name }} &mdash; {{ $boost->multiplier }}x</p>
-                            {{-- The multiplier stated as the number it actually pays.
-                                 "3x" is arithmetic homework; the total is the thing
-                                 worth getting off the sofa for. --}}
-                            <p class="mt-1 font-mono-fq text-[11px] text-fq-text-3">
-                                {{ number_format($boost->chore->points) }}
-                                <span class="text-fq-text-5">&rarr;</span>
-                                <span class="font-semibold" style="color: {{ $boostColor }}">{{ number_format($boost->chore->points * $boost->multiplier) }} PTS</span>
-                            </p>
-                        </div>
-                    @endif
-                </div>
-
-                <div class="flex flex-col gap-4">
-                    {{-- The spin lives here rather than under the wheel: on a phone the
-                         wheel fills the screen, and the button a kid came for shouldn't
-                         be the thing they have to scroll past it to find. --}}
-                    <div class="flex flex-col gap-3 rounded-[24px] border border-fq-line bg-fq-panel p-5">
-                        @if ($spinning)
-                            <button type="button" disabled class="w-full cursor-default rounded-[18px] bg-fq-line-2 py-4 font-baloo text-[19px] font-extrabold text-fq-text-3">
-                                Spinning&hellip;
-                            </button>
-                        @elseif ($spinRevealed)
-                            <button type="button" disabled class="w-full cursor-default rounded-[18px] bg-fq-line-2 py-4 font-baloo text-[19px] font-extrabold text-fq-text-3">
-                                Used today &mdash; back tomorrow
-                            </button>
-                        @else
-                            {{-- A charged wheel wears the gold rather than the
-                                 magenta: the button is the last thing a kid looks
-                                 at before spending the charge, so it is where the
-                                 charge has to be visible. --}}
-                            <button
-                                type="button"
-                                wire:click="spin"
-                                class="w-full rounded-[18px] py-4 font-baloo text-[19px] font-extrabold text-fq-bg transition hover:brightness-110"
-                                style="background:{{ $wheelCharged ? 'var(--fq-gold)' : 'var(--fq-magenta)' }}; box-shadow: var(--fq-shadow-glow-lg) {{ $wheelCharged ? 'var(--fq-gold)' : 'var(--fq-magenta)' }}"
-                            >{{ $wheelCharged ? '⚡ OP SPIN' : 'SPIN' }}</button>
-                        @endif
-
-                        <p class="text-[13px] text-fq-text-4">
-                            @if ($spinRevealed)
-                                One spin a day. Your boost is locked in below.
-                            @elseif ($wheelCharged)
-                                Charged! This spin can land 4x, and 3x is far more likely — plus a sweet treat when you finish it.
-                            @else
-                                Land on a chore, get 2x or 3x its points — plus a sweet treat when you finish it. Do it today.
-                            @endif
-                        </p>
-
-                        {{-- The charge, in whichever of its three states applies:
-                             already on the wheel, in the pocket, or for sale. Only
-                             ever one of them, and never once the wheel has gone —
-                             a charge bought after the spin would sit unseen until
-                             tomorrow. --}}
-                        @unless ($spinRevealed || $spinning)
-                            @if ($wheelCharged)
-                                <div
-                                    class="flex items-center gap-2 rounded-[12px] border px-[14px] py-[10px] text-xs font-semibold"
-                                    style="border-color: color-mix(in srgb, var(--fq-gold) 55%, transparent); background: color-mix(in srgb, var(--fq-gold) 16%, transparent); color: var(--fq-gold)"
-                                >
-                                    <span class="font-baloo text-sm">⚡</span>
-                                    <span>Wheel charged &mdash; 4x is in play</span>
-                                </div>
-                            @elseif ($opSpin)
-                                <div class="flex flex-col items-start gap-1">
-                                    <x-perk-button :entry="$opSpin" />
-                                    @if ($opSpin['blocked'])
-                                        <span class="font-mono-fq text-[10px] text-fq-text-5">{{ $opSpin['blocked'] }}</span>
-                                    @endif
-                                </div>
-                            @elseif ($opSpinForSale)
-                                @php $canAffordOp = $profile->bonus_tickets >= $opSpinForSale->cost; @endphp
-
-                                <button
-                                    type="button"
-                                    wire:click="buyOpSpin"
-                                    @disabled(! $canAffordOp)
-                                    title="{{ $opSpinForSale->description }}"
-                                    class="inline-flex h-[42px] items-center gap-2 self-start rounded-[12px] border px-[14px] text-xs font-semibold whitespace-nowrap transition hover:brightness-125 disabled:opacity-40"
-                                    style="border-color: var(--fq-steel-edge); color: var(--fq-steel-text); background: var(--fq-steel-panel)"
-                                >
-                                    <span class="font-baloo text-sm">{{ $opSpinForSale->glyph }}</span>
-                                    <span>Buy an {{ $opSpinForSale->name }}</span>
-                                    <span class="font-mono-fq text-[10px]" style="color: {{ $canAffordOp ? 'var(--fq-lime)' : 'var(--fq-text-5)' }}">
-                                        {{ $opSpinForSale->cost }}&#127903;
-                                    </span>
-                                </button>
-                            @endif
-                        @endunless
-
-                        @if ($respin)
-                            {{-- The charge is spent by the spin, not by the result,
-                                 so a respin cannot hand it back — and the kid has
-                                 no way of knowing that from a button that just says
-                                 "respin". Asked once, and only on a spin the ticket
-                                 actually paid for. --}}
-                            @php $opAtRisk = $boost && $boost->was_op && ! $respin['blocked']; @endphp
-
-                            <div class="flex flex-col items-start gap-1" x-data="{ asking: false }">
-                                @if ($opAtRisk)
-                                    <div x-show="! asking">
-                                        <button
-                                            type="button"
-                                            x-on:click="asking = true"
-                                            class="inline-flex h-[42px] items-center gap-2 rounded-[12px] border px-[14px] text-xs font-semibold whitespace-nowrap transition hover:brightness-125"
-                                            style="border-color: var(--fq-steel-edge); color: var(--fq-steel-text); background: var(--fq-steel-panel)"
-                                        >
-                                            <span class="font-baloo text-sm">↻</span>
-                                            <span>Use Wheel Respin</span>
-                                            @if ($respin['count'] > 1)
-                                                <span class="font-mono-fq text-[10px]">×{{ $respin['count'] }}</span>
-                                            @endif
-                                        </button>
-                                    </div>
-
-                                    <div x-show="asking" x-cloak class="flex w-full flex-col gap-[9px]">
-                                        <p class="text-[13px] text-fq-notice-text">
-                                            You spent an <strong style="color: var(--fq-gold)">⚡ OP charge</strong> on this spin.
-                                            Respin and it's gone &mdash; the next one is an ordinary 2x or 3x.
-                                        </p>
-
-                                        <div class="flex gap-2">
-                                            <button
-                                                type="button"
-                                                wire:click="usePerk('{{ $respin['effect']->value }}')"
-                                                x-on:click="asking = false"
-                                                class="flex-1 rounded-[14px] py-[11px] font-baloo text-[15px] font-extrabold transition hover:brightness-110"
-                                                style="background: var(--fq-fill-gold-soft); color: var(--fq-ink)"
-                                            >Respin anyway</button>
-
-                                            <button
-                                                type="button"
-                                                x-on:click="asking = false"
-                                                class="shrink-0 rounded-[14px] border bg-fq-sunk px-[16px] py-[11px] font-baloo text-[15px] font-extrabold text-fq-text-2-b transition hover:brightness-125"
-                                                style="border-color: var(--fq-line-3)"
-                                            >Keep my {{ $boost->multiplier }}x</button>
-                                        </div>
-                                    </div>
-                                @else
-                                    <x-perk-button :entry="$respin" />
-                                @endif
-
-                                @if ($respin['blocked'])
-                                    <span class="font-mono-fq text-[10px] text-fq-text-5">{{ $respin['blocked'] }}</span>
-                                @endif
-                            </div>
-                        @endif
-
-                        @if ($perkMessage)
-                            <p class="text-[13px] text-fq-text-4">{{ $perkMessage }}</p>
-                        @endif
-                    </div>
-
-                    <div class="flex flex-1 flex-col rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
-                        <h3 class="font-baloo text-lg font-bold">Active Boost</h3>
-                        @if ($spinRevealed && $boost)
-                            <div class="mt-3 flex items-center justify-between gap-3 rounded-[16px] border p-[14px]" style="{{ $boostTint }}">
-                                <span class="min-w-0">
-                                    <span class="block text-sm font-semibold">{{ $boost->chore->name }}</span>
-                                    <span class="font-mono-fq text-[10px] tracking-[0.1em] text-fq-text-4 uppercase">
-                                        {{ number_format($boost->chore->points) }} &rarr; {{ number_format($boost->chore->points * $boost->multiplier) }} pts
-                                    </span>
-                                </span>
-                                <span class="font-baloo text-[22px] font-extrabold whitespace-nowrap" style="color: {{ $boostColor }}">{{ $boost->multiplier }}x</span>
-                            </div>
-
-                            {{-- The claim, right here. The boosted chore is the one a
-                                 kid came to the wheel for; sending them off to find it
-                                 again on the board is a tab switch for no reason. --}}
-                            @if ($boostClaim && $boostClaim['claimable'])
-                                <button
-                                    type="button"
-                                    wire:click="claimBoostedChore"
-                                    class="mt-3 w-full rounded-[14px] py-[11px] text-sm font-semibold text-fq-bg transition hover:brightness-110"
-                                    style="background: var(--fq-lime)"
-                                >{{ $boostClaim['label'] }}</button>
-                            @elseif ($boostClaim)
-                                <button
-                                    type="button"
-                                    disabled
-                                    class="mt-3 w-full cursor-default rounded-[14px] bg-fq-panel-alt py-[11px] text-sm font-semibold text-fq-text-4"
-                                >{{ $boostClaim['label'] }}</button>
-                            @endif
-
-                            @if ($boostClaim && $boostClaim['note'])
-                                <p class="mt-2 text-[13px] text-fq-text-5">{{ $boostClaim['note'] }}</p>
-                            @endif
-
-                            @if ($boostClaim && $boostClaim['toQuests'])
-                                <a
-                                    href="{{ route('kid.quests') }}"
-                                    wire:navigate
-                                    class="mt-2 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase transition hover:text-fq-text"
-                                >Go to Quests &rarr;</a>
-                            @endif
-
-                            @if ($boostMessage)
-                                <p class="mt-2 text-[13px] font-semibold text-fq-gold">{{ $boostMessage }}</p>
-                            @endif
-                        @else
-                            <p class="mt-3 text-[13px] text-fq-text-5">No boost yet today.</p>
-                        @endif
-                    </div>
-                </div>
-            </div>
-        </div>
+            <i aria-hidden="true" class="fa-fw fa-solid fa-arrow-right text-[13px]" style="color: var(--fq-magenta)"></i>
+        </a>
 
         {{-- The weekly prize. A card of its own rather than a strip inside the
              standings, which is where it started and where nobody found it:

@@ -7,6 +7,7 @@ use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyQuest;
 use App\Models\Household;
+use App\Models\LedgerEntry;
 use App\Models\Profile;
 use App\Services\StreakService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -172,6 +173,35 @@ class StreakCycleTest extends TestCase
         $this->assertSame(33, $track['milestones'][0]['day']);
     }
 
+    /**
+     * A chest queued before the payout moved to the reveal.
+     *
+     * Those were credited the moment the milestone was reached, and the old
+     * code advanced the paid-through mark at the same time — so the mark
+     * already sits on the chest's own day and there is nothing left under it.
+     * That is what makes this change safe without a migration: the same walk
+     * that pays a new chest finds an empty range on an old one and pays
+     * nothing, rather than handing out the whole lap a second time.
+     */
+    public function test_a_chest_left_over_from_the_old_pay_on_reach_scheme_pays_nothing_twice(): void
+    {
+        $kid = Profile::factory()->for($this->household)->create([
+            'streak' => 30,
+            'pending_streak_chest' => 30,
+            'points' => 4000,
+        ]);
+
+        $kid->streak_milestone_paid_through = 30;
+        $kid->save();
+
+        // The card still names the milestone it is celebrating, but the balance
+        // does not move — the $40 is already in it.
+        $this->assertSame(40, $this->service()->pendingStreakChestDollars($kid));
+        $this->assertSame(['day' => 30, 'dollars' => 40], $this->service()->openStreakChest($kid));
+        $this->assertSame(4000, $kid->refresh()->points);
+        $this->assertSame(0, LedgerEntry::where('profile_id', $kid->id)->count());
+    }
+
     public function test_opening_a_second_lap_chest_reveals_the_doubled_amount(): void
     {
         $kid = Profile::factory()->for($this->household)->create([
@@ -179,7 +209,15 @@ class StreakCycleTest extends TestCase
             'pending_streak_chest' => 33,
         ]);
 
+        // The mark has to come with the streak. A kid standing on day 33 has
+        // collected the day-30 chest, and the chest pays everything between the
+        // mark and its own day — set one without the other and this reads as a
+        // first-ever chest holding the whole first lap.
+        $kid->streak_milestone_paid_through = 30;
+        $kid->save();
+
         $this->assertSame(['day' => 33, 'dollars' => 2], $this->service()->openStreakChest($kid));
+        $this->assertSame(33, $kid->refresh()->streak_milestone_paid_through);
     }
 
     public function test_the_quests_page_shows_the_second_lap_and_says_why_it_changed(): void

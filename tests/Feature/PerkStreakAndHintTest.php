@@ -167,6 +167,11 @@ class PerkStreakAndHintTest extends TestCase
         }
 
         $this->assertSame(3, $kid->refresh()->streak);
+
+        // The chest is what pays, so the milestone has to actually be collected
+        // before there is anything for a repair to collect a second time.
+        app(StreakService::class)->openStreakChest($kid);
+
         $paidForDayThree = LedgerEntry::where('profile_id', $kid->id)
             ->where('description', 'like', '%3-day streak bonus%')->count();
         $this->assertSame(1, $paidForDayThree);
@@ -182,6 +187,11 @@ class PerkStreakAndHintTest extends TestCase
 
         // Three cleared days, the bought-back one, and today.
         $this->assertSame(5, $kid->refresh()->streak);
+
+        // Day 5 is a fresh milestone and is allowed to queue a chest. Opening
+        // it must pay for day 5 and nothing else — the walk starts at the mark,
+        // so day 3 is behind it and stays bought.
+        $this->assertSame(['day' => 5, 'dollars' => 3], app(StreakService::class)->openStreakChest($kid));
         $this->assertSame(1, LedgerEntry::where('profile_id', $kid->id)
             ->where('description', 'like', '%3-day streak bonus%')->count());
     }

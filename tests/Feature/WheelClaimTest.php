@@ -50,14 +50,17 @@ class WheelClaimTest extends TestCase
         return app(SpinService::class)->spin($kid);
     }
 
-    public function test_the_boosted_chore_can_be_claimed_from_the_wheel_page(): void
+    public function test_the_boosted_chore_can_be_claimed_from_the_wheel_card(): void
     {
         [, $kid] = $this->household();
         $boost = $this->spin($kid);
 
-        Volt::test('kid.home')
+        // The button itself, not its label: "Mark it done" is on the quest hero
+        // above the wheel and on every ready row of the board below it, so the
+        // wire:click is the only part of it that belongs to the wheel.
+        Volt::test('kid.quests')
             ->assertOk()
-            ->assertSee('Mark it done')
+            ->assertSee('wire:click="claimBoostedChore"', escape: false)
             ->call('claimBoostedChore');
 
         $completion = ChoreCompletion::where('profile_id', $kid->id)->firstOrFail();
@@ -74,10 +77,10 @@ class WheelClaimTest extends TestCase
         [, $kid] = $this->household();
         $this->spin($kid);
 
-        Volt::test('kid.home')
+        Volt::test('kid.quests')
             ->call('claimBoostedChore')
             ->assertSee('Waiting on a parent')
-            ->assertDontSee('Mark it done');
+            ->assertDontSee('wire:click="claimBoostedChore"', escape: false);
     }
 
     public function test_the_boosted_claim_does_not_wait_on_the_main_quest(): void
@@ -88,9 +91,9 @@ class WheelClaimTest extends TestCase
         // The card used to keep its own copy of the board gate and refuse the
         // claim until the quest was cleared. There is no gate now, and the one
         // thing worth pinning is that no trace of it came back.
-        Volt::test('kid.home')
+        Volt::test('kid.quests')
             ->assertOk()
-            ->assertSee('Mark it done')
+            ->assertSee('wire:click="claimBoostedChore"', escape: false)
             ->assertDontSee('Main quest first')
             ->call('claimBoostedChore');
 
@@ -114,10 +117,10 @@ class WheelClaimTest extends TestCase
             'submitted_at' => now(),
         ]);
 
-        Volt::test('kid.home')
+        Volt::test('kid.quests')
             ->assertOk()
             ->assertSee('Rex got this one')
-            ->assertDontSee('Mark it done')
+            ->assertDontSee('wire:click="claimBoostedChore"', escape: false)
             ->call('claimBoostedChore');
 
         $this->assertSame(0, ChoreCompletion::where('profile_id', $kid->id)->count());
@@ -127,17 +130,17 @@ class WheelClaimTest extends TestCase
     {
         $this->household();
 
-        Volt::test('kid.home')
+        Volt::test('kid.quests')
             ->assertOk()
             ->assertSee('No boost yet today.')
-            ->assertDontSee('Mark it done');
+            ->assertDontSee('wire:click="claimBoostedChore"', escape: false);
     }
 
     public function test_claiming_without_a_spin_does_nothing(): void
     {
         [, $kid] = $this->household();
 
-        Volt::test('kid.home')->call('claimBoostedChore');
+        Volt::test('kid.quests')->call('claimBoostedChore');
 
         $this->assertSame(0, ChoreCompletion::where('profile_id', $kid->id)->count());
     }
@@ -152,7 +155,7 @@ class WheelClaimTest extends TestCase
 
         $boost = $this->spin($kid);
 
-        Volt::test('kid.home')
+        Volt::test('kid.quests')
             ->assertOk()
             ->assertSee(number_format(175 * $boost->multiplier).' PTS');
     }

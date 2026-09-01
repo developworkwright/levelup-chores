@@ -11,7 +11,6 @@ use App\Models\DailyChest;
 use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\Profile;
-use App\Services\BonusShopService;
 use App\Services\ChestService;
 use App\Services\ChoreService;
 use App\Services\MonsterService;
@@ -28,9 +27,11 @@ use Tests\TestCase;
  *
  * The individual mechanics are owned by the suites they belong to: the chest by
  * DailyChestTest, the spin by SpinFlowTest and WheelClaimTest, the standings by
- * ArenaPageTest. What is pinned here is the thing the page exists for — the six
+ * ArenaPageTest. What is pinned here is the thing the page exists for — the
  * cards, always in the same order, each saying where the kid is on it, and every
- * one of them acting in place rather than pointing somewhere else.
+ * one of them acting in place rather than pointing somewhere else. The wheel is
+ * the one exception, and it earned it: it moved to Quests, so what stands in for
+ * it here is a strip that points.
  */
 class KidHomePageTest extends TestCase
 {
@@ -72,7 +73,9 @@ class KidHomePageTest extends TestCase
                 'Daily Quest',
                 'Bonus Chest',
                 'Streak Chest',
-                'Bonus Wheel',
+                // Not a section any more — a strip pointing at the wheel on
+                // Quests, which still sits in the run where the wheel was.
+                'Your Bonus Wheel spin is waiting',
                 // Then what the house does together, and only then the one
                 // card that ranks the kids against each other.
                 'Weekly Prize',
@@ -208,17 +211,29 @@ class KidHomePageTest extends TestCase
         $this->assertSame(1, DailyChest::where('profile_id', $this->kid->id)->count());
     }
 
-    public function test_the_spin_happens_here_now_that_the_wheel_has_no_page(): void
+    /**
+     * The wheel went to Quests — the kids kept going there to look for it, and
+     * they were right: it lands on a side quest, and the board is over there.
+     * What is left here is a strip, and the news it carries is the point of it.
+     */
+    public function test_the_wheel_is_a_pointer_at_quests_rather_than_a_spin(): void
     {
         Volt::test('kid.home')
             ->assertOk()
-            ->assertSee('SPIN')
-            ->call('spin')
-            ->assertSet('spinning', true)
-            ->call('finishSpin')
-            ->assertSet('spinRevealed', true);
+            ->assertSee('Your Bonus Wheel spin is waiting')
+            ->assertSee(route('kid.quests').'#bonus-wheel', escape: false)
+            // The wheel itself, and every control on it, are not here.
+            ->assertDontSee('One Spin Per Day')
+            ->assertDontSee('Active Boost');
 
-        $this->assertNotNull($this->kid->spins()->first());
+        $spin = app(SpinService::class)->spin($this->kid);
+
+        // Once it has gone, the strip stops advertising a spin and starts
+        // reporting the boost that is live.
+        Volt::test('kid.home')
+            ->assertOk()
+            ->assertSee($spin->multiplier.'x on '.$spin->chore->name)
+            ->assertDontSee('Your Bonus Wheel spin is waiting');
     }
 
     /**
@@ -405,6 +420,28 @@ class KidHomePageTest extends TestCase
         $this->assertNull($this->kid->fresh()->pending_streak_chest);
     }
 
+    /**
+     * The bug this closes: the bonus used to be credited the moment the
+     * milestone was reached, so a kid logging in the next morning found the
+     * points already in the tile at the top of the page and then opened a chest
+     * that gave them nothing.
+     */
+    public function test_a_waiting_streak_chest_is_not_already_in_the_balance(): void
+    {
+        $this->kid->update(['streak' => 3, 'pending_streak_chest' => 3, 'points' => 0]);
+
+        $page = Volt::test('kid.home')
+            ->assertOk()
+            ->assertSee('Your streak chest is waiting');
+
+        $this->assertSame(0, $this->kid->fresh()->points);
+
+        $page->call('openStreakChest')->assertOk();
+
+        // $1 at the household's own rate, and it arrives on the tap.
+        $this->assertSame($this->household->points_per_dollar, $this->kid->fresh()->points);
+    }
+
     public function test_the_streak_track_draws_its_milestones_as_growing_chests(): void
     {
         // The payout curve has to be readable by a kid who isn't going to
@@ -457,63 +494,6 @@ class KidHomePageTest extends TestCase
         Volt::test('kid.home')
             ->assertOk()
             ->assertDontSee('Boss Fight');
-    }
-
-    /**
-     * The charge is sold beside the wheel because the window to use one closes
-     * the moment the wheel goes — a kid sent to the shop first comes back to a
-     * spent spin.
-     */
-    public function test_the_op_charge_is_offered_charged_and_then_gone_from_the_wheel(): void
-    {
-        $this->kid->update(['bonus_tickets' => 5]);
-
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('Buy an OP Spin')
-            ->call('buyOpSpin')
-            ->assertSee('Use OP Spin')
-            ->call('usePerk', PerkEffect::OpSpin->value)
-            ->assertSee('Wheel charged')
-            ->assertSee('OP SPIN')
-            // Spent by the spin itself: nothing left to sell or charge once
-            // the wheel has gone.
-            ->call('spin')
-            ->call('finishSpin')
-            ->assertDontSee('Buy an OP Spin')
-            ->assertDontSee('Wheel charged');
-    }
-
-    /**
-     * The respin cannot hand the charge back, and a button that just says
-     * "respin" gives the kid no way of knowing that.
-     */
-    public function test_respinning_an_op_result_asks_first(): void
-    {
-        $this->kid->update(['bonus_tickets' => 10]);
-
-        $respin = BonusPerk::where('household_id', $this->household->id)
-            ->where('effect', PerkEffect::WheelRespin)
-            ->firstOrFail();
-
-        app(BonusShopService::class)->purchase($this->kid, $respin);
-
-        // An ordinary spin gets the plain button; only a charged one is worth
-        // a question.
-        Volt::test('kid.home')
-            ->call('spin')
-            ->call('finishSpin')
-            ->assertSee('Use Wheel Respin')
-            ->assertDontSee('OP charge', escape: false);
-
-        app(SpinService::class)->clearToday($this->kid);
-        app(SpinService::class)->charge($this->kid->refresh());
-
-        Volt::test('kid.home')
-            ->call('spin')
-            ->call('finishSpin')
-            ->assertSee('OP charge', escape: false)
-            ->assertSee('Respin anyway');
     }
 
     public function test_home_still_renders_when_the_household_has_nothing_to_quest_on(): void

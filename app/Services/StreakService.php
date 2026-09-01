@@ -175,17 +175,24 @@ class StreakService
     }
 
     /**
-     * Recomputes the streak and pays out any milestone bonus newly crossed.
+     * Recomputes the streak and queues a chest for any milestone newly crossed.
      * Driven by approval, not by claiming, so a kid can't bank a bonus for
      * work a parent hasn't signed off on.
      *
      * Deliberately a recompute rather than an increment: a parent working
      * through several days of backlog can approve them in any order, and
      * every one of those approvals still has to land on the same number.
+     *
+     * Nothing is paid here. The bonus used to land in the ledger the moment the
+     * milestone was reached, which meant a kid logging in the next morning saw
+     * the points already in their balance and then opened a chest that gave
+     * them nothing — the reveal was spoiled by the thing it was revealing. The
+     * money is now spent by {@see openStreakChest()}.
      */
     private function refreshStreak(Profile $profile): void
     {
-        // A high-water mark, not the current streak. Gating on the live value
+        // A high-water mark of what has been *paid*, not of what has been
+        // reached — and not the current streak either. Gating on the live value
         // would let a kid lapse a streak and buy a repair to collect every
         // milestone a second time.
         $paidThrough = $profile->streak_milestone_paid_through;
@@ -202,32 +209,21 @@ class StreakService
         $ladder = $profile->streak - $this->rescuedNightsInRun($profile);
 
         // Walked day by day rather than over a fixed map, because the track
-        // repeats and the milestone days are unbounded. The high-water mark is
-        // still what gates a payout, so recomputing — or repairing — can never
-        // double-credit one already banked.
+        // repeats and the milestone days are unbounded. Only the highest day
+        // is kept: the chest carries everything behind it, and the walk from
+        // the mark up to the lid is redone when it is opened.
         for ($day = $paidThrough + 1; $day <= $ladder; $day++) {
-            $bonusDollars = $this->streakBonusOn($day);
-
-            if ($bonusDollars === null) {
-                continue;
+            if ($this->streakBonusOn($day) !== null) {
+                $reached = $day;
             }
-
-            $this->ledger->record(
-                $profile->household,
-                $profile,
-                LedgerKind::Earn,
-                $bonusDollars * $profile->household->points_per_dollar,
-                "{$profile->name} — {$day}-day streak bonus (\${$bonusDollars})",
-            );
-
-            $reached = $day;
         }
 
         if ($reached !== null) {
-            // Credited immediately above, but the reveal waits for the kid
-            // to open the streak chest — that's the surprise moment.
+            // Queued, not credited. The mark stays where it is until the lid
+            // comes off, which is also what makes this idempotent: a second
+            // recompute before the chest is opened re-queues the same day
+            // rather than paying for it twice.
             $profile->pending_streak_chest = $reached;
-            $profile->streak_milestone_paid_through = $reached;
         }
 
         $profile->save();
@@ -548,9 +544,13 @@ class StreakService
     }
 
     /**
-     * Marks the pending streak-milestone chest as opened. The bonus was
-     * already credited to the ledger when the milestone was reached — this
-     * just unlocks the reveal animation and returns what to show for it.
+     * Opens the pending streak-milestone chest: credits what it is holding and
+     * returns what to show for it.
+     *
+     * **This is where a milestone bonus is paid.** It used to be credited the
+     * moment the milestone was reached, so a kid came back the next day to a
+     * balance that already included a chest they hadn't opened. The points now
+     * land on the tap, which is the only moment the reveal is telling the truth.
      *
      * @return array{day: int, dollars: int}|null
      */
@@ -562,10 +562,79 @@ class StreakService
             return null;
         }
 
+        $dollars = $this->pendingStreakChestDollars($profile);
+
+        foreach ($this->unpaidMilestonesUnder($profile) as $milestone => $bonusDollars) {
+            $this->ledger->record(
+                $profile->household,
+                $profile,
+                LedgerKind::Earn,
+                $bonusDollars * $profile->household->points_per_dollar,
+                "{$profile->name} — {$milestone}-day streak bonus (\${$bonusDollars})",
+            );
+        }
+
         $profile->pending_streak_chest = null;
+        // Only ever forwards. A chest queued before the payout moved here has
+        // a mark already sitting on its own day, and clearing it back would
+        // re-open every milestone under it to a second payout.
+        $profile->streak_milestone_paid_through = max($profile->streak_milestone_paid_through, $day);
         $profile->save();
 
-        return ['day' => $day, 'dollars' => $this->streakBonusOn($day) ?? 0];
+        return ['day' => $day, 'dollars' => $dollars];
+    }
+
+    /**
+     * What the pending streak chest is holding, in dollars — 0 when there
+     * isn't one.
+     *
+     * Everything crossed since the last chest that was paid for, not just the
+     * day on the lid: a parent clearing a week of backlog in one sitting can
+     * take a kid past two or three milestones before any of them is opened,
+     * and only the highest is kept as the chest itself.
+     */
+    public function pendingStreakChestDollars(Profile $profile): int
+    {
+        $day = $profile->pending_streak_chest;
+
+        if ($day === null) {
+            return 0;
+        }
+
+        $unpaid = array_sum($this->unpaidMilestonesUnder($profile));
+
+        // A chest queued before the payout moved to the reveal was credited
+        // when it was reached, so its mark is already on its own day and there
+        // is nothing left owed — but the card still has to name the milestone
+        // it is celebrating.
+        return $unpaid > 0 ? $unpaid : ($this->streakBonusOn($day) ?? 0);
+    }
+
+    /**
+     * The milestones sitting under the pending chest that have not been paid
+     * for, as day => dollars.
+     *
+     * @return array<int, int>
+     */
+    private function unpaidMilestonesUnder(Profile $profile): array
+    {
+        $day = $profile->pending_streak_chest;
+
+        if ($day === null) {
+            return [];
+        }
+
+        $milestones = [];
+
+        for ($milestone = $profile->streak_milestone_paid_through + 1; $milestone <= $day; $milestone++) {
+            $dollars = $this->streakBonusOn($milestone);
+
+            if ($dollars !== null) {
+                $milestones[$milestone] = $dollars;
+            }
+        }
+
+        return $milestones;
     }
 
     /**

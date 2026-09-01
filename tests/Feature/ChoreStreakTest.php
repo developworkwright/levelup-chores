@@ -116,7 +116,7 @@ class ChoreStreakTest extends TestCase
         $this->assertSame(4, $this->kid->refresh()->streak);
     }
 
-    public function test_a_side_quest_only_run_still_pays_its_milestone(): void
+    public function test_a_side_quest_only_run_still_earns_its_milestone(): void
     {
         $chore = $this->sideChore();
 
@@ -138,10 +138,10 @@ class ChoreStreakTest extends TestCase
         $this->kid->refresh();
 
         $this->assertSame(3, $this->kid->streak);
-        // The chest is a reveal gate, not a payment gate — the milestone is
-        // banked the moment it is crossed.
+        // Queued, not paid: the chest is the payment gate now, so the mark of
+        // what has been paid for stays where it was until the lid comes off.
         $this->assertSame(3, $this->kid->pending_streak_chest);
-        $this->assertSame(3, $this->kid->streak_milestone_paid_through);
+        $this->assertSame(0, $this->kid->streak_milestone_paid_through);
     }
 
     public function test_a_day_with_nothing_approved_still_breaks_the_run(): void

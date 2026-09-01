@@ -4,14 +4,18 @@ namespace Tests\Feature;
 
 use App\Enums\BountyKind;
 use App\Enums\BountyStatus;
+use App\Enums\PerkEffect;
 use App\Enums\TradeAsset;
 use App\Models\Badge;
+use App\Models\BonusPerk;
 use App\Models\Bounty;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\Profile;
+use App\Services\BonusShopService;
 use App\Services\BountyService;
 use App\Services\ChoreService;
+use App\Services\SpinService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -23,9 +27,10 @@ use Tests\TestCase;
  *
  * The pieces themselves are covered by the suites that own them: the quest
  * chest by QuestChestTest, the mystery chore by MysteryChoreTest, the bounty
- * board by BountyBoardTest. What is tested here is the arrangement — that the
- * sections come in the order they should, that the chests and the spin and the
- * boss are no longer among them, and that the bounty board and badges count
+ * board by BountyBoardTest, the spin itself by SpinFlowTest and WheelClaimTest.
+ * What is tested here is the arrangement — that the sections come in the order
+ * they should, that the chests and the boss are no longer among them, that the
+ * wheel is (it came back from Home), and that the bounty board and badges count
  * work where they sit.
  */
 class QuestPageLayoutTest extends TestCase
@@ -96,9 +101,9 @@ class QuestPageLayoutTest extends TestCase
 
     public function test_the_sections_come_in_the_order_the_handoff_fixes(): void
     {
-        // The chests, the spin and the boss all moved to Home. What is left is
-        // the board and the things that hang off it, in the order they were
-        // always in.
+        // The chests and the boss moved to Home. The wheel went with them and
+        // came back, because it lands on a side quest and every one of those
+        // rows is on this page — so it sits directly above the board.
         Volt::test('kid.quests')
             ->assertOk()
             ->assertSeeInOrder([
@@ -109,6 +114,7 @@ class QuestPageLayoutTest extends TestCase
                 // which is why this asserts the three-card copy specifically.
                 'Choose your quest',
                 'Gratitude Quest',
+                'Bonus Wheel',
                 'Side Quests',
                 'Bounty Board',
             ], escape: false);
@@ -117,13 +123,89 @@ class QuestPageLayoutTest extends TestCase
     public function test_the_extras_left_the_board_for_home(): void
     {
         // The loot tray, the streak track and the boss strip are all on Home
-        // now. The board is the board.
+        // now. The board is the board — plus the wheel that boosts it.
         Volt::test('kid.quests')
             ->assertOk()
             ->assertDontSee('Loot Tray')
             ->assertDontSee('Streak Chest')
-            ->assertDontSee('Boss Fight')
-            ->assertDontSee('SPIN');
+            ->assertDontSee('Boss Fight');
+    }
+
+    public function test_the_spin_happens_on_the_board_it_boosts(): void
+    {
+        // Six, not three: the wheel draws from what is left once the quest
+        // hand is dealt, and a household with only a hand's worth of chores
+        // leaves it with nothing to land on.
+        Chore::factory()->for($this->household)->count(3)->create();
+
+        Volt::test('kid.quests')
+            ->assertOk()
+            ->assertSee('SPIN')
+            ->call('spin')
+            ->assertSet('spinning', true)
+            ->call('finishSpin')
+            ->assertSet('spinRevealed', true);
+
+        $this->assertNotNull($this->kid->spins()->first());
+    }
+
+    /**
+     * The charge is sold beside the wheel because the window to use one closes
+     * the moment the wheel goes — a kid sent to the shop first comes back to a
+     * spent spin.
+     */
+    public function test_the_op_charge_is_offered_charged_and_then_gone_from_the_wheel(): void
+    {
+        Chore::factory()->for($this->household)->count(3)->create();
+        $this->kid->update(['bonus_tickets' => 5]);
+
+        Volt::test('kid.quests')
+            ->assertOk()
+            ->assertSee('Buy an OP Spin')
+            ->call('buyOpSpin')
+            ->assertSee('Use OP Spin')
+            ->call('usePerk', PerkEffect::OpSpin->value)
+            ->assertSee('Wheel charged')
+            ->assertSee('OP SPIN')
+            // Spent by the spin itself: nothing left to sell or charge once
+            // the wheel has gone.
+            ->call('spin')
+            ->call('finishSpin')
+            ->assertDontSee('Buy an OP Spin')
+            ->assertDontSee('Wheel charged');
+    }
+
+    /**
+     * The respin cannot hand the charge back, and a button that just says
+     * "respin" gives the kid no way of knowing that.
+     */
+    public function test_respinning_an_op_result_asks_first(): void
+    {
+        Chore::factory()->for($this->household)->count(3)->create();
+        $this->kid->update(['bonus_tickets' => 10]);
+
+        $respin = BonusPerk::where('household_id', $this->household->id)
+            ->where('effect', PerkEffect::WheelRespin)
+            ->firstOrFail();
+
+        app(BonusShopService::class)->purchase($this->kid, $respin);
+
+        // An ordinary spin gets the plain button; only a charged one is worth
+        // a question.
+        Volt::test('kid.quests')
+            ->call('spin')
+            ->call('finishSpin')
+            ->assertSee('Use Wheel Respin')
+            ->assertDontSee('OP charge', escape: false);
+
+        app(SpinService::class)->clearToday($this->kid);
+        app(SpinService::class)->charge($this->kid->refresh());
+
+        Volt::test('kid.quests')
+            ->call('spin')
+            ->call('finishSpin')
+            ->assertSee('OP charge', escape: false)
+            ->assertSee('Respin anyway');
     }
 
     public function test_the_mystery_pill_announces_the_mystery_chore_in_both_states(): void

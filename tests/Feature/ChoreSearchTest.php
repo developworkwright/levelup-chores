@@ -209,15 +209,30 @@ class ChoreSearchTest extends TestCase
         return $household;
     }
 
+    /**
+     * The board row, by its key rather than by the chore's name.
+     *
+     * The bonus wheel sits above the board and writes every chore it can land
+     * on around its face, so a filtered-out name is still on the page — it is
+     * just no longer a row. The search filters the board; it was never meant to
+     * reach into the wheel.
+     */
+    private function boardRow(Chore $chore): string
+    {
+        return 'wire:key="chore-'.$chore->id.'"';
+    }
+
     public function test_a_kid_can_search_their_side_quests(): void
     {
         $household = $this->householdWithBoard(['Feed animals', 'Sweep the floor', 'Put away dishes']);
         Auth::guard('profile')->login(Profile::factory()->for($household)->create());
 
+        $dishes = Chore::where('name', 'Put away dishes')->firstOrFail();
+
         Volt::test('kid.quests')
             ->set('search', 'sweep')
             ->assertSee('Sweep the floor')
-            ->assertDontSee('Put away dishes');
+            ->assertDontSee($this->boardRow($dishes), escape: false);
     }
 
     public function test_a_kid_searching_for_nothing_gets_a_message(): void
@@ -235,11 +250,13 @@ class ChoreSearchTest extends TestCase
         $household = $this->householdWithBoard(['Feed animals', 'Sweep the floor', 'Put away dishes']);
         Auth::guard('profile')->login(Profile::factory()->for($household)->create());
 
+        $dishes = Chore::where('name', 'Put away dishes')->firstOrFail();
+
         Volt::test('kid.quests')
             ->set('search', 'sweep')
-            ->assertDontSee('Put away dishes')
+            ->assertDontSee($this->boardRow($dishes), escape: false)
             ->call('clearSearch')
-            ->assertSee('Put away dishes');
+            ->assertSee($this->boardRow($dishes), escape: false);
     }
 
     public function test_searching_the_board_never_reveals_a_hidden_chore(): void

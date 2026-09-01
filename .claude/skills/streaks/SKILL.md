@@ -11,9 +11,9 @@ It lived on `ChoreService` for as long as the streak was a property of the daily
 
 ## Core files
 
-- `app/Services/StreakService.php` — `streakDayEarnedOn()`, `streakDaySecuredToday()`, `earnedDaysBetween()`, `recordApproval()`, `syncStreak()`, `repairStreak()`, `openStreakChest()`, `nextStreakMilestone()`, plus the private `refreshStreak()`, `currentStreak()` and `walkBackFrom()`.
-- `App\Models\Profile` — `streak` (int) and `pending_streak_chest` (nullable int, the milestone day awaiting reveal) columns.
-- `resources/views/pages/kid/quests.blade.php` — chest UI.
+- `app/Services/StreakService.php` — `streakDayEarnedOn()`, `streakDaySecuredToday()`, `earnedDaysBetween()`, `recordApproval()`, `syncStreak()`, `repairStreak()`, `openStreakChest()`, `pendingStreakChestDollars()`, `nextStreakMilestone()`, plus the private `refreshStreak()`, `currentStreak()`, `walkBackFrom()` and `unpaidMilestonesUnder()`.
+- `App\Models\Profile` — `streak` (int), `pending_streak_chest` (nullable int, the highest milestone day earned and not yet collected) and `streak_milestone_paid_through` (int, what has been paid for) columns.
+- `resources/views/pages/kid/home.blade.php` — the chest and the track. Both came off Quests with the rest of the daily loop.
 - Tests: `ChoreStreakTest` is the one that pins **what earns a day**; `StreakCycleTest`, `StreakDecayTest` and `StreakRestoreOfferTest` cover the track, decay and repairs.
 
 ## Mechanics
@@ -45,7 +45,7 @@ Days are bucketed in PHP, not SQL — the boundary hour belongs to the household
 
 `refreshStreak()` sets `streak = currentStreak()` rather than incrementing: a parent clearing a backlog can approve days in any order and every path has to land on the same number.
 
-`ChoreService::approve()` offers **every** approval to `recordApproval()`, which recomputes only when the completion's day was not already earned — otherwise the walk is guaranteed to land on the number already stored. That guard is safe precisely because the first approval of any day always recomputes and nothing else raises a streak (`syncStreak()` only ever drops one). Milestone payouts are gated on the `streak_milestone_paid_through` high-water mark on top of that, so a recompute can never double-pay.
+`ChoreService::approve()` offers **every** approval to `recordApproval()`, which recomputes only when the completion's day was not already earned — otherwise the walk is guaranteed to land on the number already stored. That guard is safe precisely because the first approval of any day always recomputes and nothing else raises a streak (`syncStreak()` only ever drops one). Milestone payouts are gated on the `streak_milestone_paid_through` high-water mark on top of that, so a recompute can never double-pay — and since a recompute only *queues* a chest rather than paying for it, the mark does not move until the chest is opened. See "The chest is the payment gate".
 
 `StreakService::STREAK_BONUSES` maps milestone day → dollar bonus for **one lap** of the track:
 
@@ -63,15 +63,27 @@ Every lap after the first pays `STREAK_REPEAT_MULTIPLIER` (2) times the base, **
 
 A day landing exactly on a boundary belongs to the lap *behind* it: day 30 closes lap 1 and pays the base $40, not $80.
 
-Milestone days stay absolute across laps (33, 35, 60…). That is what lets `streak_milestone_paid_through` stay a plain high-water mark, and why `refreshStreak()` walks day by day up from that mark instead of iterating a fixed map.
+Milestone days stay absolute across laps (33, 35, 60…). That is what lets `streak_milestone_paid_through` stay a plain high-water mark, and why both `refreshStreak()` and `openStreakChest()` walk day by day up from that mark instead of iterating a fixed map.
 
 `streakTrackFor(Profile)` returns `['lap' => int, 'milestones' => [['day', 'dollars', 'points', 'reached'], …]]` — the five chests of the lap the kid is on, which is all the Quests page ever draws. The lap turns over when the closing chest is **opened**, not when the streak ticks past the boundary: swapping the track to days 33-60 while the day-30 chest sits unopened would replace the reward out from under the moment that earned it.
 
-If a day is a milestone, the dollar amount is converted to points (`$bonusDollars * $household->points_per_dollar`) and credited **immediately** via `LedgerService::record()` (see [[points-ledger]]) — the points land in the balance right away, they are not held back pending the chest animation.
+## The chest is the payment gate
 
-## The chest is a reveal gate, not a payment gate
+`refreshStreak()` **queues, it does not pay.** Crossing a milestone sets `pending_streak_chest` to the highest milestone day reached and nothing else; `openStreakChest()` is what writes to the ledger. The dollar amount is converted to points (`$bonusDollars * $household->points_per_dollar`) and credited via `LedgerService::record()` (see [[points-ledger]]) on the tap.
 
-Only the *visual reveal* is deferred: `pending_streak_chest` is set to the milestone day, and stays set until the kid calls `openStreakChest()` client-side, which clears the flag and returns `['day' => ..., 'dollars' => ...]` for the celebration UI. The points were already spent into the ledger the moment the milestone was hit — `openStreakChest()` never touches points, only the reveal flag. If a kid never opens the chest, the points are still theirs; only the animation is pending.
+It used to work the other way — credited on reach, revealed later — and that was a real bug. A kid whose chore was approved in the evening logged in the next morning to a balance that already held the bonus, then opened a chest that gave them nothing. The reveal was spoiled by the thing it was revealing.
+
+**`streak_milestone_paid_through` records what has been *paid*, not what has been reached**, and `openStreakChest()` is the only thing that advances it (with `max()`, never backwards). Three consequences worth holding on to:
+
+- **The chest carries every milestone under it, not just the day on the lid.** A parent clearing a week of backlog can take a kid from day 2 to day 8 in one sitting, crossing 3, 5 and 7; only day 7 is kept as the chest. `openStreakChest()` re-walks from the mark up to the lid and writes **one ledger line per milestone**, so opening that chest pays $9 and the Activity feed reads back three separate things the kid earned.
+- **`refreshStreak()` is idempotent while a chest is pending.** The mark stays put, so a second recompute re-queues the same day rather than paying it twice. This is why the walk in `refreshStreak()` can be a pure `streakBonusOn()` loop with no ledger writes in it.
+- **The lapse-and-repair exploit is still closed.** The mark only moves when a chest is actually collected, so letting a streak lapse and buying a repair can never re-open a milestone that has been paid for.
+
+`pendingStreakChestDollars(Profile)` is the one place that prices a pending chest — use it for any UI that quotes the number, never `streakBonusOn($profile->pending_streak_chest)`, which misses everything stacked underneath.
+
+**A chest queued before this change pays nothing on open, and that is correct.** The old code advanced the mark at reach time, so those rows already have the mark sitting on the chest's own day; the walk finds an empty range. That is what let the payment move without a migration. `pendingStreakChestDollars()` falls back to the lid's own milestone for exactly this case, so the card still names what it is celebrating — pinned by `StreakCycleTest::test_a_chest_left_over_from_the_old_pay_on_reach_scheme_pays_nothing_twice`.
+
+If a kid never opens the chest, the points are never paid. That is the trade this makes, and it is deliberate: the chest sits on Home as the third card down and takes one tap.
 
 `nextStreakMilestone(Profile): int` returns the smallest milestone day still ahead of the profile's current streak — used for "X days to your next bonus" UI copy. It is **non-nullable**: the track laps, so there is always another chest within 30 days. It used to return null past day 30, and the UI still carries the shape of that (an "all unlocked" branch would now be dead code — don't add one back). There's no interpolation between milestones; days between keys (e.g. day 4, day 10) earn no bonus.
 

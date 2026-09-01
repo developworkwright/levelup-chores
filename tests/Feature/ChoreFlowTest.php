@@ -15,6 +15,7 @@ use App\Services\ChoreService;
 use App\Services\HouseholdClock;
 use App\Services\MonsterService;
 use App\Services\StreakService;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Notification;
@@ -255,7 +256,7 @@ class ChoreFlowTest extends TestCase
         $this->assertSame(3, $kid->refresh()->streak);
     }
 
-    public function test_streak_bonus_is_credited_at_the_three_day_milestone(): void
+    public function test_the_three_day_milestone_queues_a_chest_and_pays_nothing_until_it_is_opened(): void
     {
         $household = Household::factory()->create(['points_per_dollar' => 100]);
         $parent = Profile::factory()->parent()->for($household)->create();
@@ -273,15 +274,37 @@ class ChoreFlowTest extends TestCase
 
         $kid->refresh();
         $this->assertSame(3, $kid->streak);
-        $this->assertSame(100, $kid->points); // $1 at 100 points/$.
+        $this->assertSame(3, $kid->pending_streak_chest);
 
-        $entry = LedgerEntry::where('profile_id', $kid->id)->latest('id')->first();
+        // Nothing paid yet. A kid coming back the next morning to a balance
+        // that already held the bonus then opened a chest that gave them
+        // nothing — the reveal was spoiled by the thing it was revealing.
+        $this->assertSame(0, $kid->points);
+        $this->assertSame(0, $this->streakBonusEntries($kid)->count());
+        $this->assertSame(0, $kid->streak_milestone_paid_through);
+
+        app(StreakService::class)->openStreakChest($kid);
+
+        $this->assertSame(100, $kid->refresh()->points); // $1 at 100 points/$.
+        $this->assertSame(3, $kid->streak_milestone_paid_through);
+
+        $entry = $this->streakBonusEntries($kid)->latest('id')->first();
         $this->assertSame(LedgerKind::Earn, $entry->kind);
         $this->assertSame(100, $entry->amount);
         $this->assertStringContainsString('3-day streak bonus', $entry->description);
+    }
 
-        // The bonus is banked immediately, but its reveal waits for the chest.
-        $this->assertSame(3, $kid->pending_streak_chest);
+    /**
+     * The streak-bonus lines only. Approving a chore writes a ledger entry of
+     * its own — worth 0 points in these tests, but still a row — so a blanket
+     * count here would be counting the approvals.
+     *
+     * @return Builder<LedgerEntry>
+     */
+    private function streakBonusEntries(Profile $kid): Builder
+    {
+        return LedgerEntry::where('profile_id', $kid->id)
+            ->where('description', 'like', '%streak bonus%');
     }
 
     public function test_opening_the_streak_chest_clears_the_pending_flag_and_reveals_the_prize(): void
@@ -338,9 +361,23 @@ class ChoreFlowTest extends TestCase
         $kid->refresh();
 
         $this->assertSame(7, $kid->streak);
-        // $1 (day 3) + $3 (day 5) + $5 (day 7) = $9 = 900 points. Nothing else
-        // was approved in this test, so this isolates the bonus math exactly.
-        $this->assertSame(900, $kid->points);
+        // Three chests earned and none opened, so only the last is on the lid —
+        // and nothing has been paid for yet.
+        $this->assertSame(7, $kid->pending_streak_chest);
+        $this->assertSame(0, $kid->points);
+
+        // The one chest carries everything underneath it. $1 (day 3) + $3
+        // (day 5) + $5 (day 7) = $9 = 900 points. Nothing else was approved in
+        // this test, so this isolates the bonus math exactly.
+        $result = app(StreakService::class)->openStreakChest($kid);
+
+        $this->assertSame(['day' => 7, 'dollars' => 9], $result);
+        $this->assertSame(900, $kid->refresh()->points);
+        $this->assertSame(7, $kid->streak_milestone_paid_through);
+
+        // One ledger line per milestone, not one lump: each is its own thing
+        // the kid earned, and the Activity feed reads them back that way.
+        $this->assertSame(3, $this->streakBonusEntries($kid)->count());
     }
 
     public function test_no_streak_bonus_on_a_non_milestone_day(): void
