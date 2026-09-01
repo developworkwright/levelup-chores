@@ -430,6 +430,10 @@ new class extends Component
             // the same reason as everything else here — a household with
             // nothing to draw one from makes questFor() throw.
             'daySecured' => $quest ? $streaks->streakDaySecuredToday($this->profile) : false,
+            // Unguarded, unlike everything else on the run: the deadline is the
+            // household rollover and any chore closes it, so a house with
+            // nothing quest-eligible still has a day that ends tonight.
+            'streakWindow' => $streaks->streakWindowFor($this->profile),
             'questApproved' => $completion?->status === CompletionStatus::Approved,
             'questPending' => $completion?->status === CompletionStatus::Pending,
             'questSentBack' => $completion?->status === CompletionStatus::Rejected,
@@ -682,13 +686,35 @@ new class extends Component
                 };
             @endphp
 
-            <div class="flex flex-col gap-3">
+            {{-- `id` rather than a bare anchor: the header's streak tile links
+                 straight here from whatever page a kid is standing on, and
+                 scroll-mt keeps the section title clear of the top edge instead
+                 of butted against it. --}}
+            <div id="streak" class="flex scroll-mt-4 flex-col gap-3">
                 <x-home-section
                     title="Streak Chest"
                     accent="var(--fq-streak)"
                     :done="(bool) $pendingChestDay"
                     :status="$streakStatus"
                     :status-color="$streakStatusColor"
+                />
+
+                {{-- The clock, first thing in the section it is about. It sat
+                     above the whole page for a while, which put the day's
+                     deadline in front of a kid before they'd been told what a
+                     streak was — the timer and the track explain each other, so
+                     they live together and the header tile is what carries the
+                     number everywhere else. --}}
+                <x-streak-timer
+                    wire:key="streak-timer"
+                    :closes-at="$streakWindow['closesAt']"
+                    :resets-at="$streakWindow['resetsAt']"
+                    :bedtime="$streakWindow['bedtime']"
+                    :timezone="$household->timezone"
+                    :streak="$profile->streak"
+                    :secured="$streakWindow['secured']"
+                    :urgent="$streakWindow['urgent']"
+                    :overtime="$streakWindow['overtime']"
                 />
 
                 {{-- Only when there is one to open. Unlike the bonus chest this

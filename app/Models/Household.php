@@ -15,6 +15,7 @@ class Household extends Model
         'timezone',
         'day_boundary_hour',
         'evening_watch_hour',
+        'bedtime',
         'weekly_chore_target',
         'weekly_prize',
         'weekly_prize_note',

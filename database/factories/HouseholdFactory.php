@@ -24,6 +24,11 @@ class HouseholdFactory extends Factory
             // reloaded — which is exactly the state that used to crash the
             // Arena. See HouseholdClock::eveningWatch().
             'evening_watch_hour' => 19,
+            // Stated for the same reason: the countdown on every kid page reads
+            // this, and a factory-made household would otherwise carry a null
+            // bedtime until it was reloaded and quietly count to the rollover
+            // instead.
+            'bedtime' => '21:00',
             'points_per_dollar' => 100,
             'spin_enabled' => true,
             // Stated for the same reason evening_watch_hour above is: a column

@@ -98,6 +98,26 @@ class HouseholdClock
         return $hour === null ? null : $this->atTime($hour.':00');
     }
 
+    /**
+     * The instant tonight's bedtime lands on, in UTC, or null when the
+     * household hasn't set one.
+     *
+     * Also not a deadline — nothing expires here either. It is what the kids'
+     * streak countdown counts down to, because it is the time they can act on;
+     * the run itself survives until the rollover. See
+     * {@see StreakService::streakWindowFor()}.
+     *
+     * Nullable for the same reasons eveningWatch() is, plus one more: the
+     * column is nullable on purpose, so a house can switch bedtime off and get
+     * the rollover back as the target.
+     */
+    public function bedtime(): ?Carbon
+    {
+        $bedtime = $this->household->bedtime;
+
+        return $bedtime === null ? null : $this->atTime($bedtime);
+    }
+
     public function atTime(string $time): ?Carbon
     {
         if (! preg_match('/^(\d{1,2}):(\d{2})$/', trim($time), $parts)) {

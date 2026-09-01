@@ -489,6 +489,76 @@ class StreakService
     }
 
     /**
+     * Tonight's window: what the countdown counts to, when the run actually
+     * dies, whether the day is already in the bag, and how close to the line
+     * the house would call it.
+     *
+     * The kids could not tell when a day ended, so the pages that show a run
+     * show the clock on it too. One method rather than four lookups per page,
+     * because the answers have to agree — a strip reading "safe" over a running
+     * countdown is worse than no countdown at all.
+     *
+     * **`closesAt` is bedtime, and `resetsAt` is the deadline.** They are
+     * different times and the split is the whole point. Nothing expires at
+     * bedtime; a chore signed off at 11pm still earns the day. But 4am is not a
+     * time anybody is going to do a chore, so a countdown pointed at it reads
+     * as "loads of time" all evening and then eats the run while everyone is
+     * asleep. Bedtime is the time a kid can actually budget against, so that is
+     * what ticks — the number on screen is the time they really have.
+     *
+     * **`closesAt` is null once bedtime passes, and that is the honest answer.**
+     * The obvious move is to re-point the timer at `resetsAt`, and it is wrong
+     * for the same reason 4am was wrong to begin with: a kid who has run out of
+     * evening would be handed a fresh six-hour number, which is the "loads of
+     * time" feeling this exists to remove, at the worst possible moment for it.
+     * So the countdown stops and `overtime` takes over, which says in words
+     * that the day is still winnable without putting a big reassuring number
+     * next to it. A house with no bedtime set has nothing better to count, so
+     * it gets `closesAt === resetsAt` and never goes overtime — exactly what
+     * this did before bedtime existed.
+     *
+     * The times come back in UTC, like everything {@see HouseholdClock::startOf()}
+     * returns, so they can be handed straight to a client-side timer.
+     *
+     * `secured` is the generous read ({@see streakDaySecuredToday()}): work
+     * waiting on a parent stops the clock, because it stopped being the kid's
+     * clock to beat the moment they claimed it. `urgent` is the house's
+     * evening watch hour — the same threshold the Arena lights its candle on,
+     * so the two screens never disagree about who is on the line.
+     *
+     * @return array{closesAt: ?Carbon, resetsAt: Carbon, bedtime: ?Carbon, secured: bool, urgent: bool, overtime: bool}
+     */
+    public function streakWindowFor(Profile $profile): array
+    {
+        $clock = HouseholdClock::for($profile->household);
+        $now = $clock->now()->utc();
+        $secured = $this->streakDaySecuredToday($profile);
+
+        $resetsAt = $clock->startOf($clock->today()->copy()->addDay());
+        $bedtime = $clock->bedtime();
+        $overtime = $bedtime !== null && $now->greaterThanOrEqualTo($bedtime);
+        $watch = $clock->eveningWatch();
+
+        return [
+            // Null rather than the rollover once bedtime has gone: see above.
+            'closesAt' => match (true) {
+                $bedtime === null => $resetsAt,
+                $overtime => null,
+                default => $bedtime,
+            },
+            'resetsAt' => $resetsAt,
+            // Handed back so the copy can name the hour even in the states that
+            // aren't counting towards it.
+            'bedtime' => $bedtime,
+            'secured' => $secured,
+            // A household with no usable watch hour never turns the strip red,
+            // the same way it never lights the Arena's candle.
+            'urgent' => ! $secured && $watch !== null && $now->greaterThanOrEqualTo($watch),
+            'overtime' => ! $secured && $overtime,
+        ];
+    }
+
+    /**
      * Tells the run that a chore was signed off.
      *
      * The single entry point for the approval path — `ChoreService::approve()`

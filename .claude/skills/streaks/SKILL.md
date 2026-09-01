@@ -11,10 +11,10 @@ It lived on `ChoreService` for as long as the streak was a property of the daily
 
 ## Core files
 
-- `app/Services/StreakService.php` — `streakDayEarnedOn()`, `streakDaySecuredToday()`, `earnedDaysBetween()`, `recordApproval()`, `syncStreak()`, `repairStreak()`, `openStreakChest()`, `pendingStreakChestDollars()`, `nextStreakMilestone()`, plus the private `refreshStreak()`, `currentStreak()`, `walkBackFrom()` and `unpaidMilestonesUnder()`.
+- `app/Services/StreakService.php` — `streakDayEarnedOn()`, `streakDaySecuredToday()`, `earnedDaysBetween()`, `recordApproval()`, `syncStreak()`, `repairStreak()`, `openStreakChest()`, `pendingStreakChestDollars()`, `nextStreakMilestone()`, `streakWindowFor()`, plus the private `refreshStreak()`, `currentStreak()`, `walkBackFrom()` and `unpaidMilestonesUnder()`.
 - `App\Models\Profile` — `streak` (int), `pending_streak_chest` (nullable int, the highest milestone day earned and not yet collected) and `streak_milestone_paid_through` (int, what has been paid for) columns.
 - `resources/views/pages/kid/home.blade.php` — the chest and the track. Both came off Quests with the rest of the daily loop.
-- Tests: `ChoreStreakTest` is the one that pins **what earns a day**; `StreakCycleTest`, `StreakDecayTest` and `StreakRestoreOfferTest` cover the track, decay and repairs.
+- Tests: `ChoreStreakTest` is the one that pins **what earns a day**; `StreakCycleTest`, `StreakDecayTest` and `StreakRestoreOfferTest` cover the track, decay and repairs; `StreakTimerTest` pins the bedtime countdown.
 
 ## Mechanics
 
@@ -34,6 +34,22 @@ Two things that follow and are easy to break:
 Same question for *today*, but a **`Pending`** completion also counts. The kid has done their part, and a screen that shows them at risk over a parent's response time is blaming them for somebody else's inbox.
 
 Use it for anything kid-facing — the Arena's safe/at-risk lanes, nudge and rescue refusals, the repair window, the streak card's copy. Use `streakDayEarnedOn()` for the walk-back itself: letting a pending claim into the run would prop up a chain nobody ever signed off.
+
+### The countdown counts to bedtime, not to the deadline
+
+`streakWindowFor(Profile)` returns `['closesAt', 'resetsAt', 'bedtime', 'secured', 'urgent', 'overtime']` — everything `<x-streak-timer>` (the strip in Home's streak section) and `<x-kid.streak-tile>` (the header tile on every kid page) draw. It exists because the kids could not tell *when* they had to act; the run was a number on a card with nothing anywhere saying a day was closing.
+
+**`closesAt` and `resetsAt` are different times and the split is the point.** `resetsAt` is the real deadline (`HouseholdClock::startOf()` on tomorrow); `closesAt` is `households.bedtime`, which expires nothing — a chore signed off at 11pm still earns the day. But 4am is not a time anybody is going to do a chore, so a countdown pointed at it reads as "loads of time" all evening and then eats the run overnight. Bedtime is the time a kid can budget against, so that is what ticks.
+
+**`closesAt` is null once bedtime passes — do not re-point it at `resetsAt`.** That was tried and it is the same bug in a smaller window: a kid who has just run out of evening gets handed a fresh six-hour number, which is the false comfort the timer exists to remove, arriving at the worst moment for it. The countdown stops and **`overtime`** takes over — the strip says in words that a chore signed off before the reset still counts, and the header tile shows a moon rather than a number. Words don't manufacture the feeling of having all night; a big ticking number does.
+
+Three things that follow:
+
+- **A null `bedtime` is the off switch for the target, not the timer.** `closesAt === resetsAt`, `overtime` is always false, and the strip counts the rollover — exactly what it did before bedtime existed. `HouseholdClock::bedtime()` is nullable for the reasons `eveningWatch()` is, plus the column genuinely being nullable.
+- **`urgent` is the Arena's threshold, reused deliberately.** It is `evening_watch_hour`, the same hour `ArenaService::stateFor()` lights the candle on, so the two screens can't disagree about who is on the line.
+- **`bedtime` is an `'H:i'` string, unlike its two neighbouring columns.** It is the one evening time a house puts on the half hour. It goes through `HouseholdClock::atTime()`, which already rejects anything that isn't an `H:i` and already knows a time before the day boundary belongs to the small hours at the *end* of the day. The parent control (`parent/kids.blade.php`, the Arena card) offers a fixed list and **clears anything off it** rather than storing it.
+
+**Where the two views live.** The strip is Home's alone, inside `id="streak"` in the Streak Chest section — the timer and the chest track explain each other, and it sat above the whole page for a while, which put a deadline in front of a kid before anything had told them what a streak was. Everywhere else the header tile carries the number: it is in `x-kid.shell`'s tile bank next to points and tickets (so the shell, not the pages, resolves the window), it links to `kid.home#streak` with a **plain load rather than `wire:navigate`** so the fragment is honoured, and it shows a tick once `secured`. Don't re-add a strip to Quests: the tile is already on that page, and two of them was the same sentence twice.
 
 ### One query window, not one per day
 

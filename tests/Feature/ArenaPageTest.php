@@ -892,6 +892,47 @@ class ArenaPageTest extends TestCase
         $this->assertSame(15, $this->household->fresh()->evening_watch_hour);
     }
 
+    public function test_bedtime_is_set_alongside_the_watch_hour(): void
+    {
+        $this->kid('Nova');
+        $this->chores();
+
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        Auth::guard('profile')->login($parent);
+
+        Volt::test('parent.kids')
+            ->assertSee('Bedtime')
+            ->set('bedtime', '20:30')
+            ->call('saveArenaSettings')
+            ->assertSet('bedtime', '20:30');
+
+        $this->assertSame('20:30', $this->household->fresh()->bedtime);
+    }
+
+    /**
+     * The column is read straight by the kids' countdown, so anything that
+     * isn't one of the offered times clears it rather than being stored — a
+     * "half seven" in there would put every kid page on a null target.
+     */
+    public function test_a_bedtime_off_the_list_clears_it_rather_than_being_stored(): void
+    {
+        $this->kid('Nova');
+        $this->chores();
+
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        Auth::guard('profile')->login($parent);
+
+        Volt::test('parent.kids')
+            ->set('bedtime', 'half seven')
+            ->call('saveArenaSettings')
+            // Echoed back empty, and said out loud: switching bedtime off
+            // re-points the kids' countdown rather than removing it.
+            ->assertSet('bedtime', '')
+            ->assertSee('count down to the day rolling over instead', escape: false);
+
+        $this->assertNull($this->household->fresh()->bedtime);
+    }
+
     public function test_a_household_with_no_usable_watch_hour_degrades_instead_of_crashing(): void
     {
         $kid = $this->kid('Nova');

@@ -360,6 +360,11 @@
     // and an empty one renders nothing at all.
     $sleep = app(App\Services\SleepService::class);
     $sky = $sleep->isEnabledFor($profile) ? $sleep->earnedConstellations($profile) : [];
+
+    // Tonight's clock, for the header tile. In the shell rather than on the
+    // pages because the question it answers — how long have I got — is one a
+    // kid has while standing on the shop or the badge wall, not only on Home.
+    $streakWindow = app(App\Services\StreakService::class)->streakWindowFor($profile);
 @endphp
 
 {{-- `isolate` so the watching monster's negative z-index puts it behind the
@@ -496,6 +501,17 @@
                     <span class="font-baloo text-[19px] leading-none font-extrabold text-fq-lime">{{ $profile->bonus_tickets }}</span>
                     <span class="font-mono-fq text-[9px] text-fq-ticket-label">TICKETS</span>
                 </a>
+
+                {{-- Third tile: what the day has left on it. It sits with the
+                     other two because it is the same kind of thing — a number
+                     about you that you want to see from anywhere — and it is
+                     the only one of the three that runs out. --}}
+                <x-kid.streak-tile
+                    :href="route('kid.home').'#streak'"
+                    :closes-at="$streakWindow['closesAt']"
+                    :secured="$streakWindow['secured']"
+                    :overtime="$streakWindow['overtime']"
+                />
 
                 {{-- Pulls down points, tickets and — on the Quests tab —
                      the chore board. The page already refreshes itself when it

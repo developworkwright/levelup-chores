@@ -50,6 +50,7 @@ new class extends Component
         $household = $this->profile->household;
 
         $this->eveningWatchHour = $household->evening_watch_hour;
+        $this->bedtime = (string) ($household->bedtime ?? '');
         $this->weeklyChoreTarget = (string) ($household->weekly_chore_target ?? '');
         $this->weeklyPrize = (string) ($household->weekly_prize ?? '');
         $this->weeklyPrizeNote = (string) ($household->weekly_prize_note ?? '');
@@ -160,6 +161,9 @@ new class extends Component
      */
     public ?int $eveningWatchHour = null;
 
+    /** 'H:i', or '' for a house that doesn't want a bedtime countdown at all. */
+    public string $bedtime = '';
+
     public string $weeklyChoreTarget = '';
 
     public string $weeklyPrize = '';
@@ -184,6 +188,11 @@ new class extends Component
         // of nagging this page's whole copy is written to avoid.
         $hour = max(15, min(23, (int) $this->eveningWatchHour));
 
+        // Anything off the list clears it rather than being stored: the kids'
+        // countdown reads this straight, and a hand-posted "half seven" would
+        // put every kid page on a null timer.
+        $bedtime = in_array($this->bedtime, self::bedtimeOptions(), true) ? $this->bedtime : null;
+
         $digits = preg_replace('/\D/', '', $this->weeklyChoreTarget);
         $target = $digits === '' ? null : max(1, min(65535, (int) $digits));
 
@@ -192,6 +201,7 @@ new class extends Component
 
         $this->profile->household->update([
             'evening_watch_hour' => $hour,
+            'bedtime' => $bedtime,
             'weekly_chore_target' => $target,
             // Empty clears rather than storing '', so the Arena's "is there a
             // prize" check stays a plain null test.
@@ -202,11 +212,38 @@ new class extends Component
         // Echoed back from what was actually written, so a value that got
         // clamped or stripped shows the parent the number they really have.
         $this->eveningWatchHour = $hour;
+        $this->bedtime = (string) ($bedtime ?? '');
         $this->weeklyChoreTarget = (string) ($target ?? '');
 
-        $this->arenaMessage = $target
-            ? 'Saved.'
-            : 'Saved — with no weekly target, the house bar stays off.';
+        $this->arenaMessage = match (true) {
+            // The one worth calling out on its own: turning bedtime off doesn't
+            // turn the countdown off, it re-points it at 4am, and a parent who
+            // meant "no timer" should find that out here rather than from a
+            // kid asking why it says nine hours.
+            $bedtime === null => 'Saved — with no bedtime, the kids count down to the day rolling over instead.',
+            (bool) $target => 'Saved.',
+            default => 'Saved — with no weekly target, the house bar stays off.',
+        };
+    }
+
+    /**
+     * The bedtimes on offer, on the half hour through the evening.
+     *
+     * A list rather than a free text box because it is written straight into a
+     * column the kids' countdown parses, and half past is the finest grain any
+     * house has asked for.
+     *
+     * @return list<string>
+     */
+    public static function bedtimeOptions(): array
+    {
+        $times = [];
+
+        for ($minutes = 17 * 60; $minutes <= 23 * 60 + 30; $minutes += 30) {
+            $times[] = sprintf('%02d:%02d', intdiv($minutes, 60), $minutes % 60);
+        }
+
+        return $times;
     }
 
     /** The household switch. Off, every per-kid switch is moot. */
@@ -458,6 +495,7 @@ new class extends Component
 
         return [
             'kids' => $kids,
+            'bedtimeOptions' => self::bedtimeOptions(),
             'questSummaries' => $kids->mapWithKeys(fn (Profile $kid) => [$kid->id => $this->questSummaryFor($kid)]),
             'spins' => $kids->mapWithKeys(function (Profile $kid) {
                 $spin = app(SpinService::class)->today($kid);
@@ -866,14 +904,18 @@ new class extends Component
         @endforeach
     </div>
 
-    {{-- What the Arena reads. All three are the household's own call, and all
-         three are safe to leave alone: the watch hour has a sensible default,
+    {{-- What the Arena reads, plus bedtime — which isn't an Arena setting at
+         all but is the other half of the same evening, and splitting the two
+         times a house sets across two cards would make them harder to reason
+         about together. All four are the household's own call and all four are
+         safe to leave alone: the watch hour and bedtime have sensible defaults,
          and the week's target and prize simply don't draw until they're set. --}}
     <div class="mt-[14px] rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
         <h3 class="font-baloo text-lg font-bold">The Arena</h3>
         <p class="mt-1 text-sm text-fq-text-2">
             The kids' landing page: whose run is on the line tonight, the streak race, and
-            what the house is fighting.
+            what the house is fighting. Bedtime lives here too — it's the clock the kids'
+            streak countdown runs against.
         </p>
 
         <div class="mt-4 flex flex-wrap gap-[14px]">
@@ -902,6 +944,36 @@ new class extends Component
                 </p>
             </div>
 
+            {{-- The one setting on this card the kids actually see a number
+                 from. It doesn't expire anything either — it's the time their
+                 countdown points at, because 4am is not a time anyone is going
+                 to do a chore. --}}
+            <div class="min-w-[240px] flex-1">
+                <label for="bedtime" class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                    Bedtime
+                </label>
+                <div class="mt-2 flex gap-2">
+                    <select
+                        id="bedtime"
+                        wire:model="bedtime"
+                        class="flex-1 rounded-[14px] border border-fq-line-2 bg-fq-sunk px-3 py-2 text-sm outline-none"
+                    >
+                        <option value="">No bedtime</option>
+                        @foreach ($bedtimeOptions as $option)
+                            <option value="{{ $option }}">{{ \Illuminate\Support\Carbon::createFromFormat('H:i', $option)->format('g:i A') }}</option>
+                        @endforeach
+                    </select>
+                </div>
+                <p class="mt-2 text-[12.5px] leading-snug text-fq-text-4">
+                    What the kids' streak countdown counts down to. Past it they're told they've
+                    still got until
+                    {{ $household->day_boundary_hour > 12 ? $household->day_boundary_hour - 12 : $household->day_boundary_hour }}:00am —
+                    nothing is taken away at bedtime.
+                </p>
+            </div>
+        </div>
+
+        <div class="mt-[14px] flex flex-wrap gap-[14px]">
             <div class="min-w-[240px] flex-1">
                 <label for="weekly-target" class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
                     Weekly chore target
