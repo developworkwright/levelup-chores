@@ -24,7 +24,7 @@ enum SleepOutcome: string
         return match ($this) {
             self::OwnBed => 'All night in my own bed',
             self::Visited => 'I came in for a cuddle',
-            self::Rough => 'It was a rough night',
+            self::Rough => 'Slept with parents',
         };
     }
 
