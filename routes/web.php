@@ -60,6 +60,9 @@ Route::middleware(['auth:profile', 'role:kid', 'sync-streak'])->prefix('kid')->g
     Volt::route('/badges', 'kid.badges')->name('kid.badges');
     Volt::route('/stats', 'kid.stats')->name('kid.stats');
     Volt::route('/journal', 'kid.journal')->name('kid.journal');
+    // Playlists. Playing music is the header's job on every page; this is the
+    // one place a kid builds a list to play — see PlaylistService.
+    Volt::route('/music', 'kid.music')->name('kid.music');
 });
 
 Route::middleware(['auth:profile', 'role:parent'])->prefix('parent')->group(function () {

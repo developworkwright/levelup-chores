@@ -15,6 +15,7 @@
         'badges' => ['label' => 'Badges', 'glyph' => '★', 'route' => 'kid.badges'],
         'stats' => ['label' => 'Stats', 'glyph' => '▤', 'route' => 'kid.stats'],
         'journal' => ['label' => 'Journal', 'glyph' => '♡', 'route' => 'kid.journal'],
+        'music' => ['label' => 'Music', 'glyph' => '♫', 'route' => 'kid.music'],
     ];
 
     /*
@@ -45,7 +46,11 @@
         // first page, and "Me" is a question about how you're doing rather
         // than about what you're saving for. Goals is where you go once the
         // numbers have given you a reason to.
-        'me' => ['label' => 'Me', 'glyph' => '★', 'justify' => 'justify-end', 'pages' => ['stats', 'goal', 'badges', 'journal']],
+        // Music is last in Me, and in Me at all, because a playlist is the one
+        // thing in the app a kid makes purely for themselves — it earns
+        // nothing, costs nothing and nobody else sees it. The header picker is
+        // still how music gets *played*; this page is where lists get built.
+        'me' => ['label' => 'Me', 'glyph' => '★', 'justify' => 'justify-end', 'pages' => ['stats', 'goal', 'badges', 'journal', 'music']],
     ];
 
     $dollars = number_format($profile->points / $profile->household->points_per_dollar, 2);
@@ -515,7 +520,7 @@
                 {{-- Background music, next to the bell because both are the
                      same question: how much noise is this app allowed to make
                      while a kid is somewhere else in the house. --}}
-                <x-music-toggle />
+                <x-music-toggle :profile="$profile" />
 
                 {{-- Alerts belong in the header rather than on a page of their
                      own. Everything a kid can be notified about — work signed

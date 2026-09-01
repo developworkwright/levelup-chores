@@ -565,10 +565,11 @@ class MusicTest extends TestCase
         $latest = app(MusicService::class)->latestChangeAt();
 
         Volt::test('kid.quests')
-            // The high-water mark rides along as the picker's second argument.
-            // Without it every browser compares against zero and reads as
-            // permanently caught up, so the marker would never appear at all.
-            ->assertSee(', '.$latest.')', false)
+            // The high-water mark rides along as the picker's second argument,
+            // between the songs and the kid's playlists. Without it every
+            // browser compares against zero and reads as permanently caught up,
+            // so the marker would never appear at all.
+            ->assertSee(', '.$latest.', ', false)
             ->assertSee('music.hasNew', false);
     }
 

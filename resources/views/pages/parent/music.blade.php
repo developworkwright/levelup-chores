@@ -2,6 +2,7 @@
 
 use App\Models\Profile;
 use App\Services\MusicService;
+use App\Services\PlaylistService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 use Livewire\WithFileUploads;
@@ -141,9 +142,31 @@ new class extends Component
         $this->openAlbum = $this->openAlbum === $album ? null : $album;
     }
 
+    /**
+     * Retitle a song, and take the kids' playlists with it.
+     *
+     * A song's id is a slug of its path, so a rename is a move that changes it
+     * — and every playlist entry naming the old one would be left pointing at a
+     * file that is no longer there. The library has no table for a foreign key
+     * to hang off (see MusicService), so nothing does this on its own: the one
+     * screen that renames songs is the one that has to say so.
+     */
     public function renameSong(string $path, string $title): void
     {
-        app(MusicService::class)->rename($path, trim($title));
+        $service = app(MusicService::class);
+        $title = trim($title);
+
+        // Worked out before the move, because afterwards the old path is gone
+        // and there is nothing left to derive the new one from.
+        $target = $service->targetPath($path, $title);
+
+        if ($service->rename($path, $title)) {
+            app(PlaylistService::class)->retrack(
+                $service->idFor($path),
+                $service->idFor($target),
+                $service->title($target),
+            );
+        }
 
         $this->flashMessage = null;
     }
@@ -159,6 +182,11 @@ new class extends Component
 
         $this->flashMessage = $service->title($path).' is gone.';
         $service->delete($path);
+
+        // And out of every playlist that named it. A kid's list is allowed to
+        // outlive a song — see PlaylistService — but not when the app knows
+        // perfectly well that the song was deleted on purpose.
+        app(PlaylistService::class)->untrack($service->idFor($path));
     }
 
     /**

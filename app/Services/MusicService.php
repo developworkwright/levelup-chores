@@ -205,8 +205,15 @@ class MusicService
             ->all();
     }
 
-    /** Retitle a song. The filename *is* the title, so this is a move. */
-    public function rename(string $path, string $title): bool
+    /**
+     * Where a song would end up if it were retitled.
+     *
+     * Public because a rename changes a song's id, and playlists are keyed by
+     * that id — the music screen has to know the new path to move a kid's
+     * playlist entries onto it, and working it out a second time on the calling
+     * side is how the two would drift.
+     */
+    public function targetPath(string $path, string $title): string
     {
         // Back into the folder it came out of. The raw first segment, not
         // album(), which has already turned underscores into spaces for
@@ -215,7 +222,13 @@ class MusicService
         $segments = explode('/', $path);
         $folder = count($segments) > 1 ? $segments[0].'/' : '';
 
-        $target = $folder.$this->filename($title);
+        return $folder.$this->filename($title);
+    }
+
+    /** Retitle a song. The filename *is* the title, so this is a move. */
+    public function rename(string $path, string $title): bool
+    {
+        $target = $this->targetPath($path, $title);
 
         if ($target === $path || $title === '' || ! $this->disk()->exists($path)) {
             return false;
@@ -275,6 +288,20 @@ class MusicService
         return str_replace('_', ' ', pathinfo($path, PATHINFO_FILENAME));
     }
 
+    /**
+     * The id a song is known by outside this class.
+     *
+     * Slugged from the whole path, not the title: two albums are each entitled
+     * to a song called Ruins. This is what a kid's browser remembers their
+     * choice by and what a playlist entry stores, so it must survive a
+     * re-render unchanged — a song at the top still slugs to exactly what it
+     * did before folders existed, so nobody's saved choice is forgotten.
+     */
+    public function idFor(string $path): string
+    {
+        return Str::slug(str_replace('/', ' ', preg_replace('/\.mp3$/i', '', $path) ?? $path));
+    }
+
     private function isLocal(): bool
     {
         return config('filesystems.disks.'.config('filesystems.music_disk').'.driver') === 'local';
@@ -298,12 +325,7 @@ class MusicService
                 $path = $item->path();
 
                 return [
-                    // Slugged from the whole path, not the title: two albums
-                    // are each entitled to a song called Ruins, and this id is
-                    // what a kid's browser remembers their choice by. A song at
-                    // the top still slugs to exactly what it did before folders
-                    // existed, so nobody's saved choice is forgotten.
-                    'id' => Str::slug(str_replace('/', ' ', preg_replace('/\.mp3$/i', '', $path) ?? $path)),
+                    'id' => $this->idFor($path),
                     'title' => $this->title($path),
                     'album' => $this->album($path),
                     'url' => $this->urlFor($disk, $path),

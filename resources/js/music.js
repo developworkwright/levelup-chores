@@ -10,13 +10,26 @@
  * page in both consoles. The header control is just a view onto that store,
  * and re-attaches to it on each navigation.
  *
- * Three keys in localStorage, so the choice survives a real page load too:
- * `fq-music-on`, `fq-music-track` and `fq-music-volume`.
+ * Five keys in localStorage, so the choice survives a real page load too:
+ * `fq-music-on`, `fq-music-track`, `fq-music-volume`, `fq-music-playlist` and
+ * `fq-music-shuffle`.
  */
 
 const KEY_ON = 'fq-music-on';
 const KEY_TRACK = 'fq-music-track';
 const KEY_VOLUME = 'fq-music-volume';
+
+/**
+ * Which playlist is on, and whether it is shuffled.
+ *
+ * The playlists themselves belong to the kid and live in the database, because
+ * a list they made has to follow them to any device. Which one is *currently
+ * playing* is the opposite kind of fact — it belongs to this browser, exactly
+ * like the remembered song beside it — so it stays here, and a kid can have
+ * one playlist going on the tablet and another on the phone.
+ */
+const KEY_PLAYLIST = 'fq-music-playlist';
+const KEY_SHUFFLE = 'fq-music-shuffle';
 
 /**
  * The newest song this browser has been shown, as a unix timestamp.
@@ -84,6 +97,14 @@ document.addEventListener('alpine:init', () => {
         playing: false,
         volume: Number(read(KEY_VOLUME, DEFAULT_VOLUME)) || DEFAULT_VOLUME,
 
+        /** @type {Array<{id: number, name: string, trackIds: Array<string>}>} */
+        playlists: [],
+
+        /** Which playlist is playing, or null for a single song on repeat. */
+        playlistId: Number(read(KEY_PLAYLIST)) || null,
+
+        shuffle: read(KEY_SHUFFLE) === '1',
+
         /**
          * True when the browser refused to resume a remembered song without a
          * tap first. The header button says so rather than sitting there lit
@@ -108,9 +129,10 @@ document.addEventListener('alpine:init', () => {
          * every navigation, so it must not disturb a song already playing —
          * only the list and a selection that has gone stale.
          */
-        load(tracks, latestAt = 0) {
+        load(tracks, latestAt = 0, playlists = []) {
             this.tracks = tracks;
             this.latestAt = latestAt;
+            this.loadPlaylists(playlists);
 
             if (this.seenAt === null) {
                 const stored = read(KEY_SEEN);
@@ -151,11 +173,141 @@ document.addEventListener('alpine:init', () => {
             return this.tracks.find((track) => track.id === this.trackId) ?? null;
         },
 
+        /**
+         * Handed the kid's playlists, at load and again whenever they edit one.
+         *
+         * The second case is the reason this is a method rather than part of
+         * `load`. The music page and the header control are on the same screen,
+         * and Livewire morphs the page around an Alpine component it does not
+         * rebuild — so a playlist made on that page never reaches an `x-data`
+         * expression that was evaluated once, on first render. The page
+         * dispatches instead, and the header listens. Without it a kid makes a
+         * playlist, walks up to the header and cannot find it.
+         */
+        loadPlaylists(playlists) {
+            this.playlists = playlists ?? [];
+
+            // A playlist deleted — on this device or another one — must not
+            // leave the player pointed at it, silently refusing to advance
+            // because its queue comes back empty.
+            if (this.playlistId !== null && ! this.playlist()) {
+                this.leavePlaylist();
+            }
+        },
+
+        playlist() {
+            return this.playlists.find((list) => list.id === this.playlistId) ?? null;
+        },
+
+        /**
+         * The songs of the playing playlist, in order, as real tracks.
+         *
+         * Ids the library no longer has are already gone before this arrives —
+         * the server drops them — so this is a map rather than a filter in all
+         * but the moment between a parent deleting a song and the next render.
+         */
+        queue() {
+            const playlist = this.playlist();
+
+            if (! playlist) {
+                return [];
+            }
+
+            return playlist.trackIds
+                .map((id) => this.tracks.find((track) => track.id === id))
+                .filter(Boolean);
+        },
+
+        /** True while a playlist is what is playing, rather than one song. */
+        get inPlaylist() {
+            return this.playlist() !== null;
+        },
+
+        /**
+         * Start a playlist from the top — or from anywhere, when shuffled.
+         *
+         * Tapping the one that is already playing turns it off rather than
+         * restarting it, which is the same "tap it again" the album headings
+         * and the play button already answer to.
+         */
+        playPlaylist(id) {
+            if (this.playlistId === id) {
+                this.leavePlaylist();
+
+                return;
+            }
+
+            this.playlistId = id;
+            write(KEY_PLAYLIST, String(id));
+
+            const queue = this.queue();
+
+            if (! queue.length) {
+                return;
+            }
+
+            const first = this.shuffle ? Math.floor(Math.random() * queue.length) : 0;
+
+            this.select(queue[first].id, true);
+            this.play();
+        },
+
+        /**
+         * Back to one song on repeat. The song keeps playing: leaving a
+         * playlist is a change of what happens *next*, not a stop button.
+         */
+        leavePlaylist() {
+            this.playlistId = null;
+            write(KEY_PLAYLIST, '');
+
+            if (this.el) {
+                this.el.loop = true;
+            }
+        },
+
+        toggleShuffle() {
+            this.shuffle = ! this.shuffle;
+            write(KEY_SHUFFLE, this.shuffle ? '1' : '0');
+        },
+
+        /**
+         * The next song in the playlist, wrapping at the end.
+         *
+         * Shuffle picks any *other* song rather than any song, so a two-song
+         * playlist alternates instead of occasionally playing one of them three
+         * times in a row — which reads as the shuffle being broken, and on a
+         * playlist that short it is indistinguishable from it.
+         */
+        advance() {
+            const queue = this.queue();
+
+            if (queue.length === 0) {
+                return;
+            }
+
+            const index = queue.findIndex((track) => track.id === this.trackId);
+
+            let next = (index + 1) % queue.length;
+
+            if (this.shuffle && queue.length > 1) {
+                do {
+                    next = Math.floor(Math.random() * queue.length);
+                } while (next === index);
+            }
+
+            this.select(queue[next].id, true);
+            this.play();
+        },
+
         audio() {
             if (! this.el) {
                 this.el = new Audio();
                 this.el.loop = true;
                 this.el.volume = this.volume;
+                // Only ever reached in a playlist: a looping element never
+                // ends. play() sets `loop` from that, so this listener is the
+                // playlist's whole advance mechanism.
+                this.el.addEventListener('ended', () => this.advance());
                 // Nothing loads until a kid actually asks for a song; these
                 // files are megabytes each and most page loads never play one.
                 this.el.preload = 'none';
@@ -180,6 +332,19 @@ document.addEventListener('alpine:init', () => {
             if (audio.src !== track.url) {
                 audio.src = track.url;
             }
+
+            /*
+             * A single song repeats itself; a playlist moves on.
+             *
+             * Set here rather than once at construction because it changes
+             * whenever a kid joins or leaves a playlist — and it has to be
+             * false for `ended` to fire at all, since a looping element simply
+             * starts again and never reports the end of anything.
+             *
+             * A playlist of one still loops. There is nothing to advance to,
+             * and the alternative is a song that stops dead.
+             */
+            audio.loop = this.queue().length < 2;
 
             this.playing = true;
             this.blocked = false;
@@ -241,9 +406,19 @@ document.addEventListener('alpine:init', () => {
         /**
          * Switching songs while the music is off selects without starting
          * anything: the picker is also how you choose what *will* play.
+         *
+         * `fromQueue` is how the player tells its own advancing apart from a
+         * kid reaching past the playlist for a particular song. Reaching past
+         * it ends it — they asked for that song, and a playlist that quietly
+         * took over again two minutes later would look like the app changing
+         * songs on its own.
          */
-        select(id) {
+        select(id, fromQueue = false) {
             const changed = id !== this.trackId;
+
+            if (! fromQueue) {
+                this.leavePlaylist();
+            }
 
             this.trackId = id;
             write(KEY_TRACK, id);
@@ -301,12 +476,23 @@ document.addEventListener('alpine:init', () => {
         },
     });
 
+    /*
+     * Edits made on the kid's music page, straight into the store.
+     *
+     * On the window rather than on the header's own markup, because the two are
+     * different Livewire renders of the same screen and the header's `x-data`
+     * expression is evaluated exactly once — see loadPlaylists().
+     */
+    window.addEventListener('playlists-updated', (event) => {
+        window.Alpine.store('music').loadPlaylists(event.detail?.playlists ?? []);
+    });
+
     /**
      * The header control. Owns nothing but the picker panel — every piece of
      * state a song has is on the store, so the control can be destroyed and
      * rebuilt by a navigation without the music noticing.
      */
-    window.Alpine.data('fqMusic', (tracks = [], latestAt = 0) => ({
+    window.Alpine.data('fqMusic', (tracks = [], latestAt = 0, playlists = []) => ({
         open: false,
 
         /**
@@ -316,7 +502,7 @@ document.addEventListener('alpine:init', () => {
         openAlbum: null,
 
         init() {
-            this.$store.music.load(tracks, latestAt);
+            this.$store.music.load(tracks, latestAt, playlists);
         },
 
         get music() {
@@ -368,14 +554,24 @@ document.addEventListener('alpine:init', () => {
             this.openAlbum = this.openAlbum === album ? null : album;
         },
 
+        /** How many of a playlist's songs are actually in the library today. */
+        countIn(playlist) {
+            return playlist.trackIds.length;
+        },
+
         get label() {
             if (this.music.blocked) {
                 return 'Tap anywhere to start the music';
             }
 
             const title = this.music.current()?.title ?? 'No songs yet';
+            // The playlist first when there is one: it is the bigger fact about
+            // what is happening, and the song under it changes on its own.
+            const what = this.music.playlist()
+                ? this.music.playlist().name + ' — ' + title
+                : title;
 
-            return this.music.playing ? 'Music on — ' + title : 'Music off — ' + title;
+            return this.music.playing ? 'Music on — ' + what : 'Music off — ' + what;
         },
     }));
 });
