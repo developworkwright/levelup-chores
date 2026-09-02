@@ -337,20 +337,50 @@ document.addEventListener('alpine:init', () => {
                 // playlist's whole advance mechanism.
                 this.el.addEventListener('ended', () => this.advance());
 
-                // The length arrives well before the song is playable, and
-                // changes again on a variable-bitrate mp3 the browser had to
-                // guess at — so both events, and only finite numbers.
+                /**
+                 * How long the song is, as best as the browser currently knows.
+                 *
+                 * Deliberately not trusting `duration` alone. A file served
+                 * without a content length — chunked, or through a proxy that
+                 * re-encodes on the way out — reports Infinity until the last
+                 * byte lands, and a VBR mp3 with no Xing header revises its
+                 * guess as it goes. What the browser will actually let us jump
+                 * to is the seekable range, which is real from the first chunk,
+                 * so that is the fallback rather than giving up on a bar.
+                 */
                 const measure = () => {
-                    this.duration = Number.isFinite(this.el.duration) ? Math.floor(this.el.duration) : 0;
+                    let length = this.el.duration;
+
+                    if (! Number.isFinite(length) && this.el.seekable.length > 0) {
+                        length = this.el.seekable.end(this.el.seekable.length - 1);
+                    }
+
+                    const whole = Number.isFinite(length) && length > 0 ? Math.floor(length) : 0;
+
+                    // Guarded because this runs on `timeupdate` as well: writing
+                    // the same number back four times a second would re-run
+                    // every binding in the panel for nothing.
+                    if (whole !== this.duration) {
+                        this.duration = whole;
+                    }
                 };
 
                 this.el.addEventListener('loadedmetadata', measure);
                 this.el.addEventListener('durationchange', measure);
+                // Buffering grows the seekable range, which is the length when
+                // the file did not come with one.
+                this.el.addEventListener('progress', measure);
 
                 // Fires about four times a second, and also on every seek,
                 // which is what moves the clock back to where a kid dropped
                 // the thumb. Nothing to do while they are still holding it.
                 this.el.addEventListener('timeupdate', () => {
+                    // Measuring here too so a length that arrives by a route
+                    // none of the events above covered still turns the bar on
+                    // within a quarter second of the song playing, rather than
+                    // leaving it dead for the whole track with no way back.
+                    measure();
+
                     if (this.scrubAt === null) {
                         this.position = Math.floor(this.el.currentTime);
                     }
@@ -545,8 +575,15 @@ document.addEventListener('alpine:init', () => {
                 return;
             }
 
-            this.el.currentTime = seconds;
-            this.position = seconds;
+            /*
+             * Throws rather than clamping in one case: a file the browser has
+             * decided it cannot seek in at all. Nothing to do about it, and it
+             * must not take the rest of the panel down with it.
+             */
+            try {
+                this.el.currentTime = seconds;
+                this.position = seconds;
+            } catch (e) {}
         },
 
         /**
