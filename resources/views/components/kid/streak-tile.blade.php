@@ -28,23 +28,46 @@
     'closesAt' => null,
     'secured' => false,
     'overtime' => false,
+    'compact' => false,
 ])
 
 @php
-    $tile = 'relative flex h-[52px] w-[92px] shrink-0 flex-col items-end justify-center rounded-[15px] border bg-fq-sunk px-3 transition';
+    /*
+     * `compact` is the kid header's size — and it is a *phone* size, not a
+     * small size. The identity row has seven things in it and 390px to put
+     * them in, which is the only reason any of this shrinks; on anything wider
+     * the tile goes back to being readable across a room, which is what a
+     * countdown pinned above every page is for.
+     *
+     * So compact carries `md:` twins of everything it shrinks, and the two
+     * branches meet at the full size rather than diverging. Getting this wrong
+     * the other way is what made the first landing of the one-row header look
+     * like a phone screenshot pasted into a desktop page.
+     *
+     * A prop rather than two components: the three states below are the whole
+     * substance of this thing, and a copy of them at another size is two
+     * places for "past bedtime" to be got wrong.
+     */
+    $tile = $compact
+        ? 'relative flex shrink-0 flex-col items-end rounded-[10px] border bg-fq-sunk px-[8px] py-[5px] transition md:rounded-[15px] md:px-3 md:py-[8px]'
+        : 'relative flex h-[52px] w-[92px] shrink-0 flex-col items-end justify-center rounded-[15px] border bg-fq-sunk px-3 transition';
+
+    $value = $compact ? 'font-baloo text-[14px] leading-none font-extrabold md:text-[19px]' : 'font-baloo text-[17px] leading-none font-extrabold';
+    $glyph = $compact ? 'font-baloo text-[15px] leading-none font-extrabold md:text-[22px]' : 'font-baloo text-[24px] leading-none font-extrabold';
+    $label = $compact ? 'mt-[2px] font-mono-fq text-[7px] whitespace-nowrap md:mt-[3px] md:text-[9px]' : 'font-mono-fq text-[9px]';
 @endphp
 
 @if ($secured)
     <a href="{{ $href }}" title="Today's streak day is safe" class="{{ $tile }} border-fq-lime">
         {{-- Nothing left to count, so the tick takes the space the number would
              have had. It is the whole message. --}}
-        <span class="font-baloo text-[24px] leading-none font-extrabold text-fq-lime">&#10003;</span>
-        <span class="font-mono-fq text-[9px] text-fq-lime">STREAK SAFE</span>
+        <span class="{{ $glyph }} text-fq-lime">&#10003;</span>
+        <span class="{{ $label }} text-fq-lime">{{ $compact ? "SAFE" : "STREAK SAFE" }}</span>
     </a>
 @elseif ($overtime || ! $closesAt)
     <a href="{{ $href }}" title="Past bedtime — the day resets soon" class="{{ $tile }} border-fq-danger">
-        <span class="font-baloo text-[22px] leading-none font-extrabold text-fq-danger">&#9790;</span>
-        <span class="font-mono-fq text-[9px] text-fq-danger">PAST BED</span>
+        <span class="{{ $glyph }} text-fq-danger">&#9790;</span>
+        <span class="{{ $label }} text-fq-danger">PAST BED</span>
     </a>
 @else
     <a
@@ -80,7 +103,7 @@
         x-on:destroy="clearInterval(timer)"
         class="{{ $tile }} border-fq-streak"
     >
-        <span class="font-baloo text-[17px] leading-none font-extrabold text-fq-streak" x-text="remaining"></span>
-        <span class="font-mono-fq text-[9px] text-fq-text-4">TILL BED</span>
+        <span class="{{ $value }} text-fq-streak" x-text="remaining"></span>
+        <span class="{{ $label }} text-fq-text-4">TILL BED</span>
     </a>
 @endif

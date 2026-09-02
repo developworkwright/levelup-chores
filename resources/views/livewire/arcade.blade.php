@@ -1,35 +1,53 @@
 <?php
 
-use App\Models\ArcadeScore;
+use App\Models\Profile;
 use App\Services\ArcadeService;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\RateLimiter;
 use Livewire\Volt\Component;
 
 /**
- * The arcade cabinet in the lobby: the game, and this week's board.
+ * The arcade cabinet: the game, and this week's board.
  *
- * Its own component rather than part of the login page, for one practical
- * reason — posting a score re-renders whatever component owns the board, and
- * the login page is not something that should be re-rendering while a kid is
- * mid-run. The canvas sits behind `wire:ignore` besides, but keeping the two
- * apart means the avatar picker never has to think about the game at all.
+ * Its own component rather than part of a page, for one practical reason —
+ * posting a score re-renders whatever component owns the board, and nothing
+ * around it should be re-rendering while somebody is mid-run. The canvas sits
+ * behind `wire:ignore` besides.
+ *
+ * It stood on the public login page until the board started carrying real
+ * names; both consoles draw it now, which is the whole of what "parents
+ * included" cost. See ArcadeService for what moving behind the PIN changed and
+ * what it deliberately did not.
  */
 new class extends Component
 {
     /** Highlights the row the player just put there, for the rest of the visit. */
     public ?int $postedId = null;
 
+    public function mount(): void
+    {
+        // Whoever opens the cabinet pays out the weeks nobody has collected —
+        // see ArcadeService::settle() for why there is no scheduler behind it.
+        // On mount rather than in with(), so it happens once a visit rather
+        // than on every round trip the game makes.
+        app(ArcadeService::class)->settle($this->player()->household);
+    }
+
     /**
      * Post a finished run to the board.
      *
-     * The score arrives from the browser, so it is a claim: `ArcadeService`
-     * decides whether it is a believable one, and the codename is rebuilt
-     * server-side from two indexes rather than accepted as text. Nothing that
-     * arrives here can put an arbitrary string on a page anyone can read.
+     * The score arrives from the browser, so it is a claim and `ArcadeService`
+     * decides whether it is a believable one. The *name* never arrives at all:
+     * it is read off the signed-in profile here, which is what keeps a typed
+     * string off a board the whole house reads.
      */
-    public function post(int $score, int $adjective, int $noun): void
+    public function post(int $score): void
     {
-        $throttle = 'arcade-post:'.session()->getId();
+        $player = $this->player();
+
+        // Per profile rather than per session, now that there is a profile to
+        // count against: a shared tablet is one session and several players.
+        $throttle = 'arcade-post:'.$player->id;
 
         if (RateLimiter::tooManyAttempts($throttle, ArcadeService::POSTS_PER_HOUR)) {
             return;
@@ -37,23 +55,34 @@ new class extends Component
 
         RateLimiter::hit($throttle, 3600);
 
-        $posted = app(ArcadeService::class)->post($score, $adjective, $noun);
+        $this->postedId = app(ArcadeService::class)->post($player, $score)?->id;
+    }
 
-        $this->postedId = $posted?->id;
+    private function player(): Profile
+    {
+        $profile = Auth::guard('profile')->user();
+
+        abort_unless($profile instanceof Profile, 403);
+
+        return $profile;
     }
 
     public function with(): array
     {
         $arcade = app(ArcadeService::class);
-        $best = $arcade->allTimeBest();
+        $player = $this->player();
+        $household = $player->household;
+        $best = $arcade->allTimeBest($household);
 
         return [
             'arcade' => $arcade,
-            'scores' => $arcade->weeklyTop(),
+            'player' => $player,
+            'scores' => $arcade->weeklyTop($household),
             'best' => $best,
             'bestAltitude' => $best ? $arcade->altitude($best->score) : null,
             'weekStart' => $arcade->weekStartedOn(),
-            'vocabulary' => ArcadeService::vocabulary(),
+            'champion' => $arcade->lastChampion($household),
+            'prize' => ArcadeService::PRIZE_TICKETS,
             'milestones' => ArcadeService::MILESTONES,
         ];
     }
@@ -75,7 +104,7 @@ new class extends Component
              running animation frame. --}}
         <div
             wire:ignore
-            x-data="fqStacker(@js($vocabulary), @js($milestones))"
+            x-data="fqStacker(@js($milestones))"
             x-on:pointerdown.prevent="$el.focus(); tap()"
             x-on:keydown.space.prevent="tap()"
             x-on:keydown.enter.prevent="tap()"
@@ -140,23 +169,21 @@ new class extends Component
                     <p class="-mt-1 font-mono-fq text-[10px] tracking-[0.18em] text-fq-text-5 uppercase">floors</p>
                     <p class="font-baloo text-[17px] font-bold text-fq-text-2" x-text="altitude"></p>
 
+                    {{-- The player's own name, and no way to change it.
+
+                         There was a rolled codename here with a re-roll button
+                         beside it, for as long as this cabinet stood on a page
+                         a stranger could open. Behind the PIN the board is the
+                         family's, so a run says who did it — and it still isn't
+                         typed: the name comes off the profile server-side, so
+                         nothing anybody enters can reach the board. --}}
                     <div class="mt-1 flex w-full flex-col items-center gap-[6px]" x-show="!posted">
                         <p class="font-mono-fq text-[9px] tracking-[0.18em] text-fq-text-5 uppercase">Posting as</p>
 
-                        <div class="flex items-center gap-2">
-                            <span
-                                class="rounded-full border border-fq-line-3 bg-fq-sunk px-3 py-[5px] font-mono-fq text-[11px] font-semibold tracking-[0.06em] text-fq-cyan"
-                                x-text="codename"
-                            ></span>
-                            {{-- No text box anywhere in this feature: the name is
-                                 rolled, not typed, because the board is public. --}}
-                            <button
-                                type="button"
-                                x-on:pointerdown.stop.prevent="rollCodename()"
-                                aria-label="Roll a different codename"
-                                class="flex h-7 w-7 items-center justify-center rounded-lg border border-fq-line-2 bg-fq-sunk text-[11px] text-fq-text-4 transition hover:text-fq-text"
-                            >&#8635;</button>
-                        </div>
+                        <span
+                            class="rounded-full border px-3 py-[5px] font-baloo text-[13px] font-bold"
+                            style="border-color: {{ $player->color->cssVar() }}; color: {{ $player->color->cssVar() }}"
+                        >{{ $player->name }}</span>
                     </div>
 
                     <p
@@ -196,6 +223,25 @@ new class extends Component
                 </span>
             </div>
 
+            {{-- What the week is worth, said before the board rather than
+                 after it: a prize nobody knows about is not a prize. The
+                 grown-ups' half is a joke rather than fine print — they are on
+                 the board to be beaten, and it works better said out loud. --}}
+            <p class="rounded-[12px] border border-fq-ticket-line px-3 py-[7px] text-[11.5px] leading-snug text-fq-text-3" style="background: var(--fq-gold-fill)">
+                <span class="font-bold text-fq-lime">{{ $prize }} bonus {{ Str::plural('ticket', $prize) }}</span>
+                to the tallest tower when the week ends on Sunday.
+                <span class="text-fq-text-5">Grown-ups can win the week, but not the tickets.</span>
+            </p>
+
+            @if ($champion)
+                <p class="font-mono-fq text-[9px] leading-relaxed tracking-[0.12em] text-fq-text-6 uppercase">
+                    Last champion &middot; {{ $champion->profile?->name }} &middot; {{ $champion->score }} floors
+                    @if ($champion->tickets > 0)
+                        &middot; won {{ $champion->tickets }} {{ Str::plural('ticket', $champion->tickets) }}
+                    @endif
+                </p>
+            @endif
+
             @if ($scores->isEmpty())
                 <p class="rounded-[14px] border border-dashed border-fq-line-2 px-4 py-6 text-center text-[12px] text-fq-text-4">
                     Nobody has stacked anything yet this week. The board resets every Monday.
@@ -219,7 +265,7 @@ new class extends Component
                             >{{ $i + 1 }}</span>
 
                             <span class="min-w-0 flex-1 truncate font-mono-fq text-[11px] font-semibold tracking-[0.04em] text-fq-chip-text">
-                                {{ $score->codename }}
+                                {{ $score->displayName() }}
                             </span>
 
                             <span class="shrink-0 font-mono-fq text-[9px] tracking-[0.1em] text-fq-text-6 uppercase">
@@ -236,7 +282,7 @@ new class extends Component
 
             @if ($best)
                 <p class="font-mono-fq text-[9px] leading-relaxed tracking-[0.12em] text-fq-text-6 uppercase">
-                    All-time record &middot; {{ $best->score }} floors &middot; {{ $best->codename }}
+                    All-time record &middot; {{ $best->score }} floors &middot; {{ $best->displayName() }}
                     <br>{{ $bestAltitude }}
                 </p>
             @endif

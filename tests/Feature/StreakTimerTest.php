@@ -343,8 +343,12 @@ class StreakTimerTest extends TestCase
 
         Auth::guard('profile')->login($this->kid);
 
+        // "SAFE", not "STREAK SAFE": the header tile is drawn compact now that
+        // the whole identity row is 34px tall, and the tick above it is doing
+        // most of the talking. The full label is still what the tile says
+        // anywhere it is given the room.
         Volt::test('kid.loot')
-            ->assertSee('STREAK SAFE')
+            ->assertSee('SAFE')
             ->assertDontSee('TILL BED');
     }
 

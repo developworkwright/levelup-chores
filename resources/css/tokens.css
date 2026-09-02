@@ -317,6 +317,24 @@
     );
     --fq-rank-doomlord-glow: rgba(255, 138, 199, 0.55);
 
+    /*
+     * The kid navigation, from the design_handoff_kid_nav bundle.
+     *
+     * Its own border is a shade under --fq-line: the header and the rail are
+     * permanent chrome and have to recede behind the page, while a card that
+     * wants attention keeps the brighter line. The count colour sits outside
+     * the six-accent cycle for the same reason the streak's ruby does — a kid
+     * whose colour is coral must never look like a waiting trade.
+     */
+    --fq-nav-line: #241539;
+    --fq-count: #ff6b8a;
+    --fq-count-ink: #2a0a14;
+    /* The flat gold the active rail tab and the ticket tile share. */
+    --fq-gold-fill: #2a2405;
+    /* The shop's blue, alongside the green and the pink already here. */
+    --fq-blue: #6bd5ff;
+    --fq-blue-deep: #0d2634;
+
     /* The wheel is a wooden carnival prop, not a UI surface. */
     --fq-wheel-rim: repeating-conic-gradient(#2b1c10 0deg 3deg, #1c120a 3deg 6deg);
     --fq-wheel-ring: #3a2a18;
@@ -402,6 +420,13 @@
     --color-fq-steel-text: var(--fq-steel-text);
     --color-fq-steel-label: var(--fq-steel-label);
     --color-fq-steel-edge: var(--fq-steel-edge);
+
+    --color-fq-nav-line: var(--fq-nav-line);
+    --color-fq-count: var(--fq-count);
+    --color-fq-count-ink: var(--fq-count-ink);
+    --color-fq-gold-fill: var(--fq-gold-fill);
+    --color-fq-blue: var(--fq-blue);
+    --color-fq-blue-deep: var(--fq-blue-deep);
 
     --color-fq-green: var(--fq-green);
     --color-fq-green-ink: var(--fq-green-ink);

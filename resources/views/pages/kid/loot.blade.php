@@ -13,6 +13,7 @@ use App\Services\GratitudeService;
 use App\Services\LuckyBlockService;
 use App\Services\StoreService;
 use Illuminate\Support\Facades\Auth;
+use Livewire\Attributes\Session;
 use Livewire\Volt\Component;
 
 new class extends Component
@@ -252,7 +253,14 @@ new class extends Component
      * How the shelves are grouped. Price is the old view and still the right
      * one for "what can I afford"; category answers "what kind of thing do I
      * want", which is the question a kid who won't read the shop actually has.
+     *
+     * Kept in the session because the Shop is two panels behind one rail
+     * button now: flipping to Bonus and back has to return the kid to the shop
+     * they left, and the grouping is the largest thing about it. It is a
+     * preference besides — nobody picks a way of reading the shelves and means
+     * it for one visit.
      */
+    #[Session]
     public string $view = 'category';
 
     public function setView(string $view): void

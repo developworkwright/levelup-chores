@@ -273,9 +273,14 @@ new class extends Component
     class="{{ $audience === 'kid' ? 'relative' : 'mb-4' }}"
 >
     @if ($audience === 'kid')
-        {{-- One of the 52px icon squares the header ends with. Like the mute
-             button beside it the glyph never changes — only its weight does —
-             so the row cannot reflow as the state settles after load. --}}
+        {{-- A 32px square in the nav sheet's header row, beside the mute.
+
+             It sat in the console header until the header became one compact
+             row with no space left in it; alerts are a setting somebody turns
+             on once, not a control anybody reaches for mid-day, so it went
+             where the mute already was. Like the mute the glyph never changes
+             — only its weight does — so the row cannot reflow as the state
+             settles after load. --}}
         <button
             type="button"
             @click="toggle()"
@@ -285,7 +290,7 @@ new class extends Component
             :aria-pressed="state === 'on'"
             :style="state === 'on' ? '' : 'opacity:0.35'"
             :class="['blocked', 'error', 'taken'].includes(state) ? 'text-fq-gold' : (state === 'on' ? 'text-fq-lime' : 'text-fq-text-4')"
-            class="flex h-[52px] w-[52px] items-center justify-center rounded-[15px] border border-fq-line-2 bg-fq-sunk text-[16px] transition hover:text-fq-text disabled:opacity-60"
+            class="grid h-[32px] w-[32px] place-items-center rounded-[10px] border border-fq-line bg-fq-sunk text-[14px] transition hover:text-fq-text disabled:opacity-60"
         >&#128276;</button>
 
         {{-- A tooltip is no use on the devices this runs on, so the explanation
@@ -294,7 +299,7 @@ new class extends Component
         <div
             x-show="showNote && note"
             x-cloak
-            class="absolute top-[58px] right-0 z-30 w-[248px] rounded-[14px] border border-fq-line-2 bg-fq-panel p-3 text-xs leading-relaxed text-fq-text-3 shadow-lg"
+            class="absolute top-[40px] right-0 z-[56] w-[248px] rounded-[14px] border border-fq-line-2 bg-fq-panel p-3 text-xs leading-relaxed text-fq-text-3 shadow-lg"
             x-text="note"
         ></div>
     @else

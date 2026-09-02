@@ -162,10 +162,12 @@ new class extends Component
         </div>
     @endif
 
-    {{-- Last on the page on purpose. This is a door before it is an arcade: the
-         avatars have to be the first thing anyone sees, and the game has to be
-         something you scroll to rather than something you land in. It holds no
-         kid data — see the `arcade_scores` migration for why that is the whole
-         design of it. --}}
-    <livewire:arcade />
+    {{-- The arcade stood here, last on the page, for as long as its board held
+         nothing about anybody. It carries real names now — the house's own
+         scores, with a bonus-ticket prize on the week — and names on a page
+         anybody with the URL can open is exactly what this page is not for.
+         The cabinet is behind the PIN in both consoles instead.
+
+         Nothing replaces it. This page is a door, and a door with a game on it
+         was always the odder of the two things it was doing. --}}
 </div>

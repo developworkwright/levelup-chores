@@ -998,3 +998,82 @@ document.addEventListener('alpine:init', () => {
         },
     }));
 });
+
+/*
+ * Segments keep their own scroll position.
+ *
+ * The kid console's Shop and House pages are each two panels behind one rail
+ * button, switched by a segment row. A segment is a switcher, not an anchor:
+ * flipping to Bonus and back has to return the kid to the same place in the
+ * loot catalogue, or the row is no better than scrolling — and a 200-item
+ * shelf is exactly where "no better than scrolling" stops being survivable.
+ *
+ * The two panels are separate routes, so the offset is kept here rather than
+ * in the DOM. Only a tap on a segment stores or restores anything: arriving at
+ * the Loot Shop from the sheet, or from a link on Home, should land at the top
+ * of the page like any other navigation, and back/forward stays Livewire's.
+ *
+ * sessionStorage rather than memory so it survives a reload, and per session
+ * rather than per login so it cannot outlive the visit it describes. Every
+ * access is guarded: a browser with site data switched off throws on the first
+ * read, and a nav that silently does nothing is much better than one that
+ * throws on every tap.
+ */
+const SEGMENT_SCROLL = 'fq-segment-scroll';
+
+const segmentScroll = {
+    read() {
+        try {
+            return JSON.parse(sessionStorage.getItem(SEGMENT_SCROLL)) ?? {};
+        } catch (e) {
+            return {};
+        }
+    },
+
+    write(state) {
+        try {
+            sessionStorage.setItem(SEGMENT_SCROLL, JSON.stringify(state));
+        } catch (e) {}
+    },
+};
+
+// Capturing, so the offset is read before Livewire begins swapping the page
+// out from under it.
+document.addEventListener('click', (event) => {
+    const segment = event.target.closest?.('[data-fq-segment]');
+
+    if (! segment) {
+        return;
+    }
+
+    const state = segmentScroll.read();
+
+    state[window.location.pathname] = Math.round(window.scrollY);
+    state.pending = new URL(segment.href, window.location.origin).pathname;
+
+    segmentScroll.write(state);
+}, true);
+
+document.addEventListener('livewire:navigated', () => {
+    const state = segmentScroll.read();
+    const pending = state.pending;
+
+    if (! pending) {
+        return;
+    }
+
+    delete state.pending;
+    segmentScroll.write(state);
+
+    // A tap that went somewhere else in the end — a redirect, or a second tap
+    // landing first — should not drop the kid at an offset from another page.
+    if (pending !== window.location.pathname) {
+        return;
+    }
+
+    const top = state[pending];
+
+    if (typeof top === 'number' && top > 0) {
+        window.scrollTo(0, top);
+    }
+});

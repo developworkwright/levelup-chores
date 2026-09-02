@@ -1655,14 +1655,19 @@ class Stacker {
  * ------------------------------------------------------------------ */
 
 document.addEventListener('alpine:init', () => {
-    window.Alpine.data('fqStacker', (vocab, milestones) => ({
+    /*
+     * The codename vocabulary used to be the first argument here, and both it
+     * and the two indexes it rolled are gone: the board is behind the PIN now
+     * and a run is posted under the player's own name, which the server reads
+     * off the signed-in profile rather than taking from this component. There
+     * is still no text input anywhere in the game.
+     */
+    window.Alpine.data('fqStacker', (milestones) => ({
         phase: 'idle',
         score: 0,
         combo: 0,
         altitude: milestones[0][1],
         best: 0,
-        adjective: 0,
-        noun: 0,
         posted: false,
         posting: false,
         muted: localStorage.getItem('fq-muted') === '1',
@@ -1670,7 +1675,6 @@ document.addEventListener('alpine:init', () => {
 
         init() {
             this.best = parseInt(localStorage.getItem('fq-arcade-best') || '0', 10) || 0;
-            this.rollCodename();
 
             this.game = new Stacker(this.$refs.canvas, milestones, {
                 onScore: (floors, altitude, combo) => {
@@ -1697,18 +1701,8 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        get codename() {
-            return vocab.adjectives[this.adjective] + ' ' + vocab.nouns[this.noun];
-        },
-
-        rollCodename() {
-            this.adjective = Math.floor(Math.random() * vocab.adjectives.length);
-            this.noun = Math.floor(Math.random() * vocab.nouns.length);
-        },
-
         play() {
             this.posted = false;
-            this.rollCodename();
             this.score = 0;
             this.combo = 0;
             this.altitude = milestones[0][1];
@@ -1737,7 +1731,7 @@ document.addEventListener('alpine:init', () => {
 
             this.posting = true;
 
-            this.$wire.post(this.score, this.adjective, this.noun).then(() => {
+            this.$wire.post(this.score).then(() => {
                 this.posting = false;
                 this.posted = true;
             });

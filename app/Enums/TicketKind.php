@@ -25,6 +25,9 @@ enum TicketKind: string
     /** Paid out to the whole household when a monster goes down. */
     case BossDefeat = 'boss_defeat';
 
+    /** Three, to whoever topped the arcade board for a finished week. */
+    case Arcade = 'arcade';
+
     public function label(): string
     {
         return match ($this) {
@@ -37,6 +40,7 @@ enum TicketKind: string
             self::Gratitude => 'Gratitude',
             self::Sleep => 'Own bed',
             self::BossDefeat => 'Boss defeated',
+            self::Arcade => 'Arcade champion',
         };
     }
 }

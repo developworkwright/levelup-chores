@@ -1,5 +1,5 @@
-{{-- The header's background music control: one 52px square that starts and
-     stops the song, and a narrow tab beside it that opens the picker. The same
+{{-- The header's background music control: one square that starts and stops
+     the song, and a narrow tab beside it that opens the picker. The same
      control in both consoles — the library is the house's, and the playlists it
      offers are whoever is signed in.
 
@@ -11,9 +11,25 @@
      Everything it knows lives in the `music` Alpine store — see
      resources/js/music.js for why the audio is deliberately not an element on
      the page. --}}
-@props(['profile' => null])
+@props(['profile' => null, 'compact' => false])
 
 @php
+    /*
+     * `compact` is the kid header's size, where this control sits in the
+     * identity row beside the tiles. It is a *phone* size with an `md:` twin,
+     * not a small size: 34px on a 390px screen, 46px on anything wider. The
+     * parent console has room for the 52px original at every width.
+     *
+     * Sizes only. Everything below behaves identically at either size, which
+     * is why this is five class strings rather than a second component.
+     */
+    $bar = $compact ? "h-[34px] rounded-[11px] border-fq-line md:h-[46px] md:rounded-[15px] md:border-fq-line-2" : "h-[52px] rounded-[15px] border-fq-line-2";
+    $play = $compact ? "w-[34px] text-[13px] md:w-[46px] md:text-[17px]" : "w-[52px] text-[18px]";
+    $tab = $compact ? "w-[20px] text-[9px] md:w-[26px] md:text-[11px]" : "w-[30px] text-[11px]";
+    // The dropdown hangs off the bottom of the bar, so it moves with it.
+    $drop = $compact ? "sm:top-[40px] md:top-[52px]" : "sm:top-[58px]";
+    $dot = $compact ? "top-[5px] right-[3px] md:top-[8px] md:right-[4px]" : "top-[9px] right-[5px]";
+
     $music = app(App\Services\MusicService::class);
 
     // Only what the player needs. The library also carries each song's storage
@@ -50,7 +66,7 @@
         @click.outside="open = false"
         class="relative shrink-0"
     >
-        <div class="flex h-[52px] items-stretch overflow-hidden rounded-[15px] border border-fq-line-2 bg-fq-sunk">
+        <div class="flex items-stretch overflow-hidden border bg-fq-sunk {{ $bar }}">
             <button
                 type="button"
                 @click="music.toggle()"
@@ -62,7 +78,7 @@
                      settles after load. --}}
                 :style="music.playing ? '' : 'opacity:0.35'"
                 :class="music.blocked ? 'text-fq-gold' : (music.playing ? 'text-fq-lime' : 'text-fq-text-4')"
-                class="flex w-[52px] items-center justify-center text-[18px] transition hover:text-fq-text"
+                class="flex items-center justify-center transition hover:text-fq-text {{ $play }}"
             >&#9835;</button>
 
             {{-- `relative` so the marker can sit on its corner. --}}
@@ -72,7 +88,7 @@
                 :aria-expanded="open"
                 :title="music.hasNew ? 'New music — choose a song' : 'Choose a song'"
                 :aria-label="music.hasNew ? 'New music — choose a song' : 'Choose a song'"
-                class="relative flex w-[30px] items-center justify-center border-l border-fq-line-2 text-[11px] text-fq-text-4 transition hover:text-fq-text"
+                class="relative flex items-center justify-center border-l border-fq-line-2 text-fq-text-4 transition hover:text-fq-text {{ $tab }}"
                 :class="open ? 'text-fq-text' : ''"
             >
                 &#9662;
@@ -84,7 +100,7 @@
                 <span
                     x-show="music.hasNew"
                     x-cloak
-                    class="pointer-events-none absolute top-[9px] right-[5px] h-[7px] w-[7px] rounded-full"
+                    class="pointer-events-none absolute h-[7px] w-[7px] rounded-full {{ $dot }}"
                     style="background: var(--fq-lime); box-shadow: 0 0 0 2px var(--fq-sunk)"
                 ></span>
             </button>
@@ -111,7 +127,7 @@
                  button and ran off the right of the screen. The two properties
                  are set separately here so nothing depends on which of two
                  same-specificity utilities Tailwind happens to emit last. --}}
-            class="fixed inset-x-0 bottom-0 z-40 flex max-h-[72vh] flex-col rounded-t-[18px] border-t border-fq-line-2 bg-fq-panel p-3 pb-[max(12px,env(safe-area-inset-bottom))] shadow-lg sm:absolute sm:top-[58px] sm:right-0 sm:bottom-auto sm:left-auto sm:w-[288px] sm:rounded-[14px] sm:border sm:pb-3"
+            class="fixed inset-x-0 bottom-0 z-40 flex max-h-[72vh] flex-col rounded-t-[18px] border-t border-fq-line-2 bg-fq-panel p-3 pb-[max(12px,env(safe-area-inset-bottom))] shadow-lg sm:absolute {{ $drop }} sm:right-0 sm:bottom-auto sm:left-auto sm:w-[288px] sm:rounded-[14px] sm:border sm:pb-3"
         >
             <p class="mb-2 shrink-0 font-mono-fq text-[10px] tracking-wide text-fq-text-4">MUSIC</p>
 
