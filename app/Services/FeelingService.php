@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\Feeling;
 use App\Enums\FeelingVisibility;
 use App\Models\FeelingEntry;
+use App\Models\FeelingReply;
 use App\Models\FeelingWord;
 use App\Models\Household;
 use App\Models\Profile;
@@ -43,6 +44,9 @@ class FeelingService
     /** Long enough for a real reason, short enough to stay a sentence or two. */
     public const MAX_BECAUSE = 500;
 
+    /** Same again for a grown-up's answer. This is a note, not a lecture. */
+    public const MAX_REPLY = 500;
+
     /** The day the card is asking about. */
     public function todaysDate(Household $household): Carbon
     {
@@ -55,7 +59,7 @@ class FeelingService
 
         return FeelingEntry::where('profile_id', $profile->id)
             ->whereDate('felt_on', $date)
-            ->with('word')
+            ->with(['word', 'replies.author'])
             ->first();
     }
 
@@ -227,6 +231,55 @@ class FeelingService
         return app(FeelingLock::class)->open($pin, (string) $entry->lock_salt, (string) $entry->because_locked);
     }
 
+    /**
+     * A grown-up saying something back.
+     *
+     * Null when the author isn't a parent, when the entry isn't in their house,
+     * when there is nothing to say, or when it is their own entry — replying to
+     * yourself is not a thing this is for.
+     *
+     * Deliberately notifies nobody. See the replies migration: the moment a
+     * hard answer summons a parent, saying something has a consequence, and
+     * this card only works while it has none.
+     */
+    public function reply(Profile $author, int $entryId, string $body): ?FeelingReply
+    {
+        if (! $author->isParent()) {
+            return null;
+        }
+
+        $body = mb_substr(trim($body), 0, self::MAX_REPLY);
+
+        if ($body === '') {
+            return null;
+        }
+
+        $entry = FeelingEntry::where('household_id', $author->household_id)->find($entryId);
+
+        if (! $entry || (int) $entry->profile_id === (int) $author->id) {
+            return null;
+        }
+
+        return FeelingReply::create([
+            'household_id' => $author->household_id,
+            'feeling_entry_id' => $entry->id,
+            'profile_id' => $author->id,
+            'body' => $body,
+        ]);
+    }
+
+    /**
+     * Take back something you said. Only ever your own — a parent cannot delete
+     * the other parent's words, and nobody can delete one off a kid's page but
+     * the grown-up who wrote it.
+     */
+    public function deleteReply(Profile $author, int $replyId): bool
+    {
+        $reply = FeelingReply::where('profile_id', $author->id)->find($replyId);
+
+        return $reply ? (bool) $reply->delete() : false;
+    }
+
     /** Collapses whitespace, caps the length, and trims what the cap left behind. */
     private function normalizeLabel(string $label): string
     {
@@ -395,7 +448,7 @@ class FeelingService
             ->whereDate('felt_on', $this->todaysDate($household))
             // Eager, because the strip asks every row for its label, glyph and
             // color — a lazy load here is a query per person in the house.
-            ->with('word')
+            ->with(['word', 'replies.author'])
             ->get()
             ->keyBy('profile_id');
 
@@ -411,6 +464,15 @@ class FeelingService
                     // Resolved here rather than in the view, so a template can
                     // never accidentally print a reason it shouldn't have.
                     'because' => $entry?->becauseVisibleTo($viewer) ? $entry->because : null,
+                    // Same rule, same reason: filtered here so a sibling's
+                    // template has nothing to leak. Empty for them always.
+                    'replies' => $entry?->repliesVisibleTo($viewer)
+                        ? $entry->replies
+                        : collect(),
+                    // A grown-up can answer anybody's day but their own.
+                    'canReply' => $entry !== null
+                        && $viewer->isParent()
+                        && (int) $entry->profile_id !== (int) $viewer->id,
                 ];
             })
             ->values();
@@ -434,6 +496,9 @@ class FeelingService
             // Whether to draw the cross beside them. Adding is everyone's;
             // removing is a grown-up's, see retireWord().
             'canRetireWords' => $profile->isParent(),
+            // So the card can tell which replies are the viewer's own to take
+            // back. Nobody deletes the other parent's words.
+            'viewerId' => (int) $profile->id,
             // How many people the strip is still waiting on. Said as a count
             // rather than as names: "three still to go" is news about the day,
             // and a list of who hasn't answered is a list of people to chase.

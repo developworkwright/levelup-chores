@@ -7,6 +7,7 @@ use App\Enums\FeelingVisibility;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * One person's answer for one day. See the create migration for why it pays
@@ -65,6 +66,29 @@ class FeelingEntry extends Model
     public function word(): BelongsTo
     {
         return $this->belongsTo(FeelingWord::class, 'feeling_word_id');
+    }
+
+    /** What the grown-ups said back. Oldest first, so it reads as a thread. */
+    public function replies(): HasMany
+    {
+        return $this->hasMany(FeelingReply::class)->oldest('id');
+    }
+
+    /**
+     * Whether `$viewer` may read the replies on this entry.
+     *
+     * The person it is about, and the grown-ups. Never a sibling: being
+     * answered in front of the whole house turns a private moment into a scene,
+     * and a kid who has been publicly parented once here will not write
+     * anything true on this card again.
+     */
+    public function repliesVisibleTo(Profile $viewer): bool
+    {
+        if ((int) $viewer->household_id !== (int) $this->household_id) {
+            return false;
+        }
+
+        return (int) $viewer->id === (int) $this->profile_id || $viewer->isParent();
     }
 
     /*

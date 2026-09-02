@@ -230,6 +230,23 @@ new class extends Component
         }
     }
 
+    /**
+     * Say something back to one of the kids.
+     *
+     * Notifies nothing and nobody. It appears on their own card when they next
+     * open it — the way a note left on a pillow does.
+     */
+    public function replyToFeeling(int $entryId, string $body): void
+    {
+        app(FeelingService::class)->reply($this->profile, $entryId, $body);
+    }
+
+    /** Take back your own words. Never the other parent's. */
+    public function deleteFeelingReply(int $replyId): void
+    {
+        app(FeelingService::class)->deleteReply($this->profile, $replyId);
+    }
+
     public function retireFeelingWord(int $wordId): void
     {
         app(FeelingService::class)->retireWord($this->profile, $wordId);

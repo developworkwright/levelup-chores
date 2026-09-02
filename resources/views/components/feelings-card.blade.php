@@ -26,6 +26,7 @@
     $waiting = $card['waiting'];
     $words = $card['words'];
     $canRetireWords = $card['canRetireWords'];
+    $viewerId = $card['viewerId'];
 
     // A short row rather than a full picker. Choosing one is the fun part for
     // some kids and friction for others, so it has to stay optional and small
@@ -305,6 +306,25 @@
 
                 {{-- Changing your mind is a plain button, not an undo. Feelings
                      move during a day and the card should say so. --}}
+                {{-- What a grown-up said back, on your own card, waiting for
+                     you rather than announced at you. No badge and no count:
+                     the whole card is built on nothing here being countable,
+                     and an unread marker would make being replied to into
+                     something outstanding. You find it because you opened your
+                     own page, the way you would find a note on your pillow. --}}
+                @foreach ($answered?->replies ?? [] as $reply)
+                    <div
+                        wire:key="own-reply-{{ $reply->id }}"
+                        class="mt-3 rounded-[14px] border-l-2 py-2 pl-3"
+                        style="border-color: var(--fq-violet)"
+                    >
+                        <p class="font-mono-fq text-[10px] tracking-[0.1em] uppercase" style="color: var(--fq-violet)">
+                            {{ $reply->author->name }} said
+                        </p>
+                        <p class="mt-[3px] text-[14px] leading-relaxed text-fq-text-2">{{ $reply->body }}</p>
+                    </div>
+                @endforeach
+
                 <button
                     type="button"
                     @click="editing = true"
@@ -659,6 +679,70 @@
                                  real and being used, which is what makes it
                                  worth trusting. --}}
                             <p class="mt-[6px] font-mono-fq text-[10px] text-fq-text-5">🔒 kept private</p>
+                        @endif
+
+                        {{-- What the grown-ups said back. A sibling never sees
+                             one of these — the service hands them an empty
+                             collection — because being answered in front of the
+                             whole house turns a private moment into a scene. --}}
+                        @foreach ($row['replies'] as $reply)
+                            <div
+                                wire:key="reply-{{ $reply->id }}"
+                                class="mt-2 rounded-[12px] border-l-2 py-1 pl-3"
+                                style="border-color: var(--fq-violet)"
+                            >
+                                <p class="font-mono-fq text-[10px] tracking-[0.1em] uppercase" style="color: var(--fq-violet)">
+                                    {{ $reply->author->name }} said
+                                </p>
+                                <p class="mt-[2px] text-[13px] leading-relaxed text-fq-text-2">{{ $reply->body }}</p>
+
+                                @if ((int) $reply->profile_id === $viewerId)
+                                    <button
+                                        type="button"
+                                        wire:click="deleteFeelingReply({{ $reply->id }})"
+                                        class="mt-1 font-mono-fq text-[10px] text-fq-text-5 underline"
+                                    >Take it back</button>
+                                @endif
+                            </div>
+                        @endforeach
+
+                        @if ($row['canReply'])
+                            {{-- Written because a grown-up looked, not because
+                                 the app fetched them. Nothing about a hard
+                                 answer summons this box. --}}
+                            <div class="mt-2" x-data="{ saying: false, body: '' }" wire:key="reply-box-{{ $entry->id }}">
+                                <button
+                                    x-show="!saying"
+                                    type="button"
+                                    @click="saying = true"
+                                    class="font-mono-fq text-[10px] tracking-[0.1em] text-fq-text-4 uppercase underline"
+                                >Say something back</button>
+
+                                <div x-show="saying" x-cloak>
+                                    <textarea
+                                        x-model="body"
+                                        maxlength="{{ FeelingService::MAX_REPLY }}"
+                                        rows="2"
+                                        placeholder="Just a note. Nothing gets sent to them."
+                                        class="w-full rounded-[12px] border border-fq-line-2 bg-fq-panel px-3 py-2 text-[13px] leading-relaxed text-fq-text placeholder:text-fq-text-5 focus:border-fq-violet focus:outline-none"
+                                    ></textarea>
+
+                                    <div class="mt-1 flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            @click="$wire.replyToFeeling({{ $entry->id }}, body); body = ''; saying = false"
+                                            :disabled="!body.trim()"
+                                            class="rounded-[10px] border border-fq-violet px-3 py-[5px] text-[12px] font-semibold transition enabled:hover:brightness-110 disabled:opacity-40"
+                                            style="background: var(--fq-wash-violet); color: var(--fq-text)"
+                                        >Leave it for them</button>
+                                        <button
+                                            type="button"
+                                            @click="saying = false; body = ''"
+                                            class="text-[11px] text-fq-text-5 underline"
+                                        >Cancel</button>
+                                    </div>
+                                </div>
+                            </div>
                         @endif
                     </div>
                 @endforeach
