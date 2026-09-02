@@ -4,6 +4,8 @@ use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
 use App\Enums\PerkEffect;
 use App\Enums\ProfileRole;
+use App\Enums\SleepBand;
+use App\Enums\SleepCardType;
 use App\Enums\SleepOutcome;
 use App\Enums\TicketKind;
 use App\Models\ChoreCompletion;
@@ -49,6 +51,7 @@ new class extends Component
         // rather than blank fields that would read as "not configured".
         $household = $this->profile->household;
 
+        $this->timezone = $household->timezone;
         $this->eveningWatchHour = $household->evening_watch_hour;
         $this->bedtime = (string) ($household->bedtime ?? '');
         $this->weeklyChoreTarget = (string) ($household->weekly_chore_target ?? '');
@@ -161,6 +164,19 @@ new class extends Component
      */
     public ?int $eveningWatchHour = null;
 
+    /**
+     * The zone every time in the app is written and read in.
+     *
+     * It had no control anywhere in the console until a deadline set for 8:55
+     * closed at 9:55 and took a while to explain. The column defaults to
+     * America/Chicago and the only way to change it was an artisan command, so
+     * a house anywhere else got every wall-clock time in the app — deadlines,
+     * bedtime, the day boundary, the watch hour — silently shifted, and the
+     * app looked self-consistent while it happened: it redisplays a stored
+     * time in the same wrong zone it stored it with.
+     */
+    public string $timezone = '';
+
     /** 'H:i', or '' for a house that doesn't want a bedtime countdown at all. */
     public string $bedtime = '';
 
@@ -171,6 +187,41 @@ new class extends Component
     public string $weeklyPrizeNote = '';
 
     public ?string $arenaMessage = null;
+
+    public ?string $clockMessage = null;
+
+    /**
+     * Set the zone the whole house runs on.
+     *
+     * Its own control and its own button, apart from the Arena's four, because
+     * it is not a preference: it decides what every other time on this page
+     * means. Changing it moves nothing that has already happened — stored
+     * instants are absolute — it changes how they read and how the next
+     * deadline is understood.
+     */
+    public function saveTimezone(): void
+    {
+        // Against PHP's own list rather than a curated one. The select only
+        // offers real zones, but this arrives from a browser, and a bad value
+        // here would put every page in the console into a DateTime exception
+        // rather than merely being wrong.
+        // Fully qualified: a Volt component compiles into the global namespace,
+        // where a `use` for a root-namespace class is an error rather than an
+        // import.
+        if (! in_array($this->timezone, \DateTimeZone::listIdentifiers(), true)) {
+            $this->timezone = $this->profile->household->timezone;
+            $this->clockMessage = 'That is not a timezone I know. Nothing changed.';
+
+            return;
+        }
+
+        $this->profile->household->update(['timezone' => $this->timezone]);
+
+        // The time it is *now* in the zone just chosen, because that is the one
+        // thing a parent can check against the clock on their own wall.
+        $this->clockMessage = 'Saved — the house clock now reads '
+            .HouseholdClock::for($this->profile->household->fresh())->now()->format('g:i A T').'.';
+    }
 
     /**
      * Writes all four at once, from an explicit button.
@@ -224,6 +275,36 @@ new class extends Component
             (bool) $target => 'Saved.',
             default => 'Saved — with no weekly target, the house bar stays off.',
         };
+    }
+
+    /**
+     * The zones on offer, the likely ones first.
+     *
+     * Grouped rather than one flat list of four hundred: a house is in one
+     * place and almost always a familiar one, but a list that stopped at the
+     * familiar ones would be a different kind of trap for the house that
+     * isn't. So the common ones are lifted to the top and everything PHP
+     * knows about follows.
+     *
+     * @return array<string, array<int, string>>
+     */
+    public static function timezoneOptions(): array
+    {
+        $common = [
+            'America/New_York',
+            'America/Chicago',
+            'America/Denver',
+            'America/Phoenix',
+            'America/Los_Angeles',
+            'America/Anchorage',
+            'Pacific/Honolulu',
+            'Europe/London',
+        ];
+
+        return [
+            'Common' => $common,
+            'Everywhere else' => array_values(array_diff(\DateTimeZone::listIdentifiers(), $common)),
+        ];
     }
 
     /**
@@ -302,9 +383,30 @@ new class extends Component
     }
 
     /**
-     * Nudge a kid's own-bed numbers. The card is answered by a small child and
+     * Switch a kid between the two bedtime cards.
+     *
+     * A graduation, so it takes nothing away: the counters of the card being
+     * left behind are frozen rather than cleared, and switching back finds them
+     * exactly where they were. See the hours-card migration for why the two
+     * sets are separate in the first place.
+     */
+    public function setSleepCardType(int $profileId, string $type): void
+    {
+        $kid = $this->ownedKid($profileId);
+        $choice = SleepCardType::tryFrom($type);
+
+        if ($kid && $choice) {
+            $kid->update(['sleep_card_type' => $choice]);
+        }
+    }
+
+    /**
+     * Nudge a kid's bedtime numbers. The card is answered by a child and
      * sometimes the answer is wrong — but the paid marks never move down with
-     * it, so correcting a number can't re-pay a constellation.
+     * it, so correcting a number can't re-pay a constellation or a chest.
+     *
+     * Reads the active card's columns, so a parent fixing an hours run doesn't
+     * silently move the frozen own-bed record underneath it.
      */
     public function adjustSleep(int $profileId, int $nights = 0, int $run = 0): void
     {
@@ -314,10 +416,12 @@ new class extends Component
             return;
         }
 
+        $type = app(SleepService::class)->typeFor($kid);
+
         app(SleepService::class)->adjust(
             $kid,
-            nights: $nights !== 0 ? max(0, $kid->sleep_nights + $nights) : null,
-            run: $run !== 0 ? max(0, $kid->sleep_run + $run) : null,
+            nights: $nights !== 0 ? max(0, $kid->{$type->nightsColumn()} + $nights) : null,
+            run: $run !== 0 ? max(0, $kid->{$type->runColumn()} + $run) : null,
         );
     }
 
@@ -496,6 +600,11 @@ new class extends Component
         return [
             'kids' => $kids,
             'bedtimeOptions' => self::bedtimeOptions(),
+            // What the house clock reads this second. The one number a parent
+            // can check against the clock on their own wall, which is the whole
+            // point of putting this control on a page at all.
+            'houseNow' => HouseholdClock::for($this->profile->household)->now(),
+            'timezones' => self::timezoneOptions(),
             'questSummaries' => $kids->mapWithKeys(fn (Profile $kid) => [$kid->id => $this->questSummaryFor($kid)]),
             'spins' => $kids->mapWithKeys(function (Profile $kid) {
                 $spin = app(SpinService::class)->today($kid);
@@ -822,8 +931,12 @@ new class extends Component
                         class="rounded-[14px] border px-3 py-[10px]"
                         style="border-color: {{ $kid->sleep_card_enabled ? 'var(--fq-line-cool)' : 'var(--fq-line-2)' }}; background: var(--fq-sunk)"
                     >
+                        @php
+                            $sleepType = $kid->sleep_card_type ?? SleepCardType::OwnBed;
+                        @endphp
+
                         <div class="flex items-center justify-between gap-2">
-                            <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Own Bed Card</p>
+                            <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Bedtime Card</p>
                             <button
                                 type="button"
                                 wire:click="toggleSleepCard({{ $kid->id }})"
@@ -832,11 +945,48 @@ new class extends Component
                         </div>
 
                         @if ($kid->sleep_card_enabled)
-                            <p class="mt-[6px] font-mono-fq text-[11px] text-fq-text-2">
-                                {{ $kid->sleep_nights }} nights ·
-                                {{ $kid->sleep_run }} in a row ·
-                                best {{ $kid->sleep_best_run }}
+                            {{-- Which question this kid gets asked. A progression
+                                 rather than a preference — the hours card is
+                                 where a kid goes once staying in their own bed
+                                 has stopped being the hard part. Switching keeps
+                                 both sets of numbers, so it is safe to change
+                                 your mind. --}}
+                            <div class="mt-2 flex gap-1 rounded-[12px] border border-fq-line-2 bg-fq-panel p-[3px]">
+                                @foreach (SleepCardType::cases() as $option)
+                                    <button
+                                        type="button"
+                                        wire:key="sleep-type-{{ $option->value }}-{{ $kid->id }}"
+                                        wire:click="setSleepCardType({{ $kid->id }}, '{{ $option->value }}')"
+                                        @class([
+                                            'flex-1 rounded-[10px] px-2 py-[6px] text-[11px] font-semibold transition',
+                                            'bg-fq-sunk text-fq-lime' => $sleepType === $option,
+                                            'text-fq-text-4' => $sleepType !== $option,
+                                        ])
+                                    >{{ $option === SleepCardType::Hours ? 'Hours' : 'Own bed' }}</button>
+                                @endforeach
+                            </div>
+
+                            <p class="mt-[6px] font-mono-fq text-[10px] text-fq-text-5">
+                                {{ $sleepType->description() }}
                             </p>
+
+                            <p class="mt-[6px] font-mono-fq text-[11px] text-fq-text-2">
+                                {{ $kid->{$sleepType->nightsColumn()} }}
+                                {{ $sleepType === SleepCardType::Hours ? 'full nights' : 'nights' }} ·
+                                {{ $kid->{$sleepType->runColumn()} }} in a row ·
+                                best {{ $kid->{$sleepType->bestRunColumn()} }}
+                            </p>
+
+                            {{-- The card they aren't on, if they ever were. The
+                                 numbers are frozen, not gone, and a parent who
+                                 has just moved a kid up should be able to see
+                                 that nothing was lost in the move. --}}
+                            @if ($sleepType === SleepCardType::Hours && $kid->sleep_nights > 0)
+                                <p class="mt-[3px] font-mono-fq text-[10px] text-fq-text-5">
+                                    Own bed, finished: {{ $kid->sleep_nights }} nights ·
+                                    {{ App\Enums\Constellation::completedFrom($kid->sleep_nights) }} pictures
+                                </p>
+                            @endif
 
                             <div class="mt-2 flex flex-wrap items-center gap-4">
                                 @foreach ([['Nights', 'nights'], ['Run', 'run']] as [$label, $field])
@@ -902,6 +1052,68 @@ new class extends Component
                 </div>
             </div>
         @endforeach
+    </div>
+
+    {{-- Above the Arena card on purpose: every time on that one — the watch
+         hour, bedtime, the day boundary — is a wall-clock time, and this is
+         what decides which wall.
+
+         It had no control anywhere in the console until it cost an evening to
+         diagnose. The column defaults to America/Chicago, the only way to
+         change it was `php artisan household:set`, and a house in another zone
+         got every time in the app shifted while the app looked entirely
+         self-consistent: it redisplays a stored time through the same zone it
+         stored it with, so the deadline field reads back exactly what you
+         typed and closes an hour out. The live clock under the control is the
+         fix for that — it is the one thing a parent can check against their
+         own wall. --}}
+    <div class="mt-[14px] rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
+        <h3 class="font-baloo text-lg font-bold">The house clock</h3>
+        <p class="mt-1 text-sm text-fq-text-2">
+            Every time in the app is this zone — chore deadlines, bedtime, the streak
+            countdown, and the hour the day rolls over. If the clock below doesn't match the
+            one on your wall, everything else here is out by the difference.
+        </p>
+
+        <div class="mt-4 flex flex-wrap items-end gap-[14px]">
+            <div class="min-w-[240px] flex-1">
+                <label for="timezone" class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                    Timezone
+                </label>
+                <select
+                    id="timezone"
+                    wire:model="timezone"
+                    class="mt-2 w-full rounded-[14px] border border-fq-line-2 bg-fq-sunk px-3 py-2 text-sm outline-none"
+                >
+                    @foreach ($timezones as $group => $zones)
+                        <optgroup label="{{ $group }}">
+                            @foreach ($zones as $zone)
+                                <option value="{{ $zone }}">{{ str_replace('_', ' ', $zone) }}</option>
+                            @endforeach
+                        </optgroup>
+                    @endforeach
+                </select>
+            </div>
+
+            <button
+                type="button"
+                wire:click="saveTimezone"
+                class="rounded-[14px] px-4 py-2 font-baloo text-sm font-extrabold"
+                style="background: var(--fq-fill-gold-soft); color: var(--fq-ink)"
+            >Save clock</button>
+        </div>
+
+        {{-- Rendered server-side from the household's own zone, so it is the
+             app's answer rather than the browser's. A parent comparing this
+             against their wall in one glance is the whole control. --}}
+        <p class="mt-3 text-[12.5px] leading-snug text-fq-text-4">
+            Right now the house clock says
+            <span class="font-mono-fq text-fq-text-2-b">{{ $houseNow->format('g:i A T, D j M') }}</span>.
+        </p>
+
+        @if ($clockMessage)
+            <p class="mt-2 text-[13px]" style="color: var(--fq-lime)">{{ $clockMessage }}</p>
+        @endif
     </div>
 
     {{-- What the Arena reads, plus bedtime — which isn't an Arena setting at

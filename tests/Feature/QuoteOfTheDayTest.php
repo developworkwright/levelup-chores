@@ -6,6 +6,7 @@ use App\Models\Household;
 use App\Models\Profile;
 use App\Models\Quote;
 use App\Notifications\QuoteAdded;
+use App\Services\HouseholdClock;
 use App\Services\QuoteService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -46,7 +47,19 @@ class QuoteOfTheDayTest extends TestCase
         $this->assertNull($quote->said_by);
         $this->assertSame('Mabel', $quote->attribution());
         $this->assertSame($parent->id, $quote->added_by_profile_id);
-        $this->assertTrue($quote->said_on->isSameDay(now()));
+        /*
+         * The *household's* today, not the app's.
+         *
+         * `said_on` is a household day — Chicago in the factory, rolling over
+         * at 4am — and `now()` is UTC. Comparing the two passed for most of the
+         * day and failed every evening between 7pm and midnight Chicago time,
+         * when UTC has already moved on to tomorrow. Nothing about the feature
+         * was ever wrong; the assertion was reading the wrong clock.
+         */
+        $this->assertTrue(
+            $quote->said_on->isSameDay(HouseholdClock::for($household)->today()),
+            'A quote should be filed under the household day it was said on.',
+        );
     }
 
     public function test_a_blank_quote_is_refused(): void
@@ -115,9 +128,14 @@ class QuoteOfTheDayTest extends TestCase
     public function test_the_home_card_prefers_today_and_keeps_every_contender(): void
     {
         $household = $this->household();
+        // Said today as the *house* reckons it. The factory's default files a
+        // quote under the app's UTC date, which is a different day from about
+        // 7pm Chicago — see the assertion in the first test in this file.
+        $today = HouseholdClock::for($household)->today()->toDateString();
+
         Quote::factory()->for($household)->daysAgo(3)->create(['text' => 'Older']);
-        Quote::factory()->for($household)->create(['text' => 'First today']);
-        Quote::factory()->for($household)->create(['text' => 'Second today']);
+        Quote::factory()->for($household)->create(['text' => 'First today', 'said_on' => $today]);
+        Quote::factory()->for($household)->create(['text' => 'Second today', 'said_on' => $today]);
 
         $day = app(QuoteService::class)->latestDay($household);
 

@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\AccentColor;
 use App\Enums\ProfileRole;
 use App\Enums\Rank;
+use App\Enums\SleepCardType;
 use App\Enums\TradeAsset;
 use Illuminate\Auth\Authenticatable as AuthenticatableTrait;
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -58,12 +59,18 @@ class Profile extends Model implements Authenticatable
         'saving_for_store_item_id',
         'daily_points_goal',
         'sleep_card_enabled',
+        'sleep_card_type',
         'sleep_nights',
         'sleep_run',
         'sleep_best_run',
         'sleep_constellations_paid',
         'sleep_run_paid_through',
         'pending_sleep_chest',
+        'sleep_hours_nights',
+        'sleep_hours_run',
+        'sleep_hours_best_run',
+        'sleep_hours_run_paid_through',
+        'pending_sleep_hours_chest',
         'monsters_seen',
         'pending_monster_kills',
     ];
@@ -84,6 +91,7 @@ class Profile extends Model implements Authenticatable
             'loot_seen_at' => 'datetime',
             'quotes_seen_at' => 'datetime',
             'sleep_card_enabled' => 'boolean',
+            'sleep_card_type' => SleepCardType::class,
             'op_spin_armed_at' => 'datetime',
         ];
     }

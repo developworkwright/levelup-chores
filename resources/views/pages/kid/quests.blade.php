@@ -4,6 +4,8 @@ use App\Enums\ChoreCategory;
 use App\Enums\CompletionStatus;
 use App\Enums\PerkEffect;
 use App\Enums\PriceBand;
+use App\Enums\SleepBand;
+use App\Enums\SleepCardType;
 use App\Enums\SleepOutcome;
 use App\Exceptions\BountyUnavailableException;
 use App\Exceptions\InsufficientPointsException;
@@ -621,6 +623,41 @@ new class extends Component
                 default => $choice->response(),
             },
             style: $result['constellation'] || $result['nightPoints'] > 0 ? 'money' : 'heart',
+            motion: 'burst',
+            origin: 'tap',
+        );
+    }
+
+    /**
+     * Answer last night's hours card.
+     *
+     * Takes minutes rather than a band, and the service works out which band
+     * that is — a kid who edits the wire can change what they claim to have
+     * slept, which is between them and their conscience, but they can't pick
+     * the payout directly.
+     */
+    public function answerSleepHours(int $minutes): void
+    {
+        try {
+            $result = app(SleepService::class)->recordHours($this->profile, $minutes);
+        } catch (RuntimeException) {
+            // Already answered, or switched off mid-visit. The card re-renders
+            // showing what they said, which explains it better than a message.
+            return;
+        }
+
+        $this->profile->refresh();
+
+        $this->dispatch(
+            'celebrate',
+            // Hearts rather than coins on the nights that didn't pay: a kid who
+            // slept badly and said so has still done the thing this card is
+            // for, and "+0 pts" would read as being shortchanged for it.
+            message: $result['nightPoints'] > 0
+                ? $result['band']->label().' — '.SleepBand::say($result['minutes'])
+                    .'! +'.number_format($result['nightPoints']).' pts'
+                : $result['band']->response(),
+            style: $result['nightPoints'] > 0 ? 'money' : 'heart',
             motion: 'burst',
             origin: 'tap',
         );
@@ -1403,8 +1440,16 @@ new class extends Component
              The Night Chest used to sit below it as a flat rectangle of its
              own, separated from the run that earns it. It is a rail inside the
              card now, drawn as the actual chest mark. --}}
+        {{-- Which card depends on what this kid has graduated to. Two
+             components rather than one that branches: they share the chest and
+             the run, and nothing else — the own-bed one is mostly sky, and the
+             hours one is mostly stepper. --}}
         @if ($sleepCard)
-            <x-sleep-card :card="$sleepCard" />
+            @if ($sleepCard['type'] === SleepCardType::Hours)
+                <x-sleep-hours-card :card="$sleepCard" />
+            @else
+                <x-sleep-card :card="$sleepCard" />
+            @endif
         @endif
 
         {{-- 3. Gratitude quest. The one quest that isn't work — nothing for a

@@ -24,12 +24,21 @@
     x-effect="document.body.style.overflow = open ? 'hidden' : ''"
     x-on:livewire:navigating.window="open = false; document.body.style.overflow = ''"
 >
+    @php
+        // The glyph carries anything waiting on a page the rail doesn't show,
+        // which since the Arcade took the fourth rail slot means the trades.
+        // So the count is real news now rather than the decoration it was, and
+        // it says what it is — a bare number on a ☰ is a puzzle.
+        $waiting = $count > 0 ? $count.' '.Str::plural('thing', $count).' waiting on you' : null;
+        $label = $waiting === null ? 'All pages' : 'All pages — '.$waiting;
+    @endphp
+
     <button
         type="button"
         x-on:click="open = true"
         :aria-expanded="open"
-        aria-label="All pages"
-        title="All pages"
+        aria-label="{{ $label }}"
+        title="{{ $label }}"
         class="relative grid w-[42px] shrink-0 place-items-center rounded-[11px] border border-fq-line-2 bg-fq-panel-alt transition hover:border-fq-line-focus"
     >
         <i class="fa-solid fa-bars text-[14px] text-fq-cyan"></i>

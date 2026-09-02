@@ -63,7 +63,22 @@
         ['label' => 'Home', 'icon' => 'fa-house', 'pages' => ['home']],
         ['label' => 'Quests', 'icon' => 'fa-flag', 'pages' => ['quests']],
         ['label' => 'Shop', 'icon' => 'fa-gem', 'pages' => ['loot', 'bonus']],
-        ['label' => 'House', 'icon' => 'fa-ranking-star', 'pages' => ['arena', 'trades']],
+        /*
+         * The fourth slot was House — the Arena and the trades — and it is the
+         * Arcade instead.
+         *
+         * Not because the Arena matters less, but because a rail button is for
+         * the thing a kid opens the app *to do*, and those two are things that
+         * happen to them: a sibling sends a swap, a monster loses some health,
+         * and either way the news finds them through a count or a card on Home.
+         * The arcade is the opposite — nothing about it ever comes looking, so
+         * it is worth nothing at all unless it is one tap from everywhere.
+         *
+         * Both keep their rows in the sheet under "The house", and the trades
+         * count that used to ride on this button moved onto the sheet's own
+         * glyph, which is exactly what $sheetCount below is for.
+         */
+        ['label' => 'Arcade', 'icon' => 'fa-gamepad', 'pages' => ['arcade']],
     ];
 
     /*
@@ -113,8 +128,9 @@
     $segments = $segmentGroup['pages'] ?? [];
 
     // What the sheet glyph carries: anything waiting that no rail button is
-    // already showing. Zero today, and deliberately not hard-coded to it — the
-    // next page to grow a count is likelier to be one reached from the sheet.
+    // already showing. It was zero while the rail held House, and this is the
+    // half of swapping that button for the Arcade that had to keep working —
+    // a swap from a sibling is now news that arrives on the ☰ or nowhere.
     $railPages = collect($rail)->flatMap(fn (array $button) => $button['pages'])->all();
     $sheetCount = collect($counts)->reject(fn (int $count, string $key) => in_array($key, $railPages, true))->sum();
 

@@ -618,4 +618,56 @@ class ParentKidsPageTest extends TestCase
 
         Volt::test('parent.kids')->assertForbidden();
     }
+
+    /**
+     * The house clock, which had no control in the console at all until a
+     * deadline set for 8:55 closed at 9:55.
+     *
+     * The column defaults to America/Chicago and could only be changed from an
+     * artisan command, so a house in another zone had every wall-clock time in
+     * the app quietly shifted — and the app hid it, because it redisplays a
+     * stored time through the same zone it stored it with.
+     */
+    public function test_a_parent_can_set_the_household_timezone(): void
+    {
+        $household = Household::factory()->create(['timezone' => 'America/Chicago']);
+        $this->actingAsParent($household);
+
+        Volt::test('parent.kids')
+            ->set('timezone', 'America/New_York')
+            ->call('saveTimezone')
+            ->assertSee('the house clock now reads');
+
+        $this->assertSame('America/New_York', $household->fresh()->timezone);
+    }
+
+    public function test_a_timezone_the_app_does_not_know_is_refused(): void
+    {
+        $household = Household::factory()->create(['timezone' => 'America/Chicago']);
+        $this->actingAsParent($household);
+
+        // It arrives from a browser, and a bad value would put every page in
+        // the console into a DateTime exception rather than merely being wrong.
+        Volt::test('parent.kids')
+            ->set('timezone', 'Middle/Earth')
+            ->call('saveTimezone')
+            ->assertSee('not a timezone I know')
+            // Snapped back, so the control never sits showing a zone the house
+            // is not actually on.
+            ->assertSet('timezone', 'America/Chicago');
+
+        $this->assertSame('America/Chicago', $household->fresh()->timezone);
+    }
+
+    public function test_the_page_says_what_the_house_clock_reads_right_now(): void
+    {
+        // The one number a parent can check against the clock on their own
+        // wall — which is the entire reason this control is worth a card.
+        $household = Household::factory()->create(['timezone' => 'America/New_York']);
+        $this->actingAsParent($household);
+
+        Volt::test('parent.kids')
+            ->assertSee('The house clock')
+            ->assertSee(HouseholdClock::for($household)->now()->format('g:i A T'));
+    }
 }

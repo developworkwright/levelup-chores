@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Enums\Constellation;
 use App\Enums\LedgerKind;
+use App\Enums\SleepBand;
+use App\Enums\SleepCardType;
 use App\Enums\SleepOutcome;
 use App\Enums\TicketKind;
 use App\Models\Household;
@@ -14,8 +16,26 @@ use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 /**
- * The own-bed card: a morning check-in for a kid who is working on sleeping in
- * their own bed.
+ * The bedtime card: a morning check-in, in one of two shapes.
+ *
+ * ## Two cards, and the second is a graduation
+ *
+ * The **own-bed card** asks a kid still learning to stay put whether they did.
+ * The **hours card** asks an older one how long they slept, which is the
+ * question that matters once staying put has stopped being the hard part. A
+ * parent switches a kid from one to the other when the day comes; see
+ * {@see SleepCardType}.
+ *
+ * They do not share counters. A twenty-night own-bed run says nothing about
+ * hours slept, so carrying it across would start the new card on a score
+ * nobody earned — and zeroing the old numbers instead would wipe the sky a kid
+ * spent months drawing, on the morning they moved up. So the own-bed counters
+ * freeze where they stopped and stay on the page as a finished thing, and the
+ * hours counters start at zero. Only the *history table* is shared, so a kid's
+ * nights read as one list across the change rather than restarting.
+ *
+ * What both cards share is the shape of the deal below, which is the part that
+ * makes either of them safe to give a kid who is anxious about sleep.
  *
  * ## Nothing here punishes a bad night
  *
@@ -92,6 +112,17 @@ class SleepService
             && $profile->household->sleep_card_enabled;
     }
 
+    /**
+     * Which card this kid gets. Defaults to the own-bed one for every profile
+     * that predates the hours card, which is what the column default says too —
+     * this coalesce is for the unrefreshed-model trap that
+     * {@see self::constellationPoints()} documents.
+     */
+    public function typeFor(Profile $profile): SleepCardType
+    {
+        return $profile->sleep_card_type ?? SleepCardType::OwnBed;
+    }
+
     /** The night the card is asking about: the one that ended this morning. */
     public function tonightsDate(Household $household): Carbon
     {
@@ -110,12 +141,10 @@ class SleepService
     /**
      * Everything the card draws, or null when this kid isn't being asked.
      *
-     * @return array{answered: ?SleepNight, nights: int, run: int, bestRun: int,
-     *               completed: int, starsLit: int, drawing: Constellation,
-     *               nextMilestone: ?int, previousMilestone: int, pendingChest: ?int,
-     *               runPaidThrough: int,
-     *               prizes: array{night: int, nights: array<string, int>, constellation: int, toGo: int},
-     *               pointsPerDollar: int, earned: array<int, Constellation>}|null
+     * Two shapes, told apart by `type`. Both carry the run, the chest and the
+     * rates; only the own-bed one carries a sky.
+     *
+     * @return array<string, mixed>|null
      */
     public function cardFor(Profile $profile): ?array
     {
@@ -123,9 +152,14 @@ class SleepService
             return null;
         }
 
+        if ($this->typeFor($profile) === SleepCardType::Hours) {
+            return $this->hoursCardFor($profile);
+        }
+
         $nights = (int) $profile->sleep_nights;
 
         return [
+            'type' => SleepCardType::OwnBed,
             'answered' => $this->answerFor($profile),
             'nights' => $nights,
             'run' => (int) $profile->sleep_run,
@@ -159,6 +193,129 @@ class SleepService
     }
 
     /**
+     * The hours card's payload. No sky and no constellation — see the class
+     * docblock for why that half is the own-bed card's alone.
+     *
+     * @return array<string, mixed>
+     */
+    private function hoursCardFor(Profile $profile): array
+    {
+        $run = (int) $profile->sleep_hours_run;
+        $paidThrough = (int) $profile->sleep_hours_run_paid_through;
+
+        return [
+            'type' => SleepCardType::Hours,
+            'answered' => $this->answerFor($profile),
+            'nights' => (int) $profile->sleep_hours_nights,
+            'run' => $run,
+            'bestRun' => (int) $profile->sleep_hours_best_run,
+            'nextMilestone' => $this->nextRunMilestone($run, $paidThrough),
+            'previousMilestone' => $this->previousRunMilestone($run),
+            'pendingChest' => $profile->pending_sleep_hours_chest,
+            'runPaidThrough' => $paidThrough,
+            'bands' => $this->hoursPrizesFor($profile->household),
+            'pointsPerDollar' => (int) $profile->household->points_per_dollar,
+            // Where the stepper opens. Last night's answer if there is one, so
+            // a kid who has already answered sees what they said rather than
+            // the default staring back at them.
+            'startMinutes' => $this->answerFor($profile)?->minutes ?? SleepBand::DEFAULT_MINUTES,
+        ];
+    }
+
+    /**
+     * Answer last night on the hours card, in minutes.
+     *
+     * Same contract as {@see self::record()} — idempotent, transactional, and
+     * incapable of taking anything away. The band is worked out here rather
+     * than passed in, so a kid can't post themselves into the paying one.
+     *
+     * @return array{band: SleepBand, minutes: int, nightPoints: int, chest: ?int}
+     */
+    public function recordHours(Profile $profile, int $minutes): array
+    {
+        if (! $this->isEnabledFor($profile) || $this->typeFor($profile) !== SleepCardType::Hours) {
+            throw new RuntimeException('The hours card is not switched on for this kid.');
+        }
+
+        // Clamped rather than rejected: the stepper can only produce values in
+        // range, so anything outside it is a stale form or a poke at the wire,
+        // and neither deserves to lose the kid their answer for the night.
+        $minutes = max(0, min(SleepBand::MAX_MINUTES, $minutes));
+        $minutes -= $minutes % SleepBand::STEP_MINUTES;
+
+        $household = $profile->household;
+        $date = $this->tonightsDate($household);
+
+        if ($this->answerFor($profile, $date)) {
+            throw new RuntimeException('Last night is already answered.');
+        }
+
+        $band = SleepBand::fromMinutes($minutes);
+
+        $earned = DB::transaction(function () use ($profile, $household, $band, $minutes, $date) {
+            SleepNight::create([
+                'household_id' => $household->id,
+                'profile_id' => $profile->id,
+                'night_date' => $date,
+                'minutes' => $minutes,
+            ]);
+
+            // Every band is paid at its own rate, the short one included. Paid
+            // per night rather than per counter for the same reason the own-bed
+            // card does it — the unique (profile, night_date) row above is the
+            // guard, so a parent nudging the counters later moves the run along
+            // without paying for a night nobody slept.
+            $nightPoints = $this->hoursPointsFor($household, $band);
+
+            if ($nightPoints > 0) {
+                // Named the way the own-bed rows are: the card, the answer and
+                // the night it was about. `night_date` is the morning it ended,
+                // and nobody calls that "Sunday night".
+                $this->ledger->record(
+                    $household,
+                    $profile,
+                    LedgerKind::Earn,
+                    $nightPoints,
+                    "{$profile->name} — Hours card: ".SleepBand::say($minutes)
+                        .' ('.$date->copy()->subDay()->format('D').' night)',
+                );
+            }
+
+            if (! $band->counts()) {
+                // The no-punishment rule, same single line as the own-bed card:
+                // the run stops and nothing else moves. The night still paid.
+                $profile->sleep_hours_run = 0;
+                $profile->save();
+
+                return ['nightPoints' => $nightPoints, 'chest' => null];
+            }
+
+            $profile->sleep_hours_nights++;
+            $profile->sleep_hours_run++;
+            $profile->sleep_hours_best_run = max(
+                (int) $profile->sleep_hours_best_run,
+                (int) $profile->sleep_hours_run,
+            );
+            $profile->save();
+
+            return [
+                'nightPoints' => $nightPoints,
+                'chest' => $this->payRunMilestones($profile),
+            ];
+        });
+
+        // A paying night moves the balance, and `big_saver` is balance-based.
+        $this->badges->evaluate($profile->refresh());
+
+        return [
+            'band' => $band,
+            'minutes' => $minutes,
+            'nightPoints' => $earned['nightPoints'],
+            'chest' => $earned['chest'],
+        ];
+    }
+
+    /**
      * Answer last night. Returns what to celebrate, if anything.
      *
      * Idempotent by the unique index on (profile_id, night_date) and by the
@@ -170,7 +327,7 @@ class SleepService
      */
     public function record(Profile $profile, SleepOutcome $outcome): array
     {
-        if (! $this->isEnabledFor($profile)) {
+        if (! $this->isEnabledFor($profile) || $this->typeFor($profile) !== SleepCardType::OwnBed) {
             throw new RuntimeException('The own-bed card is not switched on for this kid.');
         }
 
@@ -271,13 +428,17 @@ class SleepService
             return false;
         }
 
+        $type = $this->typeFor($profile);
         $priorRun = $this->runBefore($profile, $night->night_date);
 
         $night->saved_at = now();
         $night->save();
 
-        $profile->sleep_run = $priorRun + 1;
-        $profile->sleep_best_run = max((int) $profile->sleep_best_run, (int) $profile->sleep_run);
+        $profile->{$type->runColumn()} = $priorRun + 1;
+        $profile->{$type->bestRunColumn()} = max(
+            (int) $profile->{$type->bestRunColumn()},
+            (int) $profile->{$type->runColumn()},
+        );
         $profile->save();
 
         return true;
@@ -296,7 +457,7 @@ class SleepService
             ->orderByDesc('night_date')
             ->first();
 
-        if (! $latest || $latest->outcome->countsAsOwnBed() || $latest->wasSaved()) {
+        if (! $latest || $latest->counted() || $latest->wasSaved()) {
             return null;
         }
 
@@ -306,7 +467,7 @@ class SleepService
     public function saveReason(Profile $profile): ?string
     {
         if (! $this->isEnabledFor($profile)) {
-            return 'The own-bed card is not switched on for you.';
+            return 'Your bedtime card is not switched on.';
         }
 
         return $this->repairableNight($profile)
@@ -325,7 +486,7 @@ class SleepService
                 ->whereDate('night_date', $cursor)
                 ->first();
 
-            if (! $night || ! ($night->outcome->countsAsOwnBed() || $night->wasSaved())) {
+            if (! $night || ! ($night->counted() || $night->wasSaved())) {
                 return $run;
             }
 
@@ -386,8 +547,10 @@ class SleepService
      */
     private function payRunMilestones(Profile $profile): ?int
     {
-        $run = (int) $profile->sleep_run;
-        $paid = (int) $profile->sleep_run_paid_through;
+        $type = $this->typeFor($profile);
+
+        $run = (int) $profile->{$type->runColumn()};
+        $paid = (int) $profile->{$type->runPaidThroughColumn()};
 
         $owed = array_filter(
             self::RUN_MILESTONES,
@@ -403,16 +566,18 @@ class SleepService
 
         // The mark goes to the highest reached, not the highest that exists —
         // and only ever upward, so a parent nudging back down can't re-pay.
-        $profile->sleep_run_paid_through = $reached;
+        $profile->{$type->runPaidThroughColumn()} = $reached;
         // The chest announces the biggest one, which is the news.
-        $profile->pending_sleep_chest = $reached;
+        $profile->{$type->pendingChestColumn()} = $reached;
         $profile->save();
 
         $this->tickets->record(
             $profile,
             TicketKind::Sleep,
             array_sum($owed),
-            "{$reached} nights in a row in their own bed",
+            $type === SleepCardType::Hours
+                ? "{$reached} full nights in a row"
+                : "{$reached} nights in a row in their own bed",
         );
 
         return $reached;
@@ -427,13 +592,15 @@ class SleepService
      */
     public function openChest(Profile $profile): ?array
     {
-        $run = $profile->pending_sleep_chest;
+        $column = $this->typeFor($profile)->pendingChestColumn();
+
+        $run = $profile->{$column};
 
         if ($run === null) {
             return null;
         }
 
-        $profile->pending_sleep_chest = null;
+        $profile->{$column} = null;
         $profile->save();
 
         return ['nights' => $run, 'tickets' => self::RUN_MILESTONES[$run] ?? 0];
@@ -549,6 +716,38 @@ class SleepService
     }
 
     /**
+     * What a band pays on the hours card right now. Null-coalesced for the same
+     * reason {@see self::constellationPoints()} is.
+     */
+    public function hoursPointsFor(Household $household, SleepBand $band): int
+    {
+        return (int) ($household->{$band->pointsColumn()}
+            ?? $band->defaultPoints((int) $household->points_per_dollar));
+    }
+
+    public function setHoursPointsFor(Household $household, SleepBand $band, int $points): void
+    {
+        $household->update([$band->pointsColumn() => max(0, $points)]);
+    }
+
+    /**
+     * What each band pays, keyed by band value, so the card can price its
+     * bands without knowing which ones exist.
+     *
+     * @return array<string, int>
+     */
+    public function hoursPrizesFor(Household $household): array
+    {
+        $rates = [];
+
+        foreach (SleepBand::cases() as $band) {
+            $rates[$band->value] = $this->hoursPointsFor($household, $band);
+        }
+
+        return $rates;
+    }
+
+    /**
      * The whole prize on offer, for the card to say out loud.
      *
      * The card used to mention none of this: a kid saw a dot appear and the
@@ -586,13 +785,21 @@ class SleepService
      */
     public function adjust(Profile $profile, ?int $nights = null, ?int $run = null): void
     {
+        // Corrects whichever card the kid is actually on. A parent fixing an
+        // hours run must not quietly move the frozen own-bed numbers instead —
+        // those are a finished record now, and the sky is drawn from them.
+        $type = $this->typeFor($profile);
+
         if ($nights !== null) {
-            $profile->sleep_nights = max(0, $nights);
+            $profile->{$type->nightsColumn()} = max(0, $nights);
         }
 
         if ($run !== null) {
-            $profile->sleep_run = max(0, $run);
-            $profile->sleep_best_run = max((int) $profile->sleep_best_run, (int) $profile->sleep_run);
+            $profile->{$type->runColumn()} = max(0, $run);
+            $profile->{$type->bestRunColumn()} = max(
+                (int) $profile->{$type->bestRunColumn()},
+                (int) $profile->{$type->runColumn()},
+            );
         }
 
         $profile->save();
@@ -606,7 +813,10 @@ class SleepService
         //
         // Safe to run on every adjustment: both marks only ever climb, so
         // nudging down and back up pays nothing a second time.
-        $this->payConstellations($profile, $profile->household);
+        if ($type->hasConstellations()) {
+            $this->payConstellations($profile, $profile->household);
+        }
+
         $this->payRunMilestones($profile);
 
         $this->badges->evaluate($profile->refresh());

@@ -140,7 +140,12 @@ class KidHeaderTest extends TestCase
             $this->assertStringContainsString('Home', $rail);
             $this->assertStringContainsString('Quests', $rail);
             $this->assertStringContainsString('Shop', $rail);
-            $this->assertStringContainsString('House', $rail);
+            // The fourth slot held House — the Arena and the trades — and
+            // holds the Arcade instead. See the rail's own comment: those two
+            // are news that comes looking for a kid, and the arcade is the one
+            // page that is worth nothing unless it is a tap from everywhere.
+            $this->assertStringContainsString('Arcade', $rail);
+            $this->assertStringNotContainsString('House', $rail);
         }
     }
 
@@ -157,7 +162,7 @@ class KidHeaderTest extends TestCase
         preg_match_all('/<a\s[^>]*href="([^"]+)"/', $rail, $matches);
 
         $this->assertSame(
-            [route('kid.home'), route('kid.quests'), route('kid.loot'), route('kid.arena')],
+            [route('kid.home'), route('kid.quests'), route('kid.loot'), route('kid.arcade')],
             $matches[1],
             'Each rail button should open the first page behind it.',
         );
@@ -191,14 +196,9 @@ class KidHeaderTest extends TestCase
 
         $this->assertStringContainsString('Loot', $shop);
         $this->assertStringContainsString('Bonus', $shop);
-        // The other button's pages stay where they are. A segment row only
-        // ever holds the siblings of the page you are on.
+        // A segment row only ever holds the siblings of the page you are on,
+        // and Shop is the only rail button left holding two pages.
         $this->assertStringNotContainsString('Arena', $shop);
-
-        $house = $this->segments(Volt::test('kid.trades')->html());
-
-        $this->assertStringContainsString('Arena', $house);
-        $this->assertStringContainsString('Trades', $house);
     }
 
     public function test_a_page_with_no_sibling_draws_no_segment_row(): void
@@ -208,7 +208,11 @@ class KidHeaderTest extends TestCase
         // Not only for the rail's own single-page buttons: everything reached
         // from the sheet is on its own too, and a lone segment marked as the
         // open page is a control with nowhere to go.
-        foreach (['kid.home', 'kid.quests', 'kid.stats', 'kid.journal', 'kid.arcade'] as $page) {
+        //
+        // The Arena and the trades are in that second group now. They were a
+        // pair behind the House button and lost their segment row with it —
+        // the sheet's "The house" heading is what keeps them together.
+        foreach (['kid.home', 'kid.quests', 'kid.stats', 'kid.journal', 'kid.arcade', 'kid.arena', 'kid.trades'] as $page) {
             $this->assertSame('', $this->segments(Volt::test($page)->html()), $page.' should draw no segments.');
         }
     }
@@ -256,31 +260,27 @@ class KidHeaderTest extends TestCase
     public function test_a_rail_button_carries_the_counts_of_both_its_pages(): void
     {
         $kid = $this->loginKid();
-        $sibling = Profile::factory()->for($kid->household)->create();
-
-        SiblingOffer::factory()->create([
-            'household_id' => $kid->household_id,
-            'from_profile_id' => $sibling->id,
-            'to_profile_id' => $kid->id,
-        ]);
 
         StoreItem::factory()->count(2)->create(['household_id' => $kid->household_id]);
 
-        // Waiting on the Trades and Loot pages, but both counts have to be
-        // visible from the Quests tab — that's the point of hanging them on a
-        // rail button rather than on the page that owns them.
+        // New loot is waiting on the Loot page, which sits behind Shop with the
+        // Bonus Shop — and the count has to be visible from the Quests tab.
+        // That's the point of hanging it on a rail button rather than on the
+        // page that owns it.
         $rail = $this->rail(Volt::test('kid.quests')->html());
 
-        $this->assertStringContainsString('1 thing waiting on you', $rail);
         $this->assertStringContainsString('2 things waiting on you', $rail);
     }
 
     /**
-     * A count is only worth putting on a segment if it survives the segment
-     * not being the open one — otherwise the kid has to visit a panel to find
-     * out whether it wanted them.
+     * The other half of swapping House off the rail for the Arcade.
+     *
+     * A swap from a sibling used to light the House button from anywhere in
+     * the console. There is no House button now, so the count has to land on
+     * the ☰ instead — a kid who is never told a trade is waiting will not go
+     * looking for one, and the Trades page is two taps away behind a panel.
      */
-    public function test_an_inactive_segment_keeps_its_count(): void
+    public function test_a_count_with_no_rail_button_lands_on_the_sheet_glyph(): void
     {
         $kid = $this->loginKid();
         $sibling = Profile::factory()->for($kid->household)->create();
@@ -291,9 +291,32 @@ class KidHeaderTest extends TestCase
             'to_profile_id' => $kid->id,
         ]);
 
-        $segments = $this->segments(Volt::test('kid.arena')->html());
+        $html = Volt::test('kid.quests')->html();
 
-        $this->assertStringContainsString('1 thing waiting on you', $segments);
+        // Not on the rail, which no longer has a button that owns it...
+        $this->assertStringNotContainsString('1 thing waiting on you', $this->rail($html));
+        // ...and said in words on the glyph rather than left as a bare number,
+        // which on a ☰ is a puzzle rather than a message.
+        $this->assertStringContainsString('All pages — 1 thing waiting on you', $html);
+    }
+
+    /**
+     * A count is only worth putting on a segment if it survives the segment
+     * not being the open one — otherwise the kid has to visit a panel to find
+     * out whether it wanted them.
+     */
+    public function test_an_inactive_segment_keeps_its_count(): void
+    {
+        $kid = $this->loginKid();
+
+        StoreItem::factory()->count(2)->create(['household_id' => $kid->household_id]);
+
+        // Standing on the Bonus Shop, with new loot waiting on the segment
+        // beside it. Shop is the last rail button holding two pages, so it is
+        // the only place a segment row is drawn at all.
+        $segments = $this->segments(Volt::test('kid.bonus')->html());
+
+        $this->assertStringContainsString('2 things waiting on you', $segments);
     }
 
     /**
@@ -305,21 +328,29 @@ class KidHeaderTest extends TestCase
     {
         $this->loginKid();
 
-        $steered = $this->withSession(['kid_world' => 'spend'])
-            ->get(route('kid.trades').'?world=spend')
+        // A world on the query string and a stale, contradicting one in the
+        // session. The Loot page sits behind Shop whatever either of them says,
+        // because the rail is looking at the open page and nothing else.
+        $steered = $this->withSession(['kid_world' => 'house'])
+            ->get(route('kid.loot').'?world=me')
             ->assertOk()
             ->content();
 
         $rail = $this->rail($steered);
 
-        // A stale world in the session and a world on the query string, and
-        // the rail lights House either way — because it is looking at the open
-        // page and nothing else.
         $this->assertStringContainsString('aria-current="page"', $rail);
-        $this->assertStringContainsString(route('kid.trades'), $rail);
+        $this->assertStringContainsString(route('kid.loot'), $rail);
 
+        // And the trades page, which is exactly what the worlds used to steer,
+        // opens on its own with no rail button to its name and writes nothing.
         $this->flushSession();
-        $this->get(route('kid.arena'))->assertOk();
+        $this->get(route('kid.trades'))->assertOk();
+
+        $this->assertStringNotContainsString(
+            'aria-current="page"',
+            $this->rail($this->get(route('kid.arena'))->assertOk()->content()),
+            'The Arena is reached from the sheet now; no rail button should claim it.',
+        );
 
         $this->assertNull(session('kid_world'), 'The shell should no longer write a world to the session.');
     }

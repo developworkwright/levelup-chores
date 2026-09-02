@@ -538,7 +538,14 @@ new class extends Component
                             </p>
                         @elseif ($deadline['closesAt'])
                             <p class="mt-1 font-mono-fq text-[10px] uppercase" style="color: var(--fq-cyan)">
-                                Closes {{ $deadline['time']->format('g:i A') }} · {{ $deadline['closesAt']->diffForHumans() }}
+                                {{-- The zone, spelled out. A time typed here is
+                                     read in the household's zone, and when that
+                                     was wrong the card still read back exactly
+                                     what was typed — so the only place the hour
+                                     went missing was in a kid's countdown. An
+                                     abbreviation next to the number is what
+                                     makes a mismatch visible where it is set. --}}
+                                Closes {{ $deadline['time']->format('g:i A T') }} · {{ $deadline['closesAt']->diffForHumans() }}
                             </p>
                         @endif
                     </div>
