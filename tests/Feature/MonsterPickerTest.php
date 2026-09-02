@@ -148,7 +148,7 @@ class MonsterPickerTest extends TestCase
     {
         $this->spawn('Weekend away');
 
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertOk()
             ->assertSee('What the house is fighting')
             ->assertSee('Weekend away');
@@ -156,7 +156,7 @@ class MonsterPickerTest extends TestCase
 
     public function test_the_arena_page_says_so_when_the_arena_is_empty(): void
     {
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertOk()
             ->assertSee('Nothing standing yet');
     }
@@ -169,7 +169,7 @@ class MonsterPickerTest extends TestCase
             $this->chore,
         );
 
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertOk()
             ->assertSee('Flinches at')
             ->assertSee('Vacuum')

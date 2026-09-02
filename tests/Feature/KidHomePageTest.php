@@ -27,7 +27,7 @@ use Tests\TestCase;
  *
  * The individual mechanics are owned by the suites they belong to: the chest by
  * DailyChestTest, the spin by SpinFlowTest and WheelClaimTest, the standings by
- * ArenaPageTest. What is pinned here is the thing the page exists for — the
+ * HouseholdPageTest. What is pinned here is the thing the page exists for — the
  * cards, always in the same order, each saying where the kid is on it, and every
  * one of them acting in place rather than pointing somewhere else. The wheel is
  * the one exception, and it earned it: it moved to Quests, so what stands in for
@@ -343,7 +343,7 @@ class KidHomePageTest extends TestCase
             ->assertOk()
             // Nova is ahead, so Nova is first — the whole point of a table.
             ->assertSeeInOrder(['Nova', '9 NIGHTS IN A ROW', 'Rex', '2 NIGHTS IN A ROW'])
-            ->assertSee(route('kid.arena'), false);
+            ->assertSee(route('kid.household'), false);
     }
 
     /** A genuine run of cleared quests, so syncStreak() leaves the streak alone. */

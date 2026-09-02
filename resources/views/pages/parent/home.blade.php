@@ -9,8 +9,11 @@ use App\Models\ChoreCompletion;
 use App\Models\LuckyHit;
 use App\Models\Profile;
 use App\Models\Redemption;
+use App\Enums\Feeling;
+use App\Enums\FeelingVisibility;
 use App\Services\BountyService;
 use App\Services\ChoreService;
+use App\Services\FeelingService;
 use App\Services\LuckyBlockService;
 use App\Services\StoreService;
 use Illuminate\Support\Facades\Auth;
@@ -158,6 +161,80 @@ new class extends Component
         }
     }
 
+    /**
+     * Today's feeling, and optionally why. Same call the kids make.
+     *
+     * Worth a parent knowing: what you put here is the strongest signal in the
+     * feature. A house where the grown-ups post "happy" every day teaches the
+     * kids what the acceptable answer is, and they will give it to you.
+     */
+    public function answerFeeling(
+        ?string $feeling = null,
+        ?string $because = null,
+        ?string $visibility = null,
+        ?string $newWord = null,
+        ?string $newGlyph = null,
+        ?string $lockPin = null,
+    ): bool {
+        $this->feelingLockMessage = null;
+
+        $service = app(FeelingService::class);
+
+        // A typed word is created and used here rather than by a separate
+        // button — see FeelingService::resolveTypedWord().
+        $choice = $service->resolveTypedWord($this->profile, $newWord, $newGlyph)
+            ?? $service->resolveAnswer($this->profile, $feeling);
+
+        if (! $choice) {
+            return false;
+        }
+
+        $saved = $service->record(
+            $this->profile,
+            $choice,
+            $because,
+            FeelingVisibility::tryFrom((string) $visibility) ?? FeelingVisibility::Private,
+            $lockPin,
+        );
+
+        if (! $saved) {
+            $this->feelingLockMessage = 'That PIN did not match. Nothing was saved — your words are still here.';
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /** Grown-ups can lock a reason too. Same card, same rules. */
+    public ?string $openedFeeling = null;
+
+    public ?string $feelingLockMessage = null;
+
+    public function lockFeeling(string $pin): void
+    {
+        $this->openedFeeling = null;
+
+        $this->feelingLockMessage = app(FeelingService::class)->lock($this->profile, $pin)
+            ? null
+            : 'That PIN did not match, so nothing was locked.';
+    }
+
+    public function openFeeling(int $entryId, string $pin): void
+    {
+        $this->feelingLockMessage = null;
+        $this->openedFeeling = app(FeelingService::class)->openLocked($this->profile, $entryId, $pin);
+
+        if ($this->openedFeeling === null) {
+            $this->feelingLockMessage = 'That PIN did not open it.';
+        }
+    }
+
+    public function retireFeelingWord(int $wordId): void
+    {
+        app(FeelingService::class)->retireWord($this->profile, $wordId);
+    }
+
     public function with(): array
     {
         $jobOffers = Bounty::where('household_id', $this->profile->household_id)
@@ -190,12 +267,22 @@ new class extends Component
                 ->oldest('requested_at')
                 ->get(),
             'luckyHits' => app(LuckyBlockService::class)->pendingFor($this->profile->household),
+            // Parents answer this one too, and that is the mechanism rather
+            // than a courtesy: a kid who is the only one being asked how he
+            // feels is being examined, and answers "fine". See FeelingService.
+            'feelingsCard' => app(FeelingService::class)->cardFor($this->profile),
         ];
     }
 }; ?>
 
-<x-parent.shell :profile="$profile" active="approvals">
+<x-parent.shell :profile="$profile" active="home">
     <livewire:push-toggle audience="parent" />
+
+    {{-- Above the queue on purpose. This is the landing page a parent opens
+         several times a day, and the card only does its job if the grown-ups
+         actually fill it in — a house where the adults never answer teaches the
+         kids exactly what the card is worth. --}}
+    <x-feelings-card :card="$feelingsCard" :opened-feeling="$openedFeeling" :lock-message="$feelingLockMessage" class="mb-6" />
 
     {{-- Jobs the kids have offered to do, above the approvals queue: this is
          the only thing on the page nobody else can action, and a job offer

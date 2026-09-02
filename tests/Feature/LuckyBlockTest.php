@@ -335,7 +335,7 @@ class LuckyBlockTest extends TestCase
 
         $this->loginParent($household);
 
-        Volt::test('parent.approvals')
+        Volt::test('parent.home')
             ->assertSee('Lucky Block Wins')
             ->assertSee('Front seat')
             ->call('tickOffLucky', $hit->id)

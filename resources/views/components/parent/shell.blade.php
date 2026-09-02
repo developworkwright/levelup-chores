@@ -2,7 +2,7 @@
 
 @php
     $tabs = [
-        'approvals' => ['label' => 'Approvals', 'route' => 'parent.approvals'],
+        'home' => ['label' => 'Home', 'route' => 'parent.home'],
         'chores' => ['label' => 'Quests', 'route' => 'parent.chores'],
         'loot' => ['label' => 'Loot Shop', 'route' => 'parent.loot'],
         'lucky' => ['label' => 'Lucky Block', 'route' => 'parent.lucky'],

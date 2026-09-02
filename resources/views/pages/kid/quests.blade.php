@@ -1049,10 +1049,10 @@ new class extends Component
     /** The monster standing, as the strip and the watcher want it. */
     private function monsterState(): ?array
     {
-        $arena = app(MonsterService::class);
-        $monster = $arena->rotateWeakness($this->profile->household);
+        $monsters = app(MonsterService::class);
+        $monster = $monsters->rotateWeakness($this->profile->household);
 
-        return $monster ? $arena->stateFor($monster) : null;
+        return $monster ? $monsters->stateFor($monster) : null;
     }
 
     public function with(): array

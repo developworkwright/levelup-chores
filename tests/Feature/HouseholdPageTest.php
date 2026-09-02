@@ -11,7 +11,7 @@ use App\Models\Household;
 use App\Models\Nudge;
 use App\Models\Profile;
 use App\Models\StreakRescue;
-use App\Services\ArenaService;
+use App\Services\HouseholdService;
 use App\Services\ChoreService;
 use App\Services\HouseholdClock;
 use App\Services\StreakService;
@@ -22,12 +22,12 @@ use Livewire\Volt\Volt;
 use Tests\TestCase;
 
 /**
- * The Arena — the kid landing page.
+ * Household — the house-wide kid page.
  *
  * The rule under all of it: nothing expires at bedtime. `evening_watch_hour`
  * is a display threshold, not a deadline.
  */
-class ArenaPageTest extends TestCase
+class HouseholdPageTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -65,25 +65,35 @@ class ArenaPageTest extends TestCase
         ]);
     }
 
-    private function arena(): ArenaService
+    private function house(): HouseholdService
     {
-        return app(ArenaService::class);
+        return app(HouseholdService::class);
     }
 
-    public function test_kids_land_on_home_rather_than_the_arena(): void
+    public function test_kids_land_on_home_rather_than_household(): void
     {
         $kid = $this->kid();
         $this->chores();
 
         Auth::guard('profile')->login($kid);
 
-        // The Arena held this slot, and the news on it is still the best news
+        // Household held this slot, and the news on it is still the best news
         // in the app. But a landing page has to answer "what do I do now"
-        // before "what is happening" — the Arena is step four of Home instead.
+        // before "what is happening" — Household is step four of Home instead.
         $this->get('/kid')->assertRedirect('/kid/home');
     }
 
-    public function test_the_arena_renders_the_race_and_the_monsters(): void
+    public function test_the_old_arena_url_still_lands_on_household(): void
+    {
+        Auth::guard('profile')->login($this->kid());
+
+        // The page lived at /arena for months, so an installed PWA or a phone
+        // bookmark still points there. A 404 on the house page would read as
+        // the app having broken rather than as a page having been renamed.
+        $this->get('/kid/arena')->assertRedirect('/kid/household');
+    }
+
+    public function test_household_renders_the_race_and_the_monsters(): void
     {
         $this->kid('Nova');
         $this->kid('Rex');
@@ -91,7 +101,7 @@ class ArenaPageTest extends TestCase
 
         Auth::guard('profile')->login(Profile::firstWhere('name', 'Nova'));
 
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertOk()
             ->assertSee('Nights in a row')
             ->assertSee('What the house is fighting')
@@ -106,7 +116,7 @@ class ArenaPageTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertSee('NOTHING EXPIRES AT BEDTIME', escape: false)
             ->assertSee('THE DAY ROLLS AT 4:00AM');
     }
@@ -116,11 +126,11 @@ class ArenaPageTest extends TestCase
         $kid = $this->kid();
         $this->chores();
 
-        $this->assertSame(ArenaService::STATE_OPEN, $this->arena()->stateFor($kid, false));
+        $this->assertSame(HouseholdService::STATE_OPEN, $this->house()->stateFor($kid, false));
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertSee('1 run still open.')
             ->assertSee('Nothing\'s on the line until 7:00pm', escape: false)
             ->assertDontSee('still on the line');
@@ -137,7 +147,7 @@ class ArenaPageTest extends TestCase
         // Nobody can *be* at risk before the watch hour, so counting at-risk
         // kids to decide this read every untouched morning as a clean sweep —
         // the one claim on this panel that has to be earned.
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertSee('2 runs still open.')
             ->assertDontSee('Every run is safe.');
     }
@@ -153,7 +163,7 @@ class ArenaPageTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertSee('Every run is safe.')
             ->assertDontSee('still open.');
     }
@@ -169,7 +179,7 @@ class ArenaPageTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertSee('1 run still open.')
             ->assertDontSee('Every run is safe.');
     }
@@ -179,7 +189,7 @@ class ArenaPageTest extends TestCase
         $kid = $this->kid('Nova', 6);
         $this->chores();
 
-        // A live run needs something behind it. The Arena re-syncs every kid's
+        // A live run needs something behind it. Household re-syncs every kid's
         // streak on load — `profiles.streak` is a cache and this is the one
         // page that shows kids who haven't opened the app since theirs died —
         // so a bare `streak => 6` on the factory is zeroed before it renders.
@@ -187,13 +197,13 @@ class ArenaPageTest extends TestCase
 
         $this->travelTo(Carbon::parse('2026-05-04 19:30', 'UTC'));
 
-        $this->assertSame(ArenaService::STATE_AT_RISK, $this->arena()->stateFor($kid, false));
+        $this->assertSame(HouseholdService::STATE_AT_RISK, $this->house()->stateFor($kid, false));
 
         Auth::guard('profile')->login($kid);
 
         // escape: false — the apostrophe is literal template text, not `{{ }}`
         // output, so Blade never escapes it and an escaped needle can't match.
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertSee("Nova's 6 nights are on the line.", escape: false)
             ->assertSee('Go claim it');
     }
@@ -207,11 +217,11 @@ class ArenaPageTest extends TestCase
         $this->travelTo(Carbon::parse('2026-05-04 20:00', 'UTC'));
 
         // 8pm is past the default 7pm but not past this household's 9pm.
-        $this->assertSame(ArenaService::STATE_OPEN, $this->arena()->stateFor($kid->refresh(), false));
+        $this->assertSame(HouseholdService::STATE_OPEN, $this->house()->stateFor($kid->refresh(), false));
 
         $this->travelTo(Carbon::parse('2026-05-04 21:30', 'UTC'));
 
-        $this->assertSame(ArenaService::STATE_AT_RISK, $this->arena()->stateFor($kid->refresh(), false));
+        $this->assertSame(HouseholdService::STATE_AT_RISK, $this->house()->stateFor($kid->refresh(), false));
     }
 
     public function test_a_cleared_quest_is_safe_whatever_the_hour(): void
@@ -221,7 +231,7 @@ class ArenaPageTest extends TestCase
 
         $this->travelTo(Carbon::parse('2026-05-04 23:00', 'UTC'));
 
-        $this->assertSame(ArenaService::STATE_SAFE, $this->arena()->stateFor($kid, true));
+        $this->assertSame(HouseholdService::STATE_SAFE, $this->house()->stateFor($kid, true));
     }
 
     public function test_the_risk_ramp_climbs_over_the_window_and_then_holds(): void
@@ -229,15 +239,15 @@ class ArenaPageTest extends TestCase
         $this->kid();
 
         $this->travelTo(Carbon::parse('2026-05-04 18:00', 'UTC'));
-        $this->assertSame(0.0, $this->arena()->riskRamp($this->household));
+        $this->assertSame(0.0, $this->house()->riskRamp($this->household));
 
         $this->travelTo(Carbon::parse('2026-05-04 20:30', 'UTC'));
-        $this->assertEqualsWithDelta(0.5, $this->arena()->riskRamp($this->household), 0.01);
+        $this->assertEqualsWithDelta(0.5, $this->house()->riskRamp($this->household), 0.01);
 
         // Held rather than run past the end — nothing actually expires, so a
         // flame that guttered out would be the screen telling a lie.
         $this->travelTo(Carbon::parse('2026-05-05 01:00', 'UTC'));
-        $this->assertSame(1.0, $this->arena()->riskRamp($this->household));
+        $this->assertSame(1.0, $this->house()->riskRamp($this->household));
     }
 
     public function test_a_run_that_never_started_does_not_read_as_a_broken_one(): void
@@ -247,8 +257,8 @@ class ArenaPageTest extends TestCase
 
         // Zero streak, nothing behind it. That is not the same fact as a run
         // that died overnight and must not wear the skull.
-        $this->assertFalse($this->arena()->brokeAtLastRollover($kid));
-        $this->assertSame(ArenaService::STATE_OPEN, $this->arena()->stateFor($kid, false));
+        $this->assertFalse($this->house()->brokeAtLastRollover($kid));
+        $this->assertSame(HouseholdService::STATE_OPEN, $this->house()->stateFor($kid, false));
     }
 
     public function test_a_run_that_died_at_the_rollover_reads_as_broken(): void
@@ -260,12 +270,12 @@ class ArenaPageTest extends TestCase
         // ended at the last rollover.
         $this->approveQuestOn($kid, HouseholdClock::for($this->household)->today()->subDays(2));
 
-        $this->assertTrue($this->arena()->brokeAtLastRollover($kid->refresh()));
-        $this->assertSame(ArenaService::STATE_BROKEN, $this->arena()->stateFor($kid->refresh(), false));
+        $this->assertTrue($this->house()->brokeAtLastRollover($kid->refresh()));
+        $this->assertSame(HouseholdService::STATE_BROKEN, $this->house()->stateFor($kid->refresh(), false));
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.arena')->assertSee('Back to zero');
+        Volt::test('kid.household')->assertSee('Back to zero');
     }
 
     /** Stamps an approved quest on a past household day, the shortest way. */
@@ -303,15 +313,15 @@ class ArenaPageTest extends TestCase
         $rex = $this->kid('Rex');
         $this->chores();
 
-        $this->assertTrue($this->arena()->nudge($nova, $rex));
+        $this->assertTrue($this->house()->nudge($nova, $rex));
         // One each per night. Three kids each nudging four times is a pile-on,
         // and the thing being nudged is a small child.
-        $this->assertFalse($this->arena()->nudge($nova, $rex));
+        $this->assertFalse($this->house()->nudge($nova, $rex));
         $this->assertSame(1, Nudge::where('to_profile_id', $rex->id)->count());
 
         // A different sibling still gets their own.
         $ziggy = $this->kid('Ziggy');
-        $this->assertTrue($this->arena()->nudge($ziggy, $rex));
+        $this->assertTrue($this->house()->nudge($ziggy, $rex));
     }
 
     public function test_a_kid_cannot_nudge_themselves(): void
@@ -319,7 +329,7 @@ class ArenaPageTest extends TestCase
         $nova = $this->kid('Nova');
         $this->chores();
 
-        $this->assertFalse($this->arena()->nudge($nova, $nova));
+        $this->assertFalse($this->house()->nudge($nova, $nova));
     }
 
     public function test_a_nudge_is_stamped_publicly_on_the_targets_card(): void
@@ -331,13 +341,13 @@ class ArenaPageTest extends TestCase
         $this->approveQuestOn($rex, HouseholdClock::for($this->household)->today()->subDay());
         $rex->update(['streak' => 4]);
 
-        $this->arena()->nudge($nova, $rex);
+        $this->house()->nudge($nova, $rex);
         $this->travelTo(Carbon::parse('2026-05-04 19:30', 'UTC'));
 
         Auth::guard('profile')->login($nova);
 
         // The shared screen is the point, not a notification.
-        Volt::test('kid.arena')->assertSee('Nudged by Nova');
+        Volt::test('kid.household')->assertSee('Nudged by Nova');
     }
 
     public function test_the_at_risk_card_offers_nudge_and_rescue_on_a_siblings_run(): void
@@ -354,7 +364,7 @@ class ArenaPageTest extends TestCase
 
         Auth::guard('profile')->login($nova);
 
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertSee('Nudge Rex')
             ->assertSee('Rescue')
             ->assertSee('A rescue keeps the run alive — the night still pays nothing.', escape: false);
@@ -372,7 +382,7 @@ class ArenaPageTest extends TestCase
 
         Auth::guard('profile')->login($nova);
 
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertSee('Go claim it')
             ->assertDontSee('Nudge Nova')
             ->assertDontSee('A rescue keeps the run alive', escape: false);
@@ -389,9 +399,9 @@ class ArenaPageTest extends TestCase
         $rex->update(['streak' => 4]);
         $nova->update(['bonus_tickets' => 5]);
 
-        $this->assertTrue($this->arena()->rescue($nova, $rex));
+        $this->assertTrue($this->house()->rescue($nova, $rex));
 
-        $this->assertSame(5 - ArenaService::RESCUE_COST, $nova->refresh()->bonus_tickets);
+        $this->assertSame(5 - HouseholdService::RESCUE_COST, $nova->refresh()->bonus_tickets);
         // The night now counts toward the run, exactly as a repair does.
         $this->assertTrue(app(StreakService::class)->streakDayEarnedOn($rex, $today));
     }
@@ -411,7 +421,7 @@ class ArenaPageTest extends TestCase
         $rex->update(['streak' => 2]);
 
         $nova->update(['bonus_tickets' => 5]);
-        $this->assertTrue($this->arena()->rescue($nova, $rex));
+        $this->assertTrue($this->house()->rescue($nova, $rex));
 
         $chores = app(ChoreService::class);
 
@@ -435,9 +445,9 @@ class ArenaPageTest extends TestCase
 
         // Charging three tickets to keep a zero at zero is the sort of thing a
         // kid falls for exactly once.
-        $this->assertFalse($this->arena()->rescue($nova, $rex));
+        $this->assertFalse($this->house()->rescue($nova, $rex));
         $this->assertSame(5, $nova->refresh()->bonus_tickets);
-        $this->assertSame('No run to save yet', $this->arena()->rescueBlockedReason($nova, $rex));
+        $this->assertSame('No run to save yet', $this->house()->rescueBlockedReason($nova, $rex));
     }
 
     public function test_a_second_rescue_on_the_same_night_is_refused(): void
@@ -452,9 +462,9 @@ class ArenaPageTest extends TestCase
         $nova->update(['bonus_tickets' => 5]);
         $ziggy->update(['bonus_tickets' => 5]);
 
-        $this->assertTrue($this->arena()->rescue($nova, $rex));
+        $this->assertTrue($this->house()->rescue($nova, $rex));
         // A second rescuer must not be charged for a night already bought.
-        $this->assertFalse($this->arena()->rescue($ziggy, $rex));
+        $this->assertFalse($this->house()->rescue($ziggy, $rex));
         $this->assertSame(5, $ziggy->refresh()->bonus_tickets);
     }
 
@@ -466,11 +476,11 @@ class ArenaPageTest extends TestCase
 
         $this->approveQuestOn($rex, HouseholdClock::for($this->household)->today()->subDay());
         $rex->update(['streak' => 4]);
-        $nova->update(['bonus_tickets' => ArenaService::RESCUE_COST - 1]);
+        $nova->update(['bonus_tickets' => HouseholdService::RESCUE_COST - 1]);
 
         $this->expectException(InsufficientTicketsException::class);
 
-        $this->arena()->rescue($nova, $rex);
+        $this->house()->rescue($nova, $rex);
     }
 
     public function test_a_kid_with_no_run_is_not_told_one_is_on_the_line(): void
@@ -484,7 +494,7 @@ class ArenaPageTest extends TestCase
 
         // "Nova's 0-night run is still on the line" claims a loss that cannot
         // happen — there is nothing to lose yet, only something to start.
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertSee('Nova could start a run tonight.', escape: false)
             ->assertDontSee('0 nights are on the line', escape: false);
     }
@@ -529,7 +539,7 @@ class ArenaPageTest extends TestCase
             'submitted_at' => now(),
         ]);
 
-        $rows = $this->arena()->choresToday($this->household);
+        $rows = $this->house()->choresToday($this->household);
 
         $this->assertSame(2, $rows->firstWhere('profile.id', $nova->id)['chores']);
         $this->assertSame(150, $rows->firstWhere('profile.id', $nova->id)['points']);
@@ -545,7 +555,7 @@ class ArenaPageTest extends TestCase
         $this->chores();
 
         // A gold bar at zero would crown whoever happens to sort first.
-        $this->assertEmpty($this->arena()->choresToday($this->household)->where('leader', true));
+        $this->assertEmpty($this->house()->choresToday($this->household)->where('leader', true));
     }
 
     public function test_the_superlatives_name_the_first_and_biggest_of_the_day(): void
@@ -557,7 +567,7 @@ class ArenaPageTest extends TestCase
         $this->approveChore($nova, 50, Carbon::parse('2026-05-04 08:00', 'UTC'));
         $this->approveChore($rex, 400, Carbon::parse('2026-05-04 11:00', 'UTC'));
 
-        $lines = $this->arena()->superlatives($this->household);
+        $lines = $this->house()->superlatives($this->household);
 
         $this->assertSame($nova->id, $lines['first']['profile']->id);
         $this->assertSame($rex->id, $lines['biggest']['profile']->id);
@@ -568,7 +578,7 @@ class ArenaPageTest extends TestCase
         $this->kid('Nova');
         $this->chores();
 
-        $lines = $this->arena()->superlatives($this->household);
+        $lines = $this->house()->superlatives($this->household);
 
         // "BIGGEST JOB · nobody" is worse than the row not being there.
         $this->assertNull($lines['first']);
@@ -589,7 +599,7 @@ class ArenaPageTest extends TestCase
         $chores->revealQuest($nova);
         $chores->claimQuest($nova);
 
-        $lines = $this->arena()->superlatives($this->household);
+        $lines = $this->house()->superlatives($this->household);
 
         $this->assertNotNull($lines['last']);
         $this->assertSame($rex->id, $lines['last']['profile']->id);
@@ -608,7 +618,7 @@ class ArenaPageTest extends TestCase
         // "Raylan is winning" ends the day. The margin is the invitation.
         $this->assertStringContainsString(
             'one ahead of Rex with the evening still to go',
-            $this->arena()->crown($this->household)['note'],
+            $this->house()->crown($this->household)['note'],
         );
     }
 
@@ -621,7 +631,7 @@ class ArenaPageTest extends TestCase
         $this->approveChore($nova, 100);
         $this->approveChore($rex, 100);
 
-        $this->assertStringContainsString('level with', $this->arena()->crown($this->household)['note']);
+        $this->assertStringContainsString('level with', $this->house()->crown($this->household)['note']);
     }
 
     public function test_the_prize_standing_ranks_on_the_same_metric_as_the_house_bar(): void
@@ -639,7 +649,7 @@ class ArenaPageTest extends TestCase
         $this->approveChore($nova, 100);
         $this->approveChore($nova, 100);
 
-        $standing = $this->arena()->prizeStanding($this->household->fresh());
+        $standing = $this->house()->prizeStanding($this->household->fresh());
 
         $this->assertSame($nova->id, $standing->first()['profile']->id);
         $this->assertSame(2, $standing->first()['chores']);
@@ -658,7 +668,7 @@ class ArenaPageTest extends TestCase
 
         Auth::guard('profile')->login(Profile::firstWhere('name', 'Nova'));
 
-        $html = Volt::test('kid.arena')->assertOk()->html();
+        $html = Volt::test('kid.household')->assertOk()->html();
 
         // The bar names the reward instead of "the bonus"...
         $this->assertStringContainsString('20 = THE PRIZE', $html);
@@ -679,7 +689,7 @@ class ArenaPageTest extends TestCase
 
         // Three empty tracks under a divider with nothing beneath it read as
         // broken rather than as "nobody has started".
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertSee('Nothing done yet today', escape: false)
             ->assertDontSee('Last standing');
     }
@@ -693,7 +703,7 @@ class ArenaPageTest extends TestCase
 
         foreach (range(0, 2) as $offset) {
             $this->travelTo(Carbon::parse('2026-05-04 15:00', 'UTC')->addDays($offset));
-            $crown = $this->arena()->crown($this->household);
+            $crown = $this->house()->crown($this->household);
             $seen[] = $crown['label'];
 
             // Tomorrow's is named so everyone knows what to go after next.
@@ -711,11 +721,11 @@ class ArenaPageTest extends TestCase
         $this->chores();
 
         // A bar against a number nobody chose is worse than no bar.
-        $this->assertNull($this->arena()->houseWeek($this->household));
+        $this->assertNull($this->house()->houseWeek($this->household));
 
         $this->household->update(['weekly_chore_target' => 20]);
 
-        $this->assertNotNull($this->arena()->houseWeek($this->household->fresh()));
+        $this->assertNotNull($this->house()->houseWeek($this->household->fresh()));
     }
 
     public function test_the_house_week_bar_sums_every_kid_against_one_target(): void
@@ -729,7 +739,7 @@ class ArenaPageTest extends TestCase
         $this->approveChore($nova, 100);
         $this->approveChore($rex, 100);
 
-        $week = $this->arena()->houseWeek($this->household->fresh());
+        $week = $this->house()->houseWeek($this->household->fresh());
 
         $this->assertSame(3, $week['done']);
         $this->assertSame(10, $week['target']);
@@ -747,10 +757,10 @@ class ArenaPageTest extends TestCase
         $rex->update(['streak' => 3]);
         $nova->update(['bonus_tickets' => 5]);
 
-        $this->arena()->nudge($nova, $rex);
-        $this->arena()->rescue($nova, $rex);
+        $this->house()->nudge($nova, $rex);
+        $this->house()->rescue($nova, $rex);
 
-        $events = $this->arena()->ticker($this->household);
+        $events = $this->house()->ticker($this->household);
 
         // Every row is glyph / who / what / value / when — a feed, not a wall
         // of sentences. Reading the ledger's own descriptions gave lines like
@@ -783,7 +793,7 @@ class ArenaPageTest extends TestCase
         $completion = ChoreCompletion::where('profile_id', $kid->id)->latest('id')->first();
         $completion->update(['status' => CompletionStatus::Approved, 'decided_at' => now()]);
 
-        $events = $this->arena()->ticker($this->household);
+        $events = $this->house()->ticker($this->household);
 
         // One database row covers both, but clearing the day is not the same
         // event as doing a chore and must not wear the same tick.
@@ -804,7 +814,7 @@ class ArenaPageTest extends TestCase
 
         Auth::guard('profile')->login($nova);
 
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertSee('The house, this week')
             // Names the prize once one is set; falls back to "HOUSE BONUS"
             // only when there is nothing to name.
@@ -829,10 +839,10 @@ class ArenaPageTest extends TestCase
         Auth::guard('profile')->login($parent);
 
         Volt::test('parent.kids')
-            ->assertSee('The Arena')
+            ->assertSee('Household')
             // The control must not read as a bedtime — nothing expires at it.
             ->assertSee('Nothing expires', escape: false)
-            ->assertSee('Save Arena settings')
+            ->assertSee('Save household settings')
             ->set('eveningWatchHour', 21)
             ->set('weeklyChoreTarget', '60')
             ->set('weeklyPrize', 'Friday movie pick')
@@ -840,8 +850,8 @@ class ArenaPageTest extends TestCase
             // Nothing is written until the button is pressed. Setting the
             // fields alone used to save, which is what left a parent unable to
             // tell "saved" from "silently didn't".
-            ->assertSet('arenaMessage', null)
-            ->call('saveArenaSettings')
+            ->assertSet('householdMessage', null)
+            ->call('saveHouseholdSettings')
             ->assertSee('Saved.');
 
         $household = $this->household->fresh();
@@ -863,13 +873,13 @@ class ArenaPageTest extends TestCase
 
         Volt::test('parent.kids')
             ->set('weeklyChoreTarget', '')
-            ->call('saveArenaSettings')
+            ->call('saveHouseholdSettings')
             // Says what switching it off actually did, rather than a bare
-            // "Saved." over a bar that has just disappeared from the Arena.
+            // "Saved." over a bar that has just disappeared from Household.
             ->assertSee('the house bar stays off', escape: false);
 
         $this->assertNull($this->household->fresh()->weekly_chore_target);
-        $this->assertNull($this->arena()->houseWeek($this->household->fresh()));
+        $this->assertNull($this->house()->houseWeek($this->household->fresh()));
     }
 
     public function test_the_watch_hour_cannot_be_set_to_the_morning(): void
@@ -880,11 +890,11 @@ class ArenaPageTest extends TestCase
         $parent = Profile::factory()->parent()->for($this->household)->create();
         Auth::guard('profile')->login($parent);
 
-        // A watch hour over breakfast would have the Arena calling a quest at
+        // A watch hour over breakfast would have Household calling a quest at
         // risk before anyone had a chance to do it.
         Volt::test('parent.kids')
             ->set('eveningWatchHour', 6)
-            ->call('saveArenaSettings')
+            ->call('saveHouseholdSettings')
             // Echoed back from what was written, so the parent sees the number
             // they really have rather than the one they typed.
             ->assertSet('eveningWatchHour', 15);
@@ -903,7 +913,7 @@ class ArenaPageTest extends TestCase
         Volt::test('parent.kids')
             ->assertSee('Bedtime')
             ->set('bedtime', '20:30')
-            ->call('saveArenaSettings')
+            ->call('saveHouseholdSettings')
             ->assertSet('bedtime', '20:30');
 
         $this->assertSame('20:30', $this->household->fresh()->bedtime);
@@ -924,7 +934,7 @@ class ArenaPageTest extends TestCase
 
         Volt::test('parent.kids')
             ->set('bedtime', 'half seven')
-            ->call('saveArenaSettings')
+            ->call('saveHouseholdSettings')
             // Echoed back empty, and said out loud: switching bedtime off
             // re-points the kids' countdown rather than removing it.
             ->assertSet('bedtime', '')
@@ -947,23 +957,23 @@ class ArenaPageTest extends TestCase
         $inMemory->evening_watch_hour = null;
 
         $this->assertNull(HouseholdClock::for($inMemory)->eveningWatch());
-        $this->assertSame(0.0, $this->arena()->riskRamp($inMemory));
+        $this->assertSame(0.0, $this->house()->riskRamp($inMemory));
 
         // And 200 is a legal row for an unsignedTinyInteger and an illegal
         // hour, which atTime() also refuses.
         $this->household->forceFill(['evening_watch_hour' => 200])->save();
 
         $this->assertNull(HouseholdClock::for($this->household->fresh())->eveningWatch());
-        $this->assertSame(0.0, $this->arena()->riskRamp($this->household->fresh()));
+        $this->assertSame(0.0, $this->house()->riskRamp($this->household->fresh()));
         // Nobody is ever at risk without a threshold, which is the right way
         // to fail for something that is only ever a display state.
         $this->assertSame(
-            ArenaService::STATE_OPEN,
-            $this->arena()->stateFor($kid->refresh(), false),
+            HouseholdService::STATE_OPEN,
+            $this->house()->stateFor($kid->refresh(), false),
         );
 
         Auth::guard('profile')->login($kid);
-        Volt::test('kid.arena')->assertOk();
+        Volt::test('kid.household')->assertOk();
     }
 
     public function test_a_kid_cannot_nudge_or_rescue_a_parent(): void
@@ -975,11 +985,11 @@ class ArenaPageTest extends TestCase
 
         // Reachable by id from a public Livewire method. questFor() would
         // otherwise build a daily quest for a grown-up.
-        $this->assertFalse($this->arena()->nudge($kid, $parent));
-        $this->assertFalse($this->arena()->rescue($kid, $parent));
+        $this->assertFalse($this->house()->nudge($kid, $parent));
+        $this->assertFalse($this->house()->rescue($kid, $parent));
 
         Auth::guard('profile')->login($kid);
-        Volt::test('kid.arena')->call('nudge', $parent->id)->call('rescue', $parent->id);
+        Volt::test('kid.household')->call('nudge', $parent->id)->call('rescue', $parent->id);
 
         $this->assertSame(0, Nudge::where('to_profile_id', $parent->id)->count());
         $this->assertNull(DailyQuest::where('profile_id', $parent->id)->first());
@@ -1006,16 +1016,16 @@ class ArenaPageTest extends TestCase
             'profile_id' => $rex->id,
             'rescued_by_profile_id' => $nova->id,
             'rescued_date' => $today,
-            'tickets_paid' => ArenaService::RESCUE_COST,
+            'tickets_paid' => HouseholdService::RESCUE_COST,
         ]);
 
-        $this->assertFalse($this->arena()->rescue($ziggy, $rex));
+        $this->assertFalse($this->house()->rescue($ziggy, $rex));
         // Rolled back, so the loser keeps their tickets.
         $this->assertSame(5, $ziggy->refresh()->bonus_tickets);
         $this->assertSame(1, StreakRescue::where('profile_id', $rex->id)->count());
     }
 
-    public function test_the_arena_asks_for_tonight_once_per_render(): void
+    public function test_household_asks_for_tonight_once_per_render(): void
     {
         $this->kid('Nova');
         $this->kid('Rex');
@@ -1026,14 +1036,14 @@ class ArenaPageTest extends TestCase
         // Five call sites want tonightFor(); unmemoised that walked every kid
         // five times on the page every kid lands on.
         \DB::enableQueryLog();
-        Volt::test('kid.arena')->assertOk();
+        Volt::test('kid.household')->assertOk();
         $queries = count(\DB::getQueryLog());
         \DB::disableQueryLog();
 
         $this->assertLessThan(
             160,
             $queries,
-            "The Arena ran {$queries} queries for two kids — the per-kid walk is repeating.",
+            "Household ran {$queries} queries for two kids — the per-kid walk is repeating.",
         );
     }
 
@@ -1051,7 +1061,7 @@ class ArenaPageTest extends TestCase
 
         $this->assertSame(0, $kid->refresh()->streak);
 
-        $cleared = $this->arena()->ticker($this->household)->firstWhere('glyph', '🔥');
+        $cleared = $this->house()->ticker($this->household)->firstWhere('glyph', '🔥');
 
         $this->assertNotNull($cleared);
         // Not "0 nights in a row" directly above its own 💀 row.
@@ -1060,7 +1070,7 @@ class ArenaPageTest extends TestCase
 
     public function test_the_flag_ladder_matches_the_streak_bonuses(): void
     {
-        $flags = $this->arena()->flags();
+        $flags = $this->house()->flags();
 
         $this->assertSame(
             array_keys(StreakService::STREAK_BONUSES),
@@ -1074,15 +1084,15 @@ class ArenaPageTest extends TestCase
 
     public function test_a_streak_interpolates_between_the_two_flags_it_sits_between(): void
     {
-        $flags = $this->arena()->flags();
+        $flags = $this->house()->flags();
 
-        $this->assertSame(2.0, $this->arena()->positionFor(0, $flags));
-        $this->assertSame(14.0, $this->arena()->positionFor(3, $flags));
-        $this->assertSame(30.0, $this->arena()->positionFor(5, $flags));
-        $this->assertSame(94.0, $this->arena()->positionFor(30, $flags));
+        $this->assertSame(2.0, $this->house()->positionFor(0, $flags));
+        $this->assertSame(14.0, $this->house()->positionFor(3, $flags));
+        $this->assertSame(30.0, $this->house()->positionFor(5, $flags));
+        $this->assertSame(94.0, $this->house()->positionFor(30, $flags));
 
         // Four nights sits between the 3 and 5 flags, so between 14% and 30%.
-        $four = $this->arena()->positionFor(4, $flags);
+        $four = $this->house()->positionFor(4, $flags);
         $this->assertGreaterThan(14.0, $four);
         $this->assertLessThan(30.0, $four);
     }

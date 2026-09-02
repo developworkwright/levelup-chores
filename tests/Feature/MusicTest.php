@@ -334,7 +334,7 @@ class MusicTest extends TestCase
         $this->library(['Mossy_Save_Point.mp3']);
         $this->loginParent();
 
-        Volt::test('parent.approvals')
+        Volt::test('parent.home')
             ->assertSee('fqMusic', false)
             ->assertSee('Mossy Save Point')
             ->assertSee('Choose a song');

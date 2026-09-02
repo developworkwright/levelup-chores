@@ -1,6 +1,8 @@
 <?php
 
 use App\Enums\CompletionStatus;
+use App\Enums\Feeling;
+use App\Enums\FeelingVisibility;
 use App\Enums\PerkEffect;
 use App\Exceptions\InsufficientTicketsException;
 use App\Exceptions\PerkUnavailableException;
@@ -9,10 +11,11 @@ use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyQuest;
 use App\Models\Profile;
-use App\Services\ArenaService;
+use App\Services\HouseholdService;
 use App\Services\BonusShopService;
 use App\Services\ChestService;
 use App\Services\ChoreService;
+use App\Services\FeelingService;
 use App\Services\HouseholdClock;
 use App\Services\LuckyBlockService;
 use App\Services\MonsterService;
@@ -138,6 +141,102 @@ new class extends Component
     public function openStreakChest(): void
     {
         app(StreakService::class)->openStreakChest($this->profile);
+    }
+
+    /**
+     * Today's feeling, and optionally why.
+     *
+     * No celebration on purpose — not even a quiet one. A card that throws
+     * confetti at an answer is paying for it, and the moment answering pays,
+     * the fastest answer beats the true one. The reward for pressing the button
+     * is that the rest of the house opens up underneath it.
+     *
+     * Anything unrecognised is dropped rather than defaulted: a feeling nobody
+     * picked must never end up recorded as one they did.
+     *
+     * Returns whether it saved, so the card knows whether to close the form. A
+     * wrong PIN on a locked answer saves nothing at all, and the words have to
+     * still be on screen when they try again.
+     */
+    public function answerFeeling(
+        ?string $feeling = null,
+        ?string $because = null,
+        ?string $visibility = null,
+        ?string $newWord = null,
+        ?string $newGlyph = null,
+        ?string $lockPin = null,
+    ): bool {
+        $this->feelingLockMessage = null;
+
+        $service = app(FeelingService::class);
+
+        // A word typed into the box wins over a chip, and is created here
+        // rather than by a separate button — see resolveTypedWord(). The two
+        // can't normally both be set, because picking a chip clears the box.
+        //
+        // Falling back to the chip: either a built-in or one of the house's
+        // words, resolved against this household so a hand-edited request can't
+        // post a word from somebody else's family.
+        $choice = $service->resolveTypedWord($this->profile, $newWord, $newGlyph)
+            ?? $service->resolveAnswer($this->profile, $feeling);
+
+        if (! $choice) {
+            return false;
+        }
+
+        $saved = $service->record(
+            $this->profile,
+            $choice,
+            $because,
+            FeelingVisibility::tryFrom((string) $visibility) ?? FeelingVisibility::Private,
+            $lockPin,
+        );
+
+        if (! $saved) {
+            $this->feelingLockMessage = 'That PIN did not match. Nothing was saved — your words are still here.';
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * What a locked entry currently reads, for this render only.
+     *
+     * Deliberately not a persisted property that survives the round trip: the
+     * text is held for exactly as long as it takes to draw it once, and any
+     * other action on the page puts it away again. Opening a locked entry is a
+     * look, not a state change.
+     */
+    public ?string $openedFeeling = null;
+
+    public ?string $feelingLockMessage = null;
+
+    /** Seals today's reason with this kid's own PIN. */
+    public function lockFeeling(string $pin): void
+    {
+        $this->openedFeeling = null;
+
+        $this->feelingLockMessage = app(FeelingService::class)->lock($this->profile, $pin)
+            ? null
+            : 'That PIN did not match, so nothing was locked.';
+    }
+
+    /** Reads a locked entry back. The PIN is the key; there is no other way in. */
+    public function openFeeling(int $entryId, string $pin): void
+    {
+        $this->feelingLockMessage = null;
+        $this->openedFeeling = app(FeelingService::class)->openLocked($this->profile, $entryId, $pin);
+
+        if ($this->openedFeeling === null) {
+            $this->feelingLockMessage = 'That PIN did not open it.';
+        }
+    }
+
+    public function retireFeelingWord(int $wordId): void
+    {
+        app(FeelingService::class)->retireWord($this->profile, $wordId);
     }
 
     /**
@@ -316,22 +415,22 @@ new class extends Component
     /** The monster standing, as the boss strip and the watcher want it. */
     private function monsterState(): ?array
     {
-        $arena = app(MonsterService::class);
-        $monster = $arena->rotateWeakness($this->profile->household);
+        $monsters = app(MonsterService::class);
+        $monster = $monsters->rotateWeakness($this->profile->household);
 
-        return $monster ? $arena->stateFor($monster) : null;
+        return $monster ? $monsters->stateFor($monster) : null;
     }
 
     /**
      * The simplified standings: one row per kid, sorted by the run they're on.
      *
-     * Deliberately a fraction of what the Arena draws. The full page has lanes,
+     * Deliberately a fraction of what Household draws. The full page has lanes,
      * flags, a monster and a ticker; this is the league table underneath all of
      * it, which is the part a kid can read in two seconds on the way past.
      *
-     * Wrapped, because ArenaService::tonightFor() draws a quest for every kid in
+     * Wrapped, because HouseholdService::tonightFor() draws a quest for every kid in
      * the house and a household with nothing eligible makes that throw. On the
-     * Arena that's the page; here it's one card of four, and losing it must not
+     * Household that's the page; here it's one card of four, and losing it must not
      * take the landing page down with it.
      *
      * @return \Illuminate\Support\Collection<int, array<string, mixed>>
@@ -339,7 +438,7 @@ new class extends Component
     private function standings(): \Illuminate\Support\Collection
     {
         try {
-            return app(ArenaService::class)
+            return app(HouseholdService::class)
                 ->tonightFor($this->profile->household)
                 ->sortByDesc('streak')
                 ->values();
@@ -489,11 +588,15 @@ new class extends Component
             // live in the Loot Shop, which is the point of it being a strip.
             'luckyOpen' => app(LuckyBlockService::class)->isOpenFor($this->profile),
             'standings' => $this->standings(),
+            // The house's feelings for today. The service returns the strip as
+            // null until this kid has answered — see FeelingService for why the
+            // gate lives there rather than in the card.
+            'feelingsCard' => app(FeelingService::class)->cardFor($this->profile),
             // The week's shared chore target and what hitting it pays. Null
             // when a parent hasn't set one, which takes the bar with it.
-            'houseWeek' => app(ArenaService::class)->houseWeek($household),
+            'houseWeek' => app(HouseholdService::class)->houseWeek($household),
             // Status only — no replay, and nothing marked seen. See
-            // <x-monster-mini> for why the catch-up belongs to the Arena.
+            // <x-monster-mini> for why the catch-up belongs to Household.
             'monsterState' => $this->monsterState(),
             // A count rather than a list. The claim a kid is waiting on already
             // says so on its own card over on Quests, and the number that
@@ -523,6 +626,15 @@ new class extends Component
     <x-lucky-strip :tickets="$profile->bonus_tickets" :open="$luckyOpen" class="mb-[22px]" />
 
     <div class="flex flex-col gap-[22px]">
+        {{-- First, above everything that pays.
+
+             Not because it matters more than the quest, but because putting the
+             one card that is worth nothing underneath four that are worth
+             something says exactly what it looks like it says. It is also the
+             only card here that isn't a task, and it reads as one the moment it
+             is filed among them. --}}
+        <x-feelings-card :card="$feelingsCard" :opened-feeling="$openedFeeling" :lock-message="$feelingLockMessage" />
+
         {{-- The daily quest, opened right here. The hero is the same component
              the Quests page draws, so the chest, the hand, the charm window and
              the claim are one implementation rather than two that drift. --}}
@@ -1086,9 +1198,9 @@ new class extends Component
         @endif
 
         {{-- Where the house stands, and the last thing on the page. The league
-             table under the Arena and nothing else from it: no candles, no
+             table under Household and nothing else from it: no candles, no
              lanes, no monster. A kid glancing at this should get who is ahead
-             and who still has work to do, and go to the Arena when they want
+             and who still has work to do, and go to Household when they want
              the story.
 
              Last on purpose. Everything above it is something to go and do or
@@ -1098,7 +1210,7 @@ new class extends Component
         <div class="flex flex-col gap-3">
             @php
                 $mine = $standings->first(fn (array $row) => $row['profile']->is($profile));
-                $openCount = $standings->where('state', '!==', App\Services\ArenaService::STATE_SAFE)->count();
+                $openCount = $standings->where('state', '!==', App\Services\HouseholdService::STATE_SAFE)->count();
             @endphp
 
             <x-home-section
@@ -1127,9 +1239,9 @@ new class extends Component
                                 $isMe = $kid->is($profile);
 
                                 [$stateLabel, $stateInk] = match (true) {
-                                    $row['state'] === App\Services\ArenaService::STATE_SAFE => ['Cleared', 'var(--fq-lime)'],
-                                    $row['state'] === App\Services\ArenaService::STATE_AT_RISK => ['At risk', 'var(--fq-streak)'],
-                                    $row['state'] === App\Services\ArenaService::STATE_BROKEN => ['Back to zero', 'var(--fq-text-4)'],
+                                    $row['state'] === App\Services\HouseholdService::STATE_SAFE => ['Cleared', 'var(--fq-lime)'],
+                                    $row['state'] === App\Services\HouseholdService::STATE_AT_RISK => ['At risk', 'var(--fq-streak)'],
+                                    $row['state'] === App\Services\HouseholdService::STATE_BROKEN => ['Back to zero', 'var(--fq-text-4)'],
                                     default => ['Still open', 'var(--fq-text-3)'],
                                 };
                             @endphp
@@ -1164,7 +1276,7 @@ new class extends Component
 
                     <div class="mt-[14px] flex flex-wrap items-center justify-between gap-3">
                         <p class="text-[13px] text-fq-text-4">
-                            @if ($mine && $mine['state'] === App\Services\ArenaService::STATE_SAFE)
+                            @if ($mine && $mine['state'] === App\Services\HouseholdService::STATE_SAFE)
                                 Your night is safe. Do something every day and the run keeps climbing.
                             @else
                                 Get any chore signed off and tonight counts towards your run.
@@ -1172,10 +1284,10 @@ new class extends Component
                         </p>
 
                         <a
-                            href="{{ route('kid.arena') }}?world=house"
+                            href="{{ route('kid.household') }}?world=house"
                             wire:navigate
                             class="rounded-[13px] border border-fq-line-3 bg-fq-sunk px-[16px] py-[10px] text-[13px] whitespace-nowrap text-fq-text-2-b transition hover:border-fq-lime hover:text-fq-text"
-                        >See the Arena &rarr;</a>
+                        >See Household &rarr;</a>
                     </div>
                 @endif
             </div>

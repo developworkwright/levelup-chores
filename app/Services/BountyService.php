@@ -711,7 +711,7 @@ class BountyService
         $body = "{$bounty->poster->name}: {$bounty->summary()}";
 
         foreach ($audience as $profile) {
-            $this->notify($profile, $title, $body, $profile->isParent() ? '/parent/approvals' : '/kid/trades');
+            $this->notify($profile, $title, $body, $profile->isParent() ? '/parent/home' : '/kid/trades');
         }
     }
 

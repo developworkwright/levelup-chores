@@ -89,7 +89,7 @@ class TestNotificationCommand extends Command
 
         try {
             // Split by role so the notification a tap opens is a page that
-            // profile can actually reach — a kid sent to /parent/approvals
+            // profile can actually reach — a kid sent to /parent/home
             // would be bounced by the role middleware, which looks exactly
             // like the broken delivery this command exists to rule out.
             foreach ($subscribed->groupBy(fn (Profile $p) => $p->role->value) as $group) {

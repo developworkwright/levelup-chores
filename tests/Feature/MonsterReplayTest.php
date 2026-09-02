@@ -175,14 +175,14 @@ class MonsterReplayTest extends TestCase
         $this->caughtUpTo($monster, 100);
         $this->arena()->land($monster->fresh(), 800, $this->kid);
 
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertOk()
             ->assertSee('Catching you up');
 
         // Marked on the way past, so the second visit has nothing left to play.
         Auth::guard('profile')->login($this->kid->fresh());
 
-        Volt::test('kid.arena')
+        Volt::test('kid.household')
             ->assertOk()
             ->assertDontSee('Catching you up');
     }
@@ -198,7 +198,7 @@ class MonsterReplayTest extends TestCase
         // There was a queue here when three cards each had a catch-up to play
         // and they had to take turns. With one card there is nothing to wait
         // behind, and a delay would just be the page sitting still.
-        $state = Volt::test('kid.arena')->assertOk()->viewData('monsterState');
+        $state = Volt::test('kid.household')->assertOk()->viewData('monsterState');
 
         $this->assertSame(0, $state['startDelay']);
         $this->assertGreaterThan(1, count($state['steps']));

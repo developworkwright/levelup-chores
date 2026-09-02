@@ -31,6 +31,6 @@ class ParentApprovalNeeded extends Notification implements ShouldQueue
             ->body($this->body)
             ->tag('parent-approval')
             ->renotify()
-            ->data(['url' => '/parent/approvals']);
+            ->data(['url' => '/parent/home']);
     }
 }

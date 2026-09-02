@@ -169,7 +169,7 @@ class RedemptionRejectionTest extends TestCase
 
         Auth::guard('profile')->login($this->parent);
 
-        Volt::test('parent.approvals')
+        Volt::test('parent.home')
             ->assertSee('Reject')
             ->set('rejectReasons.'.$redemption->id, 'not before dinner')
             ->call('reject', $redemption->id)
@@ -189,7 +189,7 @@ class RedemptionRejectionTest extends TestCase
 
         // The request is a shopping errand: the page you need is the one they
         // were looking at, not one to go and find again in the shop admin.
-        Volt::test('parent.approvals')
+        Volt::test('parent.home')
             ->assertSee('https://lego.com/the-set')
             ->assertSee('Extra screen time');
     }
@@ -201,7 +201,7 @@ class RedemptionRejectionTest extends TestCase
 
         Auth::guard('profile')->login($this->parent);
 
-        Volt::test('parent.approvals')
+        Volt::test('parent.home')
             ->assertSee('Extra screen time')
             ->assertDontSee('fa-arrow-up-right-from-square');
     }
@@ -215,7 +215,7 @@ class RedemptionRejectionTest extends TestCase
 
         Auth::guard('profile')->login($this->parent);
 
-        Volt::test('parent.approvals')->call('reject', $theirs->id);
+        Volt::test('parent.home')->call('reject', $theirs->id);
 
         $this->assertSame(RedemptionStatus::Pending, $theirs->fresh()->status);
         $this->assertSame(400, $otherKid->refresh()->points);

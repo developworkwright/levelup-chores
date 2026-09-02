@@ -47,7 +47,7 @@ new class extends Component
         $this->profile = Auth::guard('profile')->user();
         abort_unless($this->profile->isParent(), 403);
 
-        // Seeded once, so the Arena controls open showing what is actually set
+        // Seeded once, so the Household controls open showing what is actually set
         // rather than blank fields that would read as "not configured".
         $household = $this->profile->household;
 
@@ -157,10 +157,10 @@ new class extends Component
     }
 
     /**
-     * The Arena's household settings.
+     * The Household page's settings.
      *
      * Seeded in mount() from the household so the controls open showing what
-     * is actually set, and written back together by saveArenaSettings().
+     * is actually set, and written back together by saveHouseholdSettings().
      */
     public ?int $eveningWatchHour = null;
 
@@ -186,14 +186,14 @@ new class extends Component
 
     public string $weeklyPrizeNote = '';
 
-    public ?string $arenaMessage = null;
+    public ?string $householdMessage = null;
 
     public ?string $clockMessage = null;
 
     /**
      * Set the zone the whole house runs on.
      *
-     * Its own control and its own button, apart from the Arena's four, because
+     * Its own control and its own button, apart from the Household page's four, because
      * it is not a preference: it decides what every other time on this page
      * means. Changing it moves nothing that has already happened — stored
      * instants are absolute — it changes how they read and how the next
@@ -232,10 +232,10 @@ new class extends Component
      * rule tabs between them and has no way to tell the difference between
      * "saved" and "silently didn't" — so there is a button, and it says so.
      */
-    public function saveArenaSettings(): void
+    public function saveHouseholdSettings(): void
     {
         // Bounded to the evening. A watch hour before the afternoon would have
-        // the Arena calling a quest at risk over breakfast, which is the sort
+        // the Household page calling a quest at risk over breakfast, which is the sort
         // of nagging this page's whole copy is written to avoid.
         $hour = max(15, min(23, (int) $this->eveningWatchHour));
 
@@ -254,7 +254,7 @@ new class extends Component
             'evening_watch_hour' => $hour,
             'bedtime' => $bedtime,
             'weekly_chore_target' => $target,
-            // Empty clears rather than storing '', so the Arena's "is there a
+            // Empty clears rather than storing '', so the Household page's "is there a
             // prize" check stays a plain null test.
             'weekly_prize' => $prize === '' ? null : $prize,
             'weekly_prize_note' => $note === '' ? null : $note,
@@ -266,7 +266,7 @@ new class extends Component
         $this->bedtime = (string) ($bedtime ?? '');
         $this->weeklyChoreTarget = (string) ($target ?? '');
 
-        $this->arenaMessage = match (true) {
+        $this->householdMessage = match (true) {
             // The one worth calling out on its own: turning bedtime off doesn't
             // turn the countdown off, it re-points it at 4am, and a parent who
             // meant "no timer" should find that out here rather than from a
@@ -1054,7 +1054,7 @@ new class extends Component
         @endforeach
     </div>
 
-    {{-- Above the Arena card on purpose: every time on that one — the watch
+    {{-- Above the Household card on purpose: every time on that one — the watch
          hour, bedtime, the day boundary — is a wall-clock time, and this is
          what decides which wall.
 
@@ -1116,14 +1116,14 @@ new class extends Component
         @endif
     </div>
 
-    {{-- What the Arena reads, plus bedtime — which isn't an Arena setting at
+    {{-- What the Household page reads, plus bedtime — which isn't a Household setting at
          all but is the other half of the same evening, and splitting the two
          times a house sets across two cards would make them harder to reason
          about together. All four are the household's own call and all four are
          safe to leave alone: the watch hour and bedtime have sensible defaults,
          and the week's target and prize simply don't draw until they're set. --}}
     <div class="mt-[14px] rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
-        <h3 class="font-baloo text-lg font-bold">The Arena</h3>
+        <h3 class="font-baloo text-lg font-bold">Household</h3>
         <p class="mt-1 text-sm text-fq-text-2">
             The kids' landing page: whose run is on the line tonight, the streak race, and
             what the house is fighting. Bedtime lives here too — it's the clock the kids'
@@ -1150,7 +1150,7 @@ new class extends Component
                      this as "bedtime" would expect the app to take something
                      away at it, and nothing ever does. --}}
                 <p class="mt-2 text-[12.5px] leading-snug text-fq-text-4">
-                    When an unfinished quest starts showing as <em>at risk</em> on the Arena.
+                    When an unfinished quest starts showing as <em>at risk</em> on Household.
                     Nothing expires — the day still rolls at
                     {{ $household->day_boundary_hour > 12 ? $household->day_boundary_hour - 12 : $household->day_boundary_hour }}:00am.
                 </p>
@@ -1244,15 +1244,15 @@ new class extends Component
         <div class="mt-4 flex flex-wrap items-center gap-3">
             <button
                 type="button"
-                wire:click="saveArenaSettings"
+                wire:click="saveHouseholdSettings"
                 wire:loading.attr="disabled"
-                wire:target="saveArenaSettings"
+                wire:target="saveHouseholdSettings"
                 class="rounded-[14px] px-5 py-[11px] font-baloo text-[15px] font-bold transition hover:brightness-110 disabled:opacity-60"
                 style="background: var(--fq-lime); color: var(--fq-ink)"
-            >Save Arena settings</button>
+            >Save household settings</button>
 
-            @if ($arenaMessage)
-                <span class="text-[12.5px] text-fq-lime">{{ $arenaMessage }}</span>
+            @if ($householdMessage)
+                <span class="text-[12.5px] text-fq-lime">{{ $householdMessage }}</span>
             @endif
         </div>
 

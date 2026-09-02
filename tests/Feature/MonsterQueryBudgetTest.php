@@ -93,10 +93,10 @@ class MonsterQueryBudgetTest extends TestCase
 
     public function test_the_arena_page_pays_a_fixed_price_for_the_card(): void
     {
-        $empty = $this->queriesToRender('kid.arena');
+        $empty = $this->queriesToRender('kid.household');
 
         $this->spawn();
-        $standing = $this->queriesToRender('kid.arena');
+        $standing = $this->queriesToRender('kid.household');
 
         // The card does more than the strip — a replay and the seen marker —
         // so it gets a little room, but not an open account.

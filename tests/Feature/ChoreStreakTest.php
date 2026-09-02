@@ -7,8 +7,8 @@ use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\Household;
 use App\Models\Profile;
-use App\Services\ArenaService;
 use App\Services\ChoreService;
+use App\Services\HouseholdService;
 use App\Services\StreakService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -235,7 +235,7 @@ class ChoreStreakTest extends TestCase
         $this->service()->claim($this->kid, $this->sideChore());
 
         // Deliberately the generous read: the kid has done their part, and the
-        // Arena must not show them at risk over a parent's response time.
+        // Household must not show them at risk over a parent's response time.
         $this->assertTrue($this->streaks()->streakDaySecuredToday($this->kid));
     }
 
@@ -243,11 +243,11 @@ class ChoreStreakTest extends TestCase
     {
         $this->clearSideChore();
 
-        $lane = app(ArenaService::class)
+        $lane = app(HouseholdService::class)
             ->tonightFor($this->household)
             ->firstWhere(fn (array $row) => $row['profile']->is($this->kid));
 
-        $this->assertSame(ArenaService::STATE_SAFE, $lane['state']);
+        $this->assertSame(HouseholdService::STATE_SAFE, $lane['state']);
     }
 
     public function test_a_sibling_cannot_rescue_a_kid_who_already_did_a_chore(): void
@@ -257,7 +257,7 @@ class ChoreStreakTest extends TestCase
         $this->kid->update(['streak' => 3]);
         $this->clearSideChore();
 
-        $arena = app(ArenaService::class);
+        $arena = app(HouseholdService::class);
 
         $this->assertSame(
             'Their night is already safe',
@@ -274,7 +274,7 @@ class ChoreStreakTest extends TestCase
 
         $this->clearSideChore();
 
-        $this->assertFalse(app(ArenaService::class)->nudge($sibling, $this->kid));
+        $this->assertFalse(app(HouseholdService::class)->nudge($sibling, $this->kid));
     }
 
     public function test_the_repair_window_closes_once_today_is_secured(): void

@@ -329,7 +329,7 @@ class StreakService
      * Keyed on `submitted_at`, not `decided_at`: the day belongs to the kid who
      * did the work, not to the evening a parent got round to signing it off.
      *
-     * Public for the Arena, which has to tell a run that is merely *young*
+     * Public for Household, which has to tell a run that is merely *young*
      * from one that died at the last rollover — the difference between a kid
      * on nothing and a kid who just lost nine nights, and the two must never
      * read the same on a screen the whole house is looking at.
@@ -355,7 +355,7 @@ class StreakService
      * how a 4am rollover and a timezone combine, and no portable SQL between
      * SQLite (tests) and MySQL (production) does.
      *
-     * Public so a caller asking about several adjacent days — the Arena wants
+     * Public so a caller asking about several adjacent days — Household wants
      * two of them per kid, on a page that draws every kid in the house — can
      * pay for one window instead of one per day.
      *
@@ -438,7 +438,7 @@ class StreakService
      *
      * The one walk. There were five of these, all identical bar the variable
      * names, and the `MAX_STREAK_DAYS` bound had already been copied wrong once
-     * (`ArenaService` hardcoded 366 beside a constant that was also 366 — right
+     * (`HouseholdService` hardcoded 366 beside a constant that was also 366 — right
      * by luck rather than by reference).
      *
      * @param  array<string, true>  $earned
@@ -468,7 +468,7 @@ class StreakService
      * Deliberately more generous than {@see streakDayEarnedOn()}: work sitting
      * in the approvals queue counts. The kid has done their part, and a screen
      * that shows them at risk over a parent's response time is blaming them for
-     * somebody else's inbox. This is the read the Arena and the repair window
+     * somebody else's inbox. This is the read Household and the repair window
      * want; the walk-back itself must keep using the strict one, or a pending
      * claim would prop up a run that was never signed off.
      */
@@ -523,7 +523,7 @@ class StreakService
      * `secured` is the generous read ({@see streakDaySecuredToday()}): work
      * waiting on a parent stops the clock, because it stopped being the kid's
      * clock to beat the moment they claimed it. `urgent` is the house's
-     * evening watch hour — the same threshold the Arena lights its candle on,
+     * evening watch hour — the same threshold Household lights its candle on,
      * so the two screens never disagree about who is on the line.
      *
      * @return array{closesAt: ?Carbon, resetsAt: Carbon, bedtime: ?Carbon, secured: bool, urgent: bool, overtime: bool}
@@ -552,7 +552,7 @@ class StreakService
             'bedtime' => $bedtime,
             'secured' => $secured,
             // A household with no usable watch hour never turns the strip red,
-            // the same way it never lights the Arena's candle.
+            // the same way it never lights Household's candle.
             'urgent' => ! $secured && $watch !== null && $now->greaterThanOrEqualTo($watch),
             'overtime' => ! $secured && $overtime,
         ];

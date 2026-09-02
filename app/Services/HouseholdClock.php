@@ -78,7 +78,7 @@ class HouseholdClock
      * household hasn't got a usable one.
      *
      * Not a deadline — nothing expires here. It is the hour past which the
-     * Arena starts drawing an open quest as at risk. Resolved through
+     * Household starts drawing an open quest as at risk. Resolved through
      * atTime(), so a watch hour set earlier than the day boundary lands in the
      * small hours at the *end* of the day, like every other wall-clock time.
      *

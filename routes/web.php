@@ -39,7 +39,7 @@ Route::post('/logout', function () {
 
 Route::middleware(['auth:profile', 'role:kid', 'sync-streak'])->prefix('kid')->group(function () {
     // Home: the day laid out in the order it should be done in — quest, chest,
-    // spin, standings. The Arena held this slot and the news on it is still the
+    // spin, standings. Household held this slot and the news on it is still the
     // best news in the app, but a landing page has to answer "what do I do now"
     // before it answers "what is happening", and a kid who couldn't work out
     // where to go next is the whole reason this page exists.
@@ -49,7 +49,11 @@ Route::middleware(['auth:profile', 'role:kid', 'sync-streak'])->prefix('kid')->g
     // two halves of the same instruction.
     Route::redirect('/', '/kid/home');
     Volt::route('/home', 'kid.home')->name('kid.home');
-    Volt::route('/arena', 'kid.arena')->name('kid.arena');
+    // Kept alive because the page was /arena for months and an installed PWA
+    // or a phone bookmark still points there. Costs one line; a 404 on the
+    // house page would look like the app had broken.
+    Route::redirect('/arena', '/kid/household');
+    Volt::route('/household', 'kid.household')->name('kid.household');
     Volt::route('/quests', 'kid.quests')->name('kid.quests');
     Volt::route('/loot', 'kid.loot')->name('kid.loot');
     Volt::route('/goal', 'kid.goal')->name('kid.goal');
@@ -69,8 +73,17 @@ Route::middleware(['auth:profile', 'role:kid', 'sync-streak'])->prefix('kid')->g
 });
 
 Route::middleware(['auth:profile', 'role:parent'])->prefix('parent')->group(function () {
-    Route::redirect('/', '/parent/approvals');
-    Volt::route('/approvals', 'parent.approvals')->name('parent.approvals');
+    Route::redirect('/', '/parent/home');
+    // Kept alive because push notifications already sitting on a phone carry
+    // the old path, and because the page was /approvals for months. A parent
+    // tapping an approval alert must not land on a 404.
+    Route::redirect('/approvals', '/parent/home');
+    // Home rather than Approvals: the page holds four queues, not one — jobs on
+    // offer, chore approvals, redemptions, lucky wins — and now the feelings
+    // card, which asks nothing of anybody. "Approvals" named the second of
+    // those. The kids' landing page is Home too, and the symmetry is worth
+    // having. The *sections* are still called what they are.
+    Volt::route('/home', 'parent.home')->name('parent.home');
     Volt::route('/chores', 'parent.chores')->name('parent.chores');
     Volt::route('/loot', 'parent.loot')->name('parent.loot');
     // Its own screen rather than a third section on the Loot Shop admin: the

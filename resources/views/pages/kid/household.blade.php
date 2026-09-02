@@ -4,7 +4,7 @@ use App\Enums\ProfileRole;
 use App\Exceptions\InsufficientTicketsException;
 use App\Models\Household;
 use App\Models\Profile;
-use App\Services\ArenaService;
+use App\Services\HouseholdService;
 use App\Services\HouseholdClock;
 use App\Services\MonsterService;
 use Illuminate\Support\Carbon;
@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
 /**
- * The Arena — the kid landing page, and the one kid page that is not about the
+ * Household — the kid landing page, and the one kid page that is not about the
  * kid looking at it.
  *
  * Everything on it is household-wide: whose run is on the line tonight, where
@@ -31,7 +31,7 @@ new class extends Component
     public Profile $profile;
 
     /** @var array<string, mixed>|false|null */
-    private array|false|null $arenaState = null;
+    private array|false|null $monsterState = null;
 
 
     public function mount(): void
@@ -46,14 +46,14 @@ new class extends Component
      * Memoised, because this both reads the "last looked" marker and moves it:
      * a second call inside one request would find the gap it had already
      * closed. `false` rather than null for "asked, nothing standing" — null is
-     * the not-yet-asked state, and an empty arena must not re-run markSeen().
+     * the not-yet-asked state, and an empty monster arena must not re-run markSeen().
      *
      * @return array<string, mixed>|null
      */
-    private function arena(Household $household): ?array
+    private function monster(Household $household): ?array
     {
-        if ($this->arenaState !== null) {
-            return $this->arenaState ?: null;
+        if ($this->monsterState !== null) {
+            return $this->monsterState ?: null;
         }
 
         $monsters = app(MonsterService::class);
@@ -67,21 +67,21 @@ new class extends Component
 
         $monsters->markSeen($household, $this->profile);
 
-        $this->arenaState = $state;
+        $this->monsterState = $state;
 
         return $state ?: null;
     }
 
     /** Why the last nudge or rescue didn't land. A silent no-op reads as broken. */
-    public ?string $arenaMessage = null;
+    public ?string $houseMessage = null;
 
     public function nudge(int $profileId): void
     {
-        $this->arenaMessage = null;
+        $this->houseMessage = null;
         $target = $this->sibling($profileId);
 
-        if (! $target || ! app(ArenaService::class)->nudge($this->profile, $target)) {
-            $this->arenaMessage = 'That nudge didn\'t land — one each per night.';
+        if (! $target || ! app(HouseholdService::class)->nudge($this->profile, $target)) {
+            $this->houseMessage = 'That nudge didn\'t land — one each per night.';
 
             return;
         }
@@ -91,7 +91,7 @@ new class extends Component
 
     public function rescue(int $profileId): void
     {
-        $this->arenaMessage = null;
+        $this->houseMessage = null;
         $target = $this->sibling($profileId);
 
         if (! $target) {
@@ -99,14 +99,14 @@ new class extends Component
         }
 
         try {
-            if (! app(ArenaService::class)->rescue($this->profile, $target)) {
-                $this->arenaMessage = app(ArenaService::class)->rescueBlockedReason($this->profile, $target)
+            if (! app(HouseholdService::class)->rescue($this->profile, $target)) {
+                $this->houseMessage = app(HouseholdService::class)->rescueBlockedReason($this->profile, $target)
                     ?? 'There is nothing to rescue there.';
 
                 return;
             }
         } catch (InsufficientTicketsException $e) {
-            $this->arenaMessage = $e->getMessage();
+            $this->houseMessage = $e->getMessage();
 
             return;
         }
@@ -143,9 +143,9 @@ new class extends Component
     public function with(): array
     {
         $household = $this->profile->household;
-        $arena = app(ArenaService::class);
+        $house = app(HouseholdService::class);
 
-        $race = $arena->raceFor($household);
+        $race = $house->raceFor($household);
         $lanes = $race['lanes'];
 
         return [
@@ -157,25 +157,25 @@ new class extends Component
             // here rather than in the card, so the template never has to ask
             // the service anything.
             'atRisk' => $lanes
-                ->where('state', ArenaService::STATE_AT_RISK)
+                ->where('state', HouseholdService::STATE_AT_RISK)
                 ->map(fn (array $entry) => [
                     ...$entry,
-                    'nudged' => $arena->hasNudged($this->profile, $entry['profile']),
-                    'nudgeStamp' => $arena->lastNudgeFor($entry['profile']),
-                    'rescueBlocked' => $arena->rescueBlockedReason($this->profile, $entry['profile']),
+                    'nudged' => $house->hasNudged($this->profile, $entry['profile']),
+                    'nudgeStamp' => $house->lastNudgeFor($entry['profile']),
+                    'rescueBlocked' => $house->rescueBlockedReason($this->profile, $entry['profile']),
                 ])
                 ->values(),
-            'monsterState' => $this->arena($household),
-            'choresToday' => $arena->choresToday($household),
-            'superlatives' => $arena->superlatives($household),
-            'crown' => $arena->crown($household),
-            'houseWeek' => $arena->houseWeek($household),
-            'prizeStanding' => $arena->prizeStanding($household),
+            'monsterState' => $this->monster($household),
+            'choresToday' => $house->choresToday($household),
+            'superlatives' => $house->superlatives($household),
+            'crown' => $house->crown($household),
+            'houseWeek' => $house->houseWeek($household),
+            'prizeStanding' => $house->prizeStanding($household),
             // Whole days between today and the Sunday rollover the week turns
             // on, so the prize card can say how long is left to chase it.
             'prizeDaysLeft' => (int) HouseholdClock::for($household)->today()
                 ->diffInDays(HouseholdClock::for($household)->today()->copy()->startOfWeek(Carbon::SUNDAY)->addWeek()),
-            'ticker' => $arena->ticker($household),
+            'ticker' => $house->ticker($household),
             'watchLabel' => $household->evening_watch_hour > 12
                 ? ($household->evening_watch_hour - 12).':00pm'
                 : $household->evening_watch_hour.':00am',
@@ -186,13 +186,13 @@ new class extends Component
     }
 }; ?>
 
-<x-kid.shell :profile="$profile" active="arena">
+<x-kid.shell :profile="$profile" active="household">
     {{-- 1. Tonight. The top of the page and the reason it exists. --}}
     @php
         $count = $atRisk->count();
         // Anything that isn't cleared. A broken run still has tonight's quest
         // to do, so it counts here as much as an ordinary open one.
-        $stillOpen = $lanes->where('state', '!==', ArenaService::STATE_SAFE)->count();
+        $stillOpen = $lanes->where('state', '!==', HouseholdService::STATE_SAFE)->count();
         // Only the scale steps as more kids are at risk — never the content.
         // Three at risk must not degrade into chips: a kid whose run is on the
         // line gets a real candle and a real headline whatever else is
@@ -352,7 +352,7 @@ new class extends Component
                                         title="{{ $kid['rescueBlocked'] ?? 'Keeps their run alive through the rollover' }}"
                                         class="rounded-[11px] border px-[16px] py-3 font-mono-fq text-[11px] tracking-[0.1em] uppercase transition hover:brightness-125 disabled:opacity-45"
                                         style="border-color: var(--fq-line-4); color: var(--fq-cyan); background: var(--fq-panel-alt)"
-                                    >Rescue &middot; {{ \App\Services\ArenaService::RESCUE_COST }} tickets</button>
+                                    >Rescue &middot; {{ \App\Services\HouseholdService::RESCUE_COST }} tickets</button>
                                 @endif
                             </div>
 
@@ -373,8 +373,8 @@ new class extends Component
             </div>
         @endif
 
-        @if ($arenaMessage)
-            <p class="mt-3 font-mono-fq text-[11px]" style="color: var(--fq-streak)">{{ $arenaMessage }}</p>
+        @if ($houseMessage)
+            <p class="mt-3 font-mono-fq text-[11px]" style="color: var(--fq-streak)">{{ $houseMessage }}</p>
         @endif
     </div>
 
@@ -418,9 +418,9 @@ new class extends Component
                     $accent = $kid->color->cssVar();
 
                     [$glyph, $stateLabel, $pillInk, $pillBg] = match (true) {
-                        $lane['state'] === ArenaService::STATE_SAFE => ['🔥', 'Cleared', 'var(--fq-lime)', 'color-mix(in srgb, var(--fq-lime) 16%, transparent)'],
-                        $lane['state'] === ArenaService::STATE_AT_RISK => ['🕯️', 'At risk', 'var(--fq-streak)', 'color-mix(in srgb, var(--fq-streak) 20%, transparent)'],
-                        $lane['state'] === ArenaService::STATE_BROKEN => ['💀', 'Back to zero', 'var(--fq-text-4)', 'var(--fq-panel-alt)'],
+                        $lane['state'] === HouseholdService::STATE_SAFE => ['🔥', 'Cleared', 'var(--fq-lime)', 'color-mix(in srgb, var(--fq-lime) 16%, transparent)'],
+                        $lane['state'] === HouseholdService::STATE_AT_RISK => ['🕯️', 'At risk', 'var(--fq-streak)', 'color-mix(in srgb, var(--fq-streak) 20%, transparent)'],
+                        $lane['state'] === HouseholdService::STATE_BROKEN => ['💀', 'Back to zero', 'var(--fq-text-4)', 'var(--fq-panel-alt)'],
                         default => ['○', 'Still open', 'var(--fq-text-3)', 'var(--fq-panel-alt)'],
                     };
 
@@ -429,10 +429,10 @@ new class extends Component
                         // the quest's own stamp — is null for plenty of safe
                         // kids. Saying "Quest cleared" over one of them credits
                         // work they didn't do and hides work they did.
-                        $lane['state'] === ArenaService::STATE_SAFE => $lane['clearedAt']
+                        $lane['state'] === HouseholdService::STATE_SAFE => $lane['clearedAt']
                             ? 'Quest cleared '.$lane['clearedAt']->timezone($household->timezone)->format('g:ia')
                             : 'Work in — night safe',
-                        $lane['state'] === ArenaService::STATE_BROKEN => 'Run of '.$lane['brokenFrom'].' ended at '.$rollLabel,
+                        $lane['state'] === HouseholdService::STATE_BROKEN => 'Run of '.$lane['brokenFrom'].' ended at '.$rollLabel,
                         default => $lane['quest'],
                     };
                 @endphp
@@ -440,9 +440,9 @@ new class extends Component
                 <div
                     wire:key="lane-{{ $kid->id }}"
                     class="flex flex-col gap-3 rounded-[20px] border p-[12px_14px] sm:flex-row sm:items-center sm:gap-[14px]"
-                    style="border-color: {{ $lane['state'] === ArenaService::STATE_AT_RISK ? 'var(--fq-streak-fill)' : 'var(--fq-line)' }};
-                           background: {{ $lane['state'] === ArenaService::STATE_AT_RISK ? 'linear-gradient(120deg,#2a0a16,var(--fq-panel) 60%)' : 'var(--fq-panel)' }};
-                           {{ $lane['state'] === ArenaService::STATE_BROKEN ? 'filter: saturate(.5)' : '' }}"
+                    style="border-color: {{ $lane['state'] === HouseholdService::STATE_AT_RISK ? 'var(--fq-streak-fill)' : 'var(--fq-line)' }};
+                           background: {{ $lane['state'] === HouseholdService::STATE_AT_RISK ? 'linear-gradient(120deg,#2a0a16,var(--fq-panel) 60%)' : 'var(--fq-panel)' }};
+                           {{ $lane['state'] === HouseholdService::STATE_BROKEN ? 'filter: saturate(.5)' : '' }}"
                 >
                     {{-- Below ~560px the lane stops being a row: the name block
                          and state column alone are 336px, so it stacks into a
@@ -482,11 +482,11 @@ new class extends Component
 
                         <div class="absolute top-0 grid h-[46px] w-[46px] -translate-x-1/2 place-items-center" style="left: {{ $lane['position'] }}%">
                             <div
-                                class="absolute h-[44px] w-[44px] rounded-full {{ $lane['state'] === ArenaService::STATE_BROKEN ? '' : 'fq-lane-halo' }}"
+                                class="absolute h-[44px] w-[44px] rounded-full {{ $lane['state'] === HouseholdService::STATE_BROKEN ? '' : 'fq-lane-halo' }}"
                                 style="background: radial-gradient(circle, {{ $accent }} 0%, transparent 70%); opacity: .5"
                             ></div>
                             <div
-                                class="relative grid h-[34px] w-[34px] place-items-center rounded-[12px] border-2 text-[17px] {{ $lane['state'] === ArenaService::STATE_AT_RISK ? 'fq-lane-bob' : '' }}"
+                                class="relative grid h-[34px] w-[34px] place-items-center rounded-[12px] border-2 text-[17px] {{ $lane['state'] === HouseholdService::STATE_AT_RISK ? 'fq-lane-bob' : '' }}"
                                 style="border-color: var(--fq-bg); background: var(--fq-panel-alt)"
                             >{{ $glyph }}</div>
                         </div>

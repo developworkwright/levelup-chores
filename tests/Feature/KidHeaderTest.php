@@ -140,7 +140,7 @@ class KidHeaderTest extends TestCase
             $this->assertStringContainsString('Home', $rail);
             $this->assertStringContainsString('Quests', $rail);
             $this->assertStringContainsString('Shop', $rail);
-            // The fourth slot held House — the Arena and the trades — and
+            // The fourth slot held House — Household and the trades — and
             // holds the Arcade instead. See the rail's own comment: those two
             // are news that comes looking for a kid, and the arcade is the one
             // page that is worth nothing unless it is a tap from everywhere.
@@ -198,7 +198,7 @@ class KidHeaderTest extends TestCase
         $this->assertStringContainsString('Bonus', $shop);
         // A segment row only ever holds the siblings of the page you are on,
         // and Shop is the only rail button left holding two pages.
-        $this->assertStringNotContainsString('Arena', $shop);
+        $this->assertStringNotContainsString('Household', $shop);
     }
 
     public function test_a_page_with_no_sibling_draws_no_segment_row(): void
@@ -209,10 +209,10 @@ class KidHeaderTest extends TestCase
         // from the sheet is on its own too, and a lone segment marked as the
         // open page is a control with nowhere to go.
         //
-        // The Arena and the trades are in that second group now. They were a
+        // Household and the trades are in that second group now. They were a
         // pair behind the House button and lost their segment row with it —
         // the sheet's "The house" heading is what keeps them together.
-        foreach (['kid.home', 'kid.quests', 'kid.stats', 'kid.journal', 'kid.arcade', 'kid.arena', 'kid.trades'] as $page) {
+        foreach (['kid.home', 'kid.quests', 'kid.stats', 'kid.journal', 'kid.arcade', 'kid.household', 'kid.trades'] as $page) {
             $this->assertSame('', $this->segments(Volt::test($page)->html()), $page.' should draw no segments.');
         }
     }
@@ -225,7 +225,7 @@ class KidHeaderTest extends TestCase
 
         foreach ([
             'kid.home', 'kid.quests', 'kid.loot', 'kid.journal',
-            'kid.arena', 'kid.trades', 'kid.bonus', 'kid.arcade',
+            'kid.household', 'kid.trades', 'kid.bonus', 'kid.arcade',
             'kid.stats', 'kid.goal', 'kid.badges',
         ] as $route) {
             $test->assertSee(route($route), false);
@@ -348,8 +348,8 @@ class KidHeaderTest extends TestCase
 
         $this->assertStringNotContainsString(
             'aria-current="page"',
-            $this->rail($this->get(route('kid.arena'))->assertOk()->content()),
-            'The Arena is reached from the sheet now; no rail button should claim it.',
+            $this->rail($this->get(route('kid.household'))->assertOk()->content()),
+            'Household is reached from the sheet now; no rail button should claim it.',
         );
 
         $this->assertNull(session('kid_world'), 'The shell should no longer write a world to the session.');

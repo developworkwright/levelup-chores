@@ -90,7 +90,7 @@ class AuthTest extends TestCase
 
         $this->actingAs($kid, 'profile');
 
-        $this->get('/parent/approvals')->assertForbidden();
+        $this->get('/parent/home')->assertForbidden();
     }
 
     public function test_parent_session_cannot_access_kid_routes(): void

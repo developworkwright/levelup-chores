@@ -74,7 +74,7 @@ class PushSubscriptionTest extends TestCase
 
         Auth::guard('profile')->login($parent);
 
-        $this->get(route('parent.approvals'))->assertSeeLivewire('push-toggle');
+        $this->get(route('parent.home'))->assertSeeLivewire('push-toggle');
     }
 
     public function test_a_signed_out_visitor_cannot_register_a_subscription(): void

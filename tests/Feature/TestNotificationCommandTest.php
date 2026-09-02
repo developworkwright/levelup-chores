@@ -65,7 +65,7 @@ class TestNotificationCommandTest extends TestCase
     }
 
     /**
-     * A kid sent to /parent/approvals is bounced by the role middleware, which
+     * A kid sent to /parent/home is bounced by the role middleware, which
      * looks exactly like the broken delivery this command exists to rule out.
      */
     public function test_each_role_gets_a_notification_pointing_somewhere_they_can_go(): void

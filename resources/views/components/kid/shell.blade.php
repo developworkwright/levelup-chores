@@ -25,7 +25,7 @@
         // The word rides on the count because "3" alone reads as a chore.
         'loot' => ['label' => 'Loot Shop', 'short' => 'Loot', 'icon' => 'fa-gem', 'route' => 'kid.loot', 'accent' => 'var(--fq-blue)', 'countWord' => 'new'],
         'bonus' => ['label' => 'Bonus Shop', 'short' => 'Bonus', 'icon' => 'fa-star', 'route' => 'kid.bonus', 'accent' => 'var(--fq-gold)'],
-        'arena' => ['label' => 'Arena', 'short' => 'Arena', 'icon' => 'fa-ranking-star', 'route' => 'kid.arena', 'accent' => 'var(--fq-green)'],
+        'household' => ['label' => 'Household', 'short' => 'House', 'icon' => 'fa-ranking-star', 'route' => 'kid.household', 'accent' => 'var(--fq-green)'],
         'trades' => ['label' => 'Trades & Jobs', 'short' => 'Trades', 'icon' => 'fa-right-left', 'route' => 'kid.trades', 'accent' => 'var(--fq-coral)'],
         'journal' => ['label' => 'Journal', 'icon' => 'fa-feather', 'route' => 'kid.journal', 'accent' => 'var(--fq-green)'],
         // `new` is a flag rather than something the kid's row remembers: the
@@ -64,10 +64,10 @@
         ['label' => 'Quests', 'icon' => 'fa-flag', 'pages' => ['quests']],
         ['label' => 'Shop', 'icon' => 'fa-gem', 'pages' => ['loot', 'bonus']],
         /*
-         * The fourth slot was House — the Arena and the trades — and it is the
+         * The fourth slot was House — Household and the trades — and it is the
          * Arcade instead.
          *
-         * Not because the Arena matters less, but because a rail button is for
+         * Not because Household matters less, but because a rail button is for
          * the thing a kid opens the app *to do*, and those two are things that
          * happen to them: a sibling sends a swap, a monster loses some health,
          * and either way the news finds them through a count or a card on Home.
@@ -89,7 +89,7 @@
      */
     $sheetGroups = [
         'Every day' => ['home', 'quests', 'loot', 'journal'],
-        'The house' => ['arena', 'trades'],
+        'The house' => ['household', 'trades'],
         'Now and then' => ['bonus', 'arcade', 'music'],
     ];
 

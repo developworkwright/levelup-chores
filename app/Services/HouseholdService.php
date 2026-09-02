@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
- * The Arena: the household's night, seen from outside any one kid.
+ * Household: the house's night, seen from outside any one kid.
  *
  * Everything here is household-wide by design. It is the one kid page that
  * isn't about the kid looking at it, which is why it is also the page they
@@ -33,7 +33,7 @@ use Illuminate\Support\Str;
  * chest shut is as safe as one who didn't, and this is the screen the whole
  * house looks at.
  */
-class ArenaService
+class HouseholdService
 {
     /**
      * How long the at-risk urgency ramps for before it holds.
@@ -63,7 +63,7 @@ class ArenaService
     /**
      * Per-household memos, for the life of one request.
      *
-     * The Arena asks the same three questions from five places — raceFor(),
+     * Household asks the same three questions from five places — raceFor(),
      * superlatives(), crown() (through superlatives *and* choresToday),
      * prizeStanding() and the ticker's broken-run rows all want tonightFor().
      * Unmemoised that ran the whole per-kid walk five times on the page every
@@ -73,7 +73,7 @@ class ArenaService
      *
      * Keyed by household id and never cleared, which is safe because the memo
      * lives only as long as the instance: the container hands out a new
-     * ArenaService per `app()` call, and the page resolves one and reuses it
+     * HouseholdService per `app()` call, and the page resolves one and reuses it
      * for the whole render. An action that writes — nudge(), rescue() — runs
      * on its own instance and so cannot leave a stale memo behind for the
      * re-render that follows it.
@@ -313,7 +313,7 @@ class ArenaService
                 // Any chore in for today makes the night safe, so the lane can
                 // no longer read the quest's own stamp — a kid who cleared four
                 // side quests and left the chest shut is as safe as one who
-                // didn't, and the Arena is the screen that must not get that
+                // didn't, and Household is the screen that must not get that
                 // wrong in front of the whole house.
                 $state = $this->stateFor($kid, $this->streaks->streakDaySecuredToday($kid));
 

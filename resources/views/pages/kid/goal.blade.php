@@ -218,7 +218,7 @@ new class extends Component
         @endif
 
         {{-- One column now. The monsters and the family plan that used to sit
-             beside this moved to the Arena, where the rest of what the house
+             beside this moved to Household, where the rest of what the house
              shares already lives — this page is the kid's own goal and nothing
              else. --}}
         <div class="flex flex-wrap items-start gap-[14px]">
