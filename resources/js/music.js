@@ -97,6 +97,34 @@ document.addEventListener('alpine:init', () => {
         playing: false,
         volume: Number(read(KEY_VOLUME, DEFAULT_VOLUME)) || DEFAULT_VOLUME,
 
+        /**
+         * Where the song is and how long it is, in whole seconds.
+         *
+         * Both zero until a file has actually loaded, which is the honest
+         * answer from a player that fetches nothing until somebody presses
+         * play: there is no length to report about a song the browser has never
+         * seen. Whole seconds because the display is m:ss and this is written
+         * from a handler that fires four times a second — rounding here means
+         * the panel's bindings re-run once a second instead.
+         *
+         * Deliberately not remembered anywhere. A kid coming back tomorrow
+         * wants the song from the top, not from four minutes in.
+         */
+        position: 0,
+        duration: 0,
+
+        /**
+         * Where the scrubber is being dragged to, or null when nobody is
+         * dragging it.
+         *
+         * Without this the bar fights the thumb: `timeupdate` writes the
+         * playing position back into the input four times a second, and the
+         * thumb snaps out from under the finger on the way to the middle of the
+         * song. While this is set the clock reads from it instead, and the
+         * audio is only moved on release.
+         */
+        scrubAt: null,
+
         /** @type {Array<{id: number, name: string, trackIds: Array<string>}>} */
         playlists: [],
 
@@ -308,6 +336,26 @@ document.addEventListener('alpine:init', () => {
                 // ends. play() sets `loop` from that, so this listener is the
                 // playlist's whole advance mechanism.
                 this.el.addEventListener('ended', () => this.advance());
+
+                // The length arrives well before the song is playable, and
+                // changes again on a variable-bitrate mp3 the browser had to
+                // guess at — so both events, and only finite numbers.
+                const measure = () => {
+                    this.duration = Number.isFinite(this.el.duration) ? Math.floor(this.el.duration) : 0;
+                };
+
+                this.el.addEventListener('loadedmetadata', measure);
+                this.el.addEventListener('durationchange', measure);
+
+                // Fires about four times a second, and also on every seek,
+                // which is what moves the clock back to where a kid dropped
+                // the thumb. Nothing to do while they are still holding it.
+                this.el.addEventListener('timeupdate', () => {
+                    if (this.scrubAt === null) {
+                        this.position = Math.floor(this.el.currentTime);
+                    }
+                });
+
                 // Nothing loads until a kid actually asks for a song; these
                 // files are megabytes each and most page loads never play one.
                 this.el.preload = 'none';
@@ -331,6 +379,14 @@ document.addEventListener('alpine:init', () => {
 
             if (audio.src !== track.url) {
                 audio.src = track.url;
+
+                // The old song's numbers would otherwise sit under the new
+                // song's title until its metadata lands — a four-minute bar on
+                // a thirty-second jingle, and a scrubber that can be dragged
+                // somewhere the file does not go.
+                this.position = 0;
+                this.duration = 0;
+                this.scrubAt = null;
             }
 
             /*
@@ -423,6 +479,15 @@ document.addEventListener('alpine:init', () => {
             this.trackId = id;
             write(KEY_TRACK, id);
 
+            // play() clears these too, but it is not reached when the music is
+            // off — and a picker that swaps the title while leaving the last
+            // song's length under it is reporting on a song nobody chose.
+            if (changed) {
+                this.position = 0;
+                this.duration = 0;
+                this.scrubAt = null;
+            }
+
             if (this.playing && changed) {
                 if (this.el) {
                     this.el.pause();
@@ -440,6 +505,63 @@ document.addEventListener('alpine:init', () => {
             if (this.el) {
                 this.el.volume = this.volume;
             }
+        },
+
+        /**
+         * True once the browser knows how long the song is, which is the whole
+         * of whether it can be seeked. Until the first play there is no file
+         * loaded to seek through.
+         */
+        get seekable() {
+            return this.duration > 0;
+        },
+
+        /**
+         * Where the scrubber should sit: under the finger while it is being
+         * dragged, on the song the rest of the time.
+         */
+        get elapsed() {
+            return this.scrubAt ?? this.position;
+        },
+
+        /** Dragging. Moves the clock and nothing else — see scrubAt. */
+        scrubTo(value) {
+            this.scrubAt = Math.floor(Number(value)) || 0;
+        },
+
+        /**
+         * Let go. This is the jump.
+         *
+         * The song carries on doing whatever it was doing: seeking a paused
+         * song is a kid lining up where to start from, and starting the music
+         * for them would be the panel making noise on its own.
+         */
+        seek(value) {
+            const seconds = Math.min(Math.max(Math.floor(Number(value)) || 0, 0), this.duration);
+
+            this.scrubAt = null;
+
+            if (! this.el || ! this.seekable) {
+                return;
+            }
+
+            this.el.currentTime = seconds;
+            this.position = seconds;
+        },
+
+        /**
+         * Seconds as m:ss, for both ends of the bar. Em dashes rather than
+         * 0:00 for a song the browser has not loaded, because a zero length is
+         * a claim about the song and this is an admission about the player.
+         */
+        clock(seconds) {
+            if (! Number.isFinite(seconds) || seconds < 0) {
+                return '--:--';
+            }
+
+            const whole = Math.floor(seconds);
+
+            return Math.floor(whole / 60) + ':' + String(whole % 60).padStart(2, '0');
         },
 
         /** True while songs have arrived that this browser has not been shown. */

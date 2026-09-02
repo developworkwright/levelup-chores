@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Arcade layout check</title>
+<link rel="stylesheet" href="/build/assets/app-fTNulH7I.css">
+<body class="bg-fq-bg">
+<div class="mx-auto max-w-[1080px] px-[14px] pb-10">
+  <div class="flex flex-col gap-3 rounded-[28px] border border-fq-line bg-fq-bg p-[16px_14px]">
+    <p class="text-xs text-fq-text-3">One board per game, for the whole house.</p>
+    <div class="flex flex-col gap-[13px]">
+      <div class="flex items-baseline justify-between gap-[10px]">
+        <h2 class="font-baloo text-[22px] leading-none font-extrabold text-fq-text">Arcade</h2>
+        <span class="shrink-0 font-mono-fq text-[10px] tracking-[0.14em] whitespace-nowrap text-fq-lime uppercase">Week&rsquo;s board</span>
+      </div>
+      <div class="flex flex-col items-start gap-[13px] lg:flex-row lg:items-start">
+        <div id="gamecol" class="flex w-full min-w-0 flex-col gap-[13px] lg:flex-1" style="max-width: calc(88vh * 320 / 460)">
+          <div class="flex gap-[6px]">
+            <button class="flex min-h-[44px] min-w-0 flex-1 flex-col items-center gap-[3px] rounded-[16px] border border-fq-line-2 bg-fq-sunk px-[6px] py-[8px]">
+              <span class="text-[13.5px] font-semibold whitespace-nowrap text-fq-text">Stack the Mess</span>
+              <span class="font-mono-fq text-[8.5px] tracking-[0.1em] whitespace-nowrap text-fq-text-5 uppercase">Best 39</span>
+            </button>
+            <button class="flex min-h-[44px] min-w-0 flex-1 flex-col items-center gap-[3px] rounded-[16px] border-2 border-fq-lime px-[6px] py-[8px]" style="background: linear-gradient(180deg, var(--fq-gold-fill), var(--fq-sunk))">
+              <span class="text-[13.5px] font-bold whitespace-nowrap text-fq-lime">Windy Walkies</span>
+              <span class="font-mono-fq text-[8.5px] tracking-[0.1em] whitespace-nowrap text-fq-gold-dim uppercase">Best 0</span>
+            </button>
+          </div>
+          <div id="cabinet" class="flex flex-col gap-[11px] rounded-[24px] border border-fq-line-3 p-[12px]" style="background: linear-gradient(160deg, var(--fq-cabinet), var(--fq-panel))">
+            <div class="relative w-full select-none">
+              <div class="mb-2 flex items-center justify-end gap-2">
+                <button class="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-fq-line-2 bg-fq-sunk text-[11px] text-fq-text-4">&#9834;</button>
+              </div>
+              <fart-dash></fart-dash>
+            </div>
+            <div class="flex items-center gap-[9px] border-t border-fq-line pt-[10px]">
+              <span class="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-fq-sunk"><i class="fa-solid fa-wind text-[14px] text-fq-fart"></i></span>
+              <span class="min-w-0 flex-1 text-[12.5px] leading-[1.4] text-pretty text-fq-text-3">Swipe or use the arrows. Tap to hop forward &mdash; <span class="text-fq-fart">beans give you a super fart</span> worth three lanes.</span>
+            </div>
+          </div>
+        </div>
+        <div id="boardcol" class="flex w-full flex-col gap-[10px] lg:w-[300px] lg:shrink-0">
+          <div class="flex items-baseline justify-between gap-2">
+            <span class="font-mono-fq text-[9.5px] tracking-[0.2em] text-fq-text-3 uppercase">Windy Walkies &middot; this week</span>
+            <span class="shrink-0 font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-6 uppercase">from Mon 31 Aug</span>
+          </div>
+          <p class="rounded-[12px] border border-fq-ticket-line px-3 py-[7px] text-[11.5px] leading-snug text-fq-text-3" style="background: var(--fq-gold-fill)"><span class="font-bold text-fq-lime">3 bonus tickets</span> to the top of each game&rsquo;s board when the week ends on Sunday &mdash; one prize per cabinet, so both are worth playing. <span class="text-fq-text-5">Grown-ups can win the week, but not the tickets.</span></p>
+          <ol class="flex flex-col gap-[5px]">
+            <li class="flex items-center gap-3 rounded-[15px] border border-fq-line bg-fq-panel px-3 py-[8px]"><span class="w-[18px] shrink-0 font-baloo text-[16px] font-extrabold text-fq-gold">1</span><span class="flex min-w-0 flex-1 flex-col gap-px"><span class="truncate text-[14px] leading-[1.2] font-semibold text-fq-text">Nova</span><span class="truncate font-mono-fq text-[9px] tracking-[0.06em] text-fq-text-5 uppercase">Through the doors</span></span><span class="shrink-0 font-baloo text-[19px] font-extrabold text-fq-lime">34</span></li>
+            <li class="flex items-center gap-3 rounded-[15px] border border-fq-line bg-fq-panel px-3 py-[8px]"><span class="w-[18px] shrink-0 font-baloo text-[16px] font-extrabold text-fq-text-5">2</span><span class="flex min-w-0 flex-1 flex-col gap-px"><span class="truncate text-[14px] leading-[1.2] font-semibold text-fq-text">Scout</span><span class="truncate font-mono-fq text-[9px] tracking-[0.06em] text-fq-text-5 uppercase">In the farmyard</span></span><span class="shrink-0 font-baloo text-[19px] font-extrabold text-fq-lime">26</span></li>
+            <li class="flex items-center gap-3 rounded-[15px] border border-fq-line bg-fq-panel px-3 py-[8px]"><span class="w-[18px] shrink-0 font-baloo text-[16px] font-extrabold text-fq-text-5">3</span><span class="flex min-w-0 flex-1 flex-col gap-px"><span class="truncate text-[14px] leading-[1.2] font-semibold text-fq-text">Ziggy</span><span class="truncate font-mono-fq text-[9px] tracking-[0.06em] text-fq-text-5 uppercase">Down the lane</span></span><span class="shrink-0 font-baloo text-[19px] font-extrabold text-fq-lime">19</span></li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/build/assets/app-CLW0gsuV.js"></script>
+</body>

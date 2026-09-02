@@ -2,15 +2,20 @@
 
 namespace App\Models;
 
+use App\Enums\ArcadeGame;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * One posted run of the arcade game.
+ * One posted run of one of the arcade's cabinets.
  *
  * A score used to be attached to nobody on purpose, because the cabinet stood
  * on the public login page. It is behind the PIN now and rows name the person
  * who played — see the migration that added the columns.
+ *
+ * `game` says which cabinet, and no query here should ever go without it: the
+ * two games score different things, so a board that mixes them is measuring
+ * nothing.
  */
 class ArcadeScore extends Model
 {
@@ -19,6 +24,7 @@ class ArcadeScore extends Model
     protected $fillable = [
         'household_id',
         'profile_id',
+        'game',
         'codename',
         'score',
         'week',
@@ -27,6 +33,7 @@ class ArcadeScore extends Model
     protected function casts(): array
     {
         return [
+            'game' => ArcadeGame::class,
             'score' => 'integer',
         ];
     }

@@ -30,13 +30,13 @@ new class extends Component
 
 <x-parent.shell :profile="$profile" active="arcade">
     <div class="flex flex-col gap-3 rounded-[28px] border border-fq-line bg-fq-bg p-[16px_14px]">
-        <div>
-            <h2 class="font-baloo text-xl font-extrabold">Stack the Mess</h2>
-            <p class="mt-[3px] text-xs text-fq-text-3">
-                One board for the whole house. Your runs sit on it next to theirs — the kids
-                can see exactly how you did, which is the point.
-            </p>
-        </div>
+        {{-- Deliberately no game name here. There are two cabinets and the
+             switcher inside owns which one is showing; a heading naming one of
+             them would be wrong half the time. --}}
+        <p class="text-xs text-fq-text-3">
+            One board per game, for the whole house. Your runs sit on them next to theirs — the
+            kids can see exactly how you did, which is the point.
+        </p>
 
         <livewire:arcade />
     </div>

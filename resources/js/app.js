@@ -11,11 +11,30 @@
 import './monsters.js';
 
 /*
- * The login page's arcade. Registers the `fqStacker` Alpine component and
- * nothing else — it is only ever mounted on `/`, but bundling it here keeps
- * the app to one script, which is the whole point of it installing as a PWA.
+ * Stack the Mess, the arcade's first cabinet. Registers the `fqStacker` Alpine
+ * component and nothing else. Bundling it here keeps the app to one script,
+ * which is the whole point of it installing as a PWA.
  */
 import './arcade.js';
+
+/*
+ * Windy Walkies, the arcade's second cabinet — the dog, the lanes and the
+ * beans. Shipped verbatim from handoff/design_handoff_bean_dash for the same
+ * reason monsters.js is: it arrived finished and playable, it draws to a canvas
+ * with no DOM to reconcile, and porting it would re-derive a thousand hand-tuned
+ * numbers and then drift. Update it by replacing the file from a new bundle.
+ *
+ * Several names inside it are older than the game's: the bundle's working title
+ * was "Bean Dash", so the file registers `<fart-dash>` and emits `fd-score` /
+ * `fd-over`. Those are deliberately left alone — renaming them would fork the
+ * file from the bundle to no benefit, since none of them is user-facing.
+ * `ArcadeGame::WindyWalkies` is the name the app uses.
+ *
+ * The one line that *is* changed from the bundle is the title the start screen
+ * draws, which said "BEAN DASH" in the largest type on the page. Re-apply that
+ * edit when replacing this file; `ArcadeMilestoneTest` fails if it goes missing.
+ */
+import './fart-dash.js';
 
 /*
  * Background music: the header's play button and song picker, and the Audio

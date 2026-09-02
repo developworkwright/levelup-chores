@@ -214,6 +214,46 @@
                 </template>
             </div>
 
+            {{-- Where the song is, and the way into the middle of it.
+
+                 The whole reason it is here: a lot of the library opens on a
+                 long quiet intro, and a kid who cannot tell which song is on
+                 has no way to find out but to wait. Dragging to the middle
+                 answers it in a second.
+
+                 Always drawn, disabled until a file has actually loaded, rather
+                 than appearing when the first song starts — a control that
+                 materialises under the list pushes the volume slider down at the
+                 exact moment somebody is reaching for it. --}}
+            <div class="mt-3 shrink-0 border-t border-fq-line pt-3">
+                <input
+                    type="range"
+                    min="0"
+                    {{-- Never a max of zero: with both ends the same the thumb
+                         has nowhere to sit and browsers disagree about where to
+                         park it. --}}
+                    :max="music.seekable ? music.duration : 1"
+                    step="1"
+                    :value="music.elapsed"
+                    :disabled="! music.seekable"
+                    {{-- Two events, and the split matters. `input` fires all the
+                         way through the drag and only moves the clock; `change`
+                         fires on release and is what actually moves the song, so
+                         a kid crossing a four-minute track does not make the
+                         browser start fetching at forty places on the way. --}}
+                    @input="music.scrubTo($event.target.value)"
+                    @change="music.seek($event.target.value)"
+                    aria-label="Seek through the song"
+                    :aria-valuetext="music.clock(music.elapsed) + ' of ' + music.clock(music.duration)"
+                    class="h-[4px] w-full accent-fq-lime disabled:opacity-40"
+                >
+
+                <div class="mt-[6px] flex items-center justify-between font-mono-fq text-[10px] text-fq-text-5">
+                    <span x-text="music.clock(music.elapsed)"></span>
+                    <span x-text="music.seekable ? music.clock(music.duration) : '--:--'"></span>
+                </div>
+            </div>
+
             {{-- Only while a playlist is on, because neither control means
                  anything to a single song on repeat: there is nothing to
                  shuffle and nothing to skip to. --}}

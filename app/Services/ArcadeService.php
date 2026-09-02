@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\ArcadeGame;
 use App\Enums\TicketKind;
 use App\Models\ArcadeScore;
 use App\Models\ArcadeWeekPrize;
@@ -25,19 +26,24 @@ use Illuminate\Support\Collection;
  * the score is still treated as a *claim* rather than a fact, because it still
  * arrives from a browser; and the old codename rows are still readable, which
  * is why `ArcadeScore::displayName()` falls back to that column.
+ *
+ * There are two cabinets now, and that is why every method below takes an
+ * `ArcadeGame`. Nothing here may be asked a question that spans both: a tower
+ * is floors and a walk is lanes, so a mixed board ranks numbers that are not
+ * the same kind of number. `settle()` is the one exception, and it fans out
+ * over the games rather than merging them.
  */
 class ArcadeService
 {
     /**
-     * The tallest tower the server will believe. Floors get roughly a pixel
-     * narrower each imperfect drop from a 180px slab, so even a player who
-     * never misses badly runs out of tower long before this; it exists to put
-     * a ceiling on what a tampered request can write, not to cap real play.
+     * The biggest run the server will believe, whichever cabinet it came off.
+     *
+     * A tower's floors get roughly a pixel narrower each imperfect drop from a
+     * 180px slab, and a walk's traffic speeds up with distance, so a player who
+     * never misses runs out of game long before this on either. It exists to
+     * put a ceiling on what a tampered request can write, not to cap real play.
      */
     public const MAX_SCORE = 999;
-
-    /** Runs a single player may post per hour before the board stops listening. */
-    public const POSTS_PER_HOUR = 40;
 
     /**
      * What topping a finished week is worth.
@@ -47,6 +53,10 @@ class ArcadeService
      * out-earn a week of actual chores. Paid to kids only: a grown-up who tops
      * the week wins the week and nothing else, which is the joke and also the
      * rule that keeps the prize pointing at the people it is for.
+     *
+     * Paid *per game*. One prize across both cabinets would make the second
+     * game pointless for everybody who is not already best at the first, which
+     * is the opposite of the reason it was added.
      */
     public const PRIZE_TICKETS = 3;
 
@@ -62,33 +72,68 @@ class ArcadeService
     private const SETTLE_WEEKS_BACK = 6;
 
     /**
-     * How high a tower got, in words a kid can picture.
+     * How far a run got, in words a kid can picture. One ladder per cabinet.
      *
-     * This is the shared spine of the whole feature: the game's parallax
-     * scenery is keyed to these entries *by index*, so the wall, the attic and
-     * the sky change exactly where the banner says they do. Adding a milestone
-     * here without adding the matching scenery in `resources/js/arcade.js`
-     * fails `ArcadeMilestoneTest`.
+     * This is the shared spine of the whole feature: each game's artwork is
+     * keyed to its own ladder, so the scenery changes exactly where the banner
+     * says it does. Stack the Mess keys its parallax to these entries *by
+     * index* in `resources/js/arcade.js`; Windy Walkies carries its own copy of
+     * the list inside `resources/js/fart-dash.js` and draws its banner from it.
+     * Changing either half on its own fails `ArcadeMilestoneTest`.
      *
-     * @var list<array{0: int, 1: string}>
+     * @var array<string, list<array{0: int, 1: string}>>
      */
     public const MILESTONES = [
-        [0, 'On the rug'],
-        [3, 'Sofa height'],
-        [6, 'Light switch'],
-        [9, 'Picture rail'],
-        [12, 'Window height'],
-        [15, 'Top shelf'],
-        [18, 'Ceiling'],
-        [22, 'In the attic'],
-        [26, 'Through the roof'],
-        [31, 'Treetops'],
-        [36, 'In the clouds'],
-        [42, 'Bird height'],
-        [50, 'Stratosphere'],
-        [60, 'Moonlit'],
-        [75, 'Outer space'],
+        ArcadeGame::StackTheMess->value => [
+            [0, 'On the rug'],
+            [3, 'Sofa height'],
+            [6, 'Light switch'],
+            [9, 'Picture rail'],
+            [12, 'Window height'],
+            [15, 'Top shelf'],
+            [18, 'Ceiling'],
+            [22, 'In the attic'],
+            [26, 'Through the roof'],
+            [31, 'Treetops'],
+            [36, 'In the clouds'],
+            [42, 'Bird height'],
+            [50, 'Stratosphere'],
+            [60, 'Moonlit'],
+            [75, 'Outer space'],
+        ],
+
+        /*
+         * The walk's ladder. Its thresholds are keyed to the biome cycle on
+         * purpose — the scenery changes every 14 lanes, so "In the farmyard"
+         * lands when the farm does and "Through the doors" when the shop
+         * starts. A rung that drifts off a biome boundary announces a landmark
+         * the player cannot see.
+         */
+        ArcadeGame::WindyWalkies->value => [
+            [0, 'Off the kerb'],
+            [4, 'Across the road'],
+            [8, 'Over the water'],
+            [14, 'Down the lane'],
+            [20, 'In the farmyard'],
+            [27, 'Past the tractors'],
+            [34, 'Through the doors'],
+            [42, 'Frozen aisle'],
+            [50, 'Out the back'],
+            [60, 'Open country'],
+            [72, 'Long gone'],
+            [90, 'Legendary guff'],
+        ],
     ];
+
+    /**
+     * One cabinet's ladder.
+     *
+     * @return list<array{0: int, 1: string}>
+     */
+    public static function milestonesFor(ArcadeGame $game): array
+    {
+        return self::MILESTONES[$game->value];
+    }
 
     /** ISO year-week — the bucket a run is posted into, e.g. "2026-W35". */
     public function currentWeek(?Carbon $at = null): string
@@ -103,15 +148,16 @@ class ArcadeService
     }
 
     /**
-     * How high a given number of floors got, in words. Falls back to the first
-     * milestone, which is where every run starts.
+     * How far a given score got, in words. Falls back to the first milestone,
+     * which is where every run starts.
      */
-    public function altitude(int $floors): string
+    public function altitude(ArcadeGame $game, int $score): string
     {
-        $label = self::MILESTONES[0][1];
+        $ladder = self::milestonesFor($game);
+        $label = $ladder[0][1];
 
-        foreach (self::MILESTONES as [$at, $name]) {
-            if ($floors >= $at) {
+        foreach ($ladder as [$at, $name]) {
+            if ($score >= $at) {
                 $label = $name;
             }
         }
@@ -120,15 +166,19 @@ class ArcadeService
     }
 
     /**
-     * Write a run to the board. Returns null when the claim is not worth
-     * keeping — a zero-floor run, or a number no tower could reach.
+     * Write a run to a cabinet's board. Returns null when the claim is not
+     * worth keeping — a scoreless run, or a number no player could reach.
      *
      * The name is taken off the profile rather than sent by the browser, which
      * is the same rule the codenames enforced by another means: nothing a
      * player types can reach this column. It is stored as well as linked so a
      * deleted profile leaves a readable row behind instead of a blank one.
+     *
+     * The *game* does not come from the browser either. It is whichever cabinet
+     * the page is showing, held server-side, so a run cannot be posted to a
+     * board it was not played on.
      */
-    public function post(Profile $profile, int $score): ?ArcadeScore
+    public function post(Profile $profile, ArcadeGame $game, int $score): ?ArcadeScore
     {
         if ($score < 1 || $score > self::MAX_SCORE) {
             return null;
@@ -137,6 +187,7 @@ class ArcadeService
         return ArcadeScore::create([
             'household_id' => $profile->household_id,
             'profile_id' => $profile->id,
+            'game' => $game,
             'codename' => $profile->name,
             'score' => $score,
             'week' => $this->currentWeek(),
@@ -144,27 +195,28 @@ class ArcadeService
     }
 
     /**
-     * This week's board. Ties break oldest-first: getting there first is the
-     * tiebreak everywhere else in this app, and it stops a new run from
-     * bumping an equal one that has been sitting on the board all week.
+     * This week's board for one cabinet. Ties break oldest-first: getting there
+     * first is the tiebreak everywhere else in this app, and it stops a new run
+     * from bumping an equal one that has been sitting on the board all week.
      *
      * @return Collection<int, ArcadeScore>
      */
-    public function weeklyTop(Household $household, int $limit = 10): Collection
+    public function weeklyTop(Household $household, ArcadeGame $game, int $limit = 10): Collection
     {
-        return $this->boardFor($household, $this->currentWeek(), $limit);
+        return $this->boardFor($household, $game, $this->currentWeek(), $limit);
     }
 
     /**
-     * One week's board, highest first.
+     * One week of one cabinet, highest first.
      *
      * @return Collection<int, ArcadeScore>
      */
-    public function boardFor(Household $household, string $week, int $limit = 10): Collection
+    public function boardFor(Household $household, ArcadeGame $game, string $week, int $limit = 10): Collection
     {
         return ArcadeScore::query()
             ->with('profile')
             ->where('household_id', $household->id)
+            ->where('game', $game)
             ->where('week', $week)
             ->orderByDesc('score')
             ->orderBy('id')
@@ -172,19 +224,35 @@ class ArcadeService
             ->get();
     }
 
-    /** The tallest tower this house has ever posted, or null if nobody has played. */
-    public function allTimeBest(Household $household): ?ArcadeScore
+    /** The best run this house has ever posted on a cabinet, or null if nobody has played it. */
+    public function allTimeBest(Household $household, ArcadeGame $game): ?ArcadeScore
     {
         return ArcadeScore::query()
             ->with('profile')
             ->where('household_id', $household->id)
+            ->where('game', $game)
             ->orderByDesc('score')
             ->orderBy('id')
             ->first();
     }
 
     /**
-     * Pay out every finished week this household has not settled yet.
+     * One player's own best on a cabinet, ever — the number under each card in
+     * the game switcher. Zero rather than null where they have never played it,
+     * because "Best 0" is something to go and beat and a blank is not.
+     */
+    public function personalBest(Profile $profile, ArcadeGame $game): int
+    {
+        return (int) ArcadeScore::query()
+            ->where('household_id', $profile->household_id)
+            ->where('profile_id', $profile->id)
+            ->where('game', $game)
+            ->max('score');
+    }
+
+    /**
+     * Pay out every finished week this household has not settled yet, on both
+     * cabinets.
      *
      * Lazy on purpose: a scheduled command is one more thing that has to be
      * running for a kid to get what they won, and the arcade is opened often
@@ -193,14 +261,18 @@ class ArcadeService
      * has gone to look at can wait, and the shell renders on every request in
      * the console.
      *
-     * @return Collection<int, ArcadeWeekPrize> what this call settled, newest week last
+     * The one method here that spans the games, and it fans out rather than
+     * merging: opening either cabinet settles both, because a kid who only
+     * plays one should not be the reason the other never pays.
+     *
+     * @return Collection<int, ArcadeWeekPrize> what this call settled
      */
     public function settle(Household $household): Collection
     {
         $settled = collect();
 
-        foreach ($this->unsettledWeeks($household) as $week) {
-            $prize = $this->settleWeek($household, $week);
+        foreach ($this->unsettled($household) as $pending) {
+            $prize = $this->settleWeek($household, $pending['game'], $pending['week']);
 
             if ($prize !== null) {
                 $settled->push($prize);
@@ -211,36 +283,38 @@ class ArcadeService
     }
 
     /**
-     * The most recent settled week that actually had a winner.
+     * The most recent settled week of one cabinet that actually had a winner.
      *
-     * What the board prints under "last week". A week nobody played is settled
-     * with no profile and is skipped here — "nobody won last week" is not news
-     * worth a line on the page.
+     * What the board prints under "last champion". A week nobody played is
+     * settled with no profile and is skipped here — "nobody won last week" is
+     * not news worth a line on the page.
      */
-    public function lastChampion(Household $household): ?ArcadeWeekPrize
+    public function lastChampion(Household $household, ArcadeGame $game): ?ArcadeWeekPrize
     {
         return ArcadeWeekPrize::query()
             ->with('profile')
             ->where('household_id', $household->id)
+            ->where('game', $game)
             ->whereNotNull('profile_id')
             ->orderByDesc('week')
             ->first();
     }
 
     /**
-     * Settle one finished week, or return null if somebody else got there first.
+     * Settle one finished week of one cabinet, or return null if somebody else
+     * got there first.
      *
      * The row is written *before* the tickets are minted, and the unique key on
-     * (household, week) is what makes this exactly-once: two kids opening the
-     * arcade at the same moment on a Monday both find the week unpaid, and the
-     * second one's insert fails rather than paying it twice. The cost of that
-     * order is that a crash between the two lines loses a payout — three
+     * (household, week, game) is what makes this exactly-once: two kids opening
+     * the arcade at the same moment on a Monday both find the week unpaid, and
+     * the second one's insert fails rather than paying it twice. The cost of
+     * that order is that a crash between the two lines loses a payout — three
      * tickets, once, in a case that needs the process to die inside a
      * millisecond — which is the better way round to be wrong.
      */
-    private function settleWeek(Household $household, string $week): ?ArcadeWeekPrize
+    private function settleWeek(Household $household, ArcadeGame $game, string $week): ?ArcadeWeekPrize
     {
-        $winner = $this->boardFor($household, $week, 1)->first();
+        $winner = $this->boardFor($household, $game, $week, 1)->first();
         $profile = $winner?->profile;
 
         // Kids only. A parent still wins the week — the row records it, and the
@@ -251,6 +325,7 @@ class ArcadeService
             $prize = ArcadeWeekPrize::create([
                 'household_id' => $household->id,
                 'week' => $week,
+                'game' => $game,
                 'profile_id' => $profile?->id,
                 'score' => $winner?->score,
                 'tickets' => $tickets,
@@ -266,7 +341,7 @@ class ArcadeService
                 $profile,
                 TicketKind::Arcade,
                 $tickets,
-                'Tallest tower of the week — '.$winner->score.' floors',
+                $game->prizeReason($winner->score),
                 $winner,
             );
         }
@@ -275,15 +350,18 @@ class ArcadeService
     }
 
     /**
-     * Finished weeks with runs on them that have never been settled.
+     * Finished weeks with runs on them that have never been settled, as
+     * week-and-game pairs.
      *
      * Weeks are read off the scores rather than counted back from today, so a
-     * week nobody played is never settled and never has to be: there is
-     * nothing to pay and nothing to say about it.
+     * week nobody played is never settled and never has to be: there is nothing
+     * to pay and nothing to say about it. Reading the game off the same rows is
+     * what keeps that true per cabinet — a week in which only the tower was
+     * played settles the tower and leaves the walk alone.
      *
-     * @return Collection<int, string>
+     * @return Collection<int, array{week: string, game: ArcadeGame}>
      */
-    private function unsettledWeeks(Household $household): Collection
+    private function unsettled(Household $household): Collection
     {
         $current = $this->currentWeek();
         $earliest = $this->currentWeek(now()->subWeeks(self::SETTLE_WEEKS_BACK));
@@ -294,13 +372,18 @@ class ArcadeService
             ->where('week', '>=', $earliest)
             ->distinct()
             ->orderBy('week')
-            ->pluck('week');
+            ->get(['week', 'game']);
 
         $paid = ArcadeWeekPrize::query()
             ->where('household_id', $household->id)
-            ->whereIn('week', $played)
-            ->pluck('week');
+            ->whereIn('week', $played->pluck('week'))
+            ->get(['week', 'game'])
+            ->map(fn (ArcadeWeekPrize $prize) => $prize->week.'|'.$prize->game->value)
+            ->all();
 
-        return $played->diff($paid)->values();
+        return $played
+            ->reject(fn (ArcadeScore $score) => in_array($score->week.'|'.$score->game->value, $paid, true))
+            ->map(fn (ArcadeScore $score) => ['week' => $score->week, 'game' => $score->game])
+            ->values();
     }
 }

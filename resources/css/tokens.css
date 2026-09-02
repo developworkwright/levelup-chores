@@ -335,6 +335,22 @@
     --fq-blue: #6bd5ff;
     --fq-blue-deep: #0d2634;
 
+    /*
+     * The arcade cabinet the two games sit in: a purple that is lighter than
+     * any panel, because it is furniture around a screen rather than a surface
+     * anything is written on. Only the gradient's top stop needs naming; the
+     * bottom is --fq-panel.
+     */
+    --fq-cabinet: #1d0b2f;
+    /* Gold gone quiet, for the best-score line under a selected cabinet. */
+    --fq-gold-dim: #c8b25e;
+    /*
+     * Windy Walkies' green, and the one colour in the app that belongs to a
+     * game rather than to the theme. It calls out the beans in the tips strip,
+     * which is the only place outside the canvas the joke is spelled out.
+     */
+    --fq-fart: #a8f08a;
+
     /* The wheel is a wooden carnival prop, not a UI surface. */
     --fq-wheel-rim: repeating-conic-gradient(#2b1c10 0deg 3deg, #1c120a 3deg 6deg);
     --fq-wheel-ring: #3a2a18;
@@ -427,6 +443,9 @@
     --color-fq-gold-fill: var(--fq-gold-fill);
     --color-fq-blue: var(--fq-blue);
     --color-fq-blue-deep: var(--fq-blue-deep);
+    --color-fq-cabinet: var(--fq-cabinet);
+    --color-fq-gold-dim: var(--fq-gold-dim);
+    --color-fq-fart: var(--fq-fart);
 
     --color-fq-green: var(--fq-green);
     --color-fq-green-ink: var(--fq-green-ink);

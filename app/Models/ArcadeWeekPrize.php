@@ -2,14 +2,17 @@
 
 namespace App\Models;
 
+use App\Enums\ArcadeGame;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * One finished week of the arcade, settled.
+ * One finished week of one arcade cabinet, settled.
  *
- * A row here means the week has been dealt with, not that anybody was paid —
- * see the migration for why those are different questions.
+ * A row here means that week has been dealt with *for that game*, not that
+ * anybody was paid — see the migration for why those are different questions,
+ * and for why the unique key had to grow a third column when the second
+ * cabinet arrived.
  */
 class ArcadeWeekPrize extends Model
 {
@@ -18,6 +21,7 @@ class ArcadeWeekPrize extends Model
     protected $fillable = [
         'household_id',
         'week',
+        'game',
         'profile_id',
         'score',
         'tickets',
@@ -26,6 +30,7 @@ class ArcadeWeekPrize extends Model
     protected function casts(): array
     {
         return [
+            'game' => ArcadeGame::class,
             'score' => 'integer',
             'tickets' => 'integer',
         ];

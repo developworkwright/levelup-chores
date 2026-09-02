@@ -309,6 +309,21 @@ class MusicTest extends TestCase
             ->assertSee('Choose a song');
     }
 
+    public function test_the_kid_header_offers_a_seek_bar(): void
+    {
+        // A lot of the library opens on a long quiet intro, so "which song is
+        // this?" is answered by dragging into the middle of it rather than by
+        // waiting the intro out.
+        $this->library(['Mossy_Save_Point.mp3']);
+        $this->loginKid();
+
+        Volt::test('kid.quests')
+            ->assertSee('Seek through the song')
+            // The drag moves the clock; only letting go moves the song.
+            ->assertSee('music.scrubTo($event.target.value)', false)
+            ->assertSee('music.seek($event.target.value)', false);
+    }
+
     public function test_the_kid_header_is_told_nothing_about_where_the_songs_are_stored(): void
     {
         $this->library(['Mossy_Save_Point.mp3']);
