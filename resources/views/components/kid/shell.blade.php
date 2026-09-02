@@ -670,15 +670,27 @@
             @endforeach
             </nav>
 
-            <x-kid.nav-sheet
+            {{-- The parent console runs the same sheet off its own page map,
+                 so the controls in its header row are a slot rather than
+                 something the component knows about. These two are the kid's:
+                 both answer "how much is this app allowed to bother me", one
+                 while a kid is looking at it and one while they are not. --}}
+            <x-nav-sheet
                 :pages="$pages"
                 :active="$active"
                 :counts="$counts"
                 :groups="$sheetGroups"
                 :grid="$sheetGrid"
-                :journal-tickets="$journalTickets"
+                :tickets="['journal' => $journalTickets]"
                 :count="$sheetCount"
-            />
+                :current="! in_array($active, $railPages, true)"
+                exit
+            >
+                <x-slot:controls>
+                    <x-sound-toggle small />
+                    <livewire:push-toggle audience="kid" />
+                </x-slot:controls>
+            </x-nav-sheet>
         </div>
 
         @if ($segments !== [])
