@@ -7,13 +7,13 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * One posted run of one of the arcade's cabinets.
+ * One posted run of one of the arcade's games.
  *
- * A score used to be attached to nobody on purpose, because the cabinet stood
+ * A score used to be attached to nobody on purpose, because the game stood
  * on the public login page. It is behind the PIN now and rows name the person
  * who played — see the migration that added the columns.
  *
- * `game` says which cabinet, and no query here should ever go without it: the
+ * `game` says which game, and no query here should ever go without it: the
  * two games score different things, so a board that mixes them is measuring
  * nothing.
  */

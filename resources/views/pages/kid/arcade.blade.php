@@ -5,7 +5,7 @@ use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
 /**
- * The arcade cabinet, inside the console.
+ * The arcade, inside the console.
  *
  * It has always existed on the login page, where it is a door before it is a
  * game. This is the same `<livewire:arcade>` component with the kid's shell

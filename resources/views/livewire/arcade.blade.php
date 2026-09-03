@@ -8,8 +8,7 @@ use Illuminate\Support\Facades\RateLimiter;
 use Livewire\Volt\Component;
 
 /**
- * The arcade: two cabinets, a switcher, and the week's board for whichever one
- * is showing.
+ * The arcade: a rail of games, the one that is showing, and its board.
  *
  * Its own component rather than part of a page, for one practical reason —
  * posting a score re-renders whatever component owns the board, and nothing
@@ -21,10 +20,14 @@ use Livewire\Volt\Component;
  * included" cost. See ArcadeService for what moving behind the PIN changed and
  * what it deliberately did not.
  *
- * The switcher is server-side state rather than an Alpine toggle, and that is
- * load-bearing: `$game` is what `post()` writes a run to, so which cabinet you
- * are playing is never something the browser gets to say. It also means the
- * board below swaps with the game in the same round trip.
+ * The rail is server-side state rather than an Alpine toggle, and that is
+ * load-bearing: `$game` is what `post()` writes a run to, so which game you are
+ * playing is never something the browser gets to say. It also means the board
+ * beside it swaps with the game in the same round trip.
+ *
+ * Laid out from `handoff/design_handoff_arcade_shell` — see that README for why
+ * the rail carries the week's leader rather than the reader's own best, and why
+ * there is no lobby screen in front of it.
  */
 new class extends Component
 {
@@ -34,7 +37,7 @@ new class extends Component
     public ?int $postedId = null;
 
     /**
-     * Which cabinets were new when this visit started.
+     * Which games were new when this visit started.
      *
      * A snapshot taken at mount and held for the visit, because the marker it
      * came from is stamped a line later — read live, the flash would clear
@@ -43,33 +46,33 @@ new class extends Component
      *
      * @var list<string>
      */
-    public array $newCabinets = [];
+    public array $newGames = [];
 
     public function mount(): void
     {
         $arcade = app(ArcadeService::class);
         $player = $this->player();
 
-        $this->newCabinets = $arcade->newCabinetsFor($player)->pluck('value')->all();
-        $arcade->markCabinetsSeen($player);
+        $this->newGames = $arcade->newGamesFor($player)->pluck('value')->all();
+        $arcade->markGamesSeen($player);
 
-        // Open on a cabinet they have not met, if there is one — the flash says
-        // it is new and this is what makes that mean something without a tap.
-        $this->game = ArcadeGame::tryFrom($this->newCabinets[0] ?? '') ?? ArcadeGame::default();
+        // Open on a game they have not met, if there is one — the flash says it
+        // is new and this is what makes that mean something without a tap.
+        $this->game = ArcadeGame::tryFrom($this->newGames[0] ?? '') ?? ArcadeGame::default();
 
         // Whoever opens the arcade pays out the weeks nobody has collected, on
-        // both cabinets — see ArcadeService::settle() for why there is no
-        // scheduler behind it. On mount rather than in with(), so it happens
-        // once a visit rather than on every round trip the game makes.
+        // every game — see ArcadeService::settle() for why there is no scheduler
+        // behind it. On mount rather than in with(), so it happens once a visit
+        // rather than on every round trip the game makes.
         $arcade->settle($player->household);
     }
 
     /**
-     * Move to the other cabinet.
+     * Move to another game on the rail.
      *
      * `postedId` is dropped on the way: it points at a row on the board we are
      * leaving, and an id from one game's board would highlight whichever row of
-     * the other's happened to share it.
+     * another's happened to share it.
      */
     public function switchTo(string $game): void
     {
@@ -78,7 +81,7 @@ new class extends Component
     }
 
     /**
-     * Post a finished run to the board of the cabinet on screen.
+     * Post a finished run to the board of the game on screen.
      *
      * The score arrives from the browser, so it is a claim and `ArcadeService`
      * decides whether it is a believable one. The *name* never arrives at all:
@@ -90,9 +93,9 @@ new class extends Component
     {
         $player = $this->player();
 
-        // Per profile and per cabinet: a shared tablet is one session and
-        // several players, and a run is a very different length in each game —
-        // see ArcadeGame::postsPerHour().
+        // Per profile and per game: a shared tablet is one session and several
+        // players, and a run is a very different length in each game — see
+        // ArcadeGame::postsPerHour().
         $throttle = 'arcade-post:'.$player->id.':'.$this->game->value;
 
         if (RateLimiter::tooManyAttempts($throttle, $this->game->postsPerHour())) {
@@ -118,124 +121,223 @@ new class extends Component
         $arcade = app(ArcadeService::class);
         $player = $this->player();
         $household = $player->household;
-        $best = $arcade->allTimeBest($household, $this->game);
+
+        $leaders = $arcade->weeklyLeaders($household);
+        $leader = $leaders[$this->game->value] ?? null;
+
+        $standings = $this->game->isRanked()
+            ? $arcade->weeklyStandings($household, $this->game)
+            : collect();
+
+        // Where the reader sits this week, so their own row can be shown even
+        // when the board only has room for three. Null when they have not
+        // played this game this week — there is no row to pull up.
+        $myRank = $standings->search(fn (object $score) => $score->profile_id === $player->id);
 
         return [
             'arcade' => $arcade,
             'player' => $player,
-            'scores' => $arcade->weeklyTop($household, $this->game),
-            'best' => $best,
-            'bestAltitude' => $best ? $arcade->altitude($this->game, $best->score) : null,
-            'weekStart' => $arcade->weekStartedOn(),
+            'rankedGames' => ArcadeGame::ranked(),
+            'toys' => ArcadeGame::toys(),
+            'leaders' => $leaders,
+            'leader' => $leader,
+            'beat' => $arcade->beatTarget($leader),
+            'youLead' => $leader !== null && $leader->profile_id === $player->id,
+            // A grown-up can top the week and gets nothing for it, so the target
+            // strip must not promise them tickets. See ArcadeService.
+            'canWinTickets' => $player->isKid(),
+            'standings' => $standings,
+            'myRank' => $myRank === false ? null : $myRank,
+            'best' => $arcade->allTimeBest($household, $this->game),
+            'yourBest' => $arcade->personalBest($player, $this->game),
             'champion' => $arcade->lastChampion($household, $this->game),
             'prize' => ArcadeService::PRIZE_TICKETS,
             'milestones' => ArcadeService::milestonesFor($this->game),
-            'cabinets' => ArcadeGame::cases(),
-            'personalBests' => collect(ArcadeGame::cases())
-                ->mapWithKeys(fn (ArcadeGame $game) => [$game->value => $arcade->personalBest($player, $game)])
-                ->all(),
         ];
     }
 }; ?>
 
 <div class="flex flex-col gap-[13px]">
-    <div class="flex items-baseline justify-between gap-[10px]">
+    <div class="flex items-center justify-between gap-[10px]">
         <h2 class="font-baloo text-[22px] leading-none font-extrabold text-fq-text">Arcade</h2>
-        <span class="shrink-0 font-mono-fq text-[10px] tracking-[0.14em] whitespace-nowrap text-fq-lime uppercase">
-            Week&rsquo;s board
-        </span>
+
+        {{-- The one sound control on the page, and the only one there ever
+             needed to be. Both games read the same `fq-muted` key at the moment
+             they play a sound rather than holding their own mute state, so a
+             toggle out here mutes whichever one is running — and it does not
+             have to be re-drawn inside every game that arrives later. It sits
+             outside the keyed subtree below, so switching games never takes the
+             control away mid-run. --}}
+        <x-sound-toggle small />
     </div>
 
-    {{-- Three rails from `lg`: the cabinets down the left, the game in the
-         middle, the board on the right. Below that they stack — switcher, game,
-         board — because splitting a tablet three ways leaves nothing legible.
+    {{-- Three rails from `lg`: the games down the left, the one that is showing
+         in the middle, its board on the right. Below that they stack — strip,
+         target, game, board — because splitting a tablet three ways leaves
+         nothing legible.
 
          Both side rails are fixed widths and the middle one takes what is left,
-         so adding a fourth or fifth cabinet lengthens the left rail without
-         taking a pixel off the game. --}}
+         so adding a fourth or fifth game lengthens the left rail without taking
+         a pixel off the game. --}}
     <div class="flex flex-col items-stretch gap-[13px] lg:flex-row lg:items-start">
-        {{-- The switcher. Each card carries that player's own best on that
-             cabinet rather than the house's, because the number under a button
-             you are about to press should be the one you are about to try to
-             beat.
+        {{-- The rail, which is the catalog and the switcher at once.
+
+             Each entry carries *this week's* leader rather than the reader's own
+             best, which is the change this layout is built around: the number
+             under a name nobody has tapped yet is the number somebody is
+             currently winning with, so the list of games is a standings glance
+             before anything has been opened.
 
              A vertical rail on desktop and a scrolling strip on a phone. The
              strip is what makes this survive a fifth game: a row that divides
-             the width between however many cabinets exist is unreadable by the
-             fourth, so the cards keep a fixed width and the row scrolls
-             instead. It bleeds to the screen edges so a half-visible card says
-             there is more to swipe to. --}}
-        <div class="-mx-[14px] flex shrink-0 snap-x snap-mandatory gap-[6px] overflow-x-auto px-[14px] pb-[2px] lg:mx-0 lg:w-[142px] lg:flex-col lg:overflow-visible lg:px-0 lg:pb-0">
-            @foreach ($cabinets as $cabinet)
+             the width between however many games exist is unreadable by the
+             fourth, so the entries keep a fixed width and the row scrolls
+             instead. It bleeds to the screen edges so a half-visible entry says
+             there is more to swipe to, and hides its scrollbar because that
+             half-visible entry has already said it. --}}
+        <div class="no-scrollbar -mx-[14px] flex shrink-0 snap-x snap-mandatory gap-[6px] overflow-x-auto px-[14px] pb-[2px] lg:mx-0 lg:w-[152px] lg:flex-col lg:overflow-visible lg:px-0 lg:pb-0">
+            <span class="hidden font-mono-fq text-[8px] tracking-[0.14em] text-fq-text-5 uppercase lg:block">
+                Games
+            </span>
+
+            @foreach ($rankedGames as $entry)
+                @php($entryLeader = $leaders[$entry->value] ?? null)
+
                 <button
                     type="button"
-                    wire:click="switchTo('{{ $cabinet->value }}')"
+                    wire:key="rail-{{ $entry->value }}"
+                    wire:click="switchTo('{{ $entry->value }}')"
                     @class([
-                        'flex w-[136px] shrink-0 snap-start flex-col items-center gap-[3px] rounded-[16px] px-[6px] py-[8px] lg:w-full lg:items-start lg:px-[10px]',
-                        'border-2 border-fq-lime' => $cabinet === $game,
-                        'border border-fq-line-2 bg-fq-sunk' => $cabinet !== $game,
+                        'flex w-[136px] shrink-0 snap-start flex-col items-start gap-[4px] rounded-[10px] px-[8px] py-[7px] text-left lg:w-full',
+                        'border-2 border-fq-lime' => $entry === $game,
+                        'border border-fq-line-3 bg-fq-sunk' => $entry !== $game,
                     ])
-                    @if ($cabinet === $game)
-                        style="background: linear-gradient(180deg, var(--fq-gold-fill), var(--fq-sunk))"
+                    @if ($entry === $game)
+                        style="background: linear-gradient(180deg, rgba(255, 201, 61, 0.2), var(--fq-sunk))"
                     @endif
                 >
-                    <span
-                        @class([
-                            'text-[13.5px] leading-tight text-balance lg:text-left',
-                            'font-bold text-fq-lime' => $cabinet === $game,
-                            'font-semibold text-fq-text' => $cabinet !== $game,
-                        ])
-                    >{{ $cabinet->label() }}</span>
+                    <span class="flex w-full items-center gap-[5px]">
+                        <span
+                            @class([
+                                'min-w-0 flex-1 truncate text-[11.5px] leading-tight',
+                                'font-extrabold text-fq-lime' => $entry === $game,
+                                'font-semibold text-fq-text' => $entry !== $game,
+                            ])
+                        >{{ $entry->label() }}</span>
 
-                    <span class="flex items-center gap-[5px]">
-                        @if (in_array($cabinet->value, $newCabinets, true))
-                            {{-- Beside the best rather than instead of it: a kid
-                                 who has never been here would otherwise be shown
-                                 a flash where their score should be, on every
-                                 cabinet at once. Only until they have been once
-                                 — the marker is stamped on mount, so this is the
-                                 last visit it shows on. --}}
-                            <span class="rounded-full bg-fq-coral px-[5px] py-px font-mono-fq text-[8px] font-semibold tracking-[0.1em] text-fq-ink uppercase">
+                        @if (in_array($entry->value, $newGames, true))
+                            {{-- Beside the name rather than instead of the line
+                                 below it: a kid who has never been here would
+                                 otherwise be shown a flash where the standings
+                                 should be, on every game at once. Only until
+                                 they have been once — the marker is stamped on
+                                 mount, so this is the last visit it shows on. --}}
+                            <span class="shrink-0 rounded-full bg-fq-coral px-[4px] py-px font-mono-fq text-[6.5px] font-semibold tracking-[0.1em] text-fq-ink uppercase">
                                 New
                             </span>
                         @endif
-
-                        <span
-                            @class([
-                                'font-mono-fq text-[8.5px] tracking-[0.1em] whitespace-nowrap uppercase',
-                                'text-fq-gold-dim' => $cabinet === $game,
-                                'text-fq-text-5' => $cabinet !== $game,
-                            ])
-                        >Best {{ $personalBests[$cabinet->value] }}</span>
                     </span>
+
+                    @if ($entryLeader)
+                        <span class="flex w-full items-center gap-[5px]">
+                            <span
+                                class="grid h-[15px] w-[15px] shrink-0 place-items-center rounded-full font-baloo text-[7.5px] font-extrabold text-fq-bg"
+                                style="background: {{ $entryLeader->profile?->color->cssVar() ?? 'var(--fq-line-3)' }}"
+                            >{{ mb_substr($entryLeader->displayName(), 0, 1) }}</span>
+
+                            <span class="min-w-0 flex-1 truncate font-mono-fq text-[8.5px] text-fq-text-4">
+                                best {{ $entryLeader->score }}<span class="hidden lg:inline"> this wk</span>
+                            </span>
+                        </span>
+                    @else
+                        {{-- "Nobody yet" rather than "best 0": one is an
+                             invitation and the other is a scoreboard. --}}
+                        <span class="font-mono-fq text-[8.5px] text-fq-magenta">nobody yet</span>
+                    @endif
                 </button>
             @endforeach
+
+            {{-- The toys, in their own group with no heading of the ranked kind.
+                 A toy keeps no score, so it has no leader line, no board and no
+                 week to win — see ArcadeGame::isRanked(). Nothing in the arcade
+                 is one yet, which is why this renders nothing today. --}}
+            @if ($toys !== [])
+                <span class="mt-[5px] hidden font-mono-fq text-[8px] tracking-[0.14em] text-fq-text-5 uppercase lg:block">
+                    Toys
+                </span>
+
+                @foreach ($toys as $toy)
+                    <button
+                        type="button"
+                        wire:key="rail-{{ $toy->value }}"
+                        wire:click="switchTo('{{ $toy->value }}')"
+                        @class([
+                            'flex w-[136px] shrink-0 snap-start flex-col items-start gap-[4px] rounded-[10px] px-[8px] py-[7px] text-left lg:w-full',
+                            'border-2 border-fq-lime' => $toy === $game,
+                            'border border-fq-line-4 bg-fq-sunk' => $toy !== $game,
+                        ])
+                    >
+                        <span
+                            @class([
+                                'w-full truncate text-[11.5px] leading-tight',
+                                'font-extrabold text-fq-lime' => $toy === $game,
+                                'font-semibold text-fq-text' => $toy !== $game,
+                            ])
+                        >{{ $toy->label() }}</span>
+
+                        <span class="font-mono-fq text-[8.5px] text-fq-magenta">toy</span>
+                    </button>
+                @endforeach
+            @endif
         </div>
 
-        {{-- The cabinet, and the middle rail.
+        {{-- The game, and the middle rail.
 
              Both games draw a fixed 320x460 board scaled to whatever box they
-             are given, so width is the only dial and a wider cabinet is a
-             bigger game. Height is the other limit: at full width the board
-             would stand 1550px tall, so the max-width below is a *height*
-             budget converted back through the aspect ratio, which is what keeps
-             a short window or a phone in landscape from losing the bottom of
-             the game off the screen. --}}
+             are given, so width is the only dial and a wider box is a bigger
+             game. Height is the other limit: at full width the board would stand
+             1550px tall, so the max-width below is a *height* budget converted
+             back through the aspect ratio, which is what keeps a short window or
+             a phone in landscape from losing the bottom of the game off the
+             screen. --}}
         <div
-            class="flex w-full min-w-0 flex-col gap-[13px] lg:flex-1"
+            class="flex w-full min-w-0 flex-col gap-[8px] lg:flex-1"
             style="max-width: calc(88vh * 320 / 460)"
         >
-            {{-- The cabinet.
+            <div class="flex items-baseline gap-[8px]">
+                <span class="font-baloo text-[14px] font-extrabold text-fq-lime">{{ $game->label() }}</span>
+                <span class="font-mono-fq text-[8.5px] tracking-[0.1em] text-fq-text-5 uppercase">
+                    {{ $game->scoreLabel() }}
+                </span>
+            </div>
+
+            {{-- On a phone the target sits here rather than on the board,
+                 because by the time a thumb reaches the start button the board
+                 has scrolled off the bottom of the screen. Same component and
+                 the same four states — see x-arcade-beat. --}}
+            @if ($game->isRanked())
+                <div class="lg:hidden">
+                    <x-arcade-beat
+                        :leader="$leader"
+                        :beat="$beat"
+                        :you-lead="$youLead"
+                        :can-win-tickets="$canWinTickets"
+                        :prize="$prize"
+                    />
+                </div>
+            @endif
+
+            {{-- The machine — the box the game is drawn in.
 
                  Keyed on the game so switching *replaces* this subtree instead
-                 of morphing one game's markup into the other's — the canvases
+                 of morphing one game's markup into another's — the canvases
                  inside are `wire:ignore` and would otherwise be handed to the
                  wrong game. It is also what unmounts the outgoing game: both
                  hold an animation frame, and `<fart-dash>` holds a window-level
                  keydown listener that would eat the arrow keys of whatever
                  replaced it. --}}
             <div
-                wire:key="cabinet-{{ $game->value }}"
+                wire:key="machine-{{ $game->value }}"
                 class="flex flex-col gap-[11px] rounded-[24px] border border-fq-line-3 p-[12px]"
                 style="background: linear-gradient(160deg, var(--fq-cabinet), var(--fq-panel))"
             >
@@ -263,19 +365,10 @@ new class extends Component
                                 <span class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-5 uppercase">floors</span>
                             </div>
 
-                            <div class="flex items-center gap-2">
-                                <span
-                                    class="font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-5 uppercase"
-                                    x-text="'best ' + best"
-                                ></span>
-                                <button
-                                    type="button"
-                                    x-on:pointerdown.stop.prevent="toggleMute()"
-                                    :aria-label="muted ? 'Sound off' : 'Sound on'"
-                                    :style="muted ? 'opacity:0.3' : ''"
-                                    class="flex h-6 w-6 items-center justify-center rounded-lg border border-fq-line-2 bg-fq-sunk text-[11px] text-fq-text-4"
-                                >&#9834;</button>
-                            </div>
+                            <span
+                                class="font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-5 uppercase"
+                                x-text="'best ' + best"
+                            ></span>
                         </div>
 
                         <div class="relative overflow-hidden rounded-[18px] border-2 border-fq-line-2 bg-fq-bg">
@@ -315,8 +408,8 @@ new class extends Component
                                 {{-- The player's own name, and no way to change it.
 
                                      There was a rolled codename here with a re-roll button
-                                     beside it, for as long as this cabinet stood on a page
-                                     a stranger could open. Behind the PIN the board is the
+                                     beside it, for as long as this game stood on a page a
+                                     stranger could open. Behind the PIN the board is the
                                      family's, so a run says who did it — and it still isn't
                                      typed: the name comes off the profile server-side, so
                                      nothing anybody enters can reach the board. --}}
@@ -336,10 +429,10 @@ new class extends Component
                                 >On the board &#10003;</p>
 
                                 {{-- One button, and it is the one they were
-                                     already aiming at. The Post button that
-                                     used to sit beside it is gone: the run
-                                     posts itself, so a thumb going for "again"
-                                     can no longer throw away the score it just
+                                     already aiming at. The Post button that used
+                                     to sit beside it is gone: the run posts
+                                     itself, so a thumb going for "again" can no
+                                     longer throw away the score it just
                                      earned. --}}
                                 <div class="mt-2 flex items-center gap-2">
                                     <button
@@ -368,33 +461,15 @@ new class extends Component
                          would have been pressed. --}}
                     <div
                         wire:ignore
-                        x-data="{
-                            posted: false,
-                            score: 0,
-                            muted: localStorage.getItem('fq-muted') === '1',
-                            toggleMute() {
-                                this.muted = !this.muted;
-                                localStorage.setItem('fq-muted', this.muted ? '1' : '0');
-                            },
-                        }"
+                        x-data="{ posted: false, score: 0 }"
                         x-on:fd-over="score = $event.detail.score; posted = false; if (score > 0) { $wire.post(score).then(() => posted = true) }"
                         class="relative w-full select-none"
                     >
-                        <div class="mb-2 flex items-center justify-end gap-2">
-                            <p
-                                x-show="posted"
-                                x-cloak
-                                class="font-mono-fq text-[9px] tracking-[0.14em] text-fq-lime uppercase"
-                            ><span x-text="score"></span> lanes &middot; on the board &#10003;</p>
-
-                            <button
-                                type="button"
-                                x-on:click="toggleMute()"
-                                :aria-label="muted ? 'Sound off' : 'Sound on'"
-                                :style="muted ? 'opacity:0.3' : ''"
-                                class="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-fq-line-2 bg-fq-sunk text-[11px] text-fq-text-4"
-                            >&#9834;</button>
-                        </div>
+                        <p
+                            x-show="posted"
+                            x-cloak
+                            class="mb-2 text-right font-mono-fq text-[9px] tracking-[0.14em] text-fq-lime uppercase"
+                        ><span x-text="score"></span> lanes &middot; on the board &#10003;</p>
 
                         <fart-dash aria-label="Windy Walkies — tap or press space to hop"></fart-dash>
                     </div>
@@ -418,85 +493,109 @@ new class extends Component
             </div>
         </div>
 
-        {{-- A fixed sidebar rather than a second flexible column: two `flex-1`s
-             split the row in half and the cabinet never reached the size its
-             height budget allowed. Both rails are fixed and the game takes what
-             is left. --}}
-        <div class="flex w-full flex-col gap-[10px] lg:w-[286px] lg:shrink-0">
-            <div class="flex items-baseline justify-between gap-2">
-                <span class="font-mono-fq text-[9.5px] tracking-[0.2em] text-fq-text-3 uppercase">
-                    {{ $game->label() }} &middot; this week
-                </span>
-                <span class="shrink-0 font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-6 uppercase">
-                    from {{ $weekStart->format('D j M') }}
-                </span>
-            </div>
+        {{-- The board. A fixed sidebar rather than a second flexible column: two
+             `flex-1`s split the row in half and the game never reached the size
+             its height budget allowed. Both rails are fixed and the game takes
+             what is left.
 
-            {{-- What the week is worth, said before the board rather than
-                 after it: a prize nobody knows about is not a prize. The
-                 grown-ups' half is a joke rather than fine print — they are on
-                 the board to be beaten, and it works better said out loud. --}}
-            <p class="rounded-[12px] border border-fq-ticket-line px-3 py-[7px] text-[11.5px] leading-snug text-fq-text-3" style="background: var(--fq-gold-fill)">
-                <span class="font-bold text-fq-lime">{{ $prize }} bonus {{ Str::plural('ticket', $prize) }}</span>
-                to the top of each game&rsquo;s board when the week ends on Sunday &mdash; one prize per
-                cabinet, so both are worth playing.
-                <span class="text-fq-text-5">Grown-ups can win the week, but not the tickets.</span>
-            </p>
+             Absent entirely on a toy, which keeps no score — there would be
+             three empty blocks where the standings go. --}}
+        @if ($game->isRanked())
+            <div class="flex w-full flex-col gap-[8px] lg:w-[182px] lg:shrink-0">
+                <div class="hidden lg:block">
+                    <x-arcade-beat
+                        :leader="$leader"
+                        :beat="$beat"
+                        :you-lead="$youLead"
+                        :can-win-tickets="$canWinTickets"
+                        :prize="$prize"
+                    />
+                </div>
 
-            @if ($champion)
-                <p class="font-mono-fq text-[9px] leading-relaxed tracking-[0.12em] text-fq-text-6 uppercase">
-                    Last champion &middot; {{ $champion->profile?->name }} &middot; {{ $champion->score }} {{ $game->unit() }}
-                    @if ($champion->tickets > 0)
-                        &middot; won {{ $champion->tickets }} {{ Str::plural('ticket', $champion->tickets) }}
+                {{-- This week: one row per player rather than one per run, which
+                     is what makes three rows worth reading — see
+                     ArcadeService::weeklyStandings(). --}}
+                <div class="flex flex-col gap-[6px] rounded-[11px] border border-fq-line-3 bg-fq-sunk p-[9px]">
+                    <div class="flex items-baseline justify-between gap-2">
+                        <span class="font-mono-fq text-[8px] tracking-[0.14em] text-fq-lime uppercase">This week</span>
+                        <span class="shrink-0 font-mono-fq text-[7.5px] text-fq-text-5">ends Sun</span>
+                    </div>
+
+                    @forelse ($standings->take(3) as $i => $row)
+                        <x-arcade-standing
+                            :rank="$i + 1"
+                            :score="$row"
+                            :mine="$row->profile_id === $player->id"
+                            :posted="$row->id === $postedId"
+                        />
+                    @empty
+                        <p class="py-[6px] text-[11px] leading-snug text-fq-text-4">
+                            {{ $game->emptyBoard() }}
+                        </p>
+                    @endforelse
+
+                    {{-- Their own row, pulled up from wherever it actually is. A
+                         board of three that a fourth-placed kid is missing from
+                         tells them nothing about their own week. --}}
+                    @if ($myRank !== null && $myRank > 2)
+                        <div class="border-t border-fq-line pt-[6px]">
+                            <x-arcade-standing
+                                :rank="$myRank + 1"
+                                :score="$standings[$myRank]"
+                                mine
+                                :posted="$standings[$myRank]->id === $postedId"
+                            />
+                        </div>
                     @endif
-                </p>
-            @endif
+                </div>
 
-            @if ($scores->isEmpty())
-                <p class="rounded-[14px] border border-dashed border-fq-line-2 px-4 py-6 text-center text-[12px] text-fq-text-4">
-                    {{ $game->emptyBoard() }} The board resets every Monday.
-                </p>
-            @else
-                <ol class="flex flex-col gap-[5px]">
-                    @foreach ($scores as $i => $score)
-                        <li
-                            @class([
-                                'flex items-center gap-3 rounded-[15px] border px-3 py-[8px]',
-                                'border-fq-lime bg-fq-panel-alt' => $score->id === $postedId,
-                                'border-fq-line bg-fq-panel' => $score->id !== $postedId,
-                            ])
-                        >
-                            <span
-                                @class([
-                                    'w-[18px] shrink-0 font-baloo text-[16px] font-extrabold',
-                                    'text-fq-gold' => $i === 0,
-                                    'text-fq-text-5' => $i > 0,
-                                ])
-                            >{{ $i + 1 }}</span>
+                {{-- All-time, deliberately quieter than the block above it. It is
+                     a record rather than something winnable this week, and the
+                     weekly reset is what gives a new player a shot at all — so it
+                     must not out-shout the number that is still open. --}}
+                <div class="flex flex-col gap-[5px] rounded-[11px] border border-fq-line bg-fq-panel p-[9px]">
+                    <span class="font-mono-fq text-[8px] tracking-[0.14em] text-fq-text-5 uppercase">All-time record</span>
 
-                            <span class="flex min-w-0 flex-1 flex-col gap-px">
-                                <span class="truncate text-[14px] leading-[1.2] font-semibold text-fq-text">
-                                    {{ $score->displayName() }}
-                                </span>
-                                <span class="truncate font-mono-fq text-[9px] tracking-[0.06em] text-fq-text-5 uppercase">
-                                    {{ $arcade->altitude($game, $score->score) }}
-                                </span>
+                    @if ($best)
+                        <div class="flex items-baseline gap-[6px]">
+                            <span class="shrink-0 text-[11px] text-fq-text-3">House</span>
+                            <span class="font-baloo text-[12.5px] font-extrabold text-fq-magenta">
+                                {{ $best->score }} {{ $game->unit() }}
                             </span>
-
-                            <span class="shrink-0 font-baloo text-[19px] font-extrabold text-fq-lime">
-                                {{ $score->score }}
+                            <span class="min-w-0 truncate font-mono-fq text-[7.5px] text-fq-text-5">
+                                {{ $best->displayName() }}
                             </span>
-                        </li>
-                    @endforeach
-                </ol>
-            @endif
+                        </div>
+                    @else
+                        <p class="text-[11px] text-fq-text-4">Nobody has set one yet.</p>
+                    @endif
 
-            @if ($best)
+                    <div class="flex items-baseline gap-[6px]">
+                        <span class="shrink-0 text-[11px] text-fq-text-3">Yours</span>
+                        <span class="font-baloo text-[12.5px] font-extrabold text-fq-text">
+                            {{ $yourBest }} {{ $game->unit() }}
+                        </span>
+                    </div>
+                </div>
+
+                {{-- The two quiet lines the board ends on. The grown-ups one is a
+                     joke rather than fine print, and it is also the rule that
+                     keeps the prize pointing at the people it is for — it works
+                     better said out loud than left in ArcadeService. --}}
+                @if ($champion)
+                    <p class="font-mono-fq text-[9px] leading-relaxed tracking-[0.12em] text-fq-text-6 uppercase">
+                        Last champion &middot; {{ $champion->profile?->name }} &middot; {{ $champion->score }} {{ $game->unit() }}
+                        @if ($champion->tickets > 0)
+                            &middot; won {{ $champion->tickets }} {{ Str::plural('ticket', $champion->tickets) }}
+                        @endif
+                    </p>
+                @endif
+
                 <p class="font-mono-fq text-[9px] leading-relaxed tracking-[0.12em] text-fq-text-6 uppercase">
-                    All-time record &middot; {{ $best->score }} {{ $game->unit() }} &middot; {{ $best->displayName() }}
-                    <br>{{ $bestAltitude }}
+                    {{ $prize }} bonus {{ Str::plural('ticket', $prize) }} every Sunday, one prize per game.
+                    Grown-ups can win the week, but not the tickets.
                 </p>
-            @endif
-        </div>
+            </div>
+        @endif
     </div>
 </div>

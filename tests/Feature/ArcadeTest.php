@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\ArcadeGame;
+use App\Enums\ProfileRole;
 use App\Models\ArcadeScore;
 use App\Models\Household;
 use App\Models\Profile;
@@ -17,12 +18,12 @@ use Tests\TestCase;
  * The arcade boards.
  *
  * Most of this file used to be about what a stranger could do to a game on a
- * page with no auth. The cabinet moved behind the PIN so that the board could
+ * page with no auth. The game moved behind the PIN so that the board could
  * carry real names, and what is tested here moved with it: a run names the
  * person who played, a board belongs to one household, and neither of those can
  * be steered from the browser.
  *
- * A second cabinet added a third thing that cannot be steered from the browser
+ * A second game added a third thing that cannot be steered from the browser
  * and a first thing that must never be mixed. The component opens on whichever
  * game `ArcadeGame::default()` names, so tests that want the other one switch
  * to it the way a player would.
@@ -45,7 +46,18 @@ class ArcadeTest extends TestCase
         return $kid;
     }
 
-    public function test_a_run_lands_on_this_weeks_board_of_the_cabinet_on_screen(): void
+    private function loginParent(string $name = 'Mum'): Profile
+    {
+        $parent = Profile::factory()
+            ->for(Household::factory())
+            ->create(['name' => $name, 'role' => ProfileRole::Parent]);
+
+        Auth::guard('profile')->login($parent);
+
+        return $parent;
+    }
+
+    public function test_a_run_lands_on_this_weeks_board_of_the_game_on_screen(): void
     {
         $kid = $this->loginKid();
 
@@ -64,7 +76,7 @@ class ArcadeTest extends TestCase
     {
         // The same rule as the name, for the same reason: `post()` takes a
         // score and nothing else, so a run cannot be aimed at a board it was
-        // not played on. Switching cabinets is what moves the target, and that
+        // not played on. Switching games is what moves the target, and that
         // is a server-side action.
         $kid = $this->loginKid();
 
@@ -152,7 +164,7 @@ class ArcadeTest extends TestCase
         $this->assertSame($game->postsPerHour(), ArcadeScore::count());
     }
 
-    public function test_filling_one_cabinets_hour_leaves_the_other_one_listening(): void
+    public function test_filling_one_games_hour_leaves_the_other_listening(): void
     {
         /*
          * The throttle is per game because a run is a very different length in
@@ -193,7 +205,7 @@ class ArcadeTest extends TestCase
             ->assertDontSee('SALTY RATTLE');
     }
 
-    public function test_one_cabinets_board_never_shows_the_others_runs(): void
+    public function test_one_games_board_never_shows_anothers_runs(): void
     {
         /*
          * The whole reason for the `game` column. A tower is floors and a walk
@@ -216,10 +228,12 @@ class ArcadeTest extends TestCase
             ->assertDontSee('GRIM DRIP');
     }
 
-    public function test_the_switcher_shows_each_players_own_best_on_each_cabinet(): void
+    public function test_the_rail_shows_this_weeks_leader_on_every_game(): void
     {
-        // Their own rather than the house's: the number under a button you are
-        // about to press should be the one you are about to try to beat.
+        // The house's rather than the reader's, which is the whole point of the
+        // rail: the number under a button nobody has pressed yet is the number
+        // somebody is currently winning with, so the list of games reads as a
+        // standings glance before anything has been opened.
         $kid = $this->loginKid('Nova');
         $sibling = Profile::factory()->for($kid->household)->create(['name' => 'Rook']);
         $week = $this->arcade()->currentWeek();
@@ -229,16 +243,100 @@ class ArcadeTest extends TestCase
         $this->score($sibling, 90, $week, ArcadeGame::WindyWalkies);
 
         Volt::test('arcade')
-            ->assertSee('Best 34')
-            ->assertSee('Best 21')
-            ->assertDontSee('Best 90');
+            ->assertSee('best 90')
+            ->assertSee('best 21')
+            // Nova's own walk is not the walk to beat, so the rail never says
+            // it — the reader's own number lives in the all-time block instead.
+            ->assertDontSee('best 34');
     }
 
-    public function test_a_kid_who_has_never_played_a_cabinet_is_shown_a_zero_to_beat(): void
+    public function test_a_game_nobody_has_played_this_week_says_so_rather_than_showing_a_zero(): void
     {
+        // "Nobody yet" is an invitation and "best 0" is a scoreboard.
         $this->loginKid();
 
-        Volt::test('arcade')->assertSee('Best 0');
+        Volt::test('arcade')
+            ->assertSee('nobody yet')
+            ->assertDontSee('best 0');
+    }
+
+    public function test_your_own_record_is_the_all_time_block_rather_than_the_rail(): void
+    {
+        $kid = $this->loginKid('Nova');
+        $sibling = Profile::factory()->for($kid->household)->create(['name' => 'Rook']);
+
+        $this->score($kid, 34, '1999-W01', ArcadeGame::WindyWalkies);
+        $this->score($sibling, 90, '1999-W01', ArcadeGame::WindyWalkies);
+
+        Volt::test('arcade')
+            ->assertSee('House')
+            ->assertSee('90 lanes')
+            ->assertSee('Yours')
+            ->assertSee('34 lanes');
+    }
+
+    public function test_the_target_strip_names_the_score_that_takes_the_week(): void
+    {
+        // One more than the leader, because a tie keeps the incumbent — a
+        // target of "equal it" would be a lie about how the week is settled.
+        $kid = $this->loginKid('Nova');
+        $sibling = Profile::factory()->for($kid->household)->create(['name' => 'Rook']);
+
+        $this->score($sibling, 38, $this->arcade()->currentWeek(), ArcadeGame::WindyWalkies);
+
+        Volt::test('arcade')
+            ->assertSee('Beat')
+            ->assertSee('39')
+            ->assertSee('for 3 tickets');
+    }
+
+    public function test_a_kid_already_on_top_is_told_they_are_leading_rather_than_to_beat_themselves(): void
+    {
+        $kid = $this->loginKid('Nova');
+
+        $this->score($kid, 38, $this->arcade()->currentWeek(), ArcadeGame::WindyWalkies);
+
+        Volt::test('arcade')
+            ->assertSee('Leading')
+            ->assertSee('3 tickets if it holds')
+            ->assertDontSee('Beat');
+    }
+
+    public function test_a_grown_up_is_never_promised_tickets_by_the_target_strip(): void
+    {
+        // They can top the week and get nothing for it — see ArcadeService.
+        $parent = $this->loginParent();
+
+        $this->score($parent, 38, $this->arcade()->currentWeek(), ArcadeGame::WindyWalkies);
+
+        Volt::test('arcade')
+            ->assertSee('Leading')
+            ->assertSee('hold it to take the week')
+            ->assertDontSee('tickets if it holds');
+    }
+
+    public function test_the_board_shows_each_player_once_rather_than_their_best_three_runs(): void
+    {
+        // A board of runs lets one kid having a good evening fill all three
+        // rows with their own name, and the column meant to say who is winning
+        // then says nothing at all.
+        $kid = $this->loginKid('Nova');
+        $sibling = Profile::factory()->for($kid->household)->create(['name' => 'Rook']);
+        $week = $this->arcade()->currentWeek();
+
+        $this->score($kid, 30, $week, ArcadeGame::WindyWalkies);
+        $this->score($kid, 28, $week, ArcadeGame::WindyWalkies);
+        $this->score($kid, 26, $week, ArcadeGame::WindyWalkies);
+        $this->score($sibling, 12, $week, ArcadeGame::WindyWalkies);
+
+        $standings = $this->arcade()->weeklyStandings($kid->household, ArcadeGame::WindyWalkies);
+
+        $this->assertCount(2, $standings);
+        $this->assertSame(30, $standings->first()->score);
+        $this->assertSame(12, $standings->last()->score);
+
+        // Rook is last on a board of two, so they survive the cut to three.
+        Volt::test('arcade')->assertSee('Rook');
     }
 
     public function test_last_weeks_giant_still_holds_the_all_time_record(): void
@@ -327,7 +425,7 @@ class ArcadeTest extends TestCase
         $this->assertSame('Ceiling', $arcade->altitude(ArcadeGame::StackTheMess, 18));
         $this->assertSame('Outer space', $arcade->altitude(ArcadeGame::StackTheMess, 400));
 
-        // The same number means something else on the other cabinet, which is
+        // The same number means something else on the other game, which is
         // the point of there being two ladders.
         $this->assertSame('Off the kerb', $arcade->altitude(ArcadeGame::WindyWalkies, 0));
         $this->assertSame('Over the water', $arcade->altitude(ArcadeGame::WindyWalkies, 8));
@@ -338,7 +436,7 @@ class ArcadeTest extends TestCase
     public function test_the_arcade_is_no_longer_on_the_public_login_page(): void
     {
         /*
-         * The cabinet stood on `/` for as long as its board held nothing about
+         * The game stood on `/` for as long as its board held nothing about
          * anybody. It holds names now, and `/` is world-readable — so this
          * assertion is the other half of the decision to put them there.
          */
@@ -352,7 +450,7 @@ class ArcadeTest extends TestCase
             ->assertDontSee('Windy Walkies');
     }
 
-    public function test_both_consoles_draw_both_cabinets(): void
+    public function test_both_consoles_draw_both_games(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['name' => 'Nova']);
@@ -365,7 +463,7 @@ class ArcadeTest extends TestCase
         Volt::test('parent.arcade')->assertOk()->assertSee('Stack the Mess')->assertSee('Windy Walkies');
     }
 
-    public function test_the_kid_cabinet_is_closed_to_parents_and_the_parent_one_to_kids(): void
+    public function test_the_kid_game_is_closed_to_parents_and_the_parent_one_to_kids(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();

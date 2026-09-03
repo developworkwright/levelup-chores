@@ -47,6 +47,39 @@ new class extends Component
         }
     }
 
+    /**
+     * Rename a chore.
+     *
+     * Every other thing about a chore could be changed from this page except
+     * the one a parent is most likely to get wrong first time, so a typo or a
+     * job the kids came to call something else meant removing the chore and
+     * adding it back — which throws away its completion history, its cooldown
+     * and whatever streak was resting on it.
+     *
+     * A blank is a no-op rather than a clear: a chore with no name is a card
+     * with nothing written on it, and the input puts the old name back. The
+     * icon is deliberately *not* re-guessed from the new name — a parent who
+     * picked a face is not asking for it to be replaced because they fixed a
+     * spelling, and `addChore()` is the only place a guess belongs.
+     */
+    public function rename(int $choreId, string $name): void
+    {
+        $chore = $this->ownedChore($choreId);
+
+        if (! $chore) {
+            return;
+        }
+
+        $name = trim($name);
+
+        if ($name === '' || $name === $chore->name) {
+            return;
+        }
+
+        $chore->name = mb_substr($name, 0, 255);
+        $chore->save();
+    }
+
     public function setHint(int $choreId, string $hint): void
     {
         $chore = $this->ownedChore($choreId);
@@ -496,7 +529,28 @@ new class extends Component
                     </button>
 
                     <div class="min-w-[140px] flex-1">
-                        <p class="text-[15px] font-semibold {{ $chore->isUsedUp() ? 'text-fq-text-4 line-through decoration-2' : '' }}">{{ $chore->name }}</p>
+                        {{-- The name, editable in place. An input that looks
+                             like the heading it replaced rather than a pencil
+                             and a dialog: renaming is rare enough not to earn a
+                             control of its own, and common enough that it must
+                             not cost a round trip to find. Same `wire:blur`
+                             shape as the hint below.
+
+                             Keyed on the name so that a rename which lands
+                             while another parent has the card open re-paints
+                             the input; Livewire will not morph a value the
+                             browser owns. --}}
+                        <input
+                            type="text"
+                            wire:key="chore-name-{{ $chore->id }}-{{ $chore->name }}"
+                            value="{{ $chore->name }}"
+                            wire:blur="rename({{ $chore->id }}, $event.target.value)"
+                            x-on:keydown.enter.prevent="$event.target.blur()"
+                            x-on:keydown.escape.prevent="$event.target.value = @js($chore->name); $event.target.blur()"
+                            aria-label="Chore name"
+                            maxlength="255"
+                            class="w-full rounded-[8px] border border-transparent bg-transparent px-1 py-px text-[15px] font-semibold outline-none hover:border-fq-line-2 focus:border-fq-lime focus:bg-fq-sunk {{ $chore->isUsedUp() ? 'text-fq-text-4 line-through decoration-2' : '' }}"
+                        >
                         <p class="font-mono-fq text-[10px] text-fq-text-4 uppercase">
                             {{ $chore->cadence->summary() }}
                             · {{ $chore->min_age ? "Age {$chore->min_age}+" : 'Any age' }}

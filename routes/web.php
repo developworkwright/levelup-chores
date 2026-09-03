@@ -67,7 +67,7 @@ Route::middleware(['auth:profile', 'role:kid', 'sync-streak'])->prefix('kid')->g
     // Playlists. Playing music is the header's job on every page; this is the
     // one place a kid builds a list to play — see PlaylistService.
     Volt::route('/music', 'kid.music')->name('kid.music');
-    // The cabinet, which used to be on the login page. Same component and the
+    // The game, which used to be on the login page. Same component and the
     // same board — see the page for why it isn't a copy.
     Volt::route('/arcade', 'kid.arcade')->name('kid.arcade');
 });
@@ -94,7 +94,7 @@ Route::middleware(['auth:profile', 'role:parent'])->prefix('parent')->group(func
     // The one parent screen that isn't administration: it writes to a log the
     // kids read rather than to anything they can spend.
     Volt::route('/quotes', 'parent.quotes')->name('parent.quotes');
-    // The second screen over here that isn't administration. Same cabinet and
+    // The second screen over here that isn't administration. Same game and
     // the same board as the kids' — beating them is the entire feature.
     Volt::route('/arcade', 'parent.arcade')->name('parent.arcade');
     // The music library. Songs live on a disk rather than in the repository,

@@ -11,20 +11,20 @@ use ValueError;
 /**
  * Tells the kids a new game has gone into the arcade.
  *
- * A command rather than something automatic because a cabinet arrives in a
+ * A command rather than something automatic because a game arrives in a
  * deploy: there is no row being written and no form being submitted that could
  * fire it, and a game often goes in a day or two before anybody is meant to
  * find it. This is the moment somebody decides it is ready.
  *
- * The in-app half needs no command at all — a cabinet wears a "new" flash until
+ * The in-app half needs no command at all — a game wears a "new" flash until
  * each kid next opens the arcade, off `profiles.arcade_seen_at` against the
  * game's release date. This is only the push, for the kids who are not in the
  * app to see it.
  */
-class AnnounceArcadeCabinetCommand extends Command
+class AnnounceArcadeGameCommand extends Command
 {
     protected $signature = 'arcade:announce
-        {game? : Which cabinet, e.g. windy_walkies. Defaults to the newest one.}
+        {game? : Which game, e.g. windy_walkies. Defaults to the newest one.}
         {--household= : Only one household, by name}
         {--dry-run : Show who would be told without sending anything}';
 
@@ -37,7 +37,7 @@ class AnnounceArcadeCabinetCommand extends Command
                 ? ArcadeGame::from($this->argument('game'))
                 : ArcadeGame::newest();
         } catch (ValueError) {
-            $this->error('No cabinet called "'.$this->argument('game').'".');
+            $this->error('No game called "'.$this->argument('game').'".');
             $this->line('Try one of: '.collect(ArcadeGame::cases())->pluck('value')->join(', '));
 
             return self::FAILURE;
@@ -62,7 +62,7 @@ class AnnounceArcadeCabinetCommand extends Command
         foreach ($households as $household) {
             $told = $dryRun
                 ? $household->profiles()->where('role', 'kid')->count()
-                : $arcade->announceNewCabinet($household, $game);
+                : $arcade->announceNewGame($household, $game);
 
             $rows[] = [$household->name, $told];
         }

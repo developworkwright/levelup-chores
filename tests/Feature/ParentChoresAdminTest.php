@@ -18,6 +18,73 @@ class ParentChoresAdminTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_a_parent_can_rename_a_chore(): void
+    {
+        $household = Household::factory()->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $chore = Chore::factory()->for($household)->create(['name' => 'Feeed the cat']);
+
+        Auth::guard('profile')->login($parent);
+
+        Volt::test('parent.chores')->call('rename', $chore->id, '  Feed the cat  ');
+
+        $this->assertSame('Feed the cat', $chore->refresh()->name);
+    }
+
+    public function test_renaming_a_chore_keeps_everything_resting_on_it(): void
+    {
+        // The reason this exists at all: the only way to fix a name used to be
+        // remove-and-re-add, which throws away the row every completion, every
+        // cooldown and every streak is pointed at.
+        $household = Household::factory()->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $chore = Chore::factory()->for($household)->create([
+            'name' => 'Hoover',
+            'points' => 175,
+            'icon' => ChoreIcon::Vacuum->faClass(),
+        ]);
+
+        Auth::guard('profile')->login($parent);
+
+        Volt::test('parent.chores')->call('rename', $chore->id, 'Hoover the stairs');
+
+        $chore->refresh();
+
+        $this->assertSame($chore->id, Chore::sole()->id);
+        $this->assertSame('Hoover the stairs', $chore->name);
+        $this->assertSame(175, $chore->points);
+        // Not re-guessed from the new name: a parent who picked a face is not
+        // asking for it back because they fixed a spelling.
+        $this->assertSame(ChoreIcon::Vacuum->faClass(), $chore->icon);
+    }
+
+    public function test_a_blank_name_leaves_the_chore_alone(): void
+    {
+        // A chore with no name is a card with nothing written on it. Unlike the
+        // hint, blank is not a way to clear this one.
+        $household = Household::factory()->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
+        $chore = Chore::factory()->for($household)->create(['name' => 'Feed the cat']);
+
+        Auth::guard('profile')->login($parent);
+
+        Volt::test('parent.chores')->call('rename', $chore->id, '   ');
+
+        $this->assertSame('Feed the cat', $chore->refresh()->name);
+    }
+
+    public function test_a_parent_cannot_rename_another_households_chore(): void
+    {
+        $parent = Profile::factory()->parent()->for(Household::factory())->create();
+        $foreign = Chore::factory()->for(Household::factory())->create(['name' => 'Feed the cat']);
+
+        Auth::guard('profile')->login($parent);
+
+        Volt::test('parent.chores')->call('rename', $foreign->id, 'Renamed from outside');
+
+        $this->assertSame('Feed the cat', $foreign->refresh()->name);
+    }
+
     public function test_a_parent_can_write_a_hint_for_a_chore(): void
     {
         $household = Household::factory()->create();

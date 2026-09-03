@@ -81,9 +81,25 @@ class LoginProfilePickerTest extends TestCase
         // rank or streak of their own.
         Volt::test('login')
             ->assertSee('Grown-ups')
-            ->assertSee('Parent console')
+            ->assertSee('Console')
             ->assertDontSee('Rowan')
             ->assertDontSee(Rank::Prowler->label());
+    }
+
+    public function test_the_console_links_wrap_instead_of_squeezing_the_rule_flat(): void
+    {
+        // Two nowrap links sharing one row with a flex-1 rule between them left
+        // the rules nothing to occupy on a phone: they collapsed to zero and
+        // the links ran edge to edge. One rule on its own line, links wrapping
+        // beneath it.
+        $household = Household::factory()->create();
+        Profile::factory()->parent()->for($household)->create(['name' => 'Rowan']);
+        Profile::factory()->parent()->for($household)->create(['name' => 'Sage']);
+
+        $html = Volt::test('login')->html();
+
+        $this->assertSame(1, substr_count($html, 'bg-fq-line'));
+        $this->assertStringContainsString('flex flex-wrap items-center justify-center', $html);
     }
 
     public function test_several_parents_are_each_named_so_they_can_be_told_apart(): void

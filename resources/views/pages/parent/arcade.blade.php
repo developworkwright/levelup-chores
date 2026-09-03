@@ -5,7 +5,7 @@ use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
 /**
- * The arcade cabinet, on the grown-ups' side.
+ * The arcade, on the grown-ups' side.
  *
  * The same `<livewire:arcade>` the kids get, around the parent shell — a page
  * rather than a copy, so there is one board and a score posted from either
@@ -30,7 +30,7 @@ new class extends Component
 
 <x-parent.shell :profile="$profile" active="arcade">
     <div class="flex flex-col gap-3 rounded-[28px] border border-fq-line bg-fq-bg p-[16px_14px]">
-        {{-- Deliberately no game name here. There are two cabinets and the
+        {{-- Deliberately no game name here. There are two games and the
              switcher inside owns which one is showing; a heading naming one of
              them would be wrong half the time. --}}
         <p class="text-xs text-fq-text-3">

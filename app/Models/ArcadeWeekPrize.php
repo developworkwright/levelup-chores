@@ -7,12 +7,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * One finished week of one arcade cabinet, settled.
+ * One finished week of one arcade game, settled.
  *
  * A row here means that week has been dealt with *for that game*, not that
  * anybody was paid — see the migration for why those are different questions,
  * and for why the unique key had to grow a third column when the second
- * cabinet arrived.
+ * game arrived.
  */
 class ArcadeWeekPrize extends Model
 {

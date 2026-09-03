@@ -16,17 +16,17 @@ use Livewire\Volt\Volt;
 use Tests\TestCase;
 
 /**
- * Three bonus tickets to the top of a finished week — on each cabinet.
+ * Three bonus tickets to the top of a finished week — on each game.
  *
  * There is no scheduler: the week is settled by whoever opens the arcade next.
  * So the two things worth testing hardest are that it pays exactly once however
  * many times that happens, and that a grown-up topping a board closes that week
  * without collecting anything.
  *
- * A second cabinet added a third: a week is now two settlements rather than
+ * A second game added a third: a week is now two settlements rather than
  * one, and closing the tower must not close the walk. One prize per game is a
  * product decision as much as a technical one — a combined champion would make
- * the second cabinet pointless for whoever is already best at the first.
+ * the second game pointless for whoever is already best at the first.
  */
 class ArcadePrizeTest extends TestCase
 {
@@ -91,11 +91,11 @@ class ArcadePrizeTest extends TestCase
         $this->assertSame($winner->id, $entry->profile_id);
     }
 
-    public function test_each_cabinet_pays_its_own_champion(): void
+    public function test_each_game_pays_its_own_champion(): void
     {
         /*
          * The reason the prize is per game. Merged, the better player takes both
-         * and the second cabinet is worth nothing to anybody else — which is the
+         * and the second game is worth nothing to anybody else — which is the
          * opposite of why it was built.
          */
         $climber = $this->kid('Nova');
@@ -113,12 +113,12 @@ class ArcadePrizeTest extends TestCase
         $this->assertSame(2, ArcadeWeekPrize::count());
     }
 
-    public function test_settling_one_cabinets_week_leaves_the_others_open(): void
+    public function test_settling_one_games_week_leaves_anothers_open(): void
     {
         // The unique key that makes settlement exactly-once had to grow a third
-        // column when the second cabinet arrived. Without it, the first game
+        // column when the second game arrived. Without it, the first game
         // settled on a Monday would close the week for both and the other
-        // cabinet's champion would never be paid.
+        // game's champion would never be paid.
         $walker = $this->kid('Nova');
         $climber = $this->kid('Rook');
 
@@ -128,7 +128,7 @@ class ArcadePrizeTest extends TestCase
 
         $this->assertSame(1, ArcadeWeekPrize::count());
 
-        // A run posted to the other cabinet for the same, already-part-settled
+        // A run posted to the other game for the same, already-part-settled
         // week — a kid catching up on Monday morning.
         $this->lastWeek($climber, 15, ArcadeGame::StackTheMess);
 
@@ -200,7 +200,7 @@ class ArcadePrizeTest extends TestCase
         $this->assertSame(0, ArcadeWeekPrize::count());
     }
 
-    public function test_a_cabinet_nobody_played_is_not_settled_at_all(): void
+    public function test_a_game_nobody_played_is_not_settled_at_all(): void
     {
         $kid = $this->kid();
 
@@ -241,11 +241,11 @@ class ArcadePrizeTest extends TestCase
         $this->assertSame(1, ArcadeWeekPrize::count());
     }
 
-    public function test_opening_either_cabinet_settles_both(): void
+    public function test_opening_either_game_settles_both(): void
     {
         // A kid who only ever plays one game should not be the reason the other
         // one never pays out, so settlement fans over the games rather than
-        // following whichever cabinet the page happens to be showing.
+        // following whichever game the page happens to be showing.
         $walker = $this->kid('Nova');
         $climber = $this->kid('Rook');
 
@@ -265,7 +265,7 @@ class ArcadePrizeTest extends TestCase
         $this->assertSame(ArcadeService::PRIZE_TICKETS, $climber->fresh()->bonus_tickets);
     }
 
-    public function test_the_champion_line_belongs_to_the_cabinet_on_screen(): void
+    public function test_the_champion_line_belongs_to_the_game_on_screen(): void
     {
         $walker = $this->kid('Nova');
         $climber = $this->kid('Rook');

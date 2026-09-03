@@ -11,14 +11,14 @@
 import './monsters.js';
 
 /*
- * Stack the Mess, the arcade's first cabinet. Registers the `fqStacker` Alpine
+ * Stack the Mess, the arcade's first game. Registers the `fqStacker` Alpine
  * component and nothing else. Bundling it here keeps the app to one script,
  * which is the whole point of it installing as a PWA.
  */
 import './arcade.js';
 
 /*
- * Windy Walkies, the arcade's second cabinet — the dog, the lanes and the
+ * Windy Walkies, the arcade's second game — the dog, the lanes and the
  * beans. Shipped verbatim from handoff/design_handoff_bean_dash for the same
  * reason monsters.js is: it arrived finished and playable, it draws to a canvas
  * with no DOM to reconcile, and porting it would re-derive a thousand hand-tuned

@@ -30,7 +30,7 @@
         'journal' => ['label' => 'Journal', 'icon' => 'fa-feather', 'route' => 'kid.journal', 'accent' => 'var(--fq-green)'],
         // This used to carry a hardcoded `new` flag, on the reasoning that the
         // arcade would only ever be news once and a column was not worth it.
-        // A second cabinet ended that: news now arrives one game at a time and
+        // A second game ended that: news now arrives one game at a time and
         // is different per kid, so it counts like the shop's restocks do —
         // see $counts below and ArcadeService::newCountFor().
         'arcade' => ['label' => 'Arcade', 'icon' => 'fa-gamepad', 'route' => 'kid.arcade', 'accent' => 'var(--fq-green)', 'countWord' => 'new'],
@@ -112,8 +112,8 @@
     // Loot joins it because new rewards were the thing nobody ever found: a
     // number on the tab is seen before the page is.
     // The arcade joins them for the same reason loot did, and a sharper one:
-    // nothing about a game ever comes looking for anybody, so a cabinet added
-    // quietly is a cabinet nobody plays.
+    // nothing about a game ever comes looking for anybody, so a game added
+    // quietly is a game nobody plays.
     $counts = [
         'trades' => $offersWaiting + app(App\Services\BountyService::class)->waitingOn($profile),
         'loot' => app(App\Services\StoreService::class)->newCountFor($profile),

@@ -261,10 +261,10 @@ class KidHeaderTest extends TestCase
     /**
      * The row's "new" used to be a flag hardcoded in the shell — the same for
      * everybody, and lit until somebody remembered to delete the line. It
-     * counts cabinets this kid has not met now, because news arrives one game
+     * counts games this kid has not met now, because news arrives one game
      * at a time and there are more games coming.
      */
-    public function test_the_arcade_row_counts_the_cabinets_this_kid_has_not_met(): void
+    public function test_the_arcade_row_counts_the_games_this_kid_has_not_met(): void
     {
         $this->loginKid(['arcade_seen_at' => ArcadeGame::StackTheMess->releasedOn()]);
 
@@ -276,7 +276,7 @@ class KidHeaderTest extends TestCase
         $this->loginKid(['arcade_seen_at' => now()]);
 
         // Not "0 new", and not a rim that never goes out: a kid who has seen
-        // every cabinet is being told nothing, so the row says nothing.
+        // every game is being told nothing, so the row says nothing.
         Volt::test('kid.home')->assertSee('Arcade')->assertDontSee('new</span>', false);
     }
 

@@ -146,19 +146,26 @@ new class extends Component
 
     @if ($parents->isNotEmpty())
         {{-- Deliberately understated and set apart from the tiles: the console
-             is a door for grown-ups, not one of the avatars to pick. --}}
-        <div class="mt-[6px] flex items-center gap-[14px]">
-            <span class="h-px flex-1 bg-fq-line"></span>
+             is a door for grown-ups, not one of the avatars to pick.
 
-            @foreach ($parents as $parent)
-                <a
-                    href="{{ route('pin', $parent) }}"
-                    wire:navigate
-                    class="flex items-center gap-2 px-[2px] py-[6px] font-mono-fq text-[10px] tracking-[0.22em] whitespace-nowrap text-fq-text-4 uppercase transition hover:text-fq-cyan"
-                >{{ $parents->count() > 1 ? $parent->name : 'Grown-ups' }} Console &rarr;</a>
-                <span class="h-px flex-1 bg-fq-line"></span>
-            @endforeach
+             The rule is one full-width line above the links rather than
+             hairlines threaded between them. Two nowrap links sharing a row
+             leave the flex-1 rules nothing to occupy on a phone: they collapse
+             to zero and the links run edge to edge. A rule with its own line
+             can't be squeezed, and the links below wrap instead of overflowing
+             however many grown-ups the house has. --}}
+        <div class="mt-[6px] flex flex-col items-center gap-3">
+            <span class="h-px w-full bg-fq-line"></span>
 
+            <div class="flex flex-wrap items-center justify-center gap-x-7 gap-y-1">
+                @foreach ($parents as $parent)
+                    <a
+                        href="{{ route('pin', $parent) }}"
+                        wire:navigate
+                        class="px-2 py-[10px] font-mono-fq text-[10px] tracking-[0.22em] whitespace-nowrap text-fq-text-4 uppercase transition hover:text-fq-cyan"
+                    >{{ $parents->count() > 1 ? $parent->name : 'Grown-ups' }} Console &rarr;</a>
+                @endforeach
+            </div>
         </div>
     @endif
 
@@ -166,7 +173,7 @@ new class extends Component
          nothing about anybody. It carries real names now — the house's own
          scores, with a bonus-ticket prize on the week — and names on a page
          anybody with the URL can open is exactly what this page is not for.
-         The cabinet is behind the PIN in both consoles instead.
+         The game is behind the PIN in both consoles instead.
 
          Nothing replaces it. This page is a door, and a door with a game on it
          was always the odder of the two things it was doing. --}}

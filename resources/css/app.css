@@ -94,6 +94,22 @@ body {
 }
 
 /*
+ * A row that scrolls sideways without saying so. The arcade's game rail is a
+ * snap strip on a phone, and a scrollbar under four chips is both ugly and
+ * redundant — a half-visible chip at the edge already says there is more. The
+ * `overflow-x-auto` utility still does the scrolling; this only hides the bar,
+ * on the two engines that draw one.
+ */
+.no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+
+/*
  * Rainbow badge tier. The star's fill and background-size are set inline by
  * x-badge-star — only the drift lives here, because an inline `background`
  * shorthand would reset any size this rule tried to set.

@@ -7,7 +7,7 @@ use App\Services\ArcadeService;
 use Tests\TestCase;
 
 /**
- * Each cabinet's milestone ladder is owned by PHP because the leaderboard
+ * Each game's milestone ladder is owned by PHP because the leaderboard
  * labels a score with it; the artwork that draws each rung is owned by the game
  * file because only the canvas can draw a ceiling or a farmyard. That is a
  * seam, and this is the guard on it — the same arrangement
@@ -111,7 +111,7 @@ class ArcadeMilestoneTest extends TestCase
             $this->assertStringNotContainsString($forbidden, $source, "fart-dash.js reaches for {$forbidden}.");
         }
 
-        // One storage key, and it is the mute toggle the other cabinet already
+        // One storage key, and it is the mute toggle the other game already
         // writes — which is the whole reason the speaker button governs both
         // games with no wiring between them.
         preg_match_all('/localStorage\.\w+\(([^)]*)\)/', $source, $storage);

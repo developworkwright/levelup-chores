@@ -5,7 +5,7 @@ namespace Tests\Feature;
 use App\Enums\ArcadeGame;
 use App\Models\Household;
 use App\Models\Profile;
-use App\Notifications\ArcadeCabinetAdded;
+use App\Notifications\ArcadeGameAdded;
 use App\Services\ArcadeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -14,7 +14,7 @@ use Livewire\Volt\Volt;
 use Tests\TestCase;
 
 /**
- * Telling the kids a cabinet has arrived.
+ * Telling the kids a game has arrived.
  *
  * Nothing about the arcade ever comes looking for anybody — a chore nags, a
  * sibling's swap arrives, a monster loses health, and the arcade just sits
@@ -22,7 +22,7 @@ use Tests\TestCase;
  * nobody plays, and this is the two halves of fixing that: a flash in the app
  * for the kid who opens it, and a push for the kid who doesn't.
  */
-class ArcadeNewCabinetTest extends TestCase
+class ArcadeNewGameTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -31,7 +31,7 @@ class ArcadeNewCabinetTest extends TestCase
         return app(ArcadeService::class);
     }
 
-    /** A kid who was last in the arcade before the second cabinet went in. */
+    /** A kid who was last in the arcade before the second game went in. */
     private function returningKid(string $name = 'Nova', ?Household $household = null): Profile
     {
         return Profile::factory()
@@ -42,17 +42,17 @@ class ArcadeNewCabinetTest extends TestCase
             ]);
     }
 
-    public function test_a_cabinet_added_since_a_kid_last_looked_is_new_to_them(): void
+    public function test_a_game_added_since_a_kid_last_looked_is_new_to_them(): void
     {
         $kid = $this->returningKid();
 
-        $new = $this->arcade()->newCabinetsFor($kid);
+        $new = $this->arcade()->newGamesFor($kid);
 
         $this->assertEquals([ArcadeGame::WindyWalkies], $new->all());
         $this->assertSame(1, $this->arcade()->newCountFor($kid));
     }
 
-    public function test_a_kid_who_has_never_been_finds_every_cabinet_new(): void
+    public function test_a_kid_who_has_never_been_finds_every_game_new(): void
     {
         // Null is a profile that has never opened the arcade, and the same
         // reading `loot_seen_at` gets: all of it is news to them.
@@ -61,7 +61,7 @@ class ArcadeNewCabinetTest extends TestCase
         $this->assertSame(count(ArcadeGame::cases()), $this->arcade()->newCountFor($kid));
     }
 
-    public function test_the_newest_unseen_cabinet_is_the_one_that_gets_opened(): void
+    public function test_the_newest_unseen_game_is_the_one_that_gets_opened(): void
     {
         // Two unseen games should land a kid on the one that just arrived, not
         // the one that arrived first.
@@ -85,7 +85,7 @@ class ArcadeNewCabinetTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         Volt::test('arcade')
-            ->assertSet('newCabinets', [ArcadeGame::WindyWalkies->value])
+            ->assertSet('newGames', [ArcadeGame::WindyWalkies->value])
             ->assertSee('New');
 
         // And stamped, so the next visit is quiet.
@@ -100,10 +100,10 @@ class ArcadeNewCabinetTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         Volt::test('arcade');
-        Volt::test('arcade')->assertSet('newCabinets', []);
+        Volt::test('arcade')->assertSet('newGames', []);
     }
 
-    public function test_a_new_cabinet_is_pushed_to_every_kid_in_the_house(): void
+    public function test_a_new_game_is_pushed_to_every_kid_in_the_house(): void
     {
         Notification::fake();
 
@@ -111,17 +111,17 @@ class ArcadeNewCabinetTest extends TestCase
         $kids = collect(['Nova', 'Rook'])->map(fn (string $name) => $this->returningKid($name, $household));
         $parent = Profile::factory()->for($household)->parent()->create(['name' => 'Dad']);
 
-        $told = $this->arcade()->announceNewCabinet($household, ArcadeGame::WindyWalkies);
+        $told = $this->arcade()->announceNewGame($household, ArcadeGame::WindyWalkies);
 
         $this->assertSame(2, $told);
 
         foreach ($kids as $kid) {
-            Notification::assertSentTo($kid, ArcadeCabinetAdded::class);
+            Notification::assertSentTo($kid, ArcadeGameAdded::class);
         }
 
         // Grown-ups put the game there and can see the switcher on their own
         // console; a push telling them about it would be telling them nothing.
-        Notification::assertNotSentTo($parent, ArcadeCabinetAdded::class);
+        Notification::assertNotSentTo($parent, ArcadeGameAdded::class);
     }
 
     public function test_one_houses_announcement_does_not_reach_another(): void
@@ -132,13 +132,13 @@ class ArcadeNewCabinetTest extends TestCase
         $mine = $this->returningKid('Nova', $household);
         $theirs = $this->returningKid('Rook');
 
-        $this->arcade()->announceNewCabinet($household, ArcadeGame::WindyWalkies);
+        $this->arcade()->announceNewGame($household, ArcadeGame::WindyWalkies);
 
-        Notification::assertSentTo($mine, ArcadeCabinetAdded::class);
-        Notification::assertNotSentTo($theirs, ArcadeCabinetAdded::class);
+        Notification::assertSentTo($mine, ArcadeGameAdded::class);
+        Notification::assertNotSentTo($theirs, ArcadeGameAdded::class);
     }
 
-    public function test_the_announce_command_defaults_to_the_newest_cabinet(): void
+    public function test_the_announce_command_defaults_to_the_newest_game(): void
     {
         Notification::fake();
 
@@ -149,7 +149,7 @@ class ArcadeNewCabinetTest extends TestCase
             ->expectsOutputToContain(ArcadeGame::newest()->label())
             ->assertSuccessful();
 
-        Notification::assertSentTo($kid, ArcadeCabinetAdded::class);
+        Notification::assertSentTo($kid, ArcadeGameAdded::class);
     }
 
     public function test_the_announce_command_sends_nothing_on_a_dry_run(): void
@@ -164,7 +164,7 @@ class ArcadeNewCabinetTest extends TestCase
         Notification::assertNothingSent();
     }
 
-    public function test_the_announce_command_refuses_a_cabinet_that_does_not_exist(): void
+    public function test_the_announce_command_refuses_a_game_that_does_not_exist(): void
     {
         Notification::fake();
 
@@ -173,7 +173,7 @@ class ArcadeNewCabinetTest extends TestCase
         Notification::assertNothingSent();
     }
 
-    public function test_every_cabinet_declares_when_it_went_in(): void
+    public function test_every_game_declares_when_it_went_in(): void
     {
         // The whole announcement hangs off these dates, and a game added
         // without one would be new to nobody, silently and forever.
@@ -183,7 +183,7 @@ class ArcadeNewCabinetTest extends TestCase
             $seen[] = $game->releasedOn()->toDateString();
         }
 
-        $this->assertSame($seen, array_unique($seen), 'Two cabinets claim the same release date.');
+        $this->assertSame($seen, array_unique($seen), 'Two games claim the same release date.');
         $this->assertSame(ArcadeGame::WindyWalkies, ArcadeGame::newest());
     }
 }

@@ -14,13 +14,13 @@ use NotificationChannels\WebPush\WebPushMessage;
  * The same problem `LootRestocked` was written for, one page over, and worse:
  * nothing about the arcade ever comes looking for anybody. A chore nags, a
  * sibling's swap arrives, a monster loses health — the arcade sits there being
- * a thing you have to remember. A second cabinet added quietly is a second
- * cabinet nobody plays.
+ * a thing you have to remember. A second game added quietly is a second
+ * game nobody plays.
  *
  * Kids only. A grown-up can already see the switcher on their own console, and
  * they are the ones who put the game there.
  */
-class ArcadeCabinetAdded extends Notification implements ShouldQueue
+class ArcadeGameAdded extends Notification implements ShouldQueue
 {
     use Queueable;
 
@@ -41,7 +41,7 @@ class ArcadeCabinetAdded extends Notification implements ShouldQueue
             ->title($this->title)
             ->icon('/icons/icon-192.png')
             ->body($this->body)
-            ->tag('arcade-cabinet-added')
+            ->tag('arcade-game-added')
             ->renotify()
             ->data(['url' => '/kid/arcade']);
     }
