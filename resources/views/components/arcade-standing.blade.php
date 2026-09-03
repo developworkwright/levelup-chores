@@ -18,7 +18,7 @@
 
 <div
     @class([
-        'flex items-center gap-[6px]',
+        'flex items-center gap-[7px]',
         '-mx-[4px] rounded-[7px] px-[4px] py-[3px]' => $mine,
         'ring-1 ring-fq-lime' => $posted,
     ])
@@ -28,7 +28,7 @@
 >
     <span
         @class([
-            'w-[10px] shrink-0 font-mono-fq text-[9px]',
+            'w-[13px] shrink-0 font-mono-fq text-[10.5px]',
             'text-fq-lime' => $mine,
             'text-fq-coral' => ! $mine && $rank === 1,
             'text-fq-text-5' => ! $mine && $rank !== 1,
@@ -36,13 +36,13 @@
     >{{ $rank }}</span>
 
     <span
-        class="grid h-[19px] w-[19px] shrink-0 place-items-center rounded-full font-baloo text-[9.5px] font-extrabold text-fq-bg"
+        class="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full font-baloo text-[11px] font-extrabold text-fq-bg"
         style="background: {{ $score->profile?->color->cssVar() ?? 'var(--fq-line-3)' }}"
     >{{ mb_substr($score->displayName(), 0, 1) }}</span>
 
     <span
         @class([
-            'min-w-0 flex-1 truncate text-[11px]',
+            'min-w-0 flex-1 truncate text-[13px]',
             'font-extrabold text-fq-lime' => $mine,
             'text-fq-text' => ! $mine && $rank === 1,
             'text-fq-text-3' => ! $mine && $rank !== 1,
@@ -51,7 +51,7 @@
 
     <span
         @class([
-            'shrink-0 font-baloo text-[12.5px] font-extrabold',
+            'shrink-0 font-baloo text-[15px] font-extrabold',
             'text-fq-lime' => $mine,
             'text-fq-coral' => ! $mine && $rank === 1,
             'text-fq-text-4' => ! $mine && $rank !== 1,

@@ -17,13 +17,13 @@
 ])
 
 <div
-    class="flex items-baseline gap-[6px] rounded-[11px] border-2 px-[9px] py-[8px] {{ $youLead ? 'border-fq-lime' : 'border-fq-coral' }}"
+    class="flex items-baseline gap-[7px] rounded-[11px] border-2 px-[11px] py-[10px] {{ $youLead ? 'border-fq-lime' : 'border-fq-coral' }}"
     style="background: linear-gradient(180deg, {{ $youLead ? 'rgba(255, 225, 77, 0.16)' : 'rgba(255, 138, 199, 0.16)' }}, var(--fq-sunk))"
 >
     @if ($youLead)
-        <span class="shrink-0 font-mono-fq text-[8px] tracking-[0.12em] text-fq-lime uppercase">Leading</span>
-        <span class="font-baloo text-[18px] leading-none font-extrabold text-fq-text">{{ $leader->score }}</span>
-        <span class="min-w-0 text-[10.5px] leading-tight text-pretty text-fq-text-3">
+        <span class="shrink-0 font-mono-fq text-[9.5px] tracking-[0.12em] text-fq-lime uppercase">Leading</span>
+        <span class="font-baloo text-[21px] leading-none font-extrabold text-fq-text">{{ $leader->score }}</span>
+        <span class="min-w-0 text-[12px] leading-tight text-pretty text-fq-text-3">
             @if ($canWinTickets)
                 {{ $prize }} {{ Str::plural('ticket', $prize) }} if it holds
             @else
@@ -31,9 +31,9 @@
             @endif
         </span>
     @elseif ($leader)
-        <span class="shrink-0 font-mono-fq text-[8px] tracking-[0.12em] text-fq-coral uppercase">Beat</span>
-        <span class="font-baloo text-[18px] leading-none font-extrabold text-fq-text">{{ $beat }}</span>
-        <span class="min-w-0 text-[10.5px] leading-tight text-pretty text-fq-text-3">
+        <span class="shrink-0 font-mono-fq text-[9.5px] tracking-[0.12em] text-fq-coral uppercase">Beat</span>
+        <span class="font-baloo text-[21px] leading-none font-extrabold text-fq-text">{{ $beat }}</span>
+        <span class="min-w-0 text-[12px] leading-tight text-pretty text-fq-text-3">
             @if ($canWinTickets)
                 for {{ $prize }} {{ Str::plural('ticket', $prize) }}
             @else
@@ -41,8 +41,8 @@
             @endif
         </span>
     @else
-        <span class="shrink-0 font-mono-fq text-[8px] tracking-[0.12em] text-fq-coral uppercase">Open</span>
-        <span class="min-w-0 text-[10.5px] leading-tight text-pretty text-fq-text-3">
+        <span class="shrink-0 font-mono-fq text-[9.5px] tracking-[0.12em] text-fq-coral uppercase">Open</span>
+        <span class="min-w-0 text-[12px] leading-tight text-pretty text-fq-text-3">
             @if ($canWinTickets)
                 Nobody yet &mdash; the first run takes {{ $prize }} {{ Str::plural('ticket', $prize) }}.
             @else

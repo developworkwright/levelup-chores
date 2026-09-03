@@ -476,6 +476,35 @@ class ArcadeTest extends TestCase
         $this->get('/parent/arcade')->assertForbidden();
     }
 
+    public function test_every_game_can_be_played_full_screen(): void
+    {
+        $this->loginKid();
+
+        // The overlay, the height each game stacks around its own canvas, and
+        // the way back out — Escape works, but a tablet has no Escape, so the
+        // control has to survive into the overlay itself.
+        Volt::test('arcade')
+            ->assertSee('x-data="fqStage"', false)
+            ->assertSee('fq-stage-full', false)
+            ->assertSee('--fq-stage-chrome', false)
+            ->assertSee('Full screen')
+            ->call('switchTo', ArcadeGame::WindyWalkies->value)
+            ->assertSee('fq-stage-full', false)
+            ->assertSee('--fq-stage-chrome', false)
+            ->assertSee('Full screen');
+    }
+
+    public function test_the_controls_a_game_names_include_the_keys_it_now_takes(): void
+    {
+        $this->loginKid();
+
+        Volt::test('arcade')
+            ->call('switchTo', ArcadeGame::WindyWalkies->value)
+            ->assertSee('WASD')
+            ->call('switchTo', ArcadeGame::StackTheMess->value)
+            ->assertSee('Tap, space or W');
+    }
+
     private function score(Profile $profile, int $score, string $week, ArcadeGame $game, ?string $name = null): ArcadeScore
     {
         return ArcadeScore::create([

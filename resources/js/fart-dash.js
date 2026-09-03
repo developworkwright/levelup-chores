@@ -1523,7 +1523,7 @@ class BeanDash {
 
             ctx.font = '600 11px "JetBrains Mono", ui-monospace, monospace';
             ctx.fillStyle = '#8c7bab';
-            ctx.fillText('SWIPE OR ARROW KEYS', W / 2, H / 2 + 34);
+            ctx.fillText('SWIPE, ARROWS OR WASD', W / 2, H / 2 + 34);
 
             ctx.font = '800 17px "Baloo 2", Outfit, system-ui, sans-serif';
             ctx.fillStyle = '#ffe14d';
@@ -1561,6 +1561,22 @@ class BeanDash {
 /* ------------------------------------------------------------------ *
  * The element
  * ------------------------------------------------------------------ */
+
+/**
+ * Is the keystroke going somewhere that wants the letter?
+ *
+ * The game listens on the window so a player never has to click the canvas
+ * first, which was harmless while it only claimed the arrow keys. WASD is not:
+ * an `a` belongs to whatever field has the caret.
+ */
+function isTyping(node) {
+    if (!(node instanceof HTMLElement)) {
+        return false;
+    }
+
+    return node.isContentEditable
+        || ['INPUT', 'TEXTAREA', 'SELECT'].includes(node.tagName);
+}
 
 class FartDashElement extends HTMLElement {
     connectedCallback() {
@@ -1698,12 +1714,25 @@ class FartDashElement extends HTMLElement {
         });
 
         this.onKey = (e) => {
+            // WASD beside the arrows: a laptop player's left hand is already
+            // there, and it is the same four directions rather than a second
+            // control scheme anybody has to be told about.
             const map = {
                 ArrowUp: [0, 1],
                 ArrowDown: [0, -1],
                 ArrowLeft: [-1, 0],
                 ArrowRight: [1, 0],
+                w: [0, 1],
+                s: [0, -1],
+                a: [-1, 0],
+                d: [1, 0],
             };
+
+            if (isTyping(e.target)) {
+                return;
+            }
+
+            const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
 
             if (e.key === ' ' || e.key === 'Enter') {
                 e.preventDefault();
@@ -1712,7 +1741,7 @@ class FartDashElement extends HTMLElement {
                 return;
             }
 
-            if (!map[e.key]) {
+            if (!map[key]) {
                 return;
             }
 
@@ -1724,7 +1753,7 @@ class FartDashElement extends HTMLElement {
                 return;
             }
 
-            this.game.move(map[e.key][0], map[e.key][1]);
+            this.game.move(map[key][0], map[key][1]);
         };
 
         window.addEventListener('keydown', this.onKey);

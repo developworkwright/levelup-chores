@@ -1002,3 +1002,57 @@ body {
         animation: none;
     }
 }
+
+/*
+ * The arcade cabinet, full screen.
+ *
+ * An overlay rather than `:fullscreen` styling, because the Fullscreen API is
+ * pointed at the document here and not at this element — see fqStage for what
+ * went wrong the other way round. The class is on whenever the stage is full
+ * screen, with or without the browser having granted the request.
+ *
+ * Both games draw a fixed 320x460 board scaled by the width of the box they are
+ * given, so the only thing this has to do is hand them a bigger box — and the
+ * only real constraint is height, because at full width the board stands taller
+ * than any screen. The max-width below is that height budget converted back
+ * through the aspect ratio, the same trick the arcade's middle rail uses; each
+ * game sets `--fq-stage-chrome` to whatever it stacks around its own canvas (a
+ * score line, a d-pad, the instruction bar).
+ */
+.fq-stage-full {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    padding: 12px;
+    overflow: auto;
+    align-items: center;
+    justify-content: center;
+    background: var(--fq-bg);
+}
+
+.fq-stage-full > * {
+    width: 100%;
+    max-width: calc((100dvh - var(--fq-stage-chrome, 210px)) * 320 / 460);
+}
+
+/*
+ * Full screen keeps the game and drops the cabinet: the title line, the
+ * instruction bar, anything that is read once and then never again. All of it
+ * was spending height the board wanted, and the point of the button is a bigger
+ * board rather than a bigger page.
+ *
+ * What survives is the button itself, moved into the corner — a tablet has no
+ * Escape, so the way back out has to stay on screen.
+ */
+.fq-stage-full .fq-full-hide {
+    display: none;
+}
+
+.fq-stage-full > .fq-stage-bar {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    z-index: 70;
+    width: auto;
+    max-width: none;
+}

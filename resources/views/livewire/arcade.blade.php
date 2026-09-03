@@ -195,8 +195,8 @@ new class extends Component
              instead. It bleeds to the screen edges so a half-visible entry says
              there is more to swipe to, and hides its scrollbar because that
              half-visible entry has already said it. --}}
-        <div class="no-scrollbar -mx-[14px] flex shrink-0 snap-x snap-mandatory gap-[6px] overflow-x-auto px-[14px] pb-[2px] lg:mx-0 lg:w-[152px] lg:flex-col lg:overflow-visible lg:px-0 lg:pb-0">
-            <span class="hidden font-mono-fq text-[8px] tracking-[0.14em] text-fq-text-5 uppercase lg:block">
+        <div class="no-scrollbar -mx-[14px] flex shrink-0 snap-x snap-mandatory gap-[8px] overflow-x-auto px-[14px] pb-[2px] lg:mx-0 lg:w-[186px] lg:flex-col lg:overflow-visible lg:px-0 lg:pb-0">
+            <span class="hidden font-mono-fq text-[9.5px] tracking-[0.14em] text-fq-text-5 uppercase lg:block">
                 Games
             </span>
 
@@ -208,7 +208,7 @@ new class extends Component
                     wire:key="rail-{{ $entry->value }}"
                     wire:click="switchTo('{{ $entry->value }}')"
                     @class([
-                        'flex w-[136px] shrink-0 snap-start flex-col items-start gap-[4px] rounded-[10px] px-[8px] py-[7px] text-left lg:w-full',
+                        'flex w-[168px] shrink-0 snap-start flex-col items-start gap-[6px] rounded-[12px] px-[11px] py-[10px] text-left lg:w-full',
                         'border-2 border-fq-lime' => $entry === $game,
                         'border border-fq-line-3 bg-fq-sunk' => $entry !== $game,
                     ])
@@ -219,7 +219,7 @@ new class extends Component
                     <span class="flex w-full items-center gap-[5px]">
                         <span
                             @class([
-                                'min-w-0 flex-1 truncate text-[11.5px] leading-tight',
+                                'min-w-0 flex-1 truncate text-[14px] leading-tight',
                                 'font-extrabold text-fq-lime' => $entry === $game,
                                 'font-semibold text-fq-text' => $entry !== $game,
                             ])
@@ -232,7 +232,7 @@ new class extends Component
                                  should be, on every game at once. Only until
                                  they have been once — the marker is stamped on
                                  mount, so this is the last visit it shows on. --}}
-                            <span class="shrink-0 rounded-full bg-fq-coral px-[4px] py-px font-mono-fq text-[6.5px] font-semibold tracking-[0.1em] text-fq-ink uppercase">
+                            <span class="shrink-0 rounded-full bg-fq-coral px-[5px] py-px font-mono-fq text-[8px] font-semibold tracking-[0.1em] text-fq-ink uppercase">
                                 New
                             </span>
                         @endif
@@ -241,18 +241,18 @@ new class extends Component
                     @if ($entryLeader)
                         <span class="flex w-full items-center gap-[5px]">
                             <span
-                                class="grid h-[15px] w-[15px] shrink-0 place-items-center rounded-full font-baloo text-[7.5px] font-extrabold text-fq-bg"
+                                class="grid h-[19px] w-[19px] shrink-0 place-items-center rounded-full font-baloo text-[9.5px] font-extrabold text-fq-bg"
                                 style="background: {{ $entryLeader->profile?->color->cssVar() ?? 'var(--fq-line-3)' }}"
                             >{{ mb_substr($entryLeader->displayName(), 0, 1) }}</span>
 
-                            <span class="min-w-0 flex-1 truncate font-mono-fq text-[8.5px] text-fq-text-4">
+                            <span class="min-w-0 flex-1 truncate font-mono-fq text-[10.5px] text-fq-text-4">
                                 best {{ $entryLeader->score }}<span class="hidden lg:inline"> this wk</span>
                             </span>
                         </span>
                     @else
                         {{-- "Nobody yet" rather than "best 0": one is an
                              invitation and the other is a scoreboard. --}}
-                        <span class="font-mono-fq text-[8.5px] text-fq-magenta">nobody yet</span>
+                        <span class="font-mono-fq text-[10.5px] text-fq-magenta">nobody yet</span>
                     @endif
                 </button>
             @endforeach
@@ -262,7 +262,7 @@ new class extends Component
                  week to win — see ArcadeGame::isRanked(). Nothing in the arcade
                  is one yet, which is why this renders nothing today. --}}
             @if ($toys !== [])
-                <span class="mt-[5px] hidden font-mono-fq text-[8px] tracking-[0.14em] text-fq-text-5 uppercase lg:block">
+                <span class="mt-[5px] hidden font-mono-fq text-[9.5px] tracking-[0.14em] text-fq-text-5 uppercase lg:block">
                     Toys
                 </span>
 
@@ -272,20 +272,20 @@ new class extends Component
                         wire:key="rail-{{ $toy->value }}"
                         wire:click="switchTo('{{ $toy->value }}')"
                         @class([
-                            'flex w-[136px] shrink-0 snap-start flex-col items-start gap-[4px] rounded-[10px] px-[8px] py-[7px] text-left lg:w-full',
+                            'flex w-[168px] shrink-0 snap-start flex-col items-start gap-[6px] rounded-[12px] px-[11px] py-[10px] text-left lg:w-full',
                             'border-2 border-fq-lime' => $toy === $game,
                             'border border-fq-line-4 bg-fq-sunk' => $toy !== $game,
                         ])
                     >
                         <span
                             @class([
-                                'w-full truncate text-[11.5px] leading-tight',
+                                'w-full truncate text-[14px] leading-tight',
                                 'font-extrabold text-fq-lime' => $toy === $game,
                                 'font-semibold text-fq-text' => $toy !== $game,
                             ])
                         >{{ $toy->label() }}</span>
 
-                        <span class="font-mono-fq text-[8.5px] text-fq-magenta">toy</span>
+                        <span class="font-mono-fq text-[10.5px] text-fq-magenta">toy</span>
                     </button>
                 @endforeach
             @endif
@@ -304,191 +304,231 @@ new class extends Component
             class="flex w-full min-w-0 flex-col gap-[8px] lg:flex-1"
             style="max-width: calc(88vh * 320 / 460)"
         >
-            <div class="flex items-baseline gap-[8px]">
-                <span class="font-baloo text-[14px] font-extrabold text-fq-lime">{{ $game->label() }}</span>
-                <span class="font-mono-fq text-[8.5px] tracking-[0.1em] text-fq-text-5 uppercase">
-                    {{ $game->scoreLabel() }}
-                </span>
-            </div>
+            {{-- The stage: the title, the phone-only target and the machine,
+                 wrapped so all three can be handed to the screen at once.
 
-            {{-- On a phone the target sits here rather than on the board,
-                 because by the time a thumb reaches the start button the board
-                 has scrolled off the bottom of the screen. Same component and
-                 the same four states — see x-arcade-beat. --}}
-            @if ($game->isRanked())
-                <div class="lg:hidden">
-                    <x-arcade-beat
-                        :leader="$leader"
-                        :beat="$beat"
-                        :you-lead="$youLead"
-                        :can-win-tickets="$canWinTickets"
-                        :prize="$prize"
-                    />
-                </div>
-            @endif
+                 It is the wrapper rather than the machine that carries the
+                 overlay, because the button to come back out has to still be on
+                 it — Escape works, but a six-year-old on a tablet has no Escape.
 
-            {{-- The machine — the box the game is drawn in.
-
-                 Keyed on the game so switching *replaces* this subtree instead
-                 of morphing one game's markup into another's — the canvases
-                 inside are `wire:ignore` and would otherwise be handed to the
-                 wrong game. It is also what unmounts the outgoing game: both
-                 hold an animation frame, and `<fart-dash>` holds a window-level
-                 keydown listener that would eat the arrow keys of whatever
-                 replaced it. --}}
+                 `--fq-stage-chrome` is the height each game stacks around its own
+                 canvas — a score line here, a d-pad there — which is what the
+                 stage subtracts before sizing the board. See .fq-stage-full. --}}
             <div
-                wire:key="machine-{{ $game->value }}"
-                class="flex flex-col gap-[11px] rounded-[24px] border border-fq-line-3 p-[12px]"
-                style="background: linear-gradient(160deg, var(--fq-cabinet), var(--fq-panel))"
+                x-data="fqStage"
+                :class="full ? 'fq-stage-full' : ''"
+                class="flex flex-col gap-[8px]"
+                style="--fq-stage-chrome: {{ $game === ArcadeGame::WindyWalkies ? 155 : 110 }}px"
             >
-                @if ($game === ArcadeGame::StackTheMess)
-                    {{-- `wire:ignore` because everything inside is drawn by hand
-                         and held in Alpine state. Posting a score re-renders the
-                         board beside it, and without this the canvas element
-                         would be morphed out from under a running animation
-                         frame. --}}
-                    <div
-                        wire:ignore
-                        x-data="fqStacker(@js($milestones))"
-                        x-on:pointerdown.prevent="$el.focus(); tap()"
-                        x-on:keydown.space.prevent="tap()"
-                        x-on:keydown.enter.prevent="tap()"
-                        x-on:keydown.up.prevent="tap()"
-                        tabindex="0"
-                        role="application"
-                        aria-label="Stack the Mess — tap or press space to drop a floor"
-                        class="relative w-full cursor-pointer touch-manipulation select-none focus:outline-none"
+                {{-- The title line, and the button that is the way in and back
+                     out. Full screen it drops everything but the button and
+                     floats that in the corner, so the only thing left on screen
+                     is the game — the cabinet around it is what the height was
+                     going to. See .fq-stage-bar. --}}
+                <div class="fq-stage-bar flex items-center justify-between gap-[8px]">
+                    <span class="fq-full-hide flex min-w-0 items-baseline gap-[8px]">
+                        <span class="truncate font-baloo text-[15px] font-extrabold text-fq-lime">{{ $game->label() }}</span>
+                        <span class="shrink-0 font-mono-fq text-[9px] tracking-[0.1em] text-fq-text-5 uppercase">
+                            {{ $game->scoreLabel() }}
+                        </span>
+                    </span>
+
+                    <button
+                        type="button"
+                        x-on:click="toggle()"
+                        :aria-label="full ? 'Leave full screen' : 'Play full screen'"
+                        class="flex shrink-0 items-center gap-[6px] rounded-[10px] border border-fq-line-3 bg-fq-sunk px-[10px] py-[6px] font-mono-fq text-[9px] tracking-[0.12em] text-fq-text-3 uppercase"
                     >
-                        <div class="mb-2 flex items-end justify-between gap-2">
-                            <div class="flex items-baseline gap-2">
-                                <span class="font-baloo text-[26px] leading-none font-extrabold text-fq-lime" x-text="score"></span>
-                                <span class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-5 uppercase">floors</span>
-                            </div>
+                        <i class="fa-solid fa-expand text-[12px] text-fq-cyan" :class="{ 'fa-expand': ! full, 'fa-compress': full }"></i>
+                        <span x-text="full ? 'Exit' : 'Full screen'">Full screen</span>
+                    </button>
+                </div>
 
-                            <span
-                                class="font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-5 uppercase"
-                                x-text="'best ' + best"
-                            ></span>
-                        </div>
-
-                        <div class="relative overflow-hidden rounded-[18px] border-2 border-fq-line-2 bg-fq-bg">
-                            <canvas
-                                x-ref="canvas"
-                                class="block w-full"
-                                style="aspect-ratio: 320 / 460"
-                            ></canvas>
-
-                            {{-- Idle --}}
-                            <div
-                                x-show="phase === 'idle'"
-                                class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-fq-bg/72 px-6 text-center"
-                            >
-                                <p class="font-mono-fq text-[10px] tracking-[0.3em] text-fq-cyan uppercase">Arcade</p>
-                                <h3 class="font-baloo text-[30px] leading-none font-extrabold text-fq-text">Stack<br>the Mess</h3>
-                                <p class="text-[12px] leading-snug text-fq-text-3">
-                                    Tap to drop each floor. Whatever hangs over the edge falls off — so line it up.
-                                </p>
-                                <span class="mt-1 rounded-full bg-fq-lime px-5 py-2 font-baloo text-[15px] font-extrabold text-fq-ink">
-                                    Tap to start
-                                </span>
-                            </div>
-
-                            {{-- Game over --}}
-                            <div
-                                x-show="phase === 'over'"
-                                x-cloak
-                                class="absolute inset-0 flex flex-col items-center justify-center gap-[10px] bg-fq-bg/85 px-5 text-center"
-                            >
-                                <p class="font-mono-fq text-[10px] tracking-[0.28em] text-fq-coral uppercase">Tower down</p>
-
-                                <p class="font-baloo text-[46px] leading-none font-extrabold text-fq-lime" x-text="score"></p>
-                                <p class="-mt-1 font-mono-fq text-[10px] tracking-[0.18em] text-fq-text-5 uppercase">floors</p>
-                                <p class="font-baloo text-[17px] font-bold text-fq-text-2" x-text="altitude"></p>
-
-                                {{-- The player's own name, and no way to change it.
-
-                                     There was a rolled codename here with a re-roll button
-                                     beside it, for as long as this game stood on a page a
-                                     stranger could open. Behind the PIN the board is the
-                                     family's, so a run says who did it — and it still isn't
-                                     typed: the name comes off the profile server-side, so
-                                     nothing anybody enters can reach the board. --}}
-                                <div class="mt-1 flex w-full flex-col items-center gap-[6px]" x-show="!posted">
-                                    <p class="font-mono-fq text-[9px] tracking-[0.18em] text-fq-text-5 uppercase">Posting as</p>
-
-                                    <span
-                                        class="rounded-full border px-3 py-[5px] font-baloo text-[13px] font-bold"
-                                        style="border-color: {{ $player->color->cssVar() }}; color: {{ $player->color->cssVar() }}"
-                                    >{{ $player->name }}</span>
-                                </div>
-
-                                <p
-                                    x-show="posted"
-                                    x-cloak
-                                    class="mt-1 font-mono-fq text-[10px] tracking-[0.14em] text-fq-lime uppercase"
-                                >On the board &#10003;</p>
-
-                                {{-- One button, and it is the one they were
-                                     already aiming at. The Post button that used
-                                     to sit beside it is gone: the run posts
-                                     itself, so a thumb going for "again" can no
-                                     longer throw away the score it just
-                                     earned. --}}
-                                <div class="mt-2 flex items-center gap-2">
-                                    <button
-                                        type="button"
-                                        x-on:pointerdown.stop.prevent="play()"
-                                        class="rounded-full border border-fq-line-3 bg-fq-sunk px-4 py-2 font-baloo text-[14px] font-extrabold text-fq-text"
-                                    >Play again</button>
-                                </div>
-                            </div>
-                        </div>
-
-                        <p class="mt-2 text-center font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-6 uppercase" x-cloak x-show="phase === 'playing'">
-                            <span x-text="altitude"></span>
-                        </p>
-                    </div>
-                @else
-                    {{-- Windy Walkies builds its own canvas, its own d-pad and
-                         its own HUD, so the page only has to give it a box and
-                         listen. `wire:ignore` for the same reason as the tower:
-                         the board beside it re-renders on every posted run.
-
-                         There is no Post button because there is nowhere to put
-                         one — the game-over screen is drawn inside the canvas,
-                         and a tap on it restarts. `fd-over` fires once per
-                         death, which is exactly the moment the tower's button
-                         would have been pressed. --}}
-                    <div
-                        wire:ignore
-                        x-data="{ posted: false, score: 0 }"
-                        x-on:fd-over="score = $event.detail.score; posted = false; if (score > 0) { $wire.post(score).then(() => posted = true) }"
-                        class="relative w-full select-none"
-                    >
-                        <p
-                            x-show="posted"
-                            x-cloak
-                            class="mb-2 text-right font-mono-fq text-[9px] tracking-[0.14em] text-fq-lime uppercase"
-                        ><span x-text="score"></span> lanes &middot; on the board &#10003;</p>
-
-                        <fart-dash aria-label="Windy Walkies — tap or press space to hop"></fart-dash>
+                {{-- On a phone the target sits here rather than on the board,
+                     because by the time a thumb reaches the start button the board
+                     has scrolled off the bottom of the screen. Same component and
+                     the same four states — see x-arcade-beat. --}}
+                @if ($game->isRanked())
+                    <div class="lg:hidden">
+                        <x-arcade-beat
+                            :leader="$leader"
+                            :beat="$beat"
+                            :you-lead="$youLead"
+                            :can-win-tickets="$canWinTickets"
+                            :prize="$prize"
+                        />
                     </div>
                 @endif
 
-                <div class="flex items-center gap-[9px] border-t border-fq-line pt-[10px]">
-                    <span class="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-fq-sunk">
-                        <i class="fa-solid {{ $game->icon() }} text-[14px] text-fq-fart"></i>
-                    </span>
+                {{-- The machine — the box the game is drawn in.
 
-                    <span class="min-w-0 flex-1 text-[12.5px] leading-[1.4] text-pretty text-fq-text-3">
-                        @if ($game === ArcadeGame::WindyWalkies)
-                            Swipe or use the arrows. Tap to hop forward &mdash;
-                            <span class="text-fq-fart">beans give you a super fart</span> worth three lanes.
-                        @else
-                            Tap to drop each floor. Whatever hangs over the edge
-                            falls off &mdash; so line it up.
-                        @endif
-                    </span>
+                     Keyed on the game so switching *replaces* this subtree instead
+                     of morphing one game's markup into another's — the canvases
+                     inside are `wire:ignore` and would otherwise be handed to the
+                     wrong game. It is also what unmounts the outgoing game: both
+                     hold an animation frame, and `<fart-dash>` holds a window-level
+                     keydown listener that would eat the arrow keys of whatever
+                     replaced it. --}}
+                <div
+                    wire:key="machine-{{ $game->value }}"
+                    class="flex flex-col gap-[11px] rounded-[24px] border border-fq-line-3 p-[12px]"
+                    style="background: linear-gradient(160deg, var(--fq-cabinet), var(--fq-panel))"
+                >
+                    @if ($game === ArcadeGame::StackTheMess)
+                        {{-- `wire:ignore` because everything inside is drawn by hand
+                             and held in Alpine state. Posting a score re-renders the
+                             board beside it, and without this the canvas element
+                             would be morphed out from under a running animation
+                             frame. --}}
+                        <div
+                            wire:ignore
+                            x-data="fqStacker(@js($milestones))"
+                            x-on:pointerdown.prevent="$el.focus(); tap()"
+                            x-on:keydown.space.prevent="tap()"
+                            x-on:keydown.enter.prevent="tap()"
+                            x-on:keydown.up.prevent="tap()"
+                            {{-- W beside the up arrow, so the hand a Windy Walkies
+                                 player already has on WASD works here too. The tower
+                                 has one input, so the other three do nothing. --}}
+                            x-on:keydown.w.prevent="tap()"
+                            tabindex="0"
+                            role="application"
+                            aria-label="Stack the Mess — tap or press space to drop a floor"
+                            class="relative w-full cursor-pointer touch-manipulation select-none focus:outline-none"
+                        >
+                            <div class="mb-2 flex items-end justify-between gap-2">
+                                <div class="flex items-baseline gap-2">
+                                    <span class="font-baloo text-[26px] leading-none font-extrabold text-fq-lime" x-text="score"></span>
+                                    <span class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-5 uppercase">floors</span>
+                                </div>
+
+                                <span
+                                    class="font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-5 uppercase"
+                                    x-text="'best ' + best"
+                                ></span>
+                            </div>
+
+                            <div class="relative overflow-hidden rounded-[18px] border-2 border-fq-line-2 bg-fq-bg">
+                                <canvas
+                                    x-ref="canvas"
+                                    class="block w-full"
+                                    style="aspect-ratio: 320 / 460"
+                                ></canvas>
+
+                                {{-- Idle --}}
+                                <div
+                                    x-show="phase === 'idle'"
+                                    class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-fq-bg/72 px-6 text-center"
+                                >
+                                    <p class="font-mono-fq text-[10px] tracking-[0.3em] text-fq-cyan uppercase">Arcade</p>
+                                    <h3 class="font-baloo text-[30px] leading-none font-extrabold text-fq-text">Stack<br>the Mess</h3>
+                                    <p class="text-[12px] leading-snug text-fq-text-3">
+                                        Tap to drop each floor. Whatever hangs over the edge falls off — so line it up.
+                                    </p>
+                                    <span class="mt-1 rounded-full bg-fq-lime px-5 py-2 font-baloo text-[15px] font-extrabold text-fq-ink">
+                                        Tap to start
+                                    </span>
+                                </div>
+
+                                {{-- Game over --}}
+                                <div
+                                    x-show="phase === 'over'"
+                                    x-cloak
+                                    class="absolute inset-0 flex flex-col items-center justify-center gap-[10px] bg-fq-bg/85 px-5 text-center"
+                                >
+                                    <p class="font-mono-fq text-[10px] tracking-[0.28em] text-fq-coral uppercase">Tower down</p>
+
+                                    <p class="font-baloo text-[46px] leading-none font-extrabold text-fq-lime" x-text="score"></p>
+                                    <p class="-mt-1 font-mono-fq text-[10px] tracking-[0.18em] text-fq-text-5 uppercase">floors</p>
+                                    <p class="font-baloo text-[17px] font-bold text-fq-text-2" x-text="altitude"></p>
+
+                                    {{-- The player's own name, and no way to change it.
+
+                                         There was a rolled codename here with a re-roll button
+                                         beside it, for as long as this game stood on a page a
+                                         stranger could open. Behind the PIN the board is the
+                                         family's, so a run says who did it — and it still isn't
+                                         typed: the name comes off the profile server-side, so
+                                         nothing anybody enters can reach the board. --}}
+                                    <div class="mt-1 flex w-full flex-col items-center gap-[6px]" x-show="!posted">
+                                        <p class="font-mono-fq text-[9px] tracking-[0.18em] text-fq-text-5 uppercase">Posting as</p>
+
+                                        <span
+                                            class="rounded-full border px-3 py-[5px] font-baloo text-[13px] font-bold"
+                                            style="border-color: {{ $player->color->cssVar() }}; color: {{ $player->color->cssVar() }}"
+                                        >{{ $player->name }}</span>
+                                    </div>
+
+                                    <p
+                                        x-show="posted"
+                                        x-cloak
+                                        class="mt-1 font-mono-fq text-[10px] tracking-[0.14em] text-fq-lime uppercase"
+                                    >On the board &#10003;</p>
+
+                                    {{-- One button, and it is the one they were
+                                         already aiming at. The Post button that used
+                                         to sit beside it is gone: the run posts
+                                         itself, so a thumb going for "again" can no
+                                         longer throw away the score it just
+                                         earned. --}}
+                                    <div class="mt-2 flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            x-on:pointerdown.stop.prevent="play()"
+                                            class="rounded-full border border-fq-line-3 bg-fq-sunk px-4 py-2 font-baloo text-[14px] font-extrabold text-fq-text"
+                                        >Play again</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <p class="mt-2 text-center font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-6 uppercase" x-cloak x-show="phase === 'playing'">
+                                <span x-text="altitude"></span>
+                            </p>
+                        </div>
+                    @else
+                        {{-- Windy Walkies builds its own canvas, its own d-pad and
+                             its own HUD, so the page only has to give it a box and
+                             listen. `wire:ignore` for the same reason as the tower:
+                             the board beside it re-renders on every posted run.
+
+                             There is no Post button because there is nowhere to put
+                             one — the game-over screen is drawn inside the canvas,
+                             and a tap on it restarts. `fd-over` fires once per
+                             death, which is exactly the moment the tower's button
+                             would have been pressed. --}}
+                        <div
+                            wire:ignore
+                            x-data="{ posted: false, score: 0 }"
+                            x-on:fd-over="score = $event.detail.score; posted = false; if (score > 0) { $wire.post(score).then(() => posted = true) }"
+                            class="relative w-full select-none"
+                        >
+                            <p
+                                x-show="posted"
+                                x-cloak
+                                class="mb-2 text-right font-mono-fq text-[9px] tracking-[0.14em] text-fq-lime uppercase"
+                            ><span x-text="score"></span> lanes &middot; on the board &#10003;</p>
+
+                            <fart-dash aria-label="Windy Walkies — tap or press space to hop"></fart-dash>
+                        </div>
+                    @endif
+
+                    {{-- Read once and then never again, so full screen is where
+                         it stops earning its share of the height. --}}
+                    <div class="fq-full-hide flex items-center gap-[9px] border-t border-fq-line pt-[10px]">
+                        <span class="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-fq-sunk">
+                            <i class="fa-solid {{ $game->icon() }} text-[14px] text-fq-fart"></i>
+                        </span>
+
+                        <span class="min-w-0 flex-1 text-[12.5px] leading-[1.4] text-pretty text-fq-text-3">
+                            @if ($game === ArcadeGame::WindyWalkies)
+                                Swipe, or use the arrows or WASD. Tap to hop forward &mdash;
+                                <span class="text-fq-fart">beans give you a super fart</span> worth three lanes.
+                            @else
+                                Tap, space or W to drop each floor. Whatever hangs
+                                over the edge falls off &mdash; so line it up.
+                            @endif
+                        </span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -501,7 +541,7 @@ new class extends Component
              Absent entirely on a toy, which keeps no score — there would be
              three empty blocks where the standings go. --}}
         @if ($game->isRanked())
-            <div class="flex w-full flex-col gap-[8px] lg:w-[182px] lg:shrink-0">
+            <div class="flex w-full flex-col gap-[8px] lg:w-[228px] lg:shrink-0">
                 <div class="hidden lg:block">
                     <x-arcade-beat
                         :leader="$leader"
@@ -515,10 +555,10 @@ new class extends Component
                 {{-- This week: one row per player rather than one per run, which
                      is what makes three rows worth reading — see
                      ArcadeService::weeklyStandings(). --}}
-                <div class="flex flex-col gap-[6px] rounded-[11px] border border-fq-line-3 bg-fq-sunk p-[9px]">
+                <div class="flex flex-col gap-[6px] rounded-[11px] border border-fq-line-3 bg-fq-sunk p-[11px]">
                     <div class="flex items-baseline justify-between gap-2">
-                        <span class="font-mono-fq text-[8px] tracking-[0.14em] text-fq-lime uppercase">This week</span>
-                        <span class="shrink-0 font-mono-fq text-[7.5px] text-fq-text-5">ends Sun</span>
+                        <span class="font-mono-fq text-[9.5px] tracking-[0.14em] text-fq-lime uppercase">This week</span>
+                        <span class="shrink-0 font-mono-fq text-[9px] text-fq-text-5">ends Sun</span>
                     </div>
 
                     @forelse ($standings->take(3) as $i => $row)
@@ -529,7 +569,7 @@ new class extends Component
                             :posted="$row->id === $postedId"
                         />
                     @empty
-                        <p class="py-[6px] text-[11px] leading-snug text-fq-text-4">
+                        <p class="py-[6px] text-[12.5px] leading-snug text-fq-text-4">
                             {{ $game->emptyBoard() }}
                         </p>
                     @endforelse
@@ -553,26 +593,26 @@ new class extends Component
                      a record rather than something winnable this week, and the
                      weekly reset is what gives a new player a shot at all — so it
                      must not out-shout the number that is still open. --}}
-                <div class="flex flex-col gap-[5px] rounded-[11px] border border-fq-line bg-fq-panel p-[9px]">
-                    <span class="font-mono-fq text-[8px] tracking-[0.14em] text-fq-text-5 uppercase">All-time record</span>
+                <div class="flex flex-col gap-[5px] rounded-[11px] border border-fq-line bg-fq-panel p-[11px]">
+                    <span class="font-mono-fq text-[9.5px] tracking-[0.14em] text-fq-text-5 uppercase">All-time record</span>
 
                     @if ($best)
                         <div class="flex items-baseline gap-[6px]">
-                            <span class="shrink-0 text-[11px] text-fq-text-3">House</span>
-                            <span class="font-baloo text-[12.5px] font-extrabold text-fq-magenta">
+                            <span class="shrink-0 text-[12.5px] text-fq-text-3">House</span>
+                            <span class="font-baloo text-[15px] font-extrabold text-fq-magenta">
                                 {{ $best->score }} {{ $game->unit() }}
                             </span>
-                            <span class="min-w-0 truncate font-mono-fq text-[7.5px] text-fq-text-5">
+                            <span class="min-w-0 truncate font-mono-fq text-[9px] text-fq-text-5">
                                 {{ $best->displayName() }}
                             </span>
                         </div>
                     @else
-                        <p class="text-[11px] text-fq-text-4">Nobody has set one yet.</p>
+                        <p class="text-[12.5px] text-fq-text-4">Nobody has set one yet.</p>
                     @endif
 
                     <div class="flex items-baseline gap-[6px]">
-                        <span class="shrink-0 text-[11px] text-fq-text-3">Yours</span>
-                        <span class="font-baloo text-[12.5px] font-extrabold text-fq-text">
+                        <span class="shrink-0 text-[12.5px] text-fq-text-3">Yours</span>
+                        <span class="font-baloo text-[15px] font-extrabold text-fq-text">
                             {{ $yourBest }} {{ $game->unit() }}
                         </span>
                     </div>
@@ -583,7 +623,7 @@ new class extends Component
                      keeps the prize pointing at the people it is for — it works
                      better said out loud than left in ArcadeService. --}}
                 @if ($champion)
-                    <p class="font-mono-fq text-[9px] leading-relaxed tracking-[0.12em] text-fq-text-6 uppercase">
+                    <p class="font-mono-fq text-[10.5px] leading-relaxed tracking-[0.12em] text-fq-text-6 uppercase">
                         Last champion &middot; {{ $champion->profile?->name }} &middot; {{ $champion->score }} {{ $game->unit() }}
                         @if ($champion->tickets > 0)
                             &middot; won {{ $champion->tickets }} {{ Str::plural('ticket', $champion->tickets) }}
@@ -591,7 +631,7 @@ new class extends Component
                     </p>
                 @endif
 
-                <p class="font-mono-fq text-[9px] leading-relaxed tracking-[0.12em] text-fq-text-6 uppercase">
+                <p class="font-mono-fq text-[10.5px] leading-relaxed tracking-[0.12em] text-fq-text-6 uppercase">
                     {{ $prize }} bonus {{ Str::plural('ticket', $prize) }} every Sunday, one prize per game.
                     Grown-ups can win the week, but not the tickets.
                 </p>

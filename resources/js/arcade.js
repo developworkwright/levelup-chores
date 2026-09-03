@@ -1655,6 +1655,104 @@ class Stacker {
  * ------------------------------------------------------------------ */
 
 document.addEventListener('alpine:init', () => {
+    /**
+     * The cabinet, blown up to fill the screen.
+     *
+     * Both games scale off the width of the box they are handed, so "full
+     * screen" is a layout problem rather than a game one — the stage covers the
+     * page, `.fq-stage-full` caps its children by the height that is left, and
+     * each game's own ResizeObserver redraws at the new size. Neither game knows
+     * this happened.
+     *
+     * The overlay is the whole of the layout, deliberately. Handing the *stage*
+     * to the Fullscreen API and styling `:fullscreen` was the first cut, and it
+     * collapsed the cabinet to nothing: promoted to the top layer, the element
+     * resolved its children's widths against a box of zero, so every canvas came
+     * out 0px wide on a black screen. The API is pointed at the document now,
+     * where it does one job — taking the browser's own chrome off the top — and
+     * nothing depends on it having worked. That is also what makes this survive
+     * iPad Safari, which has no element fullscreen at all.
+     */
+    window.Alpine.data('fqStage', () => ({
+        full: false,
+
+        init() {
+            // Leaving fullscreen by a route the page does not own — Escape, the
+            // browser's own control, a swipe — has to take the overlay with it,
+            // or the way back out goes with the exit button.
+            this.onFullscreenChange = () => {
+                if (this.full && ! document.fullscreenElement) {
+                    this.leave();
+                }
+            };
+
+            // And when the fullscreen request never landed there is no
+            // fullscreen for Escape to leave, so it is caught here as well.
+            this.onKey = (e) => {
+                if (e.key === 'Escape' && this.full) {
+                    this.leave();
+                }
+            };
+
+            document.addEventListener('fullscreenchange', this.onFullscreenChange);
+            window.addEventListener('keydown', this.onKey);
+        },
+
+        destroy() {
+            document.removeEventListener('fullscreenchange', this.onFullscreenChange);
+            window.removeEventListener('keydown', this.onKey);
+
+            // The overlay locks the page behind it, and the element can go away
+            // with the lock still on if a game is switched from inside one.
+            document.body.style.removeProperty('overflow');
+        },
+
+        toggle() {
+            this.full ? this.leave() : this.enter();
+        },
+
+        enter() {
+            this.full = true;
+            document.body.style.overflow = 'hidden';
+            this.focusGame();
+
+            this.ask(() => document.documentElement.requestFullscreen?.());
+        },
+
+        leave() {
+            this.full = false;
+            document.body.style.removeProperty('overflow');
+
+            if (document.fullscreenElement) {
+                this.ask(() => document.exitFullscreen());
+            }
+        },
+
+        /**
+         * Ask the browser for fullscreen, and carry on either way.
+         *
+         * Both halves of the guard are load-bearing: a browser that will not
+         * grant it usually rejects the promise, but one behind a permissions
+         * policy — an embedded frame, a locked-down tablet — throws where it
+         * stands instead, and that used to take the rest of enter() with it.
+         */
+        ask(request) {
+            try {
+                request()?.catch(() => {});
+            } catch {
+                //
+            }
+        },
+
+        /**
+         * The tower reads its keys off itself rather than the window, so going
+         * full screen has to hand it the focus or space stops dropping floors.
+         */
+        focusGame() {
+            this.$nextTick(() => this.$el.querySelector('[role="application"]')?.focus());
+        },
+    }));
+
     /*
      * The codename vocabulary used to be the first argument here, and both it
      * and the two indexes it rolled are gone: the board is behind the PIN now
