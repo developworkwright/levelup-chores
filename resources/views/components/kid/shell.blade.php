@@ -28,10 +28,12 @@
         'household' => ['label' => 'Household', 'short' => 'House', 'icon' => 'fa-ranking-star', 'route' => 'kid.household', 'accent' => 'var(--fq-green)'],
         'trades' => ['label' => 'Trades & Jobs', 'short' => 'Trades', 'icon' => 'fa-right-left', 'route' => 'kid.trades', 'accent' => 'var(--fq-coral)'],
         'journal' => ['label' => 'Journal', 'icon' => 'fa-feather', 'route' => 'kid.journal', 'accent' => 'var(--fq-green)'],
-        // `new` is a flag rather than something the kid's row remembers: the
-        // arcade is news for as long as it is news, and taking the rim off is
-        // a one-line change here rather than a column and a migration.
-        'arcade' => ['label' => 'Arcade', 'icon' => 'fa-gamepad', 'route' => 'kid.arcade', 'accent' => 'var(--fq-green)', 'new' => true],
+        // This used to carry a hardcoded `new` flag, on the reasoning that the
+        // arcade would only ever be news once and a column was not worth it.
+        // A second cabinet ended that: news now arrives one game at a time and
+        // is different per kid, so it counts like the shop's restocks do —
+        // see $counts below and ArcadeService::newCountFor().
+        'arcade' => ['label' => 'Arcade', 'icon' => 'fa-gamepad', 'route' => 'kid.arcade', 'accent' => 'var(--fq-green)', 'countWord' => 'new'],
         'stats' => ['label' => 'Stats', 'icon' => 'fa-chart-simple', 'route' => 'kid.stats', 'accent' => 'var(--fq-magenta)'],
         'goal' => ['label' => 'Goals', 'icon' => 'fa-bullseye', 'route' => 'kid.goal', 'accent' => 'var(--fq-magenta)'],
         'badges' => ['label' => 'Badges', 'icon' => 'fa-award', 'route' => 'kid.badges', 'accent' => 'var(--fq-coral)'],
@@ -109,9 +111,13 @@
     // it lives in the service rather than being written out twice.
     // Loot joins it because new rewards were the thing nobody ever found: a
     // number on the tab is seen before the page is.
+    // The arcade joins them for the same reason loot did, and a sharper one:
+    // nothing about a game ever comes looking for anybody, so a cabinet added
+    // quietly is a cabinet nobody plays.
     $counts = [
         'trades' => $offersWaiting + app(App\Services\BountyService::class)->waitingOn($profile),
         'loot' => app(App\Services\StoreService::class)->newCountFor($profile),
+        'arcade' => app(App\Services\ArcadeService::class)->newCountFor($profile),
     ];
 
     /*

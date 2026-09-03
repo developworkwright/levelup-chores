@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\ArcadeGame;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\Profile;
@@ -248,13 +249,35 @@ class KidHeaderTest extends TestCase
      * five worlds the old rail was built out of, so there was nowhere to put
      * it. Under the sheet, shipping a page costs one row.
      */
-    public function test_the_arcade_is_reachable_and_flagged_as_new(): void
+    public function test_the_arcade_is_reachable_from_the_sheet(): void
     {
         $this->loginKid();
 
-        Volt::test('kid.home')->assertSee('Arcade')->assertSee('NEW');
+        Volt::test('kid.home')->assertSee('Arcade');
 
         $this->get(route('kid.arcade'))->assertOk()->assertSee('Arcade');
+    }
+
+    /**
+     * The row's "new" used to be a flag hardcoded in the shell — the same for
+     * everybody, and lit until somebody remembered to delete the line. It
+     * counts cabinets this kid has not met now, because news arrives one game
+     * at a time and there are more games coming.
+     */
+    public function test_the_arcade_row_counts_the_cabinets_this_kid_has_not_met(): void
+    {
+        $this->loginKid(['arcade_seen_at' => ArcadeGame::StackTheMess->releasedOn()]);
+
+        Volt::test('kid.home')->assertSee('1 new');
+    }
+
+    public function test_the_arcade_row_says_nothing_once_they_have_been(): void
+    {
+        $this->loginKid(['arcade_seen_at' => now()]);
+
+        // Not "0 new", and not a rim that never goes out: a kid who has seen
+        // every cabinet is being told nothing, so the row says nothing.
+        Volt::test('kid.home')->assertSee('Arcade')->assertDontSee('new</span>', false);
     }
 
     public function test_a_rail_button_carries_the_counts_of_both_its_pages(): void

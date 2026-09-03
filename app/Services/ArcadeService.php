@@ -3,14 +3,19 @@
 namespace App\Services;
 
 use App\Enums\ArcadeGame;
+use App\Enums\ProfileRole;
 use App\Enums\TicketKind;
 use App\Models\ArcadeScore;
 use App\Models\ArcadeWeekPrize;
 use App\Models\Household;
 use App\Models\Profile;
+use App\Notifications\ArcadeCabinetAdded;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Notification;
+use Throwable;
 
 /**
  * The arcade: posting a run, the weekly board, and the prize that closes it.
@@ -248,6 +253,90 @@ class ArcadeService
             ->where('profile_id', $profile->id)
             ->where('game', $game)
             ->max('score');
+    }
+
+    /**
+     * The cabinets this kid has not been shown yet.
+     *
+     * A game is new to somebody until they next open the arcade, measured off
+     * `profiles.arcade_seen_at` against each game's release date. Null means a
+     * profile that has never been, so everything is new to them — the same
+     * reading `StoreService::newCountFor()` gives an empty `loot_seen_at`.
+     *
+     * Newest first, because the caller that cares about order is the one
+     * choosing which cabinet to open on: two unseen games should land a kid on
+     * the one that just arrived, not the one that arrived first.
+     *
+     * @return Collection<int, ArcadeGame>
+     */
+    public function newCabinetsFor(Profile $profile): Collection
+    {
+        return collect(ArcadeGame::cases())
+            ->filter(fn (ArcadeGame $game) => $profile->arcade_seen_at === null
+                || $game->releasedOn()->greaterThan($profile->arcade_seen_at))
+            ->sortByDesc(fn (ArcadeGame $game) => $game->releasedOn())
+            ->values();
+    }
+
+    /** The number the Arcade nav row wears, and the reason a kid opens it at all. */
+    public function newCountFor(Profile $profile): int
+    {
+        return $this->newCabinetsFor($profile)->count();
+    }
+
+    /**
+     * Marks the arcade as looked at.
+     *
+     * Called on mount, *after* the page has taken its snapshot of what was new
+     * — the same ordering `StoreService::markShopSeen()` needs, and for the same
+     * reason: marking first would erase the very thing the flash exists to show,
+     * on the one visit it was meant for.
+     */
+    public function markCabinetsSeen(Profile $profile): void
+    {
+        $profile->arcade_seen_at = now();
+        $profile->save();
+    }
+
+    /**
+     * Tells the kids a cabinet has landed in the arcade.
+     *
+     * The push half of the same job the "new" flash does in the app: the flash
+     * catches a kid who opens it, this catches the one who doesn't — which is
+     * most of them, because nothing about the arcade ever comes looking for
+     * anybody. The same split `StoreService::announceNewItem()` makes.
+     *
+     * Fired by hand from `arcade:announce` rather than from anything automatic,
+     * because a cabinet arrives in a deploy: there is no row being written and
+     * no form being submitted that could trigger it, and a game can go in
+     * quietly while it is being tried out.
+     */
+    public function announceNewCabinet(Household $household, ArcadeGame $game): int
+    {
+        $kids = Profile::where('household_id', $household->id)
+            ->where('role', ProfileRole::Kid)
+            ->get();
+
+        if ($kids->isEmpty()) {
+            return 0;
+        }
+
+        try {
+            Notification::send($kids, new ArcadeCabinetAdded(
+                'New game in the arcade!',
+                $game->label().' — '.$game->pitch(),
+            ));
+        } catch (Throwable $e) {
+            Log::error('Arcade cabinet notification failed.', [
+                'game' => $game->value,
+                'household_id' => $household->id,
+                'exception' => $e,
+            ]);
+
+            return 0;
+        }
+
+        return $kids->count();
     }
 
     /**

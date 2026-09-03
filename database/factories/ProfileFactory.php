@@ -22,6 +22,18 @@ class ProfileFactory extends Factory
             'points' => 0,
             'xp' => 0,
             'streak' => 0,
+            /*
+             * Already been to the arcade, so a factory profile carries no news
+             * it never asked for. Null here would mean every cabinet is new to
+             * every profile in the suite, and any test counting what a kid has
+             * waiting would be counting games it has never heard of — which is
+             * how this default was found.
+             *
+             * The same line the migration draws for profiles that existed
+             * before the marker did. A test about the flash sets the column
+             * itself; see ArcadeNewCabinetTest.
+             */
+            'arcade_seen_at' => now(),
         ];
     }
 

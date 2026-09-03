@@ -1689,6 +1689,18 @@ document.addEventListener('alpine:init', () => {
                         this.best = floors;
                         localStorage.setItem('fq-arcade-best', String(floors));
                     }
+
+                    /*
+                     * Posted for them, the way the walk does it.
+                     *
+                     * There was a Post button here, next to Play again, and a
+                     * six-year-old who has just lost a tower is aiming at
+                     * "again" — so the run that was worth keeping was the one
+                     * most likely to be thrown away by a thumb. Nothing was
+                     * being decided by that button: there is no reason to play
+                     * a run and then not want it counted.
+                     */
+                    this.post();
                 },
             });
 

@@ -33,15 +33,35 @@ new class extends Component
     /** Highlights the row the player just put there, for the rest of the visit. */
     public ?int $postedId = null;
 
+    /**
+     * Which cabinets were new when this visit started.
+     *
+     * A snapshot taken at mount and held for the visit, because the marker it
+     * came from is stamped a line later — read live, the flash would clear
+     * itself before the kid it was for had looked up. The same ordering the
+     * Loot Shop's "new" chips need, and for the same reason.
+     *
+     * @var list<string>
+     */
+    public array $newCabinets = [];
+
     public function mount(): void
     {
-        $this->game = ArcadeGame::default();
+        $arcade = app(ArcadeService::class);
+        $player = $this->player();
+
+        $this->newCabinets = $arcade->newCabinetsFor($player)->pluck('value')->all();
+        $arcade->markCabinetsSeen($player);
+
+        // Open on a cabinet they have not met, if there is one — the flash says
+        // it is new and this is what makes that mean something without a tap.
+        $this->game = ArcadeGame::tryFrom($this->newCabinets[0] ?? '') ?? ArcadeGame::default();
 
         // Whoever opens the arcade pays out the weeks nobody has collected, on
         // both cabinets — see ArcadeService::settle() for why there is no
         // scheduler behind it. On mount rather than in with(), so it happens
         // once a visit rather than on every round trip the game makes.
-        app(ArcadeService::class)->settle($this->player()->household);
+        $arcade->settle($player->household);
     }
 
     /**
@@ -126,50 +146,59 @@ new class extends Component
         </span>
     </div>
 
-    {{-- Side by side only from `lg`. Below that the two columns would split a
-         tablet into a cramped game and a cramped board; stacked, the game gets
-         the whole width and the board reads underneath it. --}}
-    <div class="flex flex-col items-start gap-[13px] lg:flex-row lg:items-start">
-        {{-- The cabinet takes the room, and the board is the sidebar.
+    {{-- Three rails from `lg`: the cabinets down the left, the game in the
+         middle, the board on the right. Below that they stack — switcher, game,
+         board — because splitting a tablet three ways leaves nothing legible.
 
-             Both games draw a fixed 320x460 board scaled to whatever box they
-             are given, so width is the only dial and a wider cabinet is a
-             bigger game. Height is what actually limits it: at the shell's
-             1080px the board would stand 1550px tall, so the max-width below is
-             a *height* budget converted back through the aspect ratio. 88vh
-             gives the game very nearly the whole window and costs a little
-             scrolling on a short one, which is the right way round on the one
-             page that exists to be looked at. A phone is narrower than the
-             result and keeps its full width. --}}
-        <div
-            class="flex w-full min-w-0 flex-col gap-[13px] lg:flex-1"
-            style="max-width: calc(88vh * 320 / 460)"
-        >
-            {{-- The switcher. Each card carries that player's own best on that
-                 cabinet rather than the house's, because the number under a
-                 button you are about to press should be the one you are about
-                 to try to beat. --}}
-            <div class="flex gap-[6px]">
-                @foreach ($cabinets as $cabinet)
-                    <button
-                        type="button"
-                        wire:click="switchTo('{{ $cabinet->value }}')"
+         Both side rails are fixed widths and the middle one takes what is left,
+         so adding a fourth or fifth cabinet lengthens the left rail without
+         taking a pixel off the game. --}}
+    <div class="flex flex-col items-stretch gap-[13px] lg:flex-row lg:items-start">
+        {{-- The switcher. Each card carries that player's own best on that
+             cabinet rather than the house's, because the number under a button
+             you are about to press should be the one you are about to try to
+             beat.
+
+             A vertical rail on desktop and a scrolling strip on a phone. The
+             strip is what makes this survive a fifth game: a row that divides
+             the width between however many cabinets exist is unreadable by the
+             fourth, so the cards keep a fixed width and the row scrolls
+             instead. It bleeds to the screen edges so a half-visible card says
+             there is more to swipe to. --}}
+        <div class="-mx-[14px] flex shrink-0 snap-x snap-mandatory gap-[6px] overflow-x-auto px-[14px] pb-[2px] lg:mx-0 lg:w-[142px] lg:flex-col lg:overflow-visible lg:px-0 lg:pb-0">
+            @foreach ($cabinets as $cabinet)
+                <button
+                    type="button"
+                    wire:click="switchTo('{{ $cabinet->value }}')"
+                    @class([
+                        'flex w-[136px] shrink-0 snap-start flex-col items-center gap-[3px] rounded-[16px] px-[6px] py-[8px] lg:w-full lg:items-start lg:px-[10px]',
+                        'border-2 border-fq-lime' => $cabinet === $game,
+                        'border border-fq-line-2 bg-fq-sunk' => $cabinet !== $game,
+                    ])
+                    @if ($cabinet === $game)
+                        style="background: linear-gradient(180deg, var(--fq-gold-fill), var(--fq-sunk))"
+                    @endif
+                >
+                    <span
                         @class([
-                            'flex min-h-[44px] min-w-0 flex-1 flex-col items-center gap-[3px] rounded-[16px] px-[6px] py-[8px]',
-                            'border-2 border-fq-lime' => $cabinet === $game,
-                            'border border-fq-line-2 bg-fq-sunk' => $cabinet !== $game,
+                            'text-[13.5px] leading-tight text-balance lg:text-left',
+                            'font-bold text-fq-lime' => $cabinet === $game,
+                            'font-semibold text-fq-text' => $cabinet !== $game,
                         ])
-                        @if ($cabinet === $game)
-                            style="background: linear-gradient(180deg, var(--fq-gold-fill), var(--fq-sunk))"
+                    >{{ $cabinet->label() }}</span>
+
+                    <span class="flex items-center gap-[5px]">
+                        @if (in_array($cabinet->value, $newCabinets, true))
+                            {{-- Beside the best rather than instead of it: a kid
+                                 who has never been here would otherwise be shown
+                                 a flash where their score should be, on every
+                                 cabinet at once. Only until they have been once
+                                 — the marker is stamped on mount, so this is the
+                                 last visit it shows on. --}}
+                            <span class="rounded-full bg-fq-coral px-[5px] py-px font-mono-fq text-[8px] font-semibold tracking-[0.1em] text-fq-ink uppercase">
+                                New
+                            </span>
                         @endif
-                    >
-                        <span
-                            @class([
-                                'text-[13.5px] whitespace-nowrap',
-                                'font-bold text-fq-lime' => $cabinet === $game,
-                                'font-semibold text-fq-text' => $cabinet !== $game,
-                            ])
-                        >{{ $cabinet->label() }}</span>
 
                         <span
                             @class([
@@ -178,10 +207,24 @@ new class extends Component
                                 'text-fq-text-5' => $cabinet !== $game,
                             ])
                         >Best {{ $personalBests[$cabinet->value] }}</span>
-                    </button>
-                @endforeach
-            </div>
+                    </span>
+                </button>
+            @endforeach
+        </div>
 
+        {{-- The cabinet, and the middle rail.
+
+             Both games draw a fixed 320x460 board scaled to whatever box they
+             are given, so width is the only dial and a wider cabinet is a
+             bigger game. Height is the other limit: at full width the board
+             would stand 1550px tall, so the max-width below is a *height*
+             budget converted back through the aspect ratio, which is what keeps
+             a short window or a phone in landscape from losing the bottom of
+             the game off the screen. --}}
+        <div
+            class="flex w-full min-w-0 flex-col gap-[13px] lg:flex-1"
+            style="max-width: calc(88vh * 320 / 460)"
+        >
             {{-- The cabinet.
 
                  Keyed on the game so switching *replaces* this subtree instead
@@ -292,15 +335,13 @@ new class extends Component
                                     class="mt-1 font-mono-fq text-[10px] tracking-[0.14em] text-fq-lime uppercase"
                                 >On the board &#10003;</p>
 
+                                {{-- One button, and it is the one they were
+                                     already aiming at. The Post button that
+                                     used to sit beside it is gone: the run
+                                     posts itself, so a thumb going for "again"
+                                     can no longer throw away the score it just
+                                     earned. --}}
                                 <div class="mt-2 flex items-center gap-2">
-                                    <button
-                                        type="button"
-                                        x-show="!posted"
-                                        x-on:pointerdown.stop.prevent="post()"
-                                        :disabled="posting"
-                                        class="rounded-full bg-fq-lime px-4 py-2 font-baloo text-[14px] font-extrabold text-fq-ink disabled:opacity-50"
-                                    >Post score</button>
-
                                     <button
                                         type="button"
                                         x-on:pointerdown.stop.prevent="play()"
@@ -379,9 +420,9 @@ new class extends Component
 
         {{-- A fixed sidebar rather than a second flexible column: two `flex-1`s
              split the row in half and the cabinet never reached the size its
-             height budget allowed. The board takes what it needs and the game
-             takes the rest. --}}
-        <div class="flex w-full flex-col gap-[10px] lg:w-[300px] lg:shrink-0">
+             height budget allowed. Both rails are fixed and the game takes what
+             is left. --}}
+        <div class="flex w-full flex-col gap-[10px] lg:w-[286px] lg:shrink-0">
             <div class="flex items-baseline justify-between gap-2">
                 <span class="font-mono-fq text-[9.5px] tracking-[0.2em] text-fq-text-3 uppercase">
                     {{ $game->label() }} &middot; this week

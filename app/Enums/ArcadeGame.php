@@ -2,6 +2,8 @@
 
 namespace App\Enums;
 
+use Carbon\CarbonImmutable;
+
 /**
  * Which cabinet a run was played on.
  *
@@ -27,10 +29,39 @@ enum ArcadeGame: string
 
     case WindyWalkies = 'windy_walkies';
 
-    /** The cabinet the switcher opens on. The new one, while it is new. */
+    /** The cabinet the switcher opens on. The newest one, so it is found. */
     public static function default(): self
     {
-        return self::WindyWalkies;
+        return self::newest();
+    }
+
+    /** The most recently installed cabinet. */
+    public static function newest(): self
+    {
+        return collect(self::cases())
+            ->sortByDesc(fn (self $game) => $game->releasedOn())
+            ->first();
+    }
+
+    /**
+     * The day this cabinet went into the arcade.
+     *
+     * Declared here rather than stored, because installing a game *is* a code
+     * change — the thing that draws it is a file in `resources/js`. A row in a
+     * table would be a second source of truth for something that cannot arrive
+     * without a deploy anyway.
+     *
+     * What reads it is the "new" flash: a cabinet is new to a kid until they
+     * next open the arcade, which is `profiles.arcade_seen_at` measured against
+     * this. Adding a game means adding a case, a ladder in `ArcadeService`, a
+     * date here, and running `arcade:announce` — see that command.
+     */
+    public function releasedOn(): CarbonImmutable
+    {
+        return CarbonImmutable::parse(match ($this) {
+            self::StackTheMess => '2026-08-25',
+            self::WindyWalkies => '2026-09-02',
+        });
     }
 
     public function label(): string
@@ -60,6 +91,15 @@ enum ArcadeGame: string
     public function titleScreen(): string
     {
         return mb_strtoupper($this->label());
+    }
+
+    /** One line telling a kid what the game is, for the push that announces it. */
+    public function pitch(): string
+    {
+        return match ($this) {
+            self::StackTheMess => 'stack the clutter as high as it will go.',
+            self::WindyWalkies => 'get the dog across the road, one fart at a time.',
+        };
     }
 
     /** The tips-strip icon, which is the one thing about a cabinet that is not words. */
