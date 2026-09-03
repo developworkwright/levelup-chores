@@ -155,10 +155,10 @@ new class extends Component
                     href="{{ route('pin', $parent) }}"
                     wire:navigate
                     class="flex items-center gap-2 px-[2px] py-[6px] font-mono-fq text-[10px] tracking-[0.22em] whitespace-nowrap text-fq-text-4 uppercase transition hover:text-fq-cyan"
-                >{{ $parents->count() > 1 ? $parent->name : 'Grown-ups' }} · Parent console &rarr;</a>
+                >{{ $parents->count() > 1 ? $parent->name : 'Grown-ups' }} Console &rarr;</a>
+                <span class="h-px flex-1 bg-fq-line"></span>
             @endforeach
 
-            <span class="h-px flex-1 bg-fq-line"></span>
         </div>
     @endif
 
