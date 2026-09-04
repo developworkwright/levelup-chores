@@ -106,6 +106,19 @@ class ArcadeMilestoneTest extends TestCase
         );
     }
 
+    public function test_the_flights_ladder_says_the_same_thing_in_both_languages(): void
+    {
+        // The one-line test `ladderIn()` was written for. Grand Tour carries
+        // its own copy of the list and draws the city in its HUD from it, so a
+        // kid who reads "The Alps" mid-flight has to find that same phrase
+        // against their name on the board afterwards.
+        $this->assertSame(
+            ArcadeService::milestonesFor(ArcadeGame::GrandTour),
+            $this->ladderIn('grand-tour.js'),
+            'grand-tour.js and ArcadeService disagree about the tour.'
+        );
+    }
+
     public function test_the_walks_artwork_reaches_for_nothing_it_should_not(): void
     {
         // Shipped verbatim from a design bundle and loaded on every page in the

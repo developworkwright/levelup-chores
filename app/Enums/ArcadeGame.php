@@ -33,6 +33,8 @@ enum ArcadeGame: string
     /** The first toy. Keeps no score — see isRanked(). */
     case SlimeTime = 'slime_time';
 
+    case GrandTour = 'grand_tour';
+
     /**
      * The game the rail opens on when nothing is new to the reader.
      *
@@ -110,7 +112,7 @@ enum ArcadeGame: string
     public function isRanked(): bool
     {
         return match ($this) {
-            self::StackTheMess, self::WindyWalkies => true,
+            self::StackTheMess, self::WindyWalkies, self::GrandTour => true,
             self::SlimeTime => false,
         };
     }
@@ -135,6 +137,14 @@ enum ArcadeGame: string
             self::StackTheMess => 110,
             self::WindyWalkies => 155,
             self::SlimeTime => 145,
+            /*
+             * The smallest budget of the four, because Grand Tour stacks the
+             * least: a canvas, a 10px gap and one 44px button. Its score, its
+             * distance and the city it has reached are all drawn inside the
+             * canvas rather than above it, and one button never wraps to a
+             * second row the way the toy's four do.
+             */
+            self::GrandTour => 140,
         };
     }
 
@@ -166,6 +176,7 @@ enum ArcadeGame: string
              * catches that.
              */
             self::SlimeTime => '2026-09-03',
+            self::GrandTour => '2026-09-04',
         });
     }
 
@@ -175,6 +186,7 @@ enum ArcadeGame: string
             self::StackTheMess => 'Stack the Mess',
             self::WindyWalkies => 'Windy Walkies',
             self::SlimeTime => 'Slime Time',
+            self::GrandTour => 'Grand Tour',
         };
     }
 
@@ -184,6 +196,15 @@ enum ArcadeGame: string
         return match ($this) {
             self::StackTheMess => 'floors',
             self::WindyWalkies => 'lanes',
+            /*
+             * Points rather than kilometres, and the distinction is the whole
+             * reason this method exists. A flight scores its distance *plus* a
+             * bonus for every gap threaded, so the number on the board is
+             * always larger than the kilometres the plane actually flew —
+             * calling it km on a board the whole house reads would make the
+             * game look like it was lying about how far anybody got.
+             */
+            self::GrandTour => 'points',
             self::SlimeTime => throw $this->notARankedGame('unit'),
         };
     }
@@ -197,6 +218,7 @@ enum ArcadeGame: string
         return match ($this) {
             self::StackTheMess => 'floors stacked',
             self::WindyWalkies => 'lanes crossed',
+            self::GrandTour => 'points flown',
             self::SlimeTime => throw $this->notARankedGame('score label'),
         };
     }
@@ -220,6 +242,7 @@ enum ArcadeGame: string
             self::StackTheMess => 'stack the clutter as high as it will go.',
             self::WindyWalkies => 'get the dog across the road, one fart at a time.',
             self::SlimeTime => 'throw goo at the walls. That is the whole game.',
+            self::GrandTour => 'fly a paper plane the whole way across Europe.',
         };
     }
 
@@ -230,6 +253,7 @@ enum ArcadeGame: string
             self::StackTheMess => 'fa-layer-group',
             self::WindyWalkies => 'fa-wind',
             self::SlimeTime => 'fa-splotch',
+            self::GrandTour => 'fa-paper-plane',
         };
     }
 
@@ -239,6 +263,7 @@ enum ArcadeGame: string
         return match ($this) {
             self::StackTheMess => 'Tallest tower of the week — '.$score.' floors',
             self::WindyWalkies => 'Longest walk of the week — '.$score.' lanes',
+            self::GrandTour => 'Longest flight of the week — '.$score.' points',
             self::SlimeTime => throw $this->notARankedGame('prize wording'),
         };
     }
@@ -249,6 +274,7 @@ enum ArcadeGame: string
         return match ($this) {
             self::StackTheMess => 'Nobody has stacked anything yet this week.',
             self::WindyWalkies => 'Nobody has taken the dog out yet this week.',
+            self::GrandTour => 'Nobody has taken off yet this week.',
             self::SlimeTime => throw $this->notARankedGame('empty board message'),
         };
     }
@@ -268,7 +294,42 @@ enum ArcadeGame: string
         return match ($this) {
             self::StackTheMess => 40,
             self::WindyWalkies => 120,
+            // A flight can end on the first gap, so the walk's number rather
+            // than the tower's.
+            self::GrandTour => 120,
             self::SlimeTime => throw $this->notARankedGame('post rate'),
+        };
+    }
+
+    /**
+     * The biggest run this game's board will believe.
+     *
+     * A ceiling on what a tampered request can write, not a cap on real play —
+     * so it sits far enough above the last rung of the ladder that no honest
+     * run ever meets it. A score arrives from a browser and is a claim until
+     * this has looked at it.
+     *
+     * It is per game because the games do not count the same *sort* of number.
+     * Floors and lanes are distances a body travels one at a time, and 999 of
+     * either is several times further than anybody has ever got; points are
+     * earned a dozen a second, so squeezing a flight under the same figure
+     * would throw away good runs in silence and leave a board that looks like a
+     * game nobody is any good at. That is worse than no ceiling at all: the
+     * kid is never told, and the run they were proudest of is the one that
+     * vanishes.
+     */
+    public function maxScore(): int
+    {
+        return match ($this) {
+            self::StackTheMess, self::WindyWalkies => 999,
+            /*
+             * Roughly five times the last city on the ladder, which is itself
+             * about a minute of flawless flying. The score climbs at ten to
+             * twenty points a second once the curve has run out, so a very
+             * good long run reaches four figures and has to be believed.
+             */
+            self::GrandTour => 4000,
+            self::SlimeTime => throw $this->notARankedGame('score ceiling'),
         };
     }
 

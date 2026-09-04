@@ -541,6 +541,34 @@ new class extends Component
 
                             <fart-dash aria-label="Windy Walkies — tap or press space to hop"></fart-dash>
                         </div>
+                    @elseif ($game === ArcadeGame::GrandTour)
+                        {{-- Grand Tour, the same arrangement as the walk: the
+                             game builds its own canvas, its own button and its
+                             own HUD, and the page gives it a box and listens.
+
+                             `gt-over` fires once per run, at the moment the
+                             plane hits the ground, which is the only way a
+                             flight ends — the cloud ceiling bumps rather than
+                             killing. There is no Post button for the same
+                             reason there is none on the walk: the game-over
+                             screen is drawn inside the canvas and a tap on it
+                             takes off again, so the run posts itself rather
+                             than being offered to a thumb already aiming at
+                             "again". --}}
+                        <div
+                            wire:ignore
+                            x-data="{ posted: false, score: 0 }"
+                            x-on:gt-over="score = $event.detail.score; posted = false; if (score > 0) { $wire.post(score).then(() => posted = true) }"
+                            class="relative w-full select-none"
+                        >
+                            <p
+                                x-show="posted"
+                                x-cloak
+                                class="mb-2 text-right font-mono-fq text-[9px] tracking-[0.14em] text-fq-lime uppercase"
+                            ><span x-text="score"></span> points &middot; on the board &#10003;</p>
+
+                            <grand-tour aria-label="Grand Tour — tap or press space to climb"></grand-tour>
+                        </div>
                     @else
                         {{-- The toy. There is no listener here and that is the whole
                              difference: Slime Time emits no score because it keeps
@@ -569,6 +597,9 @@ new class extends Component
                                 Drag the goo, then fling it. It splats, sticks and drips &mdash;
                                 <span class="text-fq-lime">the underside of a shelf is the best one</span>.
                                 Nothing here is scored.
+                            @elseif ($game === ArcadeGame::GrandTour)
+                                Tap, space or W to climb. Thread the gaps and don&rsquo;t hit the ground &mdash;
+                                <span class="text-fq-cyan">the clouds only bump you</span>, and a clean gap is worth more.
                             @else
                                 Tap, space or W to drop each floor. Whatever hangs
                                 over the edge falls off &mdash; so line it up.

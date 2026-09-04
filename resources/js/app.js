@@ -54,6 +54,25 @@ import './fart-dash.js';
 import './slime.js';
 
 /*
+ * Grand Tour, the arcade's fourth game — a paper plane crossing Europe, and
+ * the one-button flier the toy above it is not. Shipped verbatim from the
+ * design for the same reason every other game file is: it arrived finished and
+ * playable, it draws to a canvas with no DOM to reconcile, and porting it would
+ * re-derive a curve that was tuned by being flown.
+ *
+ * It is ranked, so it has a ladder in `ArcadeService::MILESTONES` and carries
+ * its own copy of it — `ArcadeFlightTest` holds the two halves together.
+ * Registers `<grand-tour>` and emits `gt-score` / `gt-over`; the page posts the
+ * run, the game never does.
+ *
+ * It carries one edit from the design: `Sfx.wake()` reads `fq-muted` before
+ * opening an AudioContext, so the single speaker button in the arcade header
+ * governs it. Re-apply that when replacing this file; `ArcadeFlightTest` fails
+ * if it goes missing.
+ */
+import './grand-tour.js';
+
+/*
  * Background music: the header's play button and song picker, and the Audio
  * object that survives `wire:navigate` between them. Registers `fqMusic` and
  * the `music` Alpine store.

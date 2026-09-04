@@ -60,7 +60,7 @@ class ArcadeToyTest extends TestCase
     {
         $this->assertFalse(ArcadeGame::SlimeTime->isRanked());
 
-        foreach ([ArcadeGame::StackTheMess, ArcadeGame::WindyWalkies] as $cabinet) {
+        foreach ([ArcadeGame::StackTheMess, ArcadeGame::WindyWalkies, ArcadeGame::GrandTour] as $cabinet) {
             $this->assertTrue($cabinet->isRanked(), $cabinet->label().' stopped keeping score.');
         }
 
@@ -170,9 +170,12 @@ class ArcadeToyTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('arcade')
-            ->assertSet('newGames', [$this->toy()->value])
-            ->assertSee('New');
+        // Containment rather than equality: anything released after the toy is
+        // new to this kid too, so asserting the exact list would make the next
+        // game added the reason this one stopped being about the pip.
+        $component = Volt::test('arcade')->assertSee('New');
+
+        $this->assertContains($this->toy()->value, $component->get('newGames'));
     }
 
     public function test_asking_a_toy_a_scoring_question_is_an_error_rather_than_a_blank(): void

@@ -156,11 +156,36 @@ class ArcadeTest extends TestCase
     {
         $kid = $this->loginKid();
 
-        // The score still arrives from the browser, so it is still a claim.
-        $this->assertNull($this->arcade()->post($kid, ArcadeGame::WindyWalkies, ArcadeService::MAX_SCORE + 1));
-        $this->assertNull($this->arcade()->post($kid, ArcadeGame::WindyWalkies, 0));
+        // The score still arrives from the browser, so it is still a claim —
+        // and the ceiling it is measured against belongs to the game it claims
+        // to come off, because the games do not count the same sort of number.
+        foreach (ArcadeGame::ranked() as $game) {
+            $this->assertNull($this->arcade()->post($kid, $game, $game->maxScore() + 1));
+            $this->assertNull($this->arcade()->post($kid, $game, 0));
+        }
 
         $this->assertSame(0, ArcadeScore::count());
+    }
+
+    public function test_a_long_flight_is_believed_where_an_equally_long_tower_would_not_be(): void
+    {
+        /*
+         * The reason the ceiling moved onto the game. A flight earns points a
+         * dozen a second, so four figures is a good long run rather than a
+         * tampered request — while the same number of floors is several times
+         * further than anybody has ever stacked. One ceiling for both would
+         * have to either wave the tower through or drop the flight, and
+         * dropping it is silent: the kid is never told, and the run they were
+         * proudest of is the one that vanishes.
+         */
+        $kid = $this->loginKid();
+        $flight = 1400;
+
+        $this->assertNotNull($this->arcade()->post($kid, ArcadeGame::GrandTour, $flight));
+        $this->assertNull($this->arcade()->post($kid, ArcadeGame::StackTheMess, $flight));
+
+        $this->assertSame(1, ArcadeScore::count());
+        $this->assertSame(ArcadeGame::GrandTour, ArcadeScore::sole()->game);
     }
 
     public function test_the_board_stops_listening_once_a_player_has_posted_enough(): void

@@ -47,23 +47,6 @@ use Throwable;
 class ArcadeService
 {
     /**
-     * The biggest run the server will believe, whichever game it came off.
-     *
-     * A tower's floors get roughly a pixel narrower each imperfect drop from a
-     * 180px slab, and a walk's traffic speeds up with distance, so a player who
-     * never misses runs out of game long before this on either. It exists to
-     * put a ceiling on what a tampered request can write, not to cap real play.
-     *
-     * One number holds only while every ranked game counts the same *sort* of
-     * number — floors and lanes are both distances a body travels. A game
-     * scoring in the thousands (a merge game paying per combine, say) would need
-     * this to become per-game rather than being squeezed under it, because a
-     * ceiling below real play throws good runs away in silence and leaves a
-     * board that looks like a game nobody is any good at.
-     */
-    public const MAX_SCORE = 999;
-
-    /**
      * What topping a finished week is worth.
      *
      * Three, which is a Bonus Shop perk and change — enough that the board is
@@ -144,6 +127,23 @@ class ArcadeService
             [72, 'Long gone'],
             [90, 'Legendary guff'],
         ],
+
+        /*
+         * The flight's ladder, and the one place where a rung is a *place*
+         * rather than a height: every promotion is a city further east, so the
+         * board reads as a trip somebody is on rather than a number going up.
+         * `resources/js/grand-tour.js` carries its own copy and draws the HUD
+         * from it — `ArcadeFlightTest` holds the two halves together.
+         */
+        ArcadeGame::GrandTour->value => [
+            [0, 'On the runway'],
+            [40, 'Over the Channel'],
+            [110, 'Paris'],
+            [220, 'The Alps'],
+            [360, 'Venice'],
+            [540, 'Athens'],
+            [780, 'All the way round'],
+        ],
     ];
 
     /**
@@ -217,7 +217,12 @@ class ArcadeService
             return null;
         }
 
-        if ($score < 1 || $score > self::MAX_SCORE) {
+        // The ceiling belongs to the game rather than to this class: a flight
+        // is scored in points earned a dozen a second and a tower in floors
+        // climbed one at a time, so one number for all of them would either
+        // wave through a tampered tower or throw away an honest flight. See
+        // ArcadeGame::maxScore().
+        if ($score < 1 || $score > $game->maxScore()) {
             return null;
         }
 
