@@ -91,6 +91,14 @@ new class extends Component
      */
     public function post(int $score): void
     {
+        // A toy has no board to post to. Slime Time never sends a score, but
+        // this method is reachable from the browser whichever game is showing,
+        // so the refusal is here rather than left to the fact that the game
+        // does not ask. ArcadeService::post() refuses it a second time.
+        if (! $this->game->isRanked()) {
+            return;
+        }
+
         $player = $this->player();
 
         // Per profile and per game: a shared tablet is one session and several
@@ -148,11 +156,18 @@ new class extends Component
             'canWinTickets' => $player->isKid(),
             'standings' => $standings,
             'myRank' => $myRank === false ? null : $myRank,
-            'best' => $arcade->allTimeBest($household, $this->game),
-            'yourBest' => $arcade->personalBest($player, $this->game),
-            'champion' => $arcade->lastChampion($household, $this->game),
+            // The All-time block, and the three queries behind it. Skipped on a
+            // toy along with the block itself — they can only ever come back
+            // empty there, and a query that is guaranteed to find nothing is
+            // worth not running on every switch of the rail.
+            'best' => $this->game->isRanked() ? $arcade->allTimeBest($household, $this->game) : null,
+            'yourBest' => $this->game->isRanked() ? $arcade->personalBest($player, $this->game) : 0,
+            'champion' => $this->game->isRanked() ? $arcade->lastChampion($household, $this->game) : null,
             'prize' => ArcadeService::PRIZE_TICKETS,
-            'milestones' => ArcadeService::milestonesFor($this->game),
+            // A toy has no ladder to hand the canvas, and asking for one throws
+            // — see ArcadeService::milestonesFor(). Only the tower reads this
+            // anyway; the other games carry their own copy.
+            'milestones' => $this->game->isRanked() ? ArcadeService::milestonesFor($this->game) : [],
         ];
     }
 }; ?>
@@ -259,8 +274,10 @@ new class extends Component
 
             {{-- The toys, in their own group with no heading of the ranked kind.
                  A toy keeps no score, so it has no leader line, no board and no
-                 week to win — see ArcadeGame::isRanked(). Nothing in the arcade
-                 is one yet, which is why this renders nothing today. --}}
+                 week to win — see ArcadeGame::isRanked(). What it does still get
+                 is the "New" pip: arriving is not a competitive fact, and the
+                 first toy is exactly the kind of thing nobody would otherwise
+                 find. --}}
             @if ($toys !== [])
                 <span class="mt-[5px] hidden font-mono-fq text-[9.5px] tracking-[0.14em] text-fq-text-5 uppercase lg:block">
                     Toys
@@ -277,13 +294,21 @@ new class extends Component
                             'border border-fq-line-4 bg-fq-sunk' => $toy !== $game,
                         ])
                     >
-                        <span
-                            @class([
-                                'w-full truncate text-[14px] leading-tight',
-                                'font-extrabold text-fq-lime' => $toy === $game,
-                                'font-semibold text-fq-text' => $toy !== $game,
-                            ])
-                        >{{ $toy->label() }}</span>
+                        <span class="flex w-full items-center gap-[5px]">
+                            <span
+                                @class([
+                                    'min-w-0 flex-1 truncate text-[14px] leading-tight',
+                                    'font-extrabold text-fq-lime' => $toy === $game,
+                                    'font-semibold text-fq-text' => $toy !== $game,
+                                ])
+                            >{{ $toy->label() }}</span>
+
+                            @if (in_array($toy->value, $newGames, true))
+                                <span class="shrink-0 rounded-full bg-fq-coral px-[5px] py-px font-mono-fq text-[8px] font-semibold tracking-[0.1em] text-fq-ink uppercase">
+                                    New
+                                </span>
+                            @endif
+                        </span>
 
                         <span class="font-mono-fq text-[10.5px] text-fq-magenta">toy</span>
                     </button>
@@ -318,7 +343,7 @@ new class extends Component
                 x-data="fqStage"
                 :class="full ? 'fq-stage-full' : ''"
                 class="flex flex-col gap-[8px]"
-                style="--fq-stage-chrome: {{ $game === ArcadeGame::WindyWalkies ? 155 : 110 }}px"
+                style="--fq-stage-chrome: {{ $game->stageChrome() }}px"
             >
                 {{-- The title line, and the button that is the way in and back
                      out. Full screen it drops everything but the button and
@@ -328,8 +353,14 @@ new class extends Component
                 <div class="fq-stage-bar flex items-center justify-between gap-[8px]">
                     <span class="fq-full-hide flex min-w-0 items-baseline gap-[8px]">
                         <span class="truncate font-baloo text-[15px] font-extrabold text-fq-lime">{{ $game->label() }}</span>
+
+                        {{-- What the run is measured in — or, on a toy, the fact
+                             that it is not measured at all. A toy has no score
+                             label and asking for one throws, which is the point:
+                             "nothing to win" is the honest thing to put where a
+                             unit goes, not a blank. --}}
                         <span class="shrink-0 font-mono-fq text-[9px] tracking-[0.1em] text-fq-text-5 uppercase">
-                            {{ $game->scoreLabel() }}
+                            {{ $game->isRanked() ? $game->scoreLabel() : 'nothing to win' }}
                         </span>
                     </span>
 
@@ -485,7 +516,7 @@ new class extends Component
                                 <span x-text="altitude"></span>
                             </p>
                         </div>
-                    @else
+                    @elseif ($game === ArcadeGame::WindyWalkies)
                         {{-- Windy Walkies builds its own canvas, its own d-pad and
                              its own HUD, so the page only has to give it a box and
                              listen. `wire:ignore` for the same reason as the tower:
@@ -510,6 +541,17 @@ new class extends Component
 
                             <fart-dash aria-label="Windy Walkies — tap or press space to hop"></fart-dash>
                         </div>
+                    @else
+                        {{-- The toy. There is no listener here and that is the whole
+                             difference: Slime Time emits no score because it keeps
+                             none, so nothing on this page has anything to post.
+
+                             `wire:ignore` is still right — the goo is a few hundred
+                             points of hand-integrated state, and a morph would
+                             hand the canvas to a fresh element mid-throw. --}}
+                        <div wire:ignore class="relative w-full select-none">
+                            <slime-time aria-label="Slime Time — drag the goo and throw it at things"></slime-time>
+                        </div>
                     @endif
 
                     {{-- Read once and then never again, so full screen is where
@@ -523,6 +565,10 @@ new class extends Component
                             @if ($game === ArcadeGame::WindyWalkies)
                                 Swipe, or use the arrows or WASD. Tap to hop forward &mdash;
                                 <span class="text-fq-fart">beans give you a super fart</span> worth three lanes.
+                            @elseif ($game === ArcadeGame::SlimeTime)
+                                Drag the goo, then fling it. It splats, sticks and drips &mdash;
+                                <span class="text-fq-lime">the underside of a shelf is the best one</span>.
+                                Nothing here is scored.
                             @else
                                 Tap, space or W to drop each floor. Whatever hangs
                                 over the edge falls off &mdash; so line it up.

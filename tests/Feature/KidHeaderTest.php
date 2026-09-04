@@ -266,9 +266,13 @@ class KidHeaderTest extends TestCase
      */
     public function test_the_arcade_row_counts_the_games_this_kid_has_not_met(): void
     {
-        $this->loginKid(['arcade_seen_at' => ArcadeGame::StackTheMess->releasedOn()]);
+        // Marked as last looking before the arcade had anything in it, so the
+        // number is every game there is — derived from the enum rather than
+        // written down, because games arrive in drops of one and of two and a
+        // literal here is a test that breaks on the next one.
+        $this->loginKid(['arcade_seen_at' => ArcadeGame::StackTheMess->releasedOn()->subDay()]);
 
-        Volt::test('kid.home')->assertSee('1 new');
+        Volt::test('kid.home')->assertSee(count(ArcadeGame::cases()).' new');
     }
 
     public function test_the_arcade_row_says_nothing_once_they_have_been(): void

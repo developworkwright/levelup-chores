@@ -254,15 +254,21 @@ class ArcadePrizeTest extends TestCase
 
         Auth::guard('profile')->login($walker);
 
-        Volt::test('kid.arcade')
-            ->assertOk()
-            // And says so on the board, so a kid finds out where they played
-            // rather than only in their ticket balance.
-            ->assertSee('Last champion')
-            ->assertSee('33 lanes');
+        // Opening the page is the whole trigger — settlement happens on mount,
+        // whichever game the rail happens to land on.
+        Volt::test('kid.arcade')->assertOk();
 
         $this->assertSame(ArcadeService::PRIZE_TICKETS, $walker->fresh()->bonus_tickets);
         $this->assertSame(ArcadeService::PRIZE_TICKETS, $climber->fresh()->bonus_tickets);
+
+        // And it says so on the board, so a kid finds out where they played
+        // rather than only in their ticket balance. Asked of the walk by name:
+        // the page opens on whatever is newest, and the champion line belongs
+        // to the game showing.
+        Volt::test('arcade')
+            ->call('switchTo', ArcadeGame::WindyWalkies->value)
+            ->assertSee('Last champion')
+            ->assertSee('33 lanes');
     }
 
     public function test_the_champion_line_belongs_to_the_game_on_screen(): void
@@ -276,6 +282,7 @@ class ArcadePrizeTest extends TestCase
         Auth::guard('profile')->login($walker);
 
         Volt::test('arcade')
+            ->call('switchTo', ArcadeGame::WindyWalkies->value)
             ->assertSee('33 lanes')
             ->call('switchTo', ArcadeGame::StackTheMess->value)
             ->assertSee('21 floors')

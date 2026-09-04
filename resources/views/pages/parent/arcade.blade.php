@@ -30,9 +30,9 @@ new class extends Component
 
 <x-parent.shell :profile="$profile" active="arcade">
     <div class="flex flex-col gap-3 rounded-[28px] border border-fq-line bg-fq-bg p-[16px_14px]">
-        {{-- Deliberately no game name here. There are two games and the
+        {{-- Deliberately no game name here. There are several games and the
              switcher inside owns which one is showing; a heading naming one of
-             them would be wrong half the time. --}}
+             them would be wrong most of the time. --}}
         <p class="text-xs text-fq-text-3">
             One board per game, for the whole house. Your runs sit on them next to theirs — the
             kids can see exactly how you did, which is the point.

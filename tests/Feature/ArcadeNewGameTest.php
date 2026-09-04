@@ -31,15 +31,39 @@ class ArcadeNewGameTest extends TestCase
         return app(ArcadeService::class);
     }
 
-    /** A kid who was last in the arcade before the second game went in. */
+    /**
+     * A kid who was last in the arcade the day before the newest drop landed.
+     *
+     * Dated off `newest()` rather than off a named game, so what these tests
+     * assert stays "the games that arrived since my last visit" instead of
+     * "Windy Walkies" — which is the same sentence today and a broken test the
+     * next time anything is added.
+     */
     private function returningKid(string $name = 'Nova', ?Household $household = null): Profile
     {
         return Profile::factory()
             ->for($household ?? Household::factory())
             ->create([
                 'name' => $name,
-                'arcade_seen_at' => ArcadeGame::StackTheMess->releasedOn(),
+                'arcade_seen_at' => ArcadeGame::newest()->releasedOn()->subDay(),
             ]);
+    }
+
+    /**
+     * The games that landed in the newest drop — everything sharing the newest
+     * release date, in the order the rail flashes them.
+     *
+     * @return list<ArcadeGame>
+     */
+    private function newestDrop(): array
+    {
+        $latest = ArcadeGame::newest()->releasedOn();
+
+        return collect(ArcadeGame::cases())
+            ->filter(fn (ArcadeGame $game) => $game->releasedOn()->equalTo($latest))
+            ->sortByDesc(fn (ArcadeGame $game) => $game->releasedOn())
+            ->values()
+            ->all();
     }
 
     public function test_a_game_added_since_a_kid_last_looked_is_new_to_them(): void
@@ -48,8 +72,9 @@ class ArcadeNewGameTest extends TestCase
 
         $new = $this->arcade()->newGamesFor($kid);
 
-        $this->assertEquals([ArcadeGame::WindyWalkies], $new->all());
-        $this->assertSame(1, $this->arcade()->newCountFor($kid));
+        // The whole of the last drop, and nothing from the ones before it.
+        $this->assertEquals($this->newestDrop(), $new->all());
+        $this->assertSame(count($this->newestDrop()), $this->arcade()->newCountFor($kid));
     }
 
     public function test_a_kid_who_has_never_been_finds_every_game_new(): void
@@ -85,7 +110,7 @@ class ArcadeNewGameTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         Volt::test('arcade')
-            ->assertSet('newGames', [ArcadeGame::WindyWalkies->value])
+            ->assertSet('newGames', array_map(fn (ArcadeGame $game) => $game->value, $this->newestDrop()))
             ->assertSee('New');
 
         // And stamped, so the next visit is quiet.
@@ -184,6 +209,27 @@ class ArcadeNewGameTest extends TestCase
         }
 
         $this->assertSame($seen, array_unique($seen), 'Two games claim the same release date.');
-        $this->assertSame(ArcadeGame::WindyWalkies, ArcadeGame::newest());
+        $this->assertSame(ArcadeGame::SlimeTime, ArcadeGame::newest());
+    }
+
+    public function test_no_game_is_dated_into_the_future(): void
+    {
+        /*
+         * A release date ahead of today is newer than any `arcade_seen_at`
+         * marker, so its game is new to everybody on every visit and the flash
+         * never clears — the marker is stamped on mount and is *still* older
+         * than the date.
+         *
+         * Worth a test of its own because a future date is a tempting way out
+         * of the rule above: two games landing in one drop cannot share a date,
+         * and post-dating one of them looks like the obvious fix right up until
+         * every kid is told it is new on every visit.
+         */
+        foreach (ArcadeGame::cases() as $game) {
+            $this->assertTrue(
+                $game->releasedOn()->lessThanOrEqualTo(now()),
+                $game->label().' is dated in the future, so its "new" flash can never clear.'
+            );
+        }
     }
 }

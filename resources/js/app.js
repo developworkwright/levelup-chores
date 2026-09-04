@@ -37,6 +37,23 @@ import './arcade.js';
 import './fart-dash.js';
 
 /*
+ * Slime Time, the arcade's first *toy* — grab the goo, throw it, and watch it
+ * splat, cling, sag and drip. Shipped verbatim from the design bundle for the
+ * same reason the files above are: it arrived finished, it draws to a canvas
+ * with no DOM to reconcile, and porting it would re-derive several hundred
+ * hand-tuned numbers and then drift.
+ *
+ * It emits no score and there is nothing to post — see `ArcadeGame::isRanked()`,
+ * which is what keeps it off every board. Registers `<slime-time>`.
+ *
+ * It carries one edit from the bundle: `Sfx.ctx()` reads `fq-muted` before
+ * opening an AudioContext, so the single speaker button in the arcade header
+ * governs it the way it governs the other games. Re-apply that when replacing
+ * this file from a newer bundle; `ArcadeToyTest` fails if it goes missing.
+ */
+import './slime.js';
+
+/*
  * Background music: the header's play button and song picker, and the Audio
  * object that survives `wire:navigate` between them. Registers `fqMusic` and
  * the `music` Alpine store.

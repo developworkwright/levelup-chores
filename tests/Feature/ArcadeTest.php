@@ -11,6 +11,7 @@ use App\Services\ArcadeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\RateLimiter;
+use Livewire\Features\SupportTesting\Testable;
 use Livewire\Volt\Volt;
 use Tests\TestCase;
 
@@ -25,8 +26,10 @@ use Tests\TestCase;
  *
  * A second game added a third thing that cannot be steered from the browser
  * and a first thing that must never be mixed. The component opens on whichever
- * game `ArcadeGame::default()` names, so tests that want the other one switch
- * to it the way a player would.
+ * game `ArcadeGame::default()` names, so tests that want another one switch to
+ * it the way a player would — `openOn()` below. Doing that explicitly rather
+ * than leaning on the default is what stops the next game added from breaking
+ * every board assertion in this file.
  */
 class ArcadeTest extends TestCase
 {
@@ -44,6 +47,18 @@ class ArcadeTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         return $kid;
+    }
+
+    /**
+     * The arcade component, showing one named game.
+     *
+     * The rail is server-side state, so this is the same round trip a player
+     * makes when they tap a game — it is not a way of reaching in and setting a
+     * property the browser is not allowed to set.
+     */
+    private function openOn(ArcadeGame $game): Testable
+    {
+        return Volt::test('arcade')->call('switchTo', $game->value);
     }
 
     private function loginParent(string $name = 'Mum'): Profile
@@ -219,7 +234,7 @@ class ArcadeTest extends TestCase
         $this->score($kid, 12, $week, ArcadeGame::WindyWalkies, 'GRIM DRIP');
         $this->score($kid, 60, $week, ArcadeGame::StackTheMess, 'SALTY RATTLE');
 
-        $component = Volt::test('arcade');
+        $component = $this->openOn(ArcadeGame::WindyWalkies);
 
         $component->assertSee('GRIM DRIP')->assertDontSee('SALTY RATTLE');
 
@@ -268,7 +283,7 @@ class ArcadeTest extends TestCase
         $this->score($kid, 34, '1999-W01', ArcadeGame::WindyWalkies);
         $this->score($sibling, 90, '1999-W01', ArcadeGame::WindyWalkies);
 
-        Volt::test('arcade')
+        $this->openOn(ArcadeGame::WindyWalkies)
             ->assertSee('House')
             ->assertSee('90 lanes')
             ->assertSee('Yours')
@@ -284,7 +299,7 @@ class ArcadeTest extends TestCase
 
         $this->score($sibling, 38, $this->arcade()->currentWeek(), ArcadeGame::WindyWalkies);
 
-        Volt::test('arcade')
+        $this->openOn(ArcadeGame::WindyWalkies)
             ->assertSee('Beat')
             ->assertSee('39')
             ->assertSee('for 3 tickets');
@@ -296,7 +311,7 @@ class ArcadeTest extends TestCase
 
         $this->score($kid, 38, $this->arcade()->currentWeek(), ArcadeGame::WindyWalkies);
 
-        Volt::test('arcade')
+        $this->openOn(ArcadeGame::WindyWalkies)
             ->assertSee('Leading')
             ->assertSee('3 tickets if it holds')
             ->assertDontSee('Beat');
@@ -309,7 +324,7 @@ class ArcadeTest extends TestCase
 
         $this->score($parent, 38, $this->arcade()->currentWeek(), ArcadeGame::WindyWalkies);
 
-        Volt::test('arcade')
+        $this->openOn(ArcadeGame::WindyWalkies)
             ->assertSee('Leading')
             ->assertSee('hold it to take the week')
             ->assertDontSee('tickets if it holds');
@@ -336,7 +351,7 @@ class ArcadeTest extends TestCase
         $this->assertSame(12, $standings->last()->score);
 
         // Rook is last on a board of two, so they survive the cut to three.
-        Volt::test('arcade')->assertSee('Rook');
+        $this->openOn(ArcadeGame::WindyWalkies)->assertSee('Rook');
     }
 
     public function test_last_weeks_giant_still_holds_the_all_time_record(): void
@@ -347,7 +362,7 @@ class ArcadeTest extends TestCase
         // all-time line is what stops the reset erasing the big run.
         $this->score($kid, 40, '1999-W01', ArcadeGame::WindyWalkies, 'SALTY RATTLE');
 
-        Volt::test('arcade')
+        $this->openOn(ArcadeGame::WindyWalkies)
             ->assertSee('All-time record')
             ->assertSee('40 lanes');
     }

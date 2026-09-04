@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\ArcadeGame;
 use App\Services\ArcadeService;
+use LogicException;
 use Tests\TestCase;
 
 /**
@@ -53,18 +54,23 @@ class ArcadeMilestoneTest extends TestCase
     }
 
     /**
-     * The ladder `fart-dash.js` carries, read out of its own `MILESTONES`
-     * array — the list it draws the in-game banner from.
+     * The ladder a game file carries, read out of its own `MILESTONES` array —
+     * the list it draws the in-game banner from.
+     *
+     * Takes a filename rather than naming `fart-dash.js`, because a shipped
+     * game file carrying its own copy of the ladder is the normal arrangement
+     * for anything that arrives from a design bundle, and the next one gets a
+     * one-line test.
      *
      * @return list<array{0: int, 1: string}>
      */
-    private function walkLadder(): array
+    private function ladderIn(string $file): array
     {
-        $source = file_get_contents(resource_path('js/fart-dash.js'));
+        $source = file_get_contents(resource_path('js/'.$file));
 
         preg_match('/const MILESTONES = \[(.*?)\n\];/s', $source, $block);
 
-        $this->assertNotEmpty($block, 'Could not find MILESTONES in fart-dash.js.');
+        $this->assertNotEmpty($block, "Could not find MILESTONES in {$file}.");
 
         preg_match_all("/\[(\d+), '(.+?)'\]/", $block[1], $matches, PREG_SET_ORDER);
 
@@ -95,7 +101,7 @@ class ArcadeMilestoneTest extends TestCase
         // mid-run has to find that same phrase against their name afterwards.
         $this->assertSame(
             ArcadeService::milestonesFor(ArcadeGame::WindyWalkies),
-            $this->walkLadder(),
+            $this->ladderIn('fart-dash.js'),
             'fart-dash.js and ArcadeService disagree about the walk.'
         );
     }
@@ -152,7 +158,7 @@ class ArcadeMilestoneTest extends TestCase
     {
         // `altitude()` walks the list and keeps the last one it clears, so an
         // out-of-order entry would silently label a long run with a short name.
-        foreach (ArcadeGame::cases() as $game) {
+        foreach (ArcadeGame::ranked() as $game) {
             $previous = -1;
 
             foreach (ArcadeService::milestonesFor($game) as [$at, $name]) {
@@ -165,8 +171,31 @@ class ArcadeMilestoneTest extends TestCase
     public function test_every_ladder_starts_at_the_ground(): void
     {
         // Every run begins at zero and must still have a label.
-        foreach (ArcadeGame::cases() as $game) {
+        foreach (ArcadeGame::ranked() as $game) {
             $this->assertSame(0, ArcadeService::milestonesFor($game)[0][0]);
+        }
+    }
+
+    public function test_a_toy_has_no_ladder_and_says_so(): void
+    {
+        /*
+         * The two loops above walk `ranked()` rather than `cases()`, and this
+         * is what makes that safe to read: a toy is not a game with an empty
+         * ladder, it is a game the question does not apply to. An empty array
+         * here would be silently indexed by `altitude()` and print a blank
+         * where a rung goes.
+         */
+        $this->assertNotEmpty(ArcadeGame::toys(), 'The toy branch is not covered by anything.');
+
+        foreach (ArcadeGame::toys() as $toy) {
+            $this->assertArrayNotHasKey($toy->value, ArcadeService::MILESTONES);
+
+            try {
+                ArcadeService::milestonesFor($toy);
+                $this->fail($toy->label().' handed back a ladder it should not have.');
+            } catch (LogicException $e) {
+                $this->assertStringContainsString('keeps no score', $e->getMessage());
+            }
         }
     }
 

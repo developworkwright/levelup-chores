@@ -15,6 +15,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
+use LogicException;
 use Throwable;
 
 /**
@@ -32,11 +33,16 @@ use Throwable;
  * arrives from a browser; and the old codename rows are still readable, which
  * is why `ArcadeScore::displayName()` falls back to that column.
  *
- * There are two games now, and that is why every method below takes an
- * `ArcadeGame`. Nothing here may be asked a question that spans both: a tower
- * is floors and a walk is lanes, so a mixed board ranks numbers that are not
- * the same kind of number. `settle()` is the one exception, and it fans out
- * over the games rather than merging them.
+ * There is more than one game now, and that is why every method below takes an
+ * `ArcadeGame`. Nothing here may be asked a question that spans them: a tower
+ * is floors, a walk is lanes and a pit is points, so a mixed board ranks
+ * numbers that are not the same kind of number. `settle()` is the one
+ * exception, and it fans out over the games rather than merging them.
+ *
+ * Not every game is one of these questions' subject. A *toy* keeps no score —
+ * see `ArcadeGame::isRanked()` — so it never reaches a board, never settles a
+ * week and is refused by `post()`. `weeklyLeaders()` and `settle()` already
+ * only ever see ranked games; `post()` is the one that had to be told.
  */
 class ArcadeService
 {
@@ -47,6 +53,13 @@ class ArcadeService
      * 180px slab, and a walk's traffic speeds up with distance, so a player who
      * never misses runs out of game long before this on either. It exists to
      * put a ceiling on what a tampered request can write, not to cap real play.
+     *
+     * One number holds only while every ranked game counts the same *sort* of
+     * number — floors and lanes are both distances a body travels. A game
+     * scoring in the thousands (a merge game paying per combine, say) would need
+     * this to become per-game rather than being squeezed under it, because a
+     * ceiling below real play throws good runs away in silence and leaves a
+     * board that looks like a game nobody is any good at.
      */
     public const MAX_SCORE = 999;
 
@@ -59,7 +72,7 @@ class ArcadeService
      * the week wins the week and nothing else, which is the joke and also the
      * rule that keeps the prize pointing at the people it is for.
      *
-     * Paid *per game*. One prize across both games would make the second
+     * Paid *per game*. One prize across all the games would make each new
      * game pointless for everybody who is not already best at the first, which
      * is the opposite of the reason it was added.
      */
@@ -85,6 +98,9 @@ class ArcadeService
      * index* in `resources/js/arcade.js`; Windy Walkies carries its own copy of
      * the list inside `resources/js/fart-dash.js` and draws its banner from it.
      * Changing either half on its own fails `ArcadeMilestoneTest`.
+     *
+     * Only the ranked games are here. A toy keeps no score, so there is nothing
+     * for a rung to label — see `milestonesFor()`.
      *
      * @var array<string, list<array{0: int, 1: string}>>
      */
@@ -133,11 +149,17 @@ class ArcadeService
     /**
      * One game's ladder.
      *
+     * A toy has none — there is no score to label — and asking for one is the
+     * same bug as asking it for a unit, so it raises the same error rather than
+     * handing back an empty array that `altitude()` would then index into.
+     *
      * @return list<array{0: int, 1: string}>
      */
     public static function milestonesFor(ArcadeGame $game): array
     {
-        return self::MILESTONES[$game->value];
+        return self::MILESTONES[$game->value] ?? throw new LogicException(
+            $game->label().' is a toy and keeps no score, so it has no milestone ladder.'
+        );
     }
 
     /** ISO year-week — the bucket a run is posted into, e.g. "2026-W35". */
@@ -182,9 +204,19 @@ class ArcadeService
      * The *game* does not come from the browser either. It is whichever game
      * the page is showing, held server-side, so a run cannot be posted to a
      * board it was not played on.
+     *
+     * A toy is refused outright rather than being allowed to write a row that
+     * nothing would ever read. Slime Time never sends a score — it has none —
+     * but the page's `post()` is reachable from the browser whichever game is
+     * showing, and a board that quietly accepted runs from a game with no
+     * scoring would be a board nobody could explain.
      */
     public function post(Profile $profile, ArcadeGame $game, int $score): ?ArcadeScore
     {
+        if (! $game->isRanked()) {
+            return null;
+        }
+
         if ($score < 1 || $score > self::MAX_SCORE) {
             return null;
         }
@@ -413,8 +445,8 @@ class ArcadeService
     }
 
     /**
-     * Pay out every finished week this household has not settled yet, on both
-     * games.
+     * Pay out every finished week this household has not settled yet, on every
+     * game.
      *
      * Lazy on purpose: a scheduled command is one more thing that has to be
      * running for a kid to get what they won, and the arcade is opened often
@@ -424,8 +456,10 @@ class ArcadeService
      * the console.
      *
      * The one method here that spans the games, and it fans out rather than
-     * merging: opening either game settles both, because a kid who only
-     * plays one should not be the reason the other never pays.
+     * merging: opening any game settles all of them, because a kid who only
+     * plays one should not be the reason the others never pay. Toys settle
+     * nothing and need no excluding — weeks are read off the scores, and a
+     * game that keeps none has no weeks to find.
      *
      * @return Collection<int, ArcadeWeekPrize> what this call settled
      */
