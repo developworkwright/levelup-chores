@@ -95,6 +95,7 @@ class Profile extends Model implements Authenticatable
             'sleep_card_enabled' => 'boolean',
             'sleep_card_type' => SleepCardType::class,
             'op_spin_armed_at' => 'datetime',
+            'streak_milestone_run_started_on' => 'date',
         ];
     }
 

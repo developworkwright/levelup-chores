@@ -191,12 +191,38 @@ class StreakService
      */
     private function refreshStreak(Profile $profile): void
     {
+        $run = $this->currentRun($profile);
+        $profile->streak = $run['length'];
+
         // A high-water mark of what has been *paid*, not of what has been
         // reached — and not the current streak either. Gating on the live value
         // would let a kid lapse a streak and buy a repair to collect every
         // milestone a second time.
+        //
+        // Scoped to the *run*, though, because a lifetime mark quietly turned
+        // every chest into a once-ever prize: break a seven-night run, build it
+        // back to seven, and days 3, 5 and 7 all pay nothing while the track
+        // draws them as reached. A repair leaves the restored run starting on
+        // the date it always did, so it keeps its mark and the lapse-and-repair
+        // exploit stays shut.
+        //
+        // Both halves are frozen while a chest is sitting unopened. That chest
+        // belongs to the run that just ended, and clearing the mark out from
+        // under it would re-open every milestone beneath its lid to a second
+        // payout — $9 for a chest worth $5. The recorded run has to be held
+        // back with it: stamping the *new* run's start date while deferring the
+        // reset would leave the two matching, and the reset would then never
+        // fire at all. So they move together, on the first recompute after the
+        // chest is collected.
+        if ($profile->pending_streak_chest === null && $run['startsOn'] !== null && ! $run['truncated']) {
+            if ($this->runIsANewOne($profile, $run)) {
+                $profile->streak_milestone_paid_through = 0;
+            }
+
+            $profile->streak_milestone_run_started_on = $run['startsOn']->toDateString();
+        }
+
         $paidThrough = $profile->streak_milestone_paid_through;
-        $profile->streak = $this->currentStreak($profile);
 
         $reached = null;
 
@@ -256,7 +282,7 @@ class StreakService
      * Rescued nights inside the run currently standing.
      *
      * Subtracted from the milestone walk so a rescue keeps the run and not the
-     * ladder. Walks the same days `currentStreak()` does, for the same reason
+     * ladder. Walks the same days `currentRun()` does, for the same reason
      * it recomputes rather than increments: a parent clearing a backlog can
      * approve days in any order and every path has to land on one number.
      *
@@ -274,7 +300,7 @@ class StreakService
         $rescued = $this->rescuedDaysBetween($profile, $from, $today);
 
         // Today being unearned doesn't end a run, it just anchors it on
-        // yesterday — the same rule currentStreak() walks by.
+        // yesterday — the same rule currentRun() walks by.
         // Copied, because Carbon is mutable and the loop below walks by
         // subtracting from this cursor in place.
         $cursor = $today->copy();
@@ -300,20 +326,67 @@ class StreakService
     }
 
     /**
-     * Consecutive household-days ending today (or yesterday, if nothing is
-     * approved yet today) that earned their day — see streakDayEarnedOn().
+     * The run as it stands: how many consecutive household-days ending today
+     * (or yesterday, if nothing is approved yet today) earned their day — see
+     * streakDayEarnedOn() — and which day it began on.
+     *
+     * The start date is the only thing that can tell one run from the next. The
+     * length can't: a kid who breaks a seven-night run and builds another one
+     * is back on `streak = 7` with the same number on the same card, and the
+     * milestone mark had no way of noticing it was looking at a different run.
+     * See {@see refreshStreak()}.
+     *
+     * @return array{length: int, startsOn: ?Carbon, truncated: bool}
      */
-    private function currentStreak(Profile $profile): int
+    private function currentRun(Profile $profile): array
     {
         $today = HouseholdClock::for($profile->household)->today();
         $earned = $this->earnedDaysBetween($profile, $this->walkWindowFor($today), $today);
 
         // Today being unearned doesn't end a streak — it just means the chain
         // is still anchored on yesterday.
-        return $this->walkBackFrom(
-            isset($earned[$today->toDateString()]) ? $today : $today->copy()->subDay(),
-            $earned,
-        );
+        $anchor = isset($earned[$today->toDateString()]) ? $today : $today->copy()->subDay();
+
+        $length = $this->walkBackFrom($anchor, $earned);
+
+        return [
+            'length' => $length,
+            'startsOn' => $length > 0 ? $anchor->copy()->subDays($length - 1) : null,
+            // The walk is bounded, so a run sitting *on* the bound has a start
+            // date that creeps forward a day at a time while the run itself has
+            // not restarted at all. Left unflagged that reads as a new run every
+            // single day, which would re-open the whole track once a day forever.
+            'truncated' => $length >= self::MAX_STREAK_DAYS,
+        ];
+    }
+
+    /**
+     * Whether the run on the board is a different one from the run the
+     * milestone high-water mark was paid to.
+     *
+     * Strictly *later*, not merely different: a parent clearing a backlog of
+     * older days can extend a run backwards, which moves its start date earlier
+     * without any new run having begun. Resetting on that would pay the whole
+     * track a second time to the same run.
+     *
+     * @param  array{length: int, startsOn: ?Carbon, truncated: bool}  $run
+     */
+    private function runIsANewOne(Profile $profile, array $run): bool
+    {
+        $paidFor = $profile->streak_milestone_run_started_on;
+
+        // No recorded run means the mark predates this column. Adopt the run
+        // rather than reset it — the mark may well have been earned in the run
+        // the kid is standing in, and inventing a second payout is the worse of
+        // the two mistakes to make with money.
+        if ($paidFor === null || $run['startsOn'] === null || $run['truncated']) {
+            return false;
+        }
+
+        // Compared as `Y-m-d` strings rather than as instants: both sides are
+        // household days, and the boundary hour the clock hangs on them is
+        // exactly the sort of thing that makes two equal days compare unequal.
+        return $run['startsOn']->toDateString() > $paidFor->toDateString();
     }
 
     /**

@@ -11,16 +11,16 @@ It lived on `ChoreService` for as long as the streak was a property of the daily
 
 ## Core files
 
-- `app/Services/StreakService.php` — `streakDayEarnedOn()`, `streakDaySecuredToday()`, `earnedDaysBetween()`, `recordApproval()`, `syncStreak()`, `repairStreak()`, `openStreakChest()`, `pendingStreakChestDollars()`, `nextStreakMilestone()`, `streakWindowFor()`, plus the private `refreshStreak()`, `currentStreak()`, `walkBackFrom()` and `unpaidMilestonesUnder()`.
-- `App\Models\Profile` — `streak` (int), `pending_streak_chest` (nullable int, the highest milestone day earned and not yet collected) and `streak_milestone_paid_through` (int, what has been paid for) columns.
+- `app/Services/StreakService.php` — `streakDayEarnedOn()`, `streakDaySecuredToday()`, `earnedDaysBetween()`, `recordApproval()`, `syncStreak()`, `repairStreak()`, `openStreakChest()`, `pendingStreakChestDollars()`, `nextStreakMilestone()`, `streakWindowFor()`, plus the private `refreshStreak()`, `currentRun()`, `runIsANewOne()`, `walkBackFrom()` and `unpaidMilestonesUnder()`.
+- `App\Models\Profile` — `streak` (int), `pending_streak_chest` (nullable int, the highest milestone day earned and not yet collected), `streak_milestone_paid_through` (int, what has been paid for) and `streak_milestone_run_started_on` (nullable date, which run it was paid to) columns.
 - `resources/views/pages/kid/home.blade.php` — the chest and the track. Both came off Quests with the rest of the daily loop.
-- Tests: `ChoreStreakTest` is the one that pins **what earns a day**; `StreakCycleTest`, `StreakDecayTest` and `StreakRestoreOfferTest` cover the track, decay and repairs; `StreakTimerTest` pins the bedtime countdown.
+- Tests: `ChoreStreakTest` is the one that pins **what earns a day**; `StreakCycleTest`, `StreakDecayTest` and `StreakRestoreOfferTest` cover the track, decay and repairs; `StreakTimerTest` pins the bedtime countdown; `StreakMilestoneRunTest` pins the mark being scoped to a run.
 
 ## Mechanics
 
 ### Any approved chore earns the day
 
-**`streakDayEarnedOn(Profile, Carbon): bool` is the single chokepoint.** Every walk — `currentStreak()`, `runLengthOn()`, `rescuedNightsInRun()`, `repairPreview()`, `syncStreak()`, and the Arena's `brokeAtLastRollover()` — goes through it, so the rule for what counts lives in exactly one place. It returns true when the day has a `streak_repairs` row, a `streak_rescues` row, or **any** `ChoreCompletion` for that profile with status `Approved`.
+**`streakDayEarnedOn(Profile, Carbon): bool` is the single chokepoint.** Every walk — `currentRun()`, `runLengthOn()`, `rescuedNightsInRun()`, `repairPreview()`, `syncStreak()`, and the Arena's `brokeAtLastRollover()` — goes through it, so the rule for what counts lives in exactly one place. It returns true when the day has a `streak_repairs` row, a `streak_rescues` row, or **any** `ChoreCompletion` for that profile with status `Approved`.
 
 The main quest has **no special standing**. It used to: the walk looked up that day's `DailyQuest` and required an approved completion of *that specific chore*, so a kid could clear six side quests and still lose their run overnight. The quest keeps its pull through the chest, the bold card and the charm; it no longer holds the streak hostage.
 
@@ -59,7 +59,7 @@ Days are bucketed in PHP, not SQL — the boundary hour belongs to the household
 
 ### Recompute, never increment
 
-`refreshStreak()` sets `streak = currentStreak()` rather than incrementing: a parent clearing a backlog can approve days in any order and every path has to land on the same number.
+`refreshStreak()` sets `streak` from `currentRun()` rather than incrementing: a parent clearing a backlog can approve days in any order and every path has to land on the same number.
 
 `ChoreService::approve()` offers **every** approval to `recordApproval()`, which recomputes only when the completion's day was not already earned — otherwise the walk is guaranteed to land on the number already stored. That guard is safe precisely because the first approval of any day always recomputes and nothing else raises a streak (`syncStreak()` only ever drops one). Milestone payouts are gated on the `streak_milestone_paid_through` high-water mark on top of that, so a recompute can never double-pay — and since a recompute only *queues* a chest rather than paying for it, the mark does not move until the chest is opened. See "The chest is the payment gate".
 
@@ -95,6 +95,21 @@ It used to work the other way — credited on reach, revealed later — and that
 - **`refreshStreak()` is idempotent while a chest is pending.** The mark stays put, so a second recompute re-queues the same day rather than paying it twice. This is why the walk in `refreshStreak()` can be a pure `streakBonusOn()` loop with no ledger writes in it.
 - **The lapse-and-repair exploit is still closed.** The mark only moves when a chest is actually collected, so letting a streak lapse and buying a repair can never re-open a milestone that has been paid for.
 
+### The mark belongs to a run, not to a lifetime
+
+`streak_milestone_paid_through` shipped unscoped, and that quietly made every chest a **once-ever** prize. A kid who opened a 7-day chest, lost the run and built it back to seven got nothing at day 3, day 5 or day 7 the second time round — and because `streakTrackFor()` draws `reached` straight off the streak number, all three rendered as already opened. No chest, no ledger line, and a screen insisting they had collected it. Reported from prod, and the reason `profiles.streak_milestone_run_started_on` (nullable date) exists.
+
+**`currentRun()` returns `['length', 'startsOn', 'truncated']`, and `startsOn` is what identifies a run.** The length can't: a broken seven-night run and its replacement are both `streak = 7`. `refreshStreak()` resets the mark to `0` when the run on the board started *later* than the run the mark was paid to.
+
+Four things that have to hold together, each of which was a bug in a draft of this:
+
+- **Strictly later, never merely different.** A parent clearing a backlog of older days extends a run *backwards* — same run, earlier start. Resetting on that pays the whole track a second time to one run. Pinned by `test_a_run_extended_backwards_does_not_pay_its_milestones_twice`.
+- **A repair keeps its mark, so the exploit stays shut.** `repairStreak()` splices the missed night back in, which leaves the restored run starting on the date it always did — no reset. `PerkStreakAndHintTest::test_repairing_never_pays_a_milestone_bonus_twice` is the guard.
+- **A pending chest freezes *both* halves.** An unopened chest belongs to the run that just ended; clearing the mark under it re-opens every milestone beneath its lid — $9 for a chest worth $5. The recorded run start must be frozen with it: stamping the new run's start while deferring the reset leaves the two matching and the reset never fires at all.
+- **`truncated` is the `MAX_STREAK_DAYS` guard.** A run sitting on the 366-day bound has a start date that creeps forward daily while nothing has restarted, which would re-open the whole track once a day forever.
+
+**A null `streak_milestone_run_started_on` is adopted, not reset.** Every row predates the column, and a mid-run mark may well have been earned in the run the kid is standing in; inventing a second payout is the worse of the two mistakes. The migration clears the mark only for profiles on `streak = 0`, where there is provably nothing to re-collect. A kid stuck mid-run at migration time stays stuck for that run and needs the mark nudged by hand.
+
 `pendingStreakChestDollars(Profile)` is the one place that prices a pending chest — use it for any UI that quotes the number, never `streakBonusOn($profile->pending_streak_chest)`, which misses everything stacked underneath.
 
 **A chest queued before this change pays nothing on open, and that is correct.** The old code advanced the mark at reach time, so those rows already have the mark sitting on the chest's own day; the walk finds an empty range. That is what let the payment move without a migration. `pendingStreakChestDollars()` falls back to the lid's own milestone for exactly this case, so the card still names what it is celebrating — pinned by `StreakCycleTest::test_a_chest_left_over_from_the_old_pay_on_reach_scheme_pays_nothing_twice`.
@@ -121,7 +136,7 @@ The Bonus Shop's Streak Restore perk writes a `streak_repairs` row for the misse
 
 `repairPreview(Profile)` returns `['date' => Carbon, 'restoresTo' => int]` — the day a restore buys back and the streak it would leave behind — so the Quests page's "Streak Rescue" card can quote the number before a perk is spent on it.
 
-**`profiles.streak_milestone_paid_through` is a high-water mark, and it must stay one.** `refreshStreak()` gates payouts on it rather than on the live `streak` value. Gating on the live value was a genuine exploit: let a streak lapse (it recomputes down), buy a repair, and every milestone pays a second time — at day 30 that's $40 for a 5-ticket purchase.
+**`profiles.streak_milestone_paid_through` is a high-water mark *within a run*, and it must stay one.** `refreshStreak()` gates payouts on it rather than on the live `streak` value. Gating on the live value was a genuine exploit: let a streak lapse (it recomputes down), buy a repair, and every milestone pays a second time — at day 30 that's $40 for a 5-ticket purchase. See "The mark belongs to a run" for why it is *scoped* rather than lifetime.
 
 ## Badge tie-ins
 
