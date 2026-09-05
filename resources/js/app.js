@@ -73,6 +73,30 @@ import './slime.js';
 import './grand-tour.js';
 
 /*
+ * Westin's Whacky Game, the arcade's fifth game — the penguin, the sling and
+ * the ice. Shipped verbatim from the design for the same reason every other
+ * game file is: it arrived finished and playable, it draws to a canvas with no
+ * DOM to reconcile, and porting it would re-derive a physics model that was
+ * tuned by being thrown.
+ *
+ * It is ranked, so it has a ladder in `ArcadeService::MILESTONES` and carries
+ * its own copy of it — `ArcadePenguinTest` holds the two halves together.
+ * Registers `<penguin-launch>` and emits `pl-score` / `pl-over`; the page posts
+ * the run, the game never does. The element name and both events keep the
+ * design's working title on purpose — none of them is user-facing, and renaming
+ * them would fork the file from the bundle for nothing, the same call
+ * `fart-dash.js` gets. `ArcadeGame::PenguinLaunch` carries the name the house
+ * uses.
+ *
+ * It carries two edits from the design, either of which a replacement drop
+ * would undo without looking broken: `Sfx.wake()` reads `fq-muted` so the
+ * header's one speaker button governs it, and the start screen draws the game's
+ * real name rather than "Penguin Launch". Re-apply both when replacing this
+ * file; `ArcadePenguinTest` fails if either goes missing.
+ */
+import './penguin-launch.js';
+
+/*
  * Background music: the header's play button and song picker, and the Audio
  * object that survives `wire:navigate` between them. Registers `fqMusic` and
  * the `music` Alpine store.

@@ -35,6 +35,9 @@ enum ArcadeGame: string
 
     case GrandTour = 'grand_tour';
 
+    /** Ships as "Penguin Launch" in the design — see label(). */
+    case PenguinLaunch = 'penguin_launch';
+
     /**
      * The game the rail opens on when nothing is new to the reader.
      *
@@ -112,7 +115,7 @@ enum ArcadeGame: string
     public function isRanked(): bool
     {
         return match ($this) {
-            self::StackTheMess, self::WindyWalkies, self::GrandTour => true,
+            self::StackTheMess, self::WindyWalkies, self::GrandTour, self::PenguinLaunch => true,
             self::SlimeTime => false,
         };
     }
@@ -145,6 +148,31 @@ enum ArcadeGame: string
              * second row the way the toy's four do.
              */
             self::GrandTour => 140,
+            /*
+             * The same stack as Grand Tour — a canvas, a 10px gap and one 44px
+             * hold-to-charge button — so the same budget. Its distance, its
+             * milestone and its best are all drawn inside the canvas.
+             */
+            self::PenguinLaunch => 140,
+        };
+    }
+
+    /**
+     * The height of the fixed board this game draws before it is scaled, in px.
+     *
+     * Every game is 320 wide and stretches its canvas to whatever box the page
+     * gives it, so width is the only dial — but the full-screen stage sizes
+     * that box from a *height* budget, and it needs the aspect ratio to turn
+     * one into the other. Four games draw 320x460 and Westin's Whacky Game
+     * draws 320x470; hard-coding 460 would size the taller board about 2% past
+     * the budget and push the bottom of the ice off a short screen, which is
+     * the exact failure `stageChrome()` exists to prevent.
+     */
+    public function boardHeight(): int
+    {
+        return match ($this) {
+            self::StackTheMess, self::WindyWalkies, self::SlimeTime, self::GrandTour => 460,
+            self::PenguinLaunch => 470,
         };
     }
 
@@ -177,6 +205,12 @@ enum ArcadeGame: string
              */
             self::SlimeTime => '2026-09-03',
             self::GrandTour => '2026-09-04',
+            /*
+             * The day after Grand Tour, and a day of its own rather than a
+             * second game sharing that one — the rule above wants distinct
+             * dates, and `newest()` has no other tie-breaker to fall back on.
+             */
+            self::PenguinLaunch => '2026-09-05',
         });
     }
 
@@ -187,6 +221,14 @@ enum ArcadeGame: string
             self::WindyWalkies => 'Windy Walkies',
             self::SlimeTime => 'Slime Time',
             self::GrandTour => 'Grand Tour',
+            /*
+             * The house's name for it, and the only name anybody sees. The
+             * design calls it "Penguin Launch" and so does everything the
+             * browser touches — the element, both events, the file — because
+             * none of those is user-facing and renaming them would fork the
+             * file from the bundle for nothing.
+             */
+            self::PenguinLaunch => "Westin's Whacky Game",
         };
     }
 
@@ -205,6 +247,13 @@ enum ArcadeGame: string
              * game look like it was lying about how far anybody got.
              */
             self::GrandTour => 'points',
+            /*
+             * Metres, and there is nothing else in the number. Rings, mines
+             * and power-ups are worth having because they carry the penguin
+             * further, never because they add points — which is what makes
+             * this the one board that cannot be farmed.
+             */
+            self::PenguinLaunch => 'metres',
             self::SlimeTime => throw $this->notARankedGame('unit'),
         };
     }
@@ -219,6 +268,7 @@ enum ArcadeGame: string
             self::StackTheMess => 'floors stacked',
             self::WindyWalkies => 'lanes crossed',
             self::GrandTour => 'points flown',
+            self::PenguinLaunch => 'metres slid',
             self::SlimeTime => throw $this->notARankedGame('score label'),
         };
     }
@@ -243,6 +293,7 @@ enum ArcadeGame: string
             self::WindyWalkies => 'get the dog across the road, one fart at a time.',
             self::SlimeTime => 'throw goo at the walls. That is the whole game.',
             self::GrandTour => 'fly a paper plane the whole way across Europe.',
+            self::PenguinLaunch => 'sling a penguin as far across the ice as it will go.',
         };
     }
 
@@ -254,6 +305,8 @@ enum ArcadeGame: string
             self::WindyWalkies => 'fa-wind',
             self::SlimeTime => 'fa-splotch',
             self::GrandTour => 'fa-paper-plane',
+            // No penguin in the free icon set, so the ice it lands on.
+            self::PenguinLaunch => 'fa-icicles',
         };
     }
 
@@ -264,6 +317,7 @@ enum ArcadeGame: string
             self::StackTheMess => 'Tallest tower of the week — '.$score.' floors',
             self::WindyWalkies => 'Longest walk of the week — '.$score.' lanes',
             self::GrandTour => 'Longest flight of the week — '.$score.' points',
+            self::PenguinLaunch => 'Longest slide of the week — '.$score.' metres',
             self::SlimeTime => throw $this->notARankedGame('prize wording'),
         };
     }
@@ -275,6 +329,7 @@ enum ArcadeGame: string
             self::StackTheMess => 'Nobody has stacked anything yet this week.',
             self::WindyWalkies => 'Nobody has taken the dog out yet this week.',
             self::GrandTour => 'Nobody has taken off yet this week.',
+            self::PenguinLaunch => 'Nobody has launched a penguin yet this week.',
             self::SlimeTime => throw $this->notARankedGame('empty board message'),
         };
     }
@@ -297,6 +352,9 @@ enum ArcadeGame: string
             // A flight can end on the first gap, so the walk's number rather
             // than the tower's.
             self::GrandTour => 120,
+            // A bad pull is over in about three seconds, so the walk's number
+            // rather than the tower's.
+            self::PenguinLaunch => 120,
             self::SlimeTime => throw $this->notARankedGame('post rate'),
         };
     }
@@ -329,6 +387,15 @@ enum ArcadeGame: string
              * good long run reaches four figures and has to be believed.
              */
             self::GrandTour => 4000,
+            /*
+             * Metres, and about four times the last rung of its ladder. A
+             * distance game needs a generous ceiling for the same reason the
+             * flight does: a run that chains a ring arc onto a glare-ice slide
+             * keeps building long after the last milestone, and a tighter
+             * number would throw away exactly the runs a kid was proudest of,
+             * in silence.
+             */
+            self::PenguinLaunch => 4000,
             self::SlimeTime => throw $this->notARankedGame('score ceiling'),
         };
     }

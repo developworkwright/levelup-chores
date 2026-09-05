@@ -1032,7 +1032,7 @@ body {
 
 .fq-stage-full > * {
     width: 100%;
-    max-width: calc((100dvh - var(--fq-stage-chrome, 210px)) * 320 / 460);
+    max-width: calc((100dvh - var(--fq-stage-chrome, 210px)) * var(--fq-stage-ratio, 0.69565));
 }
 
 /*

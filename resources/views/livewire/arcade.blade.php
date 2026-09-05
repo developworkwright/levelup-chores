@@ -168,6 +168,11 @@ new class extends Component
             // — see ArcadeService::milestonesFor(). Only the tower reads this
             // anyway; the other games carry their own copy.
             'milestones' => $this->game->isRanked() ? ArcadeService::milestonesFor($this->game) : [],
+            // The game's aspect ratio as a bare multiplier, because both places
+            // that size the board convert a height budget into a width and
+            // `calc()` will not divide by a custom property. Rounded here rather
+            // than in the style attribute so the two agree to the digit.
+            'boardRatio' => round(320 / $this->game->boardHeight(), 5),
         ];
     }
 }; ?>
@@ -318,16 +323,19 @@ new class extends Component
 
         {{-- The game, and the middle rail.
 
-             Both games draw a fixed 320x460 board scaled to whatever box they
-             are given, so width is the only dial and a wider box is a bigger
-             game. Height is the other limit: at full width the board would stand
+             Every game draws a fixed 320-wide board scaled to whatever box it is
+             given, so width is the only dial and a wider box is a bigger game.
+             Height is the other limit: at full width the board would stand
              1550px tall, so the max-width below is a *height* budget converted
              back through the aspect ratio, which is what keeps a short window or
              a phone in landscape from losing the bottom of the game off the
-             screen. --}}
+             screen.
+
+             The ratio comes from the game rather than being written in, because
+             they are not all the same shape — see ArcadeGame::boardHeight(). --}}
         <div
             class="flex w-full min-w-0 flex-col gap-[8px] lg:flex-1"
-            style="max-width: calc(88vh * 320 / 460)"
+            style="max-width: calc(88vh * {{ $boardRatio }})"
         >
             {{-- The stage: the title, the phone-only target and the machine,
                  wrapped so all three can be handed to the screen at once.
@@ -343,7 +351,7 @@ new class extends Component
                 x-data="fqStage"
                 :class="full ? 'fq-stage-full' : ''"
                 class="flex flex-col gap-[8px]"
-                style="--fq-stage-chrome: {{ $game->stageChrome() }}px"
+                style="--fq-stage-chrome: {{ $game->stageChrome() }}px; --fq-stage-ratio: {{ $boardRatio }}"
             >
                 {{-- The title line, and the button that is the way in and back
                      out. Full screen it drops everything but the button and
@@ -569,6 +577,34 @@ new class extends Component
 
                             <grand-tour aria-label="Grand Tour — tap or press space to climb"></grand-tour>
                         </div>
+                    @elseif ($game === ArcadeGame::PenguinLaunch)
+                        {{-- Westin's Whacky Game, and the same arrangement as
+                             the flight above it: the game builds its own canvas,
+                             its own hold-to-charge button and its own HUD, and
+                             the page gives it a box and listens.
+
+                             `pl-over` fires once per run, when the penguin
+                             finally slides to a stop — which is the only way a
+                             run here ends. There is no crash and no damage, so
+                             the event is a finish line rather than a death, and
+                             a run that never left the sling scores zero and is
+                             not posted. No Post button for the same reason the
+                             other two have none: the game-over screen is drawn
+                             inside the canvas and a tap on it launches again. --}}
+                        <div
+                            wire:ignore
+                            x-data="{ posted: false, score: 0 }"
+                            x-on:pl-over="score = $event.detail.score; posted = false; if (score > 0) { $wire.post(score).then(() => posted = true) }"
+                            class="relative w-full select-none"
+                        >
+                            <p
+                                x-show="posted"
+                                x-cloak
+                                class="mb-2 text-right font-mono-fq text-[9px] tracking-[0.14em] text-fq-lime uppercase"
+                            ><span x-text="score"></span> metres &middot; on the board &#10003;</p>
+
+                            <penguin-launch aria-label="Westin's Whacky Game — drag the penguin back into the sling and let go"></penguin-launch>
+                        </div>
                     @else
                         {{-- The toy. There is no listener here and that is the whole
                              difference: Slime Time emits no score because it keeps
@@ -600,6 +636,10 @@ new class extends Component
                             @elseif ($game === ArcadeGame::GrandTour)
                                 Tap, space or W to climb. Thread the gaps and don&rsquo;t hit the ground &mdash;
                                 <span class="text-fq-cyan">the clouds only bump you</span>, and a clean gap is worth more.
+                            @elseif ($game === ArcadeGame::PenguinLaunch)
+                                Drag the penguin back and let go &mdash; how far back is power, where you drag is angle.
+                                <span class="text-fq-cyan">There are no buttons once you are in the air</span>,
+                                so aim well. Or hold space to charge.
                             @else
                                 Tap, space or W to drop each floor. Whatever hangs
                                 over the edge falls off &mdash; so line it up.

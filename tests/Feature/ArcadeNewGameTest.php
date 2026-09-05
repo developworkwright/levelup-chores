@@ -209,7 +209,7 @@ class ArcadeNewGameTest extends TestCase
         }
 
         $this->assertSame($seen, array_unique($seen), 'Two games claim the same release date.');
-        $this->assertSame(ArcadeGame::GrandTour, ArcadeGame::newest());
+        $this->assertSame(ArcadeGame::PenguinLaunch, ArcadeGame::newest());
     }
 
     public function test_no_game_is_dated_into_the_future(): void

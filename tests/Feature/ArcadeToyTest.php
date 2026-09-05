@@ -60,7 +60,7 @@ class ArcadeToyTest extends TestCase
     {
         $this->assertFalse(ArcadeGame::SlimeTime->isRanked());
 
-        foreach ([ArcadeGame::StackTheMess, ArcadeGame::WindyWalkies, ArcadeGame::GrandTour] as $cabinet) {
+        foreach (ArcadeGame::ranked() as $cabinet) {
             $this->assertTrue($cabinet->isRanked(), $cabinet->label().' stopped keeping score.');
         }
 

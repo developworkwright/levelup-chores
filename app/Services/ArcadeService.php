@@ -144,6 +144,26 @@ class ArcadeService
             [540, 'Athens'],
             [780, 'All the way round'],
         ],
+
+        /*
+         * The slide's ladder, in metres. Its thresholds are the ones
+         * `resources/js/penguin-launch.js` carries, not the ones the design
+         * document beside it prints — the two disagreed on arrival, and the
+         * game file is the half that actually draws a rung on the canvas the
+         * moment a kid passes it. A ladder that disagreed with the canvas would
+         * have the board congratulating somebody for reaching a place the game
+         * never told them they had reached. `ArcadePenguinTest` holds the two
+         * halves together from here on.
+         */
+        ArcadeGame::PenguinLaunch->value => [
+            [0, 'Belly on the ice'],
+            [60, 'Off the shelf'],
+            [140, 'Open ice'],
+            [260, 'Iceberg alley'],
+            [420, 'Past the whales'],
+            [640, 'Halfway to the pole'],
+            [900, 'Nobody can beat this'],
+        ],
     ];
 
     /**
