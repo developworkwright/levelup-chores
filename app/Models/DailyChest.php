@@ -3,9 +3,19 @@
 namespace App\Models;
 
 use App\Enums\PerkEffect;
+use App\Services\ChestService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * One opened bonus chest.
+ *
+ * `quest_was_done` records which table the chest rolled on, and it means *any*
+ * quest — the day's main one or any of the side quests on the board. The column
+ * keeps its name because the app calls the board's chores side quests, but the
+ * rule it stores is {@see ChestService::isBoosted()}, not the quest card's own
+ * stamp.
+ */
 class DailyChest extends Model
 {
     public const UPDATED_AT = null;

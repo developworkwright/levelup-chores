@@ -17,6 +17,7 @@ use App\Services\ChestService;
 use App\Services\ChoreService;
 use App\Services\HouseholdClock;
 use App\Services\PerkInventoryService;
+use App\Services\SpinService;
 use App\Services\TicketService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -139,6 +140,48 @@ class ParentKidsPageTest extends TestCase
             ->assertSee('Bonus Wheel')
             ->assertSee('Fold the laundry')
             ->assertSee('3x');
+    }
+
+    /**
+     * Resetting from here is a parent undoing a spin, not a kid re-rolling
+     * one, so a ticket-bought OP charge goes back in the pocket — and the card
+     * says so before it is pressed.
+     */
+    public function test_resetting_an_op_spin_hands_the_charge_back(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create(['name' => 'Nova']);
+        Chore::factory()->for($household)->count(6)->create();
+        $this->actingAsParent($household);
+
+        $spins = app(SpinService::class);
+        $spins->charge($kid);
+        $spins->spin($kid->refresh());
+
+        Volt::test('parent.kids')
+            ->assertSee('OP spin', escape: false)
+            ->call('resetSpin', $kid->id)
+            ->assertSee("Hasn't spun today", escape: false)
+            ->assertDontSee('OP spin', escape: false);
+
+        $this->assertTrue($spins->isCharged($kid->refresh()));
+    }
+
+    public function test_resetting_a_plain_spin_charges_nothing(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create(['name' => 'Nova']);
+        Chore::factory()->for($household)->count(6)->create();
+        $this->actingAsParent($household);
+
+        app(SpinService::class)->spin($kid);
+
+        Volt::test('parent.kids')
+            ->assertDontSee('OP spin', escape: false)
+            ->call('resetSpin', $kid->id)
+            ->assertSee("Hasn't spun today", escape: false);
+
+        $this->assertFalse(app(SpinService::class)->isCharged($kid->refresh()));
     }
 
     public function test_it_says_when_a_kid_has_not_spun_yet(): void
@@ -444,12 +487,12 @@ class ParentKidsPageTest extends TestCase
 
         Volt::test('parent.kids')
             ->assertSee(app(ChestService::class)->describe($chest))
-            ->assertSee('quest was cleared first')
+            ->assertSee('a quest was done first')
             ->assertSee('CLAIMED')
             ->assertDontSee('Not opened today');
     }
 
-    public function test_a_chest_opened_on_a_worse_roll_says_the_quest_was_open(): void
+    public function test_a_chest_opened_on_a_worse_roll_says_nothing_was_done(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
@@ -466,7 +509,7 @@ class ParentKidsPageTest extends TestCase
 
         Volt::test('parent.kids')
             ->assertSee('1 ticket')
-            ->assertSee('quest was still open');
+            ->assertSee('nothing done yet');
     }
 
     public function test_yesterdays_chest_does_not_count_as_todays(): void

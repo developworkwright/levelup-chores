@@ -147,12 +147,17 @@ new class extends Component
         );
     }
 
+    /**
+     * Through resetByParent() rather than clearToday(): a reset from here puts
+     * an OP charge back in the kid's pocket, which the respin perk deliberately
+     * does not. See SpinService::resetByParent().
+     */
     public function resetSpin(int $profileId): void
     {
         $kid = $this->ownedKid($profileId);
 
         if ($kid) {
-            app(SpinService::class)->clearToday($kid);
+            app(SpinService::class)->resetByParent($kid);
         }
     }
 
@@ -622,7 +627,8 @@ new class extends Component
                     'prize' => app(ChestService::class)->describe($chest),
                     'openedAt' => $chest->created_at,
                     // Whether it rolled on the boosted table — the honest answer
-                    // to "why did they get a perk and mine got 50 points".
+                    // to "why did they get a perk and mine got 50 points". Any
+                    // quest earns it, main or side; see ChestService::isBoosted().
                     'questWasDone' => $chest->quest_was_done,
                 ] : null];
             }),
@@ -910,6 +916,14 @@ new class extends Component
                                     style="color: {{ $spin->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)' }}"
                                 >{{ $spin->multiplier }}x</span>
                             </p>
+                            {{-- Said out loud because resetting this one hands
+                                 a ticket-bought charge back, and a parent
+                                 shouldn't have to know that to press it. --}}
+                            @if ($spin->was_op)
+                                <p class="font-mono-fq text-[10px] uppercase" style="color: var(--fq-gold)">
+                                    &#9889; OP spin &mdash; reset returns the charge
+                                </p>
+                            @endif
                         @else
                             <p class="mt-[2px] text-sm text-fq-text-4">Hasn't spun today</p>
                         @endif
@@ -1022,7 +1036,7 @@ new class extends Component
                             <p class="mt-[2px] truncate text-sm font-semibold" style="color: var(--fq-chest-blue)">{{ $chest['prize'] }}</p>
                             <p class="font-mono-fq text-[10px] text-fq-text-5 uppercase">
                                 Opened {{ $chest['openedAt']->diffForHumans() }}
-                                · {{ $chest['questWasDone'] ? 'quest was cleared first' : 'quest was still open' }}
+                                · {{ $chest['questWasDone'] ? 'a quest was done first' : 'nothing done yet' }}
                             </p>
                         @else
                             <p class="mt-[2px] text-sm text-fq-text-4">Not opened today</p>

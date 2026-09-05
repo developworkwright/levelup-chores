@@ -74,12 +74,41 @@ class SpinService
      * roll, and the roll happened; a respin that returned it would let a kid
      * re-roll the 4x table until it paid. The wheel warns before it comes to
      * that — see the respin confirm on the Home page.
+     *
+     * That rule is for a kid undoing their own spin. A parent undoing it goes
+     * through {@see resetByParent()}, which does refund.
      */
     public function clearToday(Profile $profile): ?Spin
     {
         $spin = $this->today($profile);
 
         $spin?->delete();
+
+        return $spin;
+    }
+
+    /**
+     * A reset from the parent console (or `wheel:reset-spin`), which **does**
+     * hand an OP charge back.
+     *
+     * The opposite of the respin perk above, on purpose. The perk keeps the
+     * charge because the kid chose to re-roll, and returning it would let them
+     * re-roll the 4x table until it paid. A parent reset is not a re-roll a
+     * kid bought — it is a spin being undone, usually because it landed on
+     * something that was never really available — and taking a ticket-bought
+     * charge with it makes the parent's fix cost the kid money they earned.
+     *
+     * Only ever one charge on a wheel: a kid who has already armed the next
+     * spin keeps that one rather than ending up holding two, which
+     * {@see charge()} refuses on its own.
+     */
+    public function resetByParent(Profile $profile): ?Spin
+    {
+        $spin = $this->clearToday($profile);
+
+        if ($spin?->was_op) {
+            $this->charge($profile);
+        }
 
         return $spin;
     }

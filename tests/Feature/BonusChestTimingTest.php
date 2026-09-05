@@ -16,9 +16,13 @@ use Livewire\Volt\Volt;
 use Tests\TestCase;
 
 /**
- * The bonus chest rolls on a better table once the day's quest is cleared, and
- * nothing used to say so — so it was opened first thing every morning and the
- * boost went permanently unclaimed.
+ * The bonus chest rolls on a better table once a quest is done, and nothing
+ * used to say so — so it was opened first thing every morning and the boost
+ * went permanently unclaimed.
+ *
+ * Any quest earns it, the main one or a side quest off the board; the tests
+ * here mostly drive the main one because that is the card sitting next to the
+ * chest. {@see DailyChestTest} covers the side-quest path.
  *
  * @see ChestService::BOOSTED_TABLE
  */
@@ -60,7 +64,7 @@ class BonusChestTimingTest extends TestCase
             ->assertSee('Ready to open')
             // The prompt is on the page, hidden until the chest is tapped.
             ->assertSee('Hold on', escape: false)
-            ->assertSee('Do my quest first')
+            ->assertSee('Do a quest first')
             // "Open now anyway", not "Open it now anyway" — the sleep chest's
             // own CTA is "Open it", and SleepCardPagesTest asserts that string
             // is gone once it has been opened.
@@ -120,6 +124,23 @@ class BonusChestTimingTest extends TestCase
             ->assertSee('Ready · OP', escape: false)
             ->assertSee('Bonus Chest · OP', escape: false)
             ->assertSee('Your chest is OP today');
+    }
+
+    public function test_a_side_quest_flags_the_chest_as_op_as_well(): void
+    {
+        // The quest card is untouched here — this is a chore taken off the
+        // board. The kid did the work, so the chest says so and the stop that
+        // asks them to go and do some first has nothing left to ask.
+        app(ChoreService::class)->claim(
+            $this->kid,
+            Chore::where('household_id', $this->household->id)->first(),
+        );
+
+        $page = Volt::test('kid.home')
+            ->assertSee('Ready · OP', escape: false)
+            ->assertSee('Your chest is OP today');
+
+        $this->assertStringNotContainsString('data-fq-confirm="1"', $page->html());
     }
 
     public function test_the_op_flag_is_absent_while_the_quest_is_still_open(): void

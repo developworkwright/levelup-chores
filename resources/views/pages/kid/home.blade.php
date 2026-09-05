@@ -581,6 +581,10 @@ new class extends Component
             // job is to hold the *animation* still, and this decides whether
             // there is a chest to animate at all.
             'chestAvailable' => app(ChestService::class)->isAvailable($this->profile),
+            // Not $questDone: any chore in for today rolls the chest on the
+            // good table, so the copy has to ask the chest's own question
+            // rather than read the quest card's stamp.
+            'chestBoosted' => app(ChestService::class)->isBoosted($this->profile),
             'boost' => $boost,
             // Whether there is a Lucky Block to point at. The strip above the
             // run needs one boolean and the ticket count already on the
@@ -712,7 +716,7 @@ new class extends Component
                 title="Bonus Chest"
                 accent="var(--fq-chest-blue)"
                 :done="! $chestAvailable"
-                :status="$chestAvailable ? ($questDone ? 'Ready · OP' : 'Ready to open') : 'Opened today'"
+                :status="$chestAvailable ? ($chestBoosted ? 'Ready · OP' : 'Ready to open') : 'Opened today'"
                 :status-color="$chestAvailable ? 'var(--fq-chest-blue)' : 'var(--fq-lime)'"
             />
 
@@ -729,20 +733,20 @@ new class extends Component
                 wash="var(--fq-chest-blue-bg)"
                 fill="var(--fq-chest-blue-fill)"
                 kicker="Free Every Single Day"
-                :closed-title="$questDone ? 'Your chest is OP today' : 'Open today\'s bonus chest'"
-                :closed-text="$questDone
-                    ? 'Quest cleared, so this one rolls on the good table — more tickets, more perks.'
-                    : 'Tickets, points, or a perk. Clear your quest first and it rolls on a much better table.'"
+                :closed-title="$chestBoosted ? 'Your chest is OP today' : 'Open today\'s bonus chest'"
+                :closed-text="$chestBoosted
+                    ? 'You got a quest done, so this one rolls on the good table — more tickets, more perks.'
+                    : 'Tickets, points, or a perk. Do any quest first and it rolls on a much better table.'"
                 cta="Open it"
                 :prize-label="$dailyChestPrize ?? 'A prize!'"
-                :prize-sub="$questDone ? 'Bonus Chest · OP' : 'Bonus Chest'"
+                :prize-sub="$chestBoosted ? 'Bonus Chest · OP' : 'Bonus Chest'"
                 prize-property="dailyChestPrize"
                 {{-- The kids were opening this first thing every morning
-                     and never finding out the quest makes it better. So:
-                     stop once and ask, exactly as the Quests tray does. --}}
-                :confirm="$chestAvailable && ! $questDone"
+                     and never finding out that doing a quest makes it
+                     better. So: stop once and ask. --}}
+                :confirm="$chestAvailable && ! $chestBoosted"
             >
-                @if ($chestAvailable && ! $questDone)
+                @if ($chestAvailable && ! $chestBoosted)
                     <x-slot:confirm-panel>
                         <p class="mb-2 font-mono-fq text-[10px] tracking-[0.16em] uppercase" style="color: var(--fq-lime)">
                             Hold on &mdash; OP loot
@@ -753,7 +757,7 @@ new class extends Component
                                 wire:navigate
                                 class="rounded-[16px] px-[20px] py-[13px] text-center font-baloo text-[16px] font-extrabold transition hover:brightness-110"
                                 style="background: var(--fq-lime); color: var(--fq-ink)"
-                            >Do my quest first</a>
+                            >Do a quest first</a>
 
                             <button
                                 type="button"

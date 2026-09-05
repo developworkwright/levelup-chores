@@ -208,6 +208,44 @@ class QuestPageLayoutTest extends TestCase
             ->assertSee('Respin anyway');
     }
 
+    /**
+     * A parent resetting the wheel from the console has to reach a Quests page
+     * that is already open.
+     *
+     * It used to take a reload. "Spun today" was a mount snapshot and nothing
+     * moved it again, so the page went on showing "Used today — back tomorrow"
+     * over a spin that no longer existed — and since the SPIN button is
+     * rendered in the other branch, there was nothing left to tap to find out
+     * otherwise.
+     */
+    public function test_a_wheel_cleared_elsewhere_puts_the_spin_button_back(): void
+    {
+        // On top of setUp's three, which the quest hand takes.
+        Chore::factory()->for($this->household)->count(3)->create();
+
+        $page = Volt::test('kid.quests')
+            ->call('spin')
+            ->call('finishSpin')
+            ->assertSee('Spun today')
+            ->assertSee('Used today', escape: false);
+
+        // The parent console, or another tab — anything that clears the row
+        // without going back through this component.
+        app(SpinService::class)->clearToday($this->kid);
+
+        $page->call('$refresh')
+            ->assertSee('One spin waiting')
+            ->assertDontSee('Used today', escape: false)
+            ->assertSee('SPIN')
+            // Back to the top, like the respin perk leaves it: a second spin
+            // shouldn't crawl on from where the first one stopped.
+            ->assertSet('wheelDeg', 0)
+            ->assertSet('spinRevealed', false);
+
+        // Spinnable for real, not just repainted.
+        $page->call('spin')->assertSet('spinning', true);
+    }
+
     public function test_the_mystery_pill_announces_the_mystery_chore_in_both_states(): void
     {
         $service = app(ChoreService::class);

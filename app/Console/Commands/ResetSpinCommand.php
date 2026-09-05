@@ -13,7 +13,7 @@ class ResetSpinCommand extends Command
         {--kid= : Only reset one kid, by name}
         {--dry-run : Show what would change without saving anything}';
 
-    protected $description = "Clear today's bonus wheel spin so a kid can spin again — leaves points, chores, quests, and everything else untouched.";
+    protected $description = "Clear today's bonus wheel spin so a kid can spin again — an OP charge goes back in the pocket; points, chores, quests, and everything else are untouched.";
 
     public function handle(): int
     {
@@ -35,15 +35,18 @@ class ResetSpinCommand extends Command
         $spins = app(SpinService::class);
 
         foreach ($kids as $kid) {
-            $spin = $dryRun ? $spins->today($kid) : $spins->clearToday($kid);
+            // resetByParent(), like the console's own Reset button: this is a
+            // parent undoing a spin, so an OP charge goes back in the pocket.
+            $spin = $dryRun ? $spins->today($kid) : $spins->resetByParent($kid);
 
             $rows[] = [
                 $kid->name,
                 $spin ? "yes ({$spin->multiplier}x)" : 'no',
+                $spin?->was_op ? 'yes' : '—',
             ];
         }
 
-        $this->table(['Kid', 'Spin cleared'], $rows);
+        $this->table(['Kid', 'Spin cleared', 'OP charge back'], $rows);
         $this->info($dryRun ? 'Dry run — nothing was actually changed.' : 'Done.');
 
         return self::SUCCESS;

@@ -115,11 +115,34 @@ class DailyChestTest extends TestCase
 
         app(ChoreService::class)->claimQuest($kid);
 
-        $chest = $this->chests()->open($kid);
+        // Doing the work doesn't unlock the chest, it improves the roll — so
+        // the flag has to be captured to make that auditable.
+        $this->assertTrue($this->chests()->open($kid)->quest_was_done);
+    }
 
-        // Clearing the quest doesn't unlock the chest, it improves the roll —
-        // so the flag has to be captured to make that auditable.
-        $this->assertTrue($chest->quest_was_done);
+    public function test_a_side_quest_boosts_the_chest_just_like_the_main_one(): void
+    {
+        $household = Household::factory()->create();
+        $chores = Chore::factory()->for($household)->count(3)->create();
+        $kid = Profile::factory()->for($household)->create();
+
+        $this->assertFalse($this->chests()->isBoosted($kid));
+
+        // A chore off the board, with the quest card left untouched. It is
+        // still work done today, so it still moves the chest onto the good
+        // table — the main quest has no special standing here.
+        app(ChoreService::class)->claim($kid, $chores->last());
+
+        $this->assertTrue($this->chests()->isBoosted($kid));
+        $this->assertTrue($this->chests()->open($kid)->quest_was_done);
+    }
+
+    public function test_a_chest_opened_on_a_day_with_nothing_done_rolls_on_the_base_table(): void
+    {
+        $kid = $this->kid();
+
+        $this->assertFalse($this->chests()->isBoosted($kid));
+        $this->assertFalse($this->chests()->open($kid)->quest_was_done);
     }
 
     public function test_a_ticket_reward_lands_in_the_balance(): void

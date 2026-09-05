@@ -169,6 +169,70 @@ class SpinFlowTest extends TestCase
         $this->assertContains($second->multiplier, [2, 3]);
     }
 
+    /**
+     * The other half of the rule above: a parent undoing a spin is not a kid
+     * re-rolling one, so the charge they paid a ticket for comes back.
+     */
+    public function test_a_parent_reset_hands_the_op_charge_back(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->count(6)->create();
+
+        $service = app(SpinService::class);
+        $service->charge($kid);
+        $service->spin($kid->refresh());
+
+        $this->assertFalse($service->isCharged($kid->refresh()));
+
+        $cleared = $service->resetByParent($kid->refresh());
+
+        $this->assertTrue($cleared->was_op);
+        $this->assertTrue($service->isCharged($kid->refresh()));
+
+        // And it is a real charge, not just a flag: the next spin rolls on the
+        // table the ticket bought and spends it again.
+        $second = $service->spin($kid->refresh());
+
+        $this->assertTrue($second->was_op);
+        $this->assertFalse($service->isCharged($kid->refresh()));
+    }
+
+    /** A plain spin has no charge to give back, so a reset invents none. */
+    public function test_a_parent_reset_of_a_plain_spin_leaves_the_wheel_uncharged(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->count(6)->create();
+
+        $service = app(SpinService::class);
+        $service->spin($kid);
+        $service->resetByParent($kid->refresh());
+
+        $this->assertFalse($service->isCharged($kid->refresh()));
+    }
+
+    /**
+     * The Reset button is easy to press twice, and the second press has no
+     * spin to undo — it must not touch the charge the first one handed back.
+     */
+    public function test_a_second_parent_reset_leaves_the_returned_charge_alone(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        Chore::factory()->for($household)->count(6)->create();
+
+        $service = app(SpinService::class);
+        $service->charge($kid);
+        $service->spin($kid->refresh());
+        $service->resetByParent($kid->refresh());
+
+        $armedAt = $kid->refresh()->op_spin_armed_at;
+
+        $this->assertNull($service->resetByParent($kid->refresh()));
+        $this->assertEquals($armedAt, $kid->refresh()->op_spin_armed_at);
+    }
+
     /** Charges don't stack, and a perk that couldn't be applied isn't spent. */
     public function test_a_second_charge_is_refused_and_stays_in_the_pocket(): void
     {

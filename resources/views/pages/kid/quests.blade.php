@@ -840,6 +840,39 @@ new class extends Component
         $this->spinning = true;
     }
 
+    /**
+     * Puts the wheel's snapshot back in step with the database.
+     *
+     * `$spinRevealed` is set in mount() and never moved again on its own, and
+     * today's spin can disappear out from under it: a parent resets the wheel
+     * from the console, or the kid spends a Wheel Respin in another tab. The
+     * page went on showing "Used today — back tomorrow" over a result that no
+     * longer existed — and since the SPIN button is rendered in the other
+     * branch, there was nothing left to tap to find out otherwise. Navigating
+     * away and back fixed it, which is exactly the kind of "it's broken until
+     * you reload" a kid will not work out on their own.
+     *
+     * Skipped mid-animation: the row is written before the wheel finishes
+     * turning, so reading it there would jump the page to the result six
+     * seconds early. `$spinning` is what the markup reads first anyway.
+     *
+     * A wheel parked on a result that has been cleared goes back to zero, the
+     * same as the respin perk leaves it — the next spin should start from the
+     * top rather than crawl on from wherever the last one stopped.
+     */
+    private function reconcileWheel(bool $spunToday): void
+    {
+        if ($this->spinning) {
+            return;
+        }
+
+        if ($this->spinRevealed && ! $spunToday) {
+            $this->wheelDeg = 0;
+        }
+
+        $this->spinRevealed = $spunToday;
+    }
+
     public function finishSpin(): void
     {
         $this->spinning = false;
@@ -1112,6 +1145,12 @@ new class extends Component
         $questSentBack = $questCompletion?->status === CompletionStatus::Rejected;
 
         $boost = $spin->today($this->profile);
+
+        // Before wheelChores(), which forces in whatever today's spin landed
+        // on: with the spin gone there is nothing to force, and the wheel this
+        // render draws is the one the next spin will actually turn.
+        $this->reconcileWheel($boost !== null);
+
         $wheelChores = $this->wheelChores();
         $questBoosted = $boost && $boost->chore_id === $quest->chore_id;
 

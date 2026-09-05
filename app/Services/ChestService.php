@@ -15,8 +15,8 @@ use Illuminate\Support\Arr;
  * The daily bonus chest — one per kid per household-day, every day.
  *
  * Everyone gets one whether or not they've done anything, because the habit of
- * turning up is worth building. Clearing the day's quest doesn't unlock it, it
- * improves the roll — so effort shifts the odds rather than the entitlement.
+ * turning up is worth building. Doing the work doesn't unlock it, it improves
+ * the roll — so effort shifts the odds rather than the entitlement.
  *
  * Independent of the streak chest (see ChoreService): a milestone day hands
  * over both, because the milestone is meant to add to the day rather than
@@ -33,7 +33,7 @@ class ChestService
     public const KIND_XP = 'xp';
 
     /**
-     * Rolled when the day's quest is still outstanding.
+     * Rolled when the kid has nothing in for today.
      *
      * @var array<int, array{kind: string, amount: int, weight: int}>
      */
@@ -46,8 +46,8 @@ class ChestService
     ];
 
     /**
-     * Rolled once the quest is cleared — more tickets, and a perk lands far
-     * more often.
+     * Rolled once the day is earned — more tickets, and a perk lands far more
+     * often.
      *
      * @var array<int, array{kind: string, amount: int, weight: int}>
      */
@@ -65,6 +65,7 @@ class ChestService
         private LedgerService $ledger,
         private PerkInventoryService $inventory,
         private BadgeService $badges,
+        private StreakService $streaks,
     ) {}
 
     public function openedToday(Profile $profile): ?DailyChest
@@ -84,6 +85,27 @@ class ChestService
         return ! $this->openedToday($profile);
     }
 
+    /**
+     * Whether today's chest rolls on the good table.
+     *
+     * **Any chore the kid has put in today boosts it — the main quest has no
+     * special standing here.** Gating the boost on the quest meant a kid who
+     * cleared four side quests and left the quest card alone rolled on the
+     * same table as one who did nothing all day, which is the wrong lesson
+     * about doing the work. The quest keeps its own pull through the bold
+     * card, the charm and the wheel.
+     *
+     * The generous read ({@see StreakService::streakDaySecuredToday()}): work
+     * sitting in the approvals queue counts. That is parity with what it
+     * replaced — a quest boosted the chest the moment it was *claimed*, never
+     * on a parent signing it off — and a chest that rolls worse because nobody
+     * got round to the queue is blaming the kid for somebody else's inbox.
+     */
+    public function isBoosted(Profile $profile): bool
+    {
+        return $this->streaks->streakDaySecuredToday($profile);
+    }
+
     /** Rolls, grants and records. Null when there's no chest to open. */
     public function open(Profile $profile): ?DailyChest
     {
@@ -91,7 +113,7 @@ class ChestService
             return null;
         }
 
-        $questDone = app(ChoreService::class)->isQuestDoneToday($profile);
+        $questDone = $this->isBoosted($profile);
         $roll = $this->roll($profile, $questDone);
 
         $chest = DailyChest::create([
