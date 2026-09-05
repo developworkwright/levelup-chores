@@ -15,6 +15,31 @@
         {{ $track['title'] }}
     </span>
 
+    {{-- Hear it before it goes in the list.
+
+         The reason the row has three controls instead of two: the library is a
+         hundred files named after the game they came out of, and a kid choosing
+         between two of them has no way to tell which is which without playing
+         one. It reaches into the same store the header plays from, so testing a
+         song here *is* putting it on — there is never a second thing making
+         noise, and the bar at the top of the card is where it gets scrubbed. --}}
+    <button
+        type="button"
+        x-data
+        {{-- The id read off the element rather than captured in an `x-data`
+             object. Livewire morphs these rows as songs go in and out of the
+             open list, and it rewrites attributes while leaving an
+             already-evaluated `x-data` expression alone — so a captured id is
+             one that can quietly go stale, and a dataset read cannot. --}}
+        data-track="{{ $track['id'] }}"
+        @click="$store.music.preview($el.dataset.track)"
+        :aria-pressed="$store.music.isPlaying($el.dataset.track)"
+        :aria-label="($store.music.isPlaying($el.dataset.track) ? 'Stop ' : 'Play ') + @js($track['title'])"
+        class="shrink-0 rounded-[10px] border border-fq-line-2 px-[10px] py-[6px] text-[12px] transition"
+        :class="$store.music.isPlaying($el.dataset.track) ? 'text-fq-lime' : 'text-fq-text-4 hover:text-fq-text'"
+        x-text="$store.music.isPlaying($el.dataset.track) ? '■' : '▶'"
+    ></button>
+
     {{-- Already in the list: still drawn, and drawn as done rather than hidden.
          A library that quietly loses rows as songs are added is one a kid keeps
          scrolling back through looking for what they think they missed. --}}

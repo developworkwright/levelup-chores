@@ -146,30 +146,67 @@
                 <template x-if="music.playlists.length">
                     <div class="flex flex-col gap-[3px] border-b border-fq-line pb-2">
                         <template x-for="list in music.playlists" :key="list.id">
-                            <button
-                                type="button"
-                                {{-- Tapping the one already playing leaves it,
-                                     the same "tap it again" as the albums. --}}
-                                @click="music.playPlaylist(list.id)"
-                                :title="list.name"
-                                :aria-pressed="music.playlistId === list.id"
-                                class="flex w-full items-center gap-2 rounded-[10px] px-2 py-[9px] text-left text-[13px] transition"
-                                :class="music.playlistId === list.id
-                                    ? 'bg-fq-sunk font-semibold text-fq-text'
-                                    : 'text-fq-text-3 hover:text-fq-text'"
-                            >
-                                <span
-                                    class="w-[12px] shrink-0 text-[10px]"
-                                    :class="music.playlistId === list.id ? 'text-fq-lime' : 'text-fq-text-5'"
-                                >&#9654;</span>
+                            <div>
+                                <button
+                                    type="button"
+                                    {{-- Tapping the one already playing leaves it,
+                                         the same "tap it again" as the albums. --}}
+                                    @click="music.playPlaylist(list.id)"
+                                    :title="list.name"
+                                    :aria-expanded="music.playlistId === list.id"
+                                    :aria-pressed="music.playlistId === list.id"
+                                    class="flex w-full items-center gap-2 rounded-[10px] px-2 py-[9px] text-left text-[13px] transition"
+                                    :class="music.playlistId === list.id
+                                        ? 'bg-fq-sunk font-semibold text-fq-text'
+                                        : 'text-fq-text-3 hover:text-fq-text'"
+                                >
+                                    <span
+                                        class="w-[12px] shrink-0 text-[10px]"
+                                        :class="music.playlistId === list.id ? 'text-fq-lime' : 'text-fq-text-5'"
+                                    >&#9654;</span>
 
-                                <span class="truncate" x-text="list.name"></span>
+                                    <span class="truncate" x-text="list.name"></span>
 
-                                <span
-                                    class="ml-auto shrink-0 font-mono-fq text-[10px] text-fq-text-5"
-                                    x-text="countIn(list)"
-                                ></span>
-                            </button>
+                                    <span
+                                        class="ml-auto shrink-0 font-mono-fq text-[10px] text-fq-text-5"
+                                        x-text="countIn(list)"
+                                    ></span>
+                                </button>
+
+                                {{-- What is actually in the list that is on.
+
+                                     A playlist used to be a name and a number,
+                                     and everything about what it was playing
+                                     had to be inferred from the one song title
+                                     in the header — so "what is on this list?"
+                                     and "how far through is it?" were questions
+                                     the picker could not answer about the thing
+                                     it was playing.
+
+                                     Only the playing one opens. There is no
+                                     second state to be in: tapping a list is
+                                     how you start it, so a list that could be
+                                     opened without being played would need a
+                                     second control on a row that is already
+                                     three things wide on a phone.
+
+                                     `x-show` rather than a `template x-if`,
+                                     which is how the rest of this panel does
+                                     it: an `x-if` here reconstructs every row
+                                     each time the playing list changes, and
+                                     the songs paint without their handlers. --}}
+                                <div
+                                    x-show="music.playlistId === list.id"
+                                    class="flex flex-col gap-[3px]"
+                                >
+                                    <template x-for="track in music.songsOf(list)" :key="track.id">
+                                        {{-- `in-queue`, so a tap starts the
+                                             list here rather than ending it —
+                                             see the component. --}}
+                                        <x-music-song indent in-queue />
+                                    </template>
+                                </div>
+                            </div>
                         </template>
                     </div>
                 </template>
@@ -254,25 +291,71 @@
                 </div>
             </div>
 
-            {{-- Only while a playlist is on, because neither control means
+            {{-- Only while a playlist is on, because none of these means
                  anything to a single song on repeat: there is nothing to
-                 shuffle and nothing to skip to. --}}
+                 shuffle, nothing to skip to, nothing behind you, and it is
+                 already repeating. --}}
             <div
                 x-show="music.inPlaylist"
                 x-cloak
-                class="mt-3 flex shrink-0 items-center gap-2 border-t border-fq-line pt-3"
+                {{-- Wrapping, because four of these do not fit across the 288px
+                     the dropdown is: without it the last one is clipped by the
+                     panel rather than dropping to a second row. --}}
+                class="mt-3 flex shrink-0 flex-wrap items-center gap-2 border-t border-fq-line pt-3"
             >
+                {{-- Both of these are toggles, and both used to say so in text
+                     colour alone — which on a 12px label in a dark panel is not
+                     a difference anybody notices, and is no difference at all
+                     to a kid who cannot pick lime out of grey.
+
+                     Lit the way the reaction pills on a quote are: a coloured
+                     border and a filled ground under it, so the state is a
+                     shape as well as a colour, plus `aria-pressed` for anybody
+                     being read to. --}}
                 <button
                     type="button"
                     @click="music.toggleShuffle()"
                     :aria-pressed="music.shuffle"
-                    class="rounded-[10px] border border-fq-line-2 px-[10px] py-[6px] text-[12px] transition"
-                    :class="music.shuffle ? 'text-fq-lime' : 'text-fq-text-4 hover:text-fq-text'"
+                    class="rounded-[10px] border px-[10px] py-[6px] text-[12px] transition"
+                    :class="music.shuffle ? 'border-fq-lime font-bold text-fq-lime' : 'border-fq-line-2 text-fq-text-4 hover:text-fq-text'"
+                    :style="music.shuffle ? 'background: var(--fq-tab-active)' : ''"
                 >&#8646; Shuffle</button>
+
+                {{-- Beside shuffle, because they are the two answers to the
+                     same question — what happens when this song ends — and not
+                     transport controls like the two after them.
+
+                     Kept off the single-song case deliberately: a song outside
+                     a playlist already repeats itself, so a Repeat button there
+                     would be a lit control that changes nothing. --}}
+                <button
+                    type="button"
+                    @click="music.toggleRepeat()"
+                    :aria-pressed="music.repeatOne"
+                    :aria-label="music.repeatOne
+                        ? 'Stop repeating this song'
+                        : 'Repeat this song over and over'"
+                    class="rounded-[10px] border px-[10px] py-[6px] text-[12px] transition"
+                    :class="music.repeatOne ? 'border-fq-lime font-bold text-fq-lime' : 'border-fq-line-2 text-fq-text-4 hover:text-fq-text'"
+                    :style="music.repeatOne ? 'background: var(--fq-tab-active)' : ''"
+                >&#8635; Repeat one</button>
+
+                {{-- Back before Next, in the order every player anybody has
+                     ever used puts them. It is two controls in one, and the
+                     split is the store's — see BACK_RESTARTS_AT: a press in
+                     the first moments of a song means the wrong song came on,
+                     and a press after that means play that again. --}}
+                <button
+                    type="button"
+                    @click="music.back()"
+                    aria-label="Back a song"
+                    class="rounded-[10px] border border-fq-line-2 px-[10px] py-[6px] text-[12px] text-fq-text-4 transition hover:text-fq-text"
+                >&#9664;&#9664; Back</button>
 
                 <button
                     type="button"
                     @click="music.advance()"
+                    aria-label="Next song"
                     class="rounded-[10px] border border-fq-line-2 px-[10px] py-[6px] text-[12px] text-fq-text-4 transition hover:text-fq-text"
                 >Next &#9654;&#9654;</button>
             </div>

@@ -163,6 +163,40 @@ class PlaylistTest extends TestCase
         $this->assertSame(['One', 'Three'], $playlist->fresh()->tracks->pluck('title')->all());
     }
 
+    public function test_a_song_can_be_heard_before_it_goes_in_the_playlist(): void
+    {
+        // The library is a hundred files named after the game they came out of,
+        // so choosing between two of them is guesswork until one is playing.
+        $this->library(['Mossy_Save_Point.mp3']);
+        $kid = $this->loginKid();
+
+        // A list has to be open for the library to be drawn at all — mount()
+        // opens the only one there is.
+        Playlist::factory()->create(['profile_id' => $kid->id]);
+
+        Volt::test('playlist-builder')
+            // The row's own play button, reaching into the same store the
+            // header plays from, so testing a song is never a second thing
+            // making noise.
+            ->assertSee('$store.music.preview($el.dataset.track)', false)
+            ->assertSee('data-track="mossy-save-point"', false)
+            // And the bar above the library that says where in the song it is.
+            ->assertSee('Seek through the song you are testing')
+            ->assertSee('$store.music.scrubTo($event.target.value)', false)
+            ->assertSee('$store.music.seek($event.target.value)', false);
+    }
+
+    public function test_the_preview_bar_is_only_drawn_where_there_is_a_library_under_it(): void
+    {
+        // No playlist open, no library, and so nothing for a play button to
+        // start — a transport bar with nothing to play is a control that has
+        // to explain itself.
+        $this->library(['Mossy_Save_Point.mp3']);
+        $this->loginKid();
+
+        Volt::test('playlist-builder')->assertDontSee('Seek through the song you are testing');
+    }
+
     public function test_a_kid_cannot_touch_another_kids_playlist(): void
     {
         $this->library(['Mossy_Save_Point.mp3']);
@@ -344,6 +378,27 @@ class PlaylistTest extends TestCase
         Volt::test('kid.quests')
             ->assertSee('Chore Power')
             ->assertDontSee('Sibling Sounds');
+    }
+
+    public function test_the_picker_opens_the_playlist_that_is_playing(): void
+    {
+        // A playlist used to be a name and a number in the header: what was in
+        // it, and how far through it was, were questions the picker could not
+        // answer about the very list it was playing.
+        $this->library(['Mossy_Save_Point.mp3']);
+        $kid = $this->loginKid();
+
+        $mine = Playlist::factory()->create(['profile_id' => $kid->id, 'name' => 'Chore Power']);
+        $this->service()->add($mine, 'mossy-save-point');
+
+        Volt::test('kid.quests')
+            ->assertSee('Chore Power')
+            ->assertSee('music.songsOf(list)', false)
+            // Picking a song out of the list starts the list there; reaching
+            // past it into the library below still ends it. Both handlers are
+            // in the panel, which is the whole point of the distinction.
+            ->assertSee('music.jumpTo(track.id)', false)
+            ->assertSee('music.select(track.id)', false);
     }
 
     public function test_both_consoles_draw_the_same_builder(): void

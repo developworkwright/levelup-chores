@@ -5,14 +5,20 @@
      lives here rather than being written out twice and drifting.
 
      `indent` is for the album case, where the row sits under a heading it
-     belongs to. --}}
-@props(['indent' => false])
+     belongs to — and for the songs of the open playlist, which sit under
+     theirs.
+
+     `inQueue` is which of the two meanings a tap has, and it is not a detail:
+     reaching past a playlist for a song in the library means "play that
+     instead" and ends the list, while picking a song out of the list itself
+     means "start here". See the store's select() and jumpTo(). --}}
+@props(['indent' => false, 'inQueue' => false])
 
 <button
     type="button"
     {{-- Picking a song while the music is off selects it without starting
          anything: the picker is also how you choose what plays next time. --}}
-    @click="music.select(track.id)"
+    @click="{{ $inQueue ? 'music.jumpTo(track.id)' : 'music.select(track.id)' }}"
     :title="track.title"
     class="flex w-full items-center gap-2 rounded-[10px] py-[9px] text-left text-[13px] transition {{ $indent ? 'pr-2 pl-[26px]' : 'px-2' }}"
     :class="track.id === music.trackId

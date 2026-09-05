@@ -324,6 +324,47 @@ class MusicTest extends TestCase
             ->assertSee('music.seek($event.target.value)', false);
     }
 
+    public function test_the_kid_header_can_step_back_as_well_as_forward(): void
+    {
+        // A playlist with only Next on it is one you cannot un-skip: a kid who
+        // taps past the song they were waiting for has to sit through the rest
+        // of the list to reach it again.
+        $this->library(['Mossy_Save_Point.mp3']);
+        $this->loginKid();
+
+        Volt::test('kid.quests')
+            ->assertSee('music.back()', false)
+            ->assertSee('Back a song')
+            // Back sits before Next, the way it does on every player anybody
+            // has ever used.
+            ->assertSeeInOrder(['music.back()', 'music.advance()'], false);
+    }
+
+    public function test_the_kid_header_can_hold_a_playlist_on_one_song(): void
+    {
+        // The one thing a playlist could not do: a kid who wants the song they
+        // like eleven times had to leave the list to get it.
+        $this->library(['Mossy_Save_Point.mp3']);
+        $this->loginKid();
+
+        Volt::test('kid.quests')
+            ->assertSee('music.toggleRepeat()', false)
+            ->assertSee('Repeat this song over and over')
+            // Lit as a shape and not only a colour, and said out loud for
+            // anybody being read to — text colour alone on a 12px label is no
+            // difference a kid notices.
+            ->assertSee(':aria-pressed="music.repeatOne"', false)
+            ->assertSee("music.repeatOne ? 'border-fq-lime font-bold text-fq-lime'", false)
+            // Beside shuffle rather than beside the transport: the two of them
+            // answer the same question about what happens when a song ends.
+            ->assertSeeInOrder([
+                'music.toggleShuffle()',
+                'music.toggleRepeat()',
+                'music.back()',
+                'music.advance()',
+            ], false);
+    }
+
     public function test_the_kid_header_is_told_nothing_about_where_the_songs_are_stored(): void
     {
         $this->library(['Mossy_Save_Point.mp3']);

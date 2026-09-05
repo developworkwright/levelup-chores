@@ -504,6 +504,12 @@ new class extends Component
                 </span>
             </div>
 
+            {{-- Above the library rather than beside the playlist, because it
+                 belongs to the choosing: every row below it has a play button,
+                 and this is where the song those buttons start gets read and
+                 scrubbed. --}}
+            <x-music-preview />
+
             <div class="flex flex-col gap-[6px]">
                 @foreach ($loose as $track)
                     <x-music-pick :track="$track" :chosen="in_array($track['id'], $chosen, true)" />

@@ -10,9 +10,9 @@
  * page in both consoles. The header control is just a view onto that store,
  * and re-attaches to it on each navigation.
  *
- * Five keys in localStorage, so the choice survives a real page load too:
- * `fq-music-on`, `fq-music-track`, `fq-music-volume`, `fq-music-playlist` and
- * `fq-music-shuffle`.
+ * Six keys in localStorage, so the choice survives a real page load too:
+ * `fq-music-on`, `fq-music-track`, `fq-music-volume`, `fq-music-playlist`,
+ * `fq-music-shuffle` and `fq-music-repeat`.
  */
 
 const KEY_ON = 'fq-music-on';
@@ -30,6 +30,17 @@ const KEY_VOLUME = 'fq-music-volume';
  */
 const KEY_PLAYLIST = 'fq-music-playlist';
 const KEY_SHUFFLE = 'fq-music-shuffle';
+
+/**
+ * Whether the playlist is holding on one song instead of moving through.
+ *
+ * Beside shuffle rather than folded into it: they are the two halves of the
+ * same question — what happens when this song ends — and a kid can want either
+ * one on a list they made yesterday. Remembered for the same reason shuffle is,
+ * and given away by a lit button so a playlist that refuses to move on is never
+ * a mystery.
+ */
+const KEY_REPEAT = 'fq-music-repeat';
 
 /**
  * The newest song this browser has been shown, as a unix timestamp.
@@ -63,6 +74,24 @@ const SESSION = Math.random().toString(36).slice(2);
  * anyone does is turn it off and never come back.
  */
 const DEFAULT_VOLUME = 0.35;
+
+/**
+ * Seconds into a song after which Back means "play that again" rather than
+ * "wrong song".
+ *
+ * The two meanings are genuinely different and every player a kid has ever
+ * used splits them here: the press in the first moments of a song is almost
+ * always a miss, and every one after it is a request for the bit they liked.
+ */
+const BACK_RESTARTS_AT = 3;
+
+/**
+ * How many songs back the playlist remembers having played.
+ *
+ * A cap rather than a full log: nobody presses Back through an afternoon of
+ * listening, and without one this grows for the rest of the page's life.
+ */
+const HISTORY_DEPTH = 50;
 
 /** Private-mode Safari throws on both of these rather than returning null. */
 function read(key, fallback = null) {
@@ -132,6 +161,30 @@ document.addEventListener('alpine:init', () => {
         playlistId: Number(read(KEY_PLAYLIST)) || null,
 
         shuffle: read(KEY_SHUFFLE) === '1',
+
+        /**
+         * Hold on this one song rather than playing the list through.
+         *
+         * Only ever a fact about a playlist: a single song already repeats
+         * itself, so the button that sets this is drawn with the playlist
+         * controls and nowhere else.
+         */
+        repeatOne: read(KEY_REPEAT) === '1',
+
+        /**
+         * Songs the playlist has moved on from, newest last.
+         *
+         * Only ever read by back(), and it only earns its keep once shuffle is
+         * on: in running order "the one before" is a fact about the queue, but
+         * a shuffled playlist has no before — the song that actually just
+         * played is the only honest answer, and nothing else here remembers it.
+         *
+         * Not written anywhere. A kid coming back tomorrow is not reaching
+         * backwards into yesterday.
+         *
+         * @type {Array<string>}
+         */
+        history: [],
 
         /**
          * True when the browser refused to resume a remembered song without a
@@ -228,15 +281,18 @@ document.addEventListener('alpine:init', () => {
         },
 
         /**
-         * The songs of the playing playlist, in order, as real tracks.
+         * Any playlist's songs, in its own order, as real tracks.
          *
          * Ids the library no longer has are already gone before this arrives —
          * the server drops them — so this is a map rather than a filter in all
          * but the moment between a parent deleting a song and the next render.
+         *
+         * Takes a playlist rather than reading the playing one, because the
+         * picker draws the songs of the list it is showing and the player asks
+         * about the list it is playing. Those are the same list today and there
+         * is no reason for the answer to depend on that staying true.
          */
-        queue() {
-            const playlist = this.playlist();
-
+        songsOf(playlist) {
             if (! playlist) {
                 return [];
             }
@@ -244,6 +300,11 @@ document.addEventListener('alpine:init', () => {
             return playlist.trackIds
                 .map((id) => this.tracks.find((track) => track.id === id))
                 .filter(Boolean);
+        },
+
+        /** What is actually playing through, in order. */
+        queue() {
+            return this.songsOf(this.playlist());
         },
 
         /** True while a playlist is what is playing, rather than one song. */
@@ -299,6 +360,40 @@ document.addEventListener('alpine:init', () => {
         },
 
         /**
+         * Hold on this song, or let the list carry on.
+         *
+         * The element is moved here and not only in play(), which is the whole
+         * difference between a toggle and a setting: a kid presses this in the
+         * middle of the song they want to keep, and a flag that only took
+         * effect on the next play() would do nothing until the list had already
+         * moved off it.
+         */
+        toggleRepeat() {
+            this.repeatOne = ! this.repeatOne;
+            write(KEY_REPEAT, this.repeatOne ? '1' : '0');
+
+            if (this.el) {
+                this.el.loop = this.loops();
+            }
+        },
+
+        /**
+         * Whether the element should start the same file again when it reaches
+         * the end, rather than reporting that it ended.
+         *
+         * A single song repeats itself; a playlist moves on unless it has been
+         * asked to hold. A playlist of one loops either way — there is nothing
+         * to advance to, and the alternative is a song that stops dead.
+         *
+         * It matters that this is false in every other case: `ended` is the
+         * playlist's whole advance mechanism, and a looping element simply
+         * starts again and never reports the end of anything.
+         */
+        loops() {
+            return this.repeatOne || this.queue().length < 2;
+        },
+
+        /**
          * The next song in the playlist, wrapping at the end.
          *
          * Shuffle picks any *other* song rather than any song, so a two-song
@@ -315,6 +410,17 @@ document.addEventListener('alpine:init', () => {
 
             const index = queue.findIndex((track) => track.id === this.trackId);
 
+            /*
+             * Remembered here rather than in select(), which is also how a kid
+             * picks a song by hand — and a song they chose for themselves is
+             * not a song the playlist moved past.
+             */
+            this.history.push(this.trackId);
+
+            if (this.history.length > HISTORY_DEPTH) {
+                this.history.shift();
+            }
+
             let next = (index + 1) % queue.length;
 
             if (this.shuffle && queue.length > 1) {
@@ -325,6 +431,100 @@ document.addEventListener('alpine:init', () => {
 
             this.select(queue[next].id, true);
             this.play();
+        },
+
+        /**
+         * Back a song — or back to the start of this one.
+         *
+         * See BACK_RESTARTS_AT for the split. Drawn only while a playlist is
+         * on, because a single song on repeat has nothing behind it and the
+         * scrubber beside it already covers starting it again.
+         */
+        back() {
+            if (this.position > BACK_RESTARTS_AT && this.seekable) {
+                this.seek(0);
+
+                return;
+            }
+
+            const queue = this.queue();
+
+            if (queue.length === 0) {
+                this.seek(0);
+
+                return;
+            }
+
+            /*
+             * What actually played, when there is any — see history. Checked
+             * against the queue rather than taken on trust, because a song can
+             * leave the playlist between playing and being asked for again.
+             */
+            const played = this.history.pop();
+
+            if (played !== undefined && queue.some((track) => track.id === played)) {
+                this.select(played, true);
+                this.play();
+
+                return;
+            }
+
+            const index = queue.findIndex((track) => track.id === this.trackId);
+
+            // Wrapping off the top onto the last song, which is the same loop
+            // advance() already makes off the bottom.
+            const before = (index - 1 + queue.length) % queue.length;
+
+            this.select(queue[before].id, true);
+            this.play();
+        },
+
+        /**
+         * Play one song straight off a list on the page — the test-listen the
+         * playlist builder is built around.
+         *
+         * Tapping the one already playing stops it, the same "tap it again"
+         * the picker's albums and playlists answer to. select() restarts the
+         * music by itself when it is already on, so play() is only reached for
+         * the case where it is not — calling both would start the file twice.
+         */
+        preview(id) {
+            if (this.trackId === id) {
+                this.toggle();
+
+                return;
+            }
+
+            this.select(id);
+
+            if (! this.playing) {
+                this.play();
+            }
+        },
+
+        /**
+         * Jump to a song inside the playlist that is playing, without ending
+         * it.
+         *
+         * The opposite of select()'s default, and the distinction is the whole
+         * reason this exists: reaching past a playlist for a song in the
+         * library means "play that instead", and it ends the list. Picking a
+         * song *out of the list itself* means "start here" — a playlist that
+         * quietly stopped because a kid skipped to track four of it would look
+         * like the app losing their place.
+         */
+        jumpTo(id) {
+            if (! this.queue().some((track) => track.id === id)) {
+                return;
+            }
+
+            this.select(id, true);
+            this.play();
+        },
+
+        /** True while this particular song is the one making noise. */
+        isPlaying(id) {
+            return this.playing && this.trackId === id;
         },
 
         audio() {
@@ -419,18 +619,10 @@ document.addEventListener('alpine:init', () => {
                 this.scrubAt = null;
             }
 
-            /*
-             * A single song repeats itself; a playlist moves on.
-             *
-             * Set here rather than once at construction because it changes
-             * whenever a kid joins or leaves a playlist — and it has to be
-             * false for `ended` to fire at all, since a looping element simply
-             * starts again and never reports the end of anything.
-             *
-             * A playlist of one still loops. There is nothing to advance to,
-             * and the alternative is a song that stops dead.
-             */
-            audio.loop = this.queue().length < 2;
+            // Set here rather than once at construction because it changes
+            // whenever a kid joins a playlist, leaves one, or asks to hold on
+            // a song — see loops().
+            audio.loop = this.loops();
 
             this.playing = true;
             this.blocked = false;
