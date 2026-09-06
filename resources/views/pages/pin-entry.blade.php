@@ -107,7 +107,25 @@ new class extends Component
     }
 }; ?>
 
-<div class="mx-auto flex max-w-[400px] flex-col items-center gap-6 px-5 pt-16 pb-10">
+{{-- The keypad below is the primary input and is unchanged — it is what a
+     kid taps on a phone. On anything with a keyboard, typing the code is
+     the faster path, so digits and Backspace are forwarded to the same two
+     component methods the buttons call.
+
+     Nothing is tracked client side: Alpine only relays the keystroke and
+     the PIN still lives on the server, so the lockout and rate-limit guards
+     in press() cover typed input exactly as they cover taps. Key repeat is
+     ignored so a held-down digit can't fill the code on its own, and
+     modified keystrokes are left alone so browser shortcuts still work. --}}
+<div
+    class="mx-auto flex max-w-[400px] flex-col items-center gap-6 px-5 pt-16 pb-10"
+    x-data
+    @keydown.window="
+        if ($event.repeat || $event.metaKey || $event.ctrlKey || $event.altKey) return;
+        if (/^[0-9]$/.test($event.key)) { $event.preventDefault(); $wire.press($event.key); }
+        else if ($event.key === 'Backspace') { $event.preventDefault(); $wire.backspace(); }
+    "
+>
     <div
         class="flex h-[76px] w-[76px] items-center justify-center rounded-[24px] font-baloo text-[34px] font-extrabold text-fq-bg"
         style="background:{{ $profile->color->cssVar() }}"

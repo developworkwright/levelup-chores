@@ -102,4 +102,35 @@ class AuthTest extends TestCase
 
         $this->get('/kid/quests')->assertForbidden();
     }
+
+    public function test_backspace_clears_the_last_digit(): void
+    {
+        $kid = $this->makeKid('1234');
+
+        Volt::test('pin-entry', ['profile' => $kid])
+            ->call('press', '1')
+            ->call('press', '9')
+            ->call('backspace')
+            ->assertSet('pin', '1')
+            ->call('press', '2')
+            ->call('press', '3')
+            ->call('press', '4')
+            ->assertRedirect('/kid');
+
+        $this->assertAuthenticatedAs($kid, 'profile');
+    }
+
+    public function test_pin_entry_accepts_typed_digits_alongside_the_keypad(): void
+    {
+        $kid = $this->makeKid('1234');
+
+        $component = Volt::test('pin-entry', ['profile' => $kid]);
+
+        // The keypad is what a phone taps and must stay on the page...
+        $component->assertSeeHtml('wire:click="press(\'0\')"');
+
+        // ...while a keyboard routes into the same two methods.
+        $component->assertSeeHtml('$wire.press($event.key)');
+        $component->assertSeeHtml('$wire.backspace()');
+    }
 }
