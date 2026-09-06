@@ -42,12 +42,33 @@
 
     {{-- Already in the list: still drawn, and drawn as done rather than hidden.
          A library that quietly loses rows as songs are added is one a kid keeps
-         scrolling back through looking for what they think they missed. --}}
+         scrolling back through looking for what they think they missed.
+
+         And it is the way back out. It used to be a label, which put the two
+         halves of editing a list at opposite ends of the page: songs went in
+         from the library down here and came out from the playlist up there, so
+         undoing the tap you had just made meant scrolling past everything you
+         had already added. Tapping it again is the same idiom the play button,
+         the albums and the playlists all answer to.
+
+         The word swaps under a pointer, which is the whole of how a parent
+         discovers it. A phone never sees that state and does not need to: on
+         touch this is the tap-it-again the rest of the page has already
+         taught, and the button says what it does out loud for anybody being
+         read to. --}}
     @if ($chosen)
-        <span
-            class="shrink-0 rounded-[10px] px-[10px] py-[6px] font-mono-fq text-[10px] text-fq-lime"
-            aria-label="{{ $track['title'] }} is already in this playlist"
-        >&check; IN</span>
+        <button
+            type="button"
+            wire:click="dropSong(@js($track['id']))"
+            title="Take {{ $track['title'] }} out"
+            aria-label="Take {{ $track['title'] }} out of this playlist"
+            {{-- Fixed width, so the row does not twitch as the word under the
+                 pointer changes length. --}}
+            class="group w-[58px] shrink-0 rounded-[10px] border border-transparent py-[6px] text-center font-mono-fq text-[10px] text-fq-lime transition hover:border-fq-line-2 hover:text-fq-text"
+        >
+            <span class="group-hover:hidden">&check; IN</span>
+            <span class="hidden group-hover:inline">&times; OUT</span>
+        </button>
     @else
         <button
             type="button"

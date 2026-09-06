@@ -193,6 +193,37 @@ new class extends Component
         $this->announce();
     }
 
+    /**
+     * Take a song back out of the open list, from the library row that says it
+     * is in it.
+     *
+     * The mirror of addSong(), and it takes no playlist id for the same reason
+     * that one does not: the library is only ever drawn underneath the list
+     * that is open, so an id would be a second answer to a question the
+     * component has already answered — and one the browser would get to send
+     * back.
+     *
+     * It exists because the two halves of editing a list were at opposite ends
+     * of the page. Songs go in from the library at the bottom and came out from
+     * the playlist at the top, so undoing the tap you just made meant scrolling
+     * past everything you had already added.
+     */
+    public function dropSong(string $trackId): void
+    {
+        $playlist = $this->playlist($this->openPlaylistId);
+
+        if ($playlist === null) {
+            return;
+        }
+
+        app(PlaylistService::class)->remove($playlist, $trackId);
+
+        $this->flashMessage = null;
+        $this->errorMessage = null;
+
+        $this->announce();
+    }
+
     public function removeSong(int $id, string $trackId): void
     {
         $playlist = $this->playlist($id);

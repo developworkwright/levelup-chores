@@ -163,6 +163,48 @@ class PlaylistTest extends TestCase
         $this->assertSame(['One', 'Three'], $playlist->fresh()->tracks->pluck('title')->all());
     }
 
+    public function test_a_song_can_be_taken_out_from_the_library_row_that_put_it_in(): void
+    {
+        // The two halves of editing a list used to be at opposite ends of the
+        // page: in from the library at the bottom, out from the playlist at the
+        // top. Undoing the tap you just made meant scrolling past everything
+        // you had already added.
+        $this->library(['Mossy_Save_Point.mp3', 'Snowglobe_Ruins.mp3']);
+        $kid = $this->loginKid();
+        $playlist = Playlist::factory()->create(['profile_id' => $kid->id]);
+
+        Volt::test('playlist-builder')
+            ->call('addSong', 'mossy-save-point')
+            ->call('addSong', 'snowglobe-ruins')
+            // The row that says a song is in the list is the button that takes
+            // it out again — there is no second control for it.
+            ->assertSee('Take Mossy Save Point out of this playlist')
+            ->call('dropSong', 'mossy-save-point')
+            ->assertDontSee('Take Mossy Save Point out of this playlist')
+            ->assertSee('Add Mossy Save Point');
+
+        $this->assertSame(['Snowglobe Ruins'], $playlist->fresh()->tracks->pluck('title')->all());
+        // Positions still start at one, the same as taking it out from the top.
+        $this->assertSame([1], $playlist->fresh()->tracks->pluck('position')->all());
+    }
+
+    public function test_the_library_only_takes_songs_out_of_a_list_its_owner_has_open(): void
+    {
+        $this->library(['Mossy_Save_Point.mp3']);
+        $kid = $this->loginKid();
+        $sibling = Profile::factory()->for($kid->household)->create();
+
+        $theirs = Playlist::factory()->create(['profile_id' => $sibling->id]);
+        $this->service()->add($theirs, 'mossy-save-point');
+
+        // Nothing of this kid's is open — they have no lists at all — so the
+        // row has no list to act on and the sibling's is not reachable from
+        // here by any id, because dropSong() takes none.
+        Volt::test('playlist-builder')->call('dropSong', 'mossy-save-point');
+
+        $this->assertSame(1, $theirs->fresh()->tracks->count());
+    }
+
     public function test_a_song_can_be_heard_before_it_goes_in_the_playlist(): void
     {
         // The library is a hundred files named after the game they came out of,
@@ -380,11 +422,13 @@ class PlaylistTest extends TestCase
             ->assertDontSee('Sibling Sounds');
     }
 
-    public function test_the_picker_opens_the_playlist_that_is_playing(): void
+    public function test_the_panel_is_a_player_with_a_rail_of_sources(): void
     {
-        // A playlist used to be a name and a number in the header: what was in
-        // it, and how far through it was, were questions the picker could not
-        // answer about the very list it was playing.
+        // The panel stopped being a picker: a dozen playlists above two hundred
+        // songs in one 288px scroller, where the only way into a list was to
+        // start it. It is a rail of sources and the songs of whichever you are
+        // looking at — and looking is not choosing, so the rail only calls
+        // look().
         $this->library(['Mossy_Save_Point.mp3']);
         $kid = $this->loginKid();
 
@@ -393,12 +437,53 @@ class PlaylistTest extends TestCase
 
         Volt::test('kid.quests')
             ->assertSee('Chore Power')
-            ->assertSee('music.songsOf(list)', false)
-            // Picking a song out of the list starts the list there; reaching
-            // past it into the library below still ends it. Both handlers are
-            // in the panel, which is the whole point of the distinction.
-            ->assertSee('music.jumpTo(track.id)', false)
-            ->assertSee('music.select(track.id)', false);
+            ->assertSee('Your playlists')
+            ->assertSee('The house')
+            ->assertSee('All songs')
+            // The rail looks; only Play all, a track row and the transport
+            // reach the store.
+            ->assertSee("look('playlist', list.id)", false)
+            ->assertSee("look('album', album)", false)
+            ->assertSee('music.playFrom(viewing)', false)
+            ->assertSee('music.preview(track.id)', false);
+    }
+
+    public function test_the_panel_carries_the_whole_transport(): void
+    {
+        // Everything here reads the store the header bar plays from, so the two
+        // agree by construction rather than by being kept in step.
+        $this->library(['Mossy_Save_Point.mp3']);
+        $this->loginKid();
+
+        Volt::test('kid.quests')
+            ->assertSee('music.back()', false)
+            ->assertSee('music.advance()', false)
+            ->assertSee('music.toggleShuffle()', false)
+            ->assertSee('music.toggleRepeat()', false)
+            ->assertSee('music.setVolume(', false)
+            ->assertSee('music.repeatFrom(track.id)', false)
+            ->assertSee('Seek through the song')
+            // Where it is coming from and how far through — the two questions
+            // the old picker could not answer about the list it was playing.
+            ->assertSee('music.scopeLabel', false)
+            ->assertSee('music.queueAt', false)
+            // Back is cut on a phone: skip is in two places, and going
+            // backwards is rare enough to be the row itself.
+            ->assertSee('hidden h-[44px] w-[44px] place-items-center', false);
+    }
+
+    public function test_the_panel_never_carries_another_kids_playlist(): void
+    {
+        $this->library(['Mossy_Save_Point.mp3']);
+        $kid = $this->loginKid();
+        $sibling = Profile::factory()->for($kid->household)->create();
+
+        Playlist::factory()->create(['profile_id' => $kid->id, 'name' => 'Chore Power']);
+        Playlist::factory()->create(['profile_id' => $sibling->id, 'name' => 'Sibling Sounds']);
+
+        Volt::test('kid.quests')
+            ->assertSee('Chore Power')
+            ->assertDontSee('Sibling Sounds');
     }
 
     public function test_both_consoles_draw_the_same_builder(): void

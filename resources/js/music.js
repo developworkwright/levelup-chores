@@ -20,16 +20,30 @@ const KEY_TRACK = 'fq-music-track';
 const KEY_VOLUME = 'fq-music-volume';
 
 /**
- * Which playlist is on, and whether it is shuffled.
+ * What is queued, and whether it is shuffled.
  *
  * The playlists themselves belong to the kid and live in the database, because
- * a list they made has to follow them to any device. Which one is *currently
+ * a list they made has to follow them to any device. What is *currently
  * playing* is the opposite kind of fact — it belongs to this browser, exactly
  * like the remembered song beside it — so it stays here, and a kid can have
  * one playlist going on the tablet and another on the phone.
+ *
+ * A source rather than a playlist id, as JSON: `{kind, ref}`, where kind is
+ * `playlist` (ref is an id), `album` (ref is its name) or `all` (no ref). A
+ * playlist was the only thing that could make a queue until the music page
+ * landed, and an album with no next song was the whole reason that page exists.
+ */
+const KEY_SOURCE = 'fq-music-source';
+const KEY_SHUFFLE = 'fq-music-shuffle';
+
+/**
+ * The playlist id this browser was playing before sources existed.
+ *
+ * Read once, never written. Without it every kid with music on loses their
+ * list on the deploy that ships the page — which is a small thing that looks
+ * exactly like the app forgetting what they told it.
  */
 const KEY_PLAYLIST = 'fq-music-playlist';
-const KEY_SHUFFLE = 'fq-music-shuffle';
 
 /**
  * Whether the playlist is holding on one song instead of moving through.
@@ -108,6 +122,32 @@ function write(key, value) {
     } catch (e) {}
 }
 
+/**
+ * What was queued last time, or null for a single song on repeat.
+ *
+ * @return {{kind: string, ref: (number|string|null)}|null}
+ */
+function readSource() {
+    const stored = read(KEY_SOURCE);
+
+    if (stored) {
+        try {
+            const source = JSON.parse(stored);
+
+            if (source && typeof source.kind === 'string') {
+                return source;
+            }
+        } catch (e) {
+            // Nothing to do about a key somebody has edited by hand, and it
+            // must not stop the player from starting.
+        }
+    }
+
+    const legacy = Number(read(KEY_PLAYLIST)) || null;
+
+    return legacy === null ? null : { kind: 'playlist', ref: legacy };
+}
+
 document.addEventListener('alpine:init', () => {
     /*
      * Registering twice would replace this object with a fresh one while the
@@ -157,8 +197,27 @@ document.addEventListener('alpine:init', () => {
         /** @type {Array<{id: number, name: string, trackIds: Array<string>}>} */
         playlists: [],
 
-        /** Which playlist is playing, or null for a single song on repeat. */
-        playlistId: Number(read(KEY_PLAYLIST)) || null,
+        /**
+         * What is queued — a playlist, an album, the whole library, or null
+         * for a single song on repeat. See KEY_SOURCE.
+         *
+         * @type {{kind: string, ref: (number|string|null)}|null}
+         */
+        source: readSource(),
+
+        /**
+         * The playing playlist's id, or null when what is playing is not a
+         * playlist at all.
+         *
+         * A getter rather than the property it used to be: the picker and the
+         * builder both light a row from it, and both should go dark when an
+         * album is what is on.
+         */
+        get playlistId() {
+            return this.source !== null && this.source.kind === 'playlist'
+                ? this.source.ref
+                : null;
+        },
 
         shuffle: read(KEY_SHUFFLE) === '1',
 
@@ -270,9 +329,10 @@ document.addEventListener('alpine:init', () => {
 
             // A playlist deleted — on this device or another one — must not
             // leave the player pointed at it, silently refusing to advance
-            // because its queue comes back empty.
-            if (this.playlistId !== null && ! this.playlist()) {
-                this.leavePlaylist();
+            // because its queue comes back empty. An album emptied by a parent
+            // deleting its last song is the same fact wearing a different kind.
+            if (this.source !== null && this.queue().length === 0) {
+                this.leaveSource();
             }
         },
 
@@ -302,36 +362,66 @@ document.addEventListener('alpine:init', () => {
                 .filter(Boolean);
         },
 
-        /** What is actually playing through, in order. */
-        queue() {
-            return this.songsOf(this.playlist());
+        /**
+         * The songs of any source, in the order it plays them.
+         *
+         * An album and the whole library are filters over the catalogue the
+         * header already handed us; only a playlist has an order of its own.
+         * Nothing else in the player asks which kind it was — that is the point
+         * of the source, and why shuffle, advance(), back() and
+         * BACK_RESTARTS_AT needed no changes when albums learned to queue.
+         */
+        sourceTracks(source) {
+            if (source === null) {
+                return [];
+            }
+
+            if (source.kind === 'all') {
+                return this.tracks;
+            }
+
+            if (source.kind === 'album') {
+                return this.tracks.filter((track) => track.album === source.ref);
+            }
+
+            return this.songsOf(
+                this.playlists.find((list) => list.id === source.ref) ?? null,
+            );
         },
 
-        /** True while a playlist is what is playing, rather than one song. */
-        get inPlaylist() {
-            return this.playlist() !== null;
+        /** What is actually playing through, in order. */
+        queue() {
+            return this.sourceTracks(this.source);
         },
 
         /**
-         * Start a playlist from the top — or from anywhere, when shuffled.
+         * True while something with a next song is playing, rather than one
+         * song on repeat.
          *
-         * Tapping the one that is already playing turns it off rather than
-         * restarting it, which is the same "tap it again" the album headings
-         * and the play button already answer to.
+         * The whole of whether skip, back and shuffle mean anything, and the
+         * header's third segment is drawn from it.
          */
-        playPlaylist(id) {
-            if (this.playlistId === id) {
-                this.leavePlaylist();
+        get hasQueue() {
+            return this.queue().length > 0;
+        },
 
-                return;
-            }
-
-            this.playlistId = id;
-            write(KEY_PLAYLIST, String(id));
+        /**
+         * Start something playing from the top — or from anywhere, when
+         * shuffled.
+         *
+         * Always starts. The page's `Play all` is a play button and not a
+         * toggle: a six-year-old who taps the biggest thing on the screen and
+         * gets silence has been told the app is broken.
+         */
+        playFrom(source) {
+            this.source = source;
+            write(KEY_SOURCE, JSON.stringify(source));
 
             const queue = this.queue();
 
             if (! queue.length) {
+                this.leaveSource();
+
                 return;
             }
 
@@ -342,16 +432,64 @@ document.addEventListener('alpine:init', () => {
         },
 
         /**
-         * Back to one song on repeat. The song keeps playing: leaving a
-         * playlist is a change of what happens *next*, not a stop button.
+         * The picker's way in, which is a toggle.
+         *
+         * Tapping the list that is already playing turns it off rather than
+         * restarting it — the same "tap it again" the album headings and the
+         * play button beside it already answer to. The page does not behave
+         * this way; see playFrom().
          */
-        leavePlaylist() {
-            this.playlistId = null;
-            write(KEY_PLAYLIST, '');
+        playPlaylist(id) {
+            if (this.playlistId === id) {
+                this.leaveSource();
+
+                return;
+            }
+
+            this.playFrom({ kind: 'playlist', ref: id });
+        },
+
+        /**
+         * Back to one song on repeat. The song keeps playing: leaving a list
+         * is a change of what happens *next*, not a stop button.
+         */
+        leaveSource() {
+            this.source = null;
+            write(KEY_SOURCE, '');
 
             if (this.el) {
-                this.el.loop = true;
+                this.el.loop = this.loops();
             }
+        },
+
+        /**
+         * What the sticky bar and the picker print under the song title —
+         * `WESTIN'S BANGERS`, `ENCANTO`, `ALL SONGS`.
+         *
+         * Derived rather than stored: a playlist renamed on another device
+         * would otherwise keep announcing the name it had when it started.
+         */
+        get scopeLabel() {
+            if (this.source === null) {
+                return '';
+            }
+
+            if (this.source.kind === 'all') {
+                return 'ALL SONGS';
+            }
+
+            if (this.source.kind === 'album') {
+                return String(this.source.ref).toUpperCase();
+            }
+
+            return (this.playlist()?.name ?? '').toUpperCase();
+        },
+
+        /** Where in the queue the song is, one-based, or 0 outside one. */
+        get queueAt() {
+            const at = this.queue().findIndex((track) => track.id === this.trackId);
+
+            return at < 0 ? 0 : at + 1;
         },
 
         toggleShuffle() {
@@ -436,8 +574,8 @@ document.addEventListener('alpine:init', () => {
         /**
          * Back a song — or back to the start of this one.
          *
-         * See BACK_RESTARTS_AT for the split. Drawn only while a playlist is
-         * on, because a single song on repeat has nothing behind it and the
+         * See BACK_RESTARTS_AT for the split. Drawn only while there is a
+         * queue, because a single song on repeat has nothing behind it and the
          * scrubber beside it already covers starting it again.
          */
         back() {
@@ -480,13 +618,21 @@ document.addEventListener('alpine:init', () => {
         },
 
         /**
-         * Play one song straight off a list on the page — the test-listen the
-         * playlist builder is built around.
+         * Play one song straight off a list on the page.
          *
-         * Tapping the one already playing stops it, the same "tap it again"
-         * the picker's albums and playlists answer to. select() restarts the
-         * music by itself when it is already on, so play() is only reached for
-         * the case where it is not — calling both would start the file twice.
+         * Three cases, and the middle one is the reason this is not just
+         * select():
+         *
+         * - the song already on — tapping it again stops it, the same "tap it
+         *   again" the picker's albums and playlists answer to;
+         * - a song inside the queue that is playing — a jump, and the list
+         *   carries on around it;
+         * - anything else — a plain choice, which ends the list, because
+         *   reaching outside what is on means "play that instead".
+         *
+         * select() restarts the music by itself when it is already on, so
+         * play() is only reached for the case where it is not — calling both
+         * would start the file twice.
          */
         preview(id) {
             if (this.trackId === id) {
@@ -495,10 +641,39 @@ document.addEventListener('alpine:init', () => {
                 return;
             }
 
+            if (this.queue().some((track) => track.id === id)) {
+                this.jumpTo(id);
+
+                return;
+            }
+
             this.select(id);
 
             if (! this.playing) {
                 this.play();
+            }
+        },
+
+        /**
+         * "That one again" — the music page's per-row loop control.
+         *
+         * Put the song on and hold it there in one tap, because those are one
+         * thought. Tapping the row that is already looping lets go of it and
+         * leaves the song playing: turning repeat off is not a stop button.
+         */
+        repeatFrom(id) {
+            if (this.trackId === id && this.repeatOne) {
+                this.toggleRepeat();
+
+                return;
+            }
+
+            if (this.trackId !== id) {
+                this.preview(id);
+            }
+
+            if (! this.repeatOne) {
+                this.toggleRepeat();
             }
         },
 
@@ -695,7 +870,7 @@ document.addEventListener('alpine:init', () => {
             const changed = id !== this.trackId;
 
             if (! fromQueue) {
-                this.leavePlaylist();
+                this.leaveSource();
             }
 
             this.trackId = id;
@@ -847,10 +1022,21 @@ document.addEventListener('alpine:init', () => {
         open: false,
 
         /**
-         * Which album is expanded, if any. One at a time: a soundtrack is a
-         * hundred songs, and two open at once is a scroll with no landmarks.
+         * Which source the panel is *looking at* — 'playlist', 'album' or
+         * 'all', and the id or album name it names.
+         *
+         * The line this whole panel is drawn along: looking is not choosing.
+         * This is the rail's state and nothing else reads it; what is *playing*
+         * is the store's `source`, and only Play all, a track row and the
+         * transport touch that. A rail that started a list on the way past
+         * would make browsing impossible while the music is on, which is
+         * exactly when anybody browses.
+         *
+         * Local to the panel rather than remembered, because it is a place to
+         * be standing for as long as the panel is open and no longer.
          */
-        openAlbum: null,
+        viewKind: 'all',
+        viewRef: null,
 
         init() {
             this.$store.music.load(tracks, latestAt, playlists);
@@ -860,9 +1046,48 @@ document.addEventListener('alpine:init', () => {
             return this.$store.music;
         },
 
-        /** Songs sitting loose at the top of the library, outside any album. */
-        get loose() {
-            return this.music.tracks.filter((track) => ! track.album);
+        /** What the rail is pointed at, in the shape the store takes. */
+        get viewing() {
+            return { kind: this.viewKind, ref: this.viewRef };
+        },
+
+        look(kind, ref = null) {
+            this.viewKind = kind;
+            this.viewRef = ref;
+        },
+
+        /** The songs under the heading — the store already knows how. */
+        get viewTracks() {
+            return this.music.sourceTracks(this.viewing);
+        },
+
+        get viewName() {
+            if (this.viewKind === 'album') {
+                return this.viewRef;
+            }
+
+            if (this.viewKind === 'playlist') {
+                // A list deleted on another device while the panel is open.
+                return this.music.playlists.find((list) => list.id === this.viewRef)?.name
+                    ?? 'All songs';
+            }
+
+            return 'All songs';
+        },
+
+        get viewKindLabel() {
+            const count = this.viewTracks.length;
+            const songs = count + (count === 1 ? ' SONG' : ' SONGS');
+
+            if (this.viewKind === 'album') {
+                return 'ALBUM · ' + songs;
+            }
+
+            if (this.viewKind === 'playlist') {
+                return 'PLAYLIST · ' + songs + ' · YOURS';
+            }
+
+            return 'EVERY SONG IN THE HOUSE';
         },
 
         /** Album names, in the order the server sorted the songs into. */
@@ -883,26 +1108,39 @@ document.addEventListener('alpine:init', () => {
         },
 
         /**
-         * Opening the picker jumps to wherever the current song lives, so a kid
-         * playing track 60 of a soundtrack is not dropped at the top of a list
-         * of a hundred with no idea where they were.
+         * Opening the panel lands on whatever is playing, so a kid on track 60
+         * of a soundtrack is not dropped at the top of a list of a hundred with
+         * no idea where they were.
          */
         togglePanel() {
             this.open = ! this.open;
 
             if (this.open) {
-                this.openAlbum = this.music.current()?.album ?? null;
+                this.lookAtWhatIsPlaying();
                 this.music.markSeen();
             }
         },
 
         /**
-         * Click only. Hover was tried and taken out: it opens an album as the
-         * pointer crosses it on the way somewhere else, and does nothing at all
-         * on the phones this is mostly used from.
+         * Where the rail points when the panel opens: what is on, then their
+         * own first list, then the whole house.
+         *
+         * Their own list before the library, because a kid who has made one has
+         * said what they want to look at — and the library is one tap below it
+         * either way.
          */
-        toggleAlbum(album) {
-            this.openAlbum = this.openAlbum === album ? null : album;
+        lookAtWhatIsPlaying() {
+            const source = this.music.source;
+
+            if (source !== null && this.music.sourceTracks(source).length > 0) {
+                this.look(source.kind, source.ref);
+
+                return;
+            }
+
+            const first = this.music.playlists[0];
+
+            first ? this.look('playlist', first.id) : this.look('all');
         },
 
         /** How many of a playlist's songs are actually in the library today. */

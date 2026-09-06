@@ -269,16 +269,19 @@ class MusicTest extends TestCase
         Storage::disk('music')->assertMissing('Home.mp3');
     }
 
-    public function test_the_kid_picker_offers_the_album_as_a_folder(): void
+    public function test_the_kid_player_offers_the_album_as_a_source(): void
     {
+        // An album used to be a folder in the picker that opened to reveal its
+        // songs. It is a source in the rail now, which is the difference that
+        // matters: it can be played, skipped through and shuffled, because the
+        // store queues one exactly like a playlist.
         $this->library(['Undertale/Ruins.mp3', 'Pixel_Run.mp3']);
         $this->loginKid();
 
         Volt::test('kid.quests')
             ->assertSee('Undertale')
             ->assertSee('Ruins')
-            // The folder is a real control, not a heading.
-            ->assertSee('toggleAlbum(album)', false);
+            ->assertSee("look('album', album)", false);
     }
 
     public function test_a_title_keeps_its_own_capitalisation_through_the_round_trip(): void
@@ -306,7 +309,7 @@ class MusicTest extends TestCase
         Volt::test('kid.quests')
             ->assertSee('fqMusic', false)
             ->assertSee('Mossy Save Point')
-            ->assertSee('Choose a song');
+            ->assertSee('Open the player');
     }
 
     public function test_the_kid_header_offers_a_seek_bar(): void
@@ -335,9 +338,11 @@ class MusicTest extends TestCase
         Volt::test('kid.quests')
             ->assertSee('music.back()', false)
             ->assertSee('Back a song')
-            // Back sits before Next, the way it does on every player anybody
-            // has ever used.
-            ->assertSeeInOrder(['music.back()', 'music.advance()'], false);
+            // Back sits before play, and play before skip, the way it does on
+            // every player anybody has ever used. Not asserted against the
+            // header's own skip segment, which is a different control further
+            // up the same markup.
+            ->assertSeeInOrder(['Back a song', 'music.toggle()'], false);
     }
 
     public function test_the_kid_header_can_hold_a_playlist_on_one_song(): void
@@ -354,15 +359,41 @@ class MusicTest extends TestCase
             // anybody being read to — text colour alone on a 12px label is no
             // difference a kid notices.
             ->assertSee(':aria-pressed="music.repeatOne"', false)
-            ->assertSee("music.repeatOne ? 'border-fq-lime font-bold text-fq-lime'", false)
-            // Beside shuffle rather than beside the transport: the two of them
-            // answer the same question about what happens when a song ends.
-            ->assertSeeInOrder([
-                'music.toggleShuffle()',
-                'music.toggleRepeat()',
-                'music.back()',
-                'music.advance()',
-            ], false);
+            ->assertSee("'border-fq-lime font-bold text-fq-lime'", false)
+            // And on every track row, which is where it is actually reached
+            // from: "that one again" is a thing you think about a song, not
+            // about the player.
+            ->assertSee('music.repeatFrom(track.id)', false);
+    }
+
+    public function test_the_kid_header_gains_a_skip_segment_that_is_absent_on_a_phone(): void
+    {
+        // The bar is three segments now: play, skip, picker. Skip is drawn only
+        // while there is something to skip to — a lit button that does nothing
+        // is worse than an absent one — and never at the compact size, where it
+        // would be a 34px target hard against the button that stops the music.
+        $this->library(['Mossy_Save_Point.mp3']);
+        $this->loginKid();
+
+        Volt::test('kid.quests')
+            ->assertSee('music.advance()', false)
+            ->assertSee('Next song')
+            ->assertSee('x-show="music.hasQueue"', false)
+            ->assertSee('hidden w-[46px] md:flex', false);
+    }
+
+    public function test_the_panel_sends_playlist_building_to_the_page(): void
+    {
+        // The panel browses and plays. Building a list wants the whole library
+        // laid out and a way to put songs in it one tap at a time, which is a
+        // page — so the rail's button is a link rather than a form, and a
+        // worse version of that page is not squeezed in here.
+        $this->library(['Mossy_Save_Point.mp3']);
+        $this->loginKid();
+
+        Volt::test('kid.quests')
+            ->assertSee('+ New playlist')
+            ->assertSee(route('kid.music'));
     }
 
     public function test_the_kid_header_is_told_nothing_about_where_the_songs_are_stored(): void
@@ -379,7 +410,7 @@ class MusicTest extends TestCase
     {
         $this->loginKid();
 
-        Volt::test('kid.quests')->assertDontSee('Choose a song');
+        Volt::test('kid.quests')->assertDontSee('Open the player');
     }
 
     public function test_the_parent_header_offers_the_songs_too(): void
@@ -393,7 +424,7 @@ class MusicTest extends TestCase
         Volt::test('parent.home')
             ->assertSee('fqMusic', false)
             ->assertSee('Mossy Save Point')
-            ->assertSee('Choose a song');
+            ->assertSee('Open the player');
     }
 
     public function test_a_parent_can_add_a_song_and_name_it(): void
@@ -542,7 +573,7 @@ class MusicTest extends TestCase
 
         Volt::test('kid.quests')
             ->assertOk()
-            ->assertDontSee('Choose a song');
+            ->assertDontSee('Open the player');
     }
 
     public function test_the_music_screen_says_why_the_playlist_is_empty(): void
