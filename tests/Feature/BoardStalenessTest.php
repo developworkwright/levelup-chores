@@ -176,7 +176,7 @@ class BoardStalenessTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        $page = Volt::test('kid.quests')->assertSee('Mark it done');
+        $page = Volt::test('kid.quests')->assertSee('See it and mark it done');
 
         $this->service()->claim($sibling, $chore);
 
@@ -230,7 +230,7 @@ class BoardStalenessTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        $page = Volt::test('kid.quests')->assertSee('Mark it done');
+        $page = Volt::test('kid.quests')->assertSee('See it and mark it done');
 
         $this->service()->claim($sibling, $chore);
 

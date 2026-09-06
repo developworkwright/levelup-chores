@@ -159,6 +159,34 @@ new class extends Component
         }
     }
 
+    /**
+     * Flags the one job that actually needs doing tonight, or takes the flag
+     * back off.
+     *
+     * A toggle rather than a set-and-forget field, because the flag is worth
+     * something only while it is scarce — and it expires overnight on its own
+     * (see {@see Chore::isHelpWantedAt()}), so the off switch is for "somebody
+     * did it another way", not for tidying up yesterday.
+     */
+    public function toggleHelpWanted(int $choreId): void
+    {
+        $chore = $this->ownedChore($choreId);
+
+        if (! $chore) {
+            return;
+        }
+
+        $service = app(ChoreService::class);
+
+        if ($service->isHelpWanted($chore)) {
+            $service->clearHelpWanted($chore);
+
+            return;
+        }
+
+        $service->flagHelpWanted($chore);
+    }
+
     public function toggleQuestEligible(int $choreId): void
     {
         $chore = $this->ownedChore($choreId);
@@ -417,6 +445,10 @@ new class extends Component
                 'freesAt' => $row['freesAt']?->copy()->setTimezone($timezone),
                 'lastDoneAt' => $row['lastDone']?->submitted_at?->copy()->setTimezone($timezone),
             ]),
+            // Keyed like the deadlines below, and for the same reason: the
+            // flag lifts at the household day boundary, so a row can't answer
+            // "is this flagged" off the raw column.
+            'helpWanted' => $chores->mapWithKeys(fn (Chore $chore) => [$chore->id => $service->isHelpWanted($chore)]),
             'deadlines' => $chores->mapWithKeys(fn (Chore $chore) => [$chore->id => [
                 'closesAt' => $service->deadlineFor($chore),
                 'expired' => $service->isExpired($chore),
@@ -481,6 +513,7 @@ new class extends Component
             @foreach ($chores as $chore)
                 @php
                     $deadline = $deadlines[$chore->id];
+                    $flagged = $helpWanted[$chore->id];
                     $status = $availability[$chore->id];
                     $holder = $status['claimant']?->profile->name;
                     $freesAt = $status['freesAt'];
@@ -602,6 +635,17 @@ new class extends Component
                                 Closes {{ $deadline['time']->format('g:i A T') }} · {{ $deadline['closesAt']->diffForHumans() }}
                             </p>
                         @endif
+
+                        @if ($flagged)
+                            {{-- Says what the kids are seeing, not just that a
+                                 switch is on — the flag costs a bonus ticket
+                                 and the row that turns it on should say so. --}}
+                            <p class="mt-1 font-mono-fq text-[10px] uppercase" style="color: var(--fq-coral)">
+                                Help wanted · top of every board
+                                · +{{ ChoreService::HELP_WANTED_TICKETS }} {{ Str::plural('ticket', ChoreService::HELP_WANTED_TICKETS) }} to whoever does it
+                                · clears overnight
+                            </p>
+                        @endif
                     </div>
 
                     <div class="flex items-center gap-2">
@@ -653,6 +697,26 @@ new class extends Component
                             >Clear</button>
                         @endif
                     </div>
+
+                    {{-- The one control that says "this is the job", as opposed
+                         to everything else on this page, which only says what a
+                         job is worth and when it comes back. Sits next to the
+                         clock because they are the two urgency controls, and
+                         they combine: flag it and give them until dinner.
+
+                         Filled rather than outlined when on. Every other toggle
+                         in this row is a preference a parent sets once; this
+                         one is live tonight, and has to be findable at a glance
+                         when you come back to turn it off. --}}
+                    <button
+                        type="button"
+                        wire:click="toggleHelpWanted({{ $chore->id }})"
+                        title="Flag this as the job that needs doing today — it goes to the top of every kid's board and pays a bonus ticket"
+                        class="rounded-[12px] border px-3 py-2 text-xs font-semibold {{ $flagged ? 'text-fq-bg' : 'border-fq-line-3 bg-fq-sunk text-fq-text-3' }}"
+                        style="{{ $flagged ? 'background: var(--fq-coral); border-color: var(--fq-coral)' : '' }}"
+                    >
+                        {{ $flagged ? 'Help wanted' : 'Ask for help' }}
+                    </button>
 
                     @unless ($status['available'])
                         <button

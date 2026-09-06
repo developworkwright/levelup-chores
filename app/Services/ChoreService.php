@@ -7,6 +7,7 @@ use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
 use App\Enums\ProfileRole;
 use App\Enums\QuestCharmEffect;
+use App\Enums\TicketKind;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyMystery;
@@ -16,12 +17,14 @@ use App\Models\MysteryHintPurchase;
 use App\Models\Profile;
 use App\Notifications\ChoreClosingSoon;
 use App\Notifications\ChoreReviewed;
+use App\Notifications\HelpWantedPosted;
 use App\Notifications\ParentApprovalNeeded;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
 
@@ -29,6 +32,20 @@ class ChoreService
 {
     /** Bonus paid on top of whatever chore gets picked as the day's mystery. */
     public const MYSTERY_BONUS_POINTS = 500;
+
+    /**
+     * Tickets paid for finishing a chore a parent had flagged Help Wanted.
+     *
+     * Deliberately a ticket rather than points. Points are backed by
+     * `points_per_dollar` — real money — so a standing "anything I flag pays
+     * more" would be a standing pay rise, and the flag would get used less
+     * because of it. A ticket costs the household nothing and still buys the
+     * things kids actually want out of the Bonus Shop, which makes the flag
+     * cheap enough to use on a Tuesday night when the bins genuinely need
+     * doing. It is also the fairer currency here: cooldowns are household-wide,
+     * so a points bonus on a flagged chore is a race exactly one kid can win.
+     */
+    public const HELP_WANTED_TICKETS = 1;
 
     /**
      * Cards dealt for the daily quest.
@@ -713,6 +730,10 @@ class ChoreService
                     // Resolved here so the card can render a countdown without
                     // each one working out the household day for itself.
                     'closesAt' => $this->deadlineFor($chore),
+                    // Same again for the flag: the row needs it for both its
+                    // badge and its colour, and neither should be re-deriving
+                    // the household day per render.
+                    'helpWanted' => $this->isHelpWanted($chore),
                 ];
             })
             // A taken one-time chore leaves the board outright — that's the
@@ -722,21 +743,27 @@ class ChoreService
             ->reject(fn (array $entry) => $entry['chore']->isUsedUp() && $entry['state'] !== 'pending')
             // Urgency first, then payout.
             //
-            // The two top tiers are the chores that won't wait: a one-time
-            // chore the first kid to tap takes for good, and anything a parent
-            // has put on a clock. Burying either under the daily regulars would
-            // hide the very cards worth hurrying for. Everything below them is
-            // ordered by what it pays, which is the only question left once
-            // nothing is expiring.
+            // The top three tiers are the chores that won't wait: one a parent
+            // has asked for outright, a one-time chore the first kid to tap
+            // takes for good, and anything on a clock. Burying any of them
+            // under the daily regulars would hide the very cards worth hurrying
+            // for. Everything below is ordered by what it pays, which is the
+            // only question left once nothing is urgent.
+            //
+            // Help wanted outranks the other two because it is the only one a
+            // parent aimed: a one-time chore is urgent to whoever wants the
+            // points and a deadline is urgent to the clock, but this row is
+            // urgent because somebody in the house said so.
             //
             // Sorted after the map, not before it, so the deadline tier can
             // read the 'closesAt' the map already resolved rather than working
             // the household day out a second time.
             ->sortBy(fn (array $entry) => [
                 match (true) {
-                    $entry['chore']->isOneTime() => 0,
-                    $entry['closesAt'] !== null => 1,
-                    default => 2,
+                    $entry['helpWanted'] => 0,
+                    $entry['chore']->isOneTime() => 1,
+                    $entry['closesAt'] !== null => 2,
+                    default => 3,
                 },
                 // Negated for a descending sort — biggest payout first.
                 -$entry['chore']->points,
@@ -1032,6 +1059,17 @@ class ChoreService
         return $claimant && $claimant->profile_id !== $profile->id ? $claimant : null;
     }
 
+    /**
+     * Whether a parent is currently asking for this job — the flag, resolved
+     * against the household day rather than the calendar one.
+     */
+    public function isHelpWanted(Chore $chore): bool
+    {
+        $clock = HouseholdClock::for($chore->household);
+
+        return $chore->isHelpWantedAt($clock->startOf($clock->today()));
+    }
+
     public function isExpired(Chore $chore): bool
     {
         $clock = HouseholdClock::for($chore->household);
@@ -1178,6 +1216,60 @@ class ChoreService
         }
     }
 
+    /**
+     * Flags a chore as the one that needs doing, and tells the kids.
+     *
+     * The board can only ever say "here is everything you could do". This is
+     * the one control that says "here is what we actually need", which is the
+     * thing a parent standing in a messy kitchen wants to be able to say — and
+     * saying it silently, to a page nobody has open, says nothing at all. Same
+     * reasoning as {@see self::setDeadline()}, and the same best-effort
+     * handling: flagging must never fail because a push couldn't be sent.
+     *
+     * Re-flagging an already-flagged chore re-stamps it and sends again. That
+     * is deliberate — it is how a parent renews the ask the following day, and
+     * the alternative (a silent no-op) would look like a broken button.
+     */
+    public function flagHelpWanted(Chore $chore): void
+    {
+        $chore->help_wanted_at = now();
+        $chore->save();
+
+        $kids = Profile::where('household_id', $chore->household_id)
+            ->where('role', ProfileRole::Kid)
+            ->get();
+
+        $tickets = self::HELP_WANTED_TICKETS;
+        $reward = $tickets === 1 ? 'a bonus ticket' : "{$tickets} bonus tickets";
+
+        try {
+            Notification::send($kids, new HelpWantedPosted(
+                'Help wanted!',
+                "{$chore->name} needs doing — first one to finish it earns {$reward}.",
+            ));
+        } catch (Throwable $e) {
+            Log::error('Help-wanted notification failed for chore flag.', [
+                'chore_id' => $chore->id,
+                'exception' => $e,
+            ]);
+        }
+    }
+
+    /**
+     * Takes the flag off — the job got done another way, or it turned out not
+     * to be urgent after all.
+     *
+     * This never claws back a ticket. A claim already in flight was made while
+     * the flag was up and carries its own `help_wanted` stamp (see
+     * {@see self::claim()}), so clearing here changes what the board asks for
+     * next, not what work already done was worth.
+     */
+    public function clearHelpWanted(Chore $chore): void
+    {
+        $chore->help_wanted_at = null;
+        $chore->save();
+    }
+
     /** Lifts a deadline, putting the chore back on its ordinary cadence. */
     public function clearDeadline(Chore $chore): void
     {
@@ -1254,6 +1346,11 @@ class ChoreService
             'profile_id' => $profile->id,
             'status' => CompletionStatus::Pending,
             'points_awarded' => $chore->points * $multiplier + $bonusPoints,
+            // Frozen here for the same reason struck_weak_point is: the flag
+            // is why this chore may have been picked over another, so a parent
+            // clearing it before they get round to approving must not reach
+            // back and cancel the ticket the work had already earned.
+            'help_wanted' => $this->isHelpWanted($chore),
             'submitted_at' => now(),
             ...$aim,
         ]);
@@ -1464,6 +1561,13 @@ class ChoreService
         // approval writes, not a second one bolted on afterwards.
         $this->awardMysteryBonus($completion, $profile, $household);
 
+        // Its own currency, so unlike the mystery bonus this touches nothing
+        // the ledger or the goal maths below will read — but it belongs beside
+        // it all the same: both settle what this particular chore turned out
+        // to be worth, and both are decided by a parent signing off rather
+        // than by a kid tapping.
+        $ticketed = $this->awardHelpWantedTicket($completion, $profile, $household);
+
         $this->ledger->record(
             $household,
             $profile,
@@ -1505,7 +1609,8 @@ class ChoreService
         try {
             $profile->notify(new ChoreReviewed(
                 'Signed off!',
-                "+{$completion->points_awarded} points for {$completion->chore->name}.",
+                "+{$completion->points_awarded} points for {$completion->chore->name}."
+                    .($ticketed ? ' Plus '.self::HELP_WANTED_TICKETS.' bonus '.Str::plural('ticket', self::HELP_WANTED_TICKETS).' for helping out!' : ''),
             ));
         } catch (Throwable $e) {
             Log::error('Chore reviewed notification failed for approval.', [
@@ -1513,6 +1618,57 @@ class ChoreService
                 'exception' => $e,
             ]);
         }
+    }
+
+    /**
+     * Pays the Help Wanted ticket, if this approval earned one.
+     *
+     * Read off the completion's own `help_wanted` stamp rather than the chore's
+     * current flag, so the answer is "was this asked for when they took it"
+     * rather than "is it still being asked for now" — a parent clearing the
+     * flag between the claim and the sign-off must not quietly cancel a reward
+     * the kid was already promised on the board.
+     *
+     * @return bool whether a ticket was actually paid, so the approval's
+     *              notification can say so
+     */
+    private function awardHelpWantedTicket(ChoreCompletion $completion, Profile $profile, Household $household): bool
+    {
+        if (! $completion->help_wanted) {
+            return false;
+        }
+
+        $clock = HouseholdClock::for($household);
+        $day = $clock->dayFor($completion->submitted_at);
+
+        // One ticket per chore per household day, whoever gets there first.
+        //
+        // Household-wide cooldowns make this a guard on most cadences, but
+        // ChoreCadence::Unlimited has no cooldown at all — without this, a
+        // flagged unlimited chore is a ticket printer for anyone willing to
+        // submit it repeatedly. The flag is an ask for one job to get done, and
+        // it is answered once.
+        $alreadyPaid = ChoreCompletion::where('chore_id', $completion->chore_id)
+            ->where('id', '!=', $completion->id)
+            ->where('status', CompletionStatus::Approved)
+            ->where('help_wanted', true)
+            ->where('submitted_at', '>=', $clock->startOf($day))
+            ->where('submitted_at', '<', $clock->startOf($day->copy()->addDay()))
+            ->exists();
+
+        if ($alreadyPaid) {
+            return false;
+        }
+
+        $this->tickets->record(
+            $profile,
+            TicketKind::HelpWanted,
+            self::HELP_WANTED_TICKETS,
+            "Helped out — {$completion->chore->name}",
+            $completion,
+        );
+
+        return true;
     }
 
     /**

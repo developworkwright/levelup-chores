@@ -12,9 +12,10 @@ Covers the chore board, the daily quest, and the automatic mystery chore — all
 - `app/Services/ChoreService.php` — all logic below lives here.
 - `app/Models/{Chore,ChoreCompletion,DailyQuest,DailyMystery}.php`
 - `app/Enums/{ChoreCadence,CompletionStatus}.php`
+- `app/Notifications/{ChoreClosingSoon,HelpWantedPosted,ParentApprovalNeeded,ChoreReviewed}.php` — the four pushes this service sends.
 - `resources/views/pages/kid/quests.blade.php` — kid-facing board, quest reveal, mystery reveal.
-- `resources/views/pages/parent/chores.blade.php` — chore CRUD (points, cadence, min age, quest eligibility). No mystery controls here — mystery is fully automatic.
-- Tests: `tests/Feature/ChoreFlowTest.php`, `tests/Feature/MysteryChoreTest.php`, `tests/Feature/HouseholdCooldownTest.php`, `tests/Feature/BlockedQuestTest.php`, `tests/Feature/OneTimeChoreTest.php`, `tests/Feature/ChoreDeadlineTest.php`.
+- `resources/views/pages/parent/chores.blade.php` — chore CRUD (points, cadence, min age, quest eligibility), plus the two urgency controls: the deadline clock and the Help Wanted flag. No mystery controls here — mystery is fully automatic.
+- Tests: `tests/Feature/ChoreFlowTest.php`, `tests/Feature/MysteryChoreTest.php`, `tests/Feature/HouseholdCooldownTest.php`, `tests/Feature/BlockedQuestTest.php`, `tests/Feature/OneTimeChoreTest.php`, `tests/Feature/ChoreDeadlineTest.php`, `tests/Feature/HelpWantedChoreTest.php`, `tests/Feature/ChoreConfirmTest.php`.
 
 ## Cooldowns are household-wide
 
@@ -146,6 +147,45 @@ The countdown is `<x-chore-countdown>`, an Alpine block ticking client-side that
 
 `'pending'` vs `'done'` is the *only* place the viewing profile matters; both come off the same `claimantFor()` lookup, resolved through the shared private `stateFrom()` so `stateFor()` and `boardFor()` can't drift. `boardFor()` calls `claimantFor()` itself rather than `stateFor()`, so naming the claimant costs no extra queries — `claimantFor()` already eager-loads `profile`. There is no separate mystery-chore branch — mystery exclusivity and ordinary cooldown are now the same mechanism.
 
+### Help wanted
+
+The board's whole vocabulary is "here is everything you *could* do". `chores.help_wanted_at` is the one control that says **"here is what we actually need"** — a parent standing in a messy kitchen pointing at one job. It sorts to the top of every kid's board in coral, and whoever finishes it earns `ChoreService::HELP_WANTED_TICKETS` (1) bonus ticket.
+
+`flagHelpWanted()` / `clearHelpWanted()` own both ends, and `isHelpWanted(Chore)` wraps `Chore::isHelpWantedAt($dayStart)` with the clock — exactly the `isExpired()` / `hasExpiredAt()` pairing beside it.
+
+**It pays a ticket and not points, and that is not a balance knob.** Points are backed by `points_per_dollar` — real money — so a standing "anything I flag pays more" is a standing pay rise, and a parent who feels that will use the flag less, which is the one failure mode that makes the whole feature pointless. A ticket costs the household nothing and still buys everything in the Bonus Shop. It is also the fairer currency: cooldowns are household-wide, so a *points* bonus on a flagged chore is a race exactly one kid can ever win, while a ticket doesn't inflate the thing siblings are compared on. If this ever grows a second reward, keep it outside the points economy.
+
+**The flag lifts at the household day boundary**, same as a deadline and for the same reason — nothing to clear, no scheduled job. That expiry is load-bearing rather than a convenience: a board where half the rows shout is a board where none of them do, so a parent re-asserts what is urgent each day instead of accumulating flags nobody reads. `flagHelpWanted()` deliberately re-stamps an already-flagged chore rather than no-oping, since that is how the ask gets renewed tomorrow.
+
+Four rules on the payout, each protecting something real:
+
+- **Eligibility is frozen on the completion, not read off the chore.** `chore_completions.help_wanted` is stamped by `claim()` and `awardHelpWantedTicket()` reads *that*. Same rule as `struck_weak_point` and for the same reason: the flag is why the kid may have picked this chore over another, so a parent clearing it before they get round to approving must not reach back and cancel a reward the board already promised. The mirror case falls out of it too — flagging a chore *after* the work was handed in pays nothing, because that work wasn't done in answer to an ask.
+- **The ticket is paid at approval**, by `awardHelpWantedTicket()` sitting beside `awardMysteryBonus()` in `approve()`. Nothing about it is hidden, so there is no claim-time leak to guard here the way the mystery has — it is simply that a parent signing off is the only event that means the work happened.
+- **One ticket per chore per household day**, whoever gets there first. Household-wide cooldowns make this a guard on most cadences, but `ChoreCadence::Unlimited` has no cooldown at all — without it, a flagged unlimited chore is a ticket printer for anyone willing to submit it repeatedly. The flag asks for one job to get done and is answered once. The query scopes on `submitted_at` inside the household day, so tomorrow's flag is winnable again.
+- **`clearHelpWanted()` never claws back.** It changes what the board asks for next, not what already-done work was worth.
+
+**Sort order.** `boardFor()` now has four tiers, not three: help wanted (0), one-time (1), on a clock (2), everything else (3), then descending points *within* a tier. Help wanted outranks the other two because it is the only urgency somebody aimed — a one-time chore is urgent to whoever wants the points and a deadline is urgent to the clock, but this row is urgent because someone in the house said so.
+
+**On the kid row**, the badge drops the `+1 ticket` half once the row isn't `'ready'`. The ask still shows — it was still made — but a sibling taking it means the ticket is genuinely gone, and advertising a prize on a struck-through row is promising something that isn't there. The border/wash precedence is: their own pending claim, then help wanted, then a deadline, then one-time; the new `--fq-wash-coral` token is coral rather than another gold specifically so a flagged row can't be mistaken for the one-time row under it.
+
+`flagHelpWanted()` notifies the kids via `HelpWantedPosted` — its own class rather than a second title/body through `ChoreClosingSoon`, because the push `tag` is what lets a phone replace a stale notification, and a flag must not overwrite a running countdown.
+
+> **Not built: guaranteeing the flagged chore a card in the quest hand.** It is the strongest lever in the app — the quest feeds streak, chest and charm — but it does not survive four or five chores being flagged at once: it either floods the three-card hand or picks a favourite arbitrarily. If this is revisited, the shape that scales is letting flagged chores win ties *within* their band in `dealHand()` — a bias, not a guarantee.
+
+### A tap opens the sheet, it does not claim
+
+**The board row no longer claims on press.** `wire:click` on the row is `askChore()`, not `claimChore()` — the claim lives on the "Yes, it's done" button inside the sheet that opens. Kids were tapping rows expecting to be told more about a chore, because a whole row that is one big button reads like a link to a detail view, and were submitting jobs they had not done for a parent to approve.
+
+The sheet is deliberately **both halves of the fix**. Putting the claim behind a second press is only the second half; the first is that the sheet answers the question the tap was actually asking — what it pays in money and points, cadence, effort, done-before, wheel boost, help wanted, a live countdown. A confirm dialog that only said "are you sure?" would train them to tap through it, because it would still be withholding the thing they wanted.
+
+- **`askChore()` runs `choreIsClaimable()` first**, so a tap on a row a sibling took a second ago still gets its `boardMessage` explanation rather than a sheet for a job nobody can take. `claimChore()` re-checks the same thing on the way out — the sheet can sit open for minutes, and it is a button in a browser like any other.
+- **`confirmingChoreId` is one id on the component, not a per-row Alpine flag.** The board morphs constantly as chores are claimed and filters change, and a client-side open/closed map keyed by row is precisely the thing that survives a morph pointing at the wrong chore (see [[alpine-livewire-morph-trap]]).
+- **`with()` resolves `confirming` off `$flagged`, not `$filtered`**, so changing a chip or a band under an open sheet does not blank it — and it re-checks `state === 'ready'` every render, so a sheet whose chore a sibling just took closes itself instead of offering a button that can only fail.
+- **Never render the chore's `hint` in the sheet.** That is the Mystery Chore's clue and the Bonus Shop sells it; a kid could read it off every chore by opening enough sheets.
+- The row's title and sr-only text read **"See it and mark it done"** rather than "Mark it done" — the tick is a picture, so those two strings are the only place the row says what a press does, and they have to name both halves of it. `QuestBoardFilterTest` asserts on this exact string.
+
+**Not covered by this, on purpose:** the quest hero's "Mark it done" (a large explicitly-labelled button, and the page's deliberate main action), the quest hand's cards (choosing, not claiming), and the wheel's boosted-chore claim. The accidental taps came from the row-as-button affordance specifically.
+
 ## Keeping an open board honest
 
 Kids leave the quests page open for hours, and cooldowns are household-wide, so a board goes stale on its own. The danger is **not** a bad write — `claimChore()` re-checks `stateFor()` server-side and the quest path is covered by the reveal guard, so a stale tap can never double-claim. The danger is a kid *doing the physical work* on a chore a sibling already claimed and only finding out at submit time.
@@ -158,7 +198,7 @@ Three things address staleness, in order of how much they matter:
 2. **Refresh on focus/visibility**, via a small Alpine block on the board list calling `$wire.$refresh()`, throttled to 2s because returning to a tab fires both events. Paired with an explicit **Refresh button in the kid shell header**, sitting with the points/streak/tickets tiles it also updates — the automatic refresh is invisible, and a kid about to start a chore wants to *check*.
 
    The shell takes a `refreshAction` prop defaulting to `$refresh`, so all five kid tabs get the button; Quests passes `refresh-action="refreshBoard"` so it can additionally clear `boardMessage`. Anything added to the shell header that calls a component method needs that same treatment — the shell is shared, and a method that exists on only one tab breaks the other four.
-3. **`boardMessage`** explains a late tap ("Nova got to Feed animals first!") — a silently no-oping button reads as broken.
+3. **`boardMessage`** explains a late tap ("Nova got to Feed animals first!") — a silently no-oping button reads as broken. Written by `choreIsClaimable()`, which `askChore()` now runs *before* opening the sheet as well as `claimChore()` running it before the claim, so a stale row is answered at the first press rather than the second.
 
 **Do not add `wire:poll` here.** It was tried and removed: the production server scales to zero when idle, so a tablet left open on the quests page would hold it awake and billing indefinitely. Websockets are worse for the same reason — Reverb needs an always-on process. Refresh-on-focus costs one request at the only moment a stale board can mislead anyone: when someone looks at it.
 

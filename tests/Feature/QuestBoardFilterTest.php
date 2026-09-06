@@ -346,15 +346,16 @@ class QuestBoardFilterTest extends TestCase
 
     public function test_a_row_says_what_tapping_it_does(): void
     {
-        // The row *is* the button, which is the design — but a row that claims
+        // The row *is* the button, which is the design — but a row that opens
         // a chore with no sign of it is a trap. The tick that carries it is a
         // picture, so the words live in the row's title and in sr-only text
-        // rather than nowhere at all.
+        // rather than nowhere at all. They name both halves of the tap: it
+        // shows the chore, and that is where it gets marked done.
         $household = $this->household();
         $this->chore($household, 'Sweep the kitchen', 250);
         $this->loginKid($household);
 
-        Volt::test('kid.quests')->assertSee('Mark it done');
+        Volt::test('kid.quests')->assertSee('See it and mark it done');
     }
 
     public function test_a_light_chore_says_so_as_readily_as_a_hard_one(): void

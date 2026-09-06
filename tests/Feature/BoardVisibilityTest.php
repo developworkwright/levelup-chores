@@ -168,7 +168,7 @@ class BoardVisibilityTest extends TestCase
         Volt::test('kid.quests')
             ->call('toggleUnavailable')
             ->assertSee('Feed animals')
-            ->assertSee('Mark it done');
+            ->assertSee('See it and mark it done');
     }
 
     public function test_the_toggle_stays_out_of_the_way_on_a_clear_board(): void

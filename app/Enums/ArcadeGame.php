@@ -139,7 +139,18 @@ enum ArcadeGame: string
         return match ($this) {
             self::StackTheMess => 110,
             self::WindyWalkies => 155,
-            self::SlimeTime => 145,
+            /*
+             * The tallest by a distance, and the only one carrying a whole
+             * second control below the canvas: the colour picker — a chip per
+             * slime over a fixed six-by-two palette. See buildPicker() in
+             * resources/js/slime.js.
+             *
+             * Measured rather than estimated: the picker is a constant 100px at
+             * every canvas width (the palette is a grid, not a wrapping row,
+             * precisely so this number does not move), which puts the toy's
+             * chrome at 164px against the 54px it was before. 145 + 110 = 255.
+             */
+            self::SlimeTime => 255,
             /*
              * The smallest budget of the four, because Grand Tour stacks the
              * least: a canvas, a 10px gap and one 44px button. Its score, its

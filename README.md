@@ -10,7 +10,7 @@ A self-hosted, gamified chore and allowance tracker for households — daily que
 [![Laravel](https://img.shields.io/badge/Laravel-13-FF2D20?logo=laravel&logoColor=white)](https://laravel.com)
 [![Livewire](https://img.shields.io/badge/Livewire-4-FB70A9?logo=livewire&logoColor=white)](https://livewire.laravel.com)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
-[![Tests](https://img.shields.io/badge/tests-229%20passing-3ECF8E)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-passing-3ECF8E)](#-testing)
 [![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8)](#-install-it-like-an-app)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
@@ -72,6 +72,7 @@ The board also **moves on the claim, not the approval** — a chore locks for th
 |---|---|---|
 | 🎁 | **Daily Quest** | A hand of chores per kid per day, hidden inside a chest. Opening it is the reveal moment. It's the best-paying card on the board — bold-card bonus, charms, the wheel — but nothing waits on it. |
 | 🕵️ | **Mystery Chore** | Each day one chore is secretly worth **+500 points**. Nobody knows which. The first kid in the household to finish it wins — then everyone sees who got it. |
+| 🙋 | **Help Wanted** | A parent flags the one job that actually needs doing. It jumps to the top of the board in its own colour, and whoever finishes it earns a **bonus ticket**. The flag clears itself overnight. |
 | 🎡 | **Bonus Wheel** | One spin a day. Lands on a chore and multiplies it **2×**, or **3×** on a 35% roll. |
 | 🔥 | **Streak Chest** | Consecutive days with **any** approved chore build a streak. Milestones pay real money and unlock a chest with a reveal animation. |
 | 🛒 | **Loot Shop** | Spend points on rewards the parent defines — screen time, Robux, dessert pick, a family outing. |
@@ -84,7 +85,7 @@ The board also **moves on the claim, not the approval** — a chore locks for th
 | | Tab | What you do there |
 |---|---|---|
 | ✅ | **Approvals** | One queue for chore completions *and* reward redemptions. Approve or send back. |
-| 📋 | **Quests** | Search, add and edit chores — points, cadence, minimum age, quest eligibility, and the mystery hint. |
+| 📋 | **Quests** | Search, add and edit chores — points, cadence, minimum age, quest eligibility, and the mystery hint. Plus the two ways to say something is urgent: a deadline to beat, and the Help Wanted flag. |
 | 🎁 | **Loot Shop** | Manage the reward catalog and pricing, plus perk pricing and which perks are switched on. |
 | 👹 | **Monsters** | Name what the monster is guarding, price it, set its health, swap its face or its weak chore, and nudge the bar by hand. Plus the trophy shelf of everything the family has put down. |
 | 👨‍👩‍👧 | **Kids & Points** | Balances, tickets, levels, manual adjustments, cash-in/payout, PIN resets, per-kid spin reset, quest swap, and today's Mystery Chore. |
@@ -134,6 +135,28 @@ Picked automatically each day, with no parent setup. The candidate pool is filte
 Chores with a parent-written hint win the draw outright, so the Bonus Shop's hint perk always has something to sell — which means hints want writing broadly, or the mystery becomes guessable.
 
 The pick is persisted per household per day, so it stays the same chore for everyone all day no matter how many times the page is loaded. Claiming it locks it household-wide; a parent rejecting the claim reopens it. A parent can also swap the pick from Kids & Points — but not once someone has found it.
+
+</details>
+
+<details>
+<summary><b>Help Wanted — pointing at one job, without printing money</b></summary>
+
+<br>
+
+Everything else on the board says "here is what you *could* do". This is the one control that says **"here is what we actually need"** — the thing you want to be able to say standing in a messy kitchen at 6pm.
+
+Flag a chore from the Quests tab and it goes to the top of every kid's board wearing its own colour and a badge naming the prize. Whoever finishes it earns **one bonus ticket**.
+
+**Why a ticket and not extra points.** Points are backed by `points_per_dollar` — real money — so "anything I flag pays more" would be a standing pay rise, and a parent who feels that stops using the flag. Tickets cost the household nothing and still buy everything in the Bonus Shop. They're also fairer here: cooldowns are household-wide, so a points bonus on a flagged chore is a race exactly one kid can ever win.
+
+Four rules keep it honest:
+
+- **The flag clears itself overnight.** Nothing to tidy up, and no scheduled job — the stamp simply stops binding at the 4am boundary. This is deliberate: a board where half the rows shout is a board where none of them do, so you re-assert what's urgent each day rather than collecting flags nobody reads.
+- **Taking the flag back down never cancels a reward.** Eligibility is frozen the moment the kid claims it, because the flag is *why* they picked that chore over another. Flagging one *after* the work was handed in pays nothing, for the same reason in reverse.
+- **The ticket lands at approval**, not when the kid taps — same as everything else that pays.
+- **One ticket per chore per day**, whoever gets there first. Without that, a flagged unlimited-cadence chore would be a ticket printer.
+
+Kids get a push the moment you flag something, so the ask reaches them rather than waiting for someone to open the app.
 
 </details>
 

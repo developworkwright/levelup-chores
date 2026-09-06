@@ -83,6 +83,9 @@
     /* Tinted card washes — an accent bled into the panel colour. */
     --fq-wash-violet: linear-gradient(135deg, #2a1150, #0e0719);
     --fq-wash-gold: linear-gradient(135deg, #2a2405, #0e0719);
+    /* Behind a Help Wanted row. Coral rather than another gold, so a flagged
+       chore can't be mistaken for the one-time chore sitting under it. */
+    --fq-wash-coral: linear-gradient(135deg, #3a1030, #0e0719);
     --fq-wash-blue: linear-gradient(135deg, #2a2050, #0e0719);
     --fq-wash-cleared: linear-gradient(135deg, #221046, #0e0719);
     /* The pinned saving-up goal card at the top of the Loot Shop. */

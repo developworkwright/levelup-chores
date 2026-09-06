@@ -17,6 +17,7 @@ class ChoreCompletion extends Model
         'status',
         'points_awarded',
         'struck_weak_point',
+        'help_wanted',
         'submitted_at',
         'decided_at',
         'decided_by_profile_id',
@@ -27,6 +28,7 @@ class ChoreCompletion extends Model
         return [
             'status' => CompletionStatus::class,
             'struck_weak_point' => 'boolean',
+            'help_wanted' => 'boolean',
             'submitted_at' => 'datetime',
             'decided_at' => 'datetime',
         ];

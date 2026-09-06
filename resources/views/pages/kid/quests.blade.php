@@ -87,6 +87,23 @@ new class extends Component
     public ?string $boardMessage = null;
 
     /**
+     * Which chore has its "are you sure?" sheet open, or null.
+     *
+     * The whole row is the claim button, which reads to a kid as "tap this to
+     * find out more" — and a tap that instead submitted the job for approval
+     * cost them a chore they hadn't done. So the tap now opens the sheet, and
+     * the sheet is *both* halves of the fix: it answers the question they were
+     * actually asking (what does this pay, how often, is it a big one) and it
+     * puts the claim behind a second, labelled press.
+     *
+     * One id rather than a per-row Alpine flag, deliberately. The board morphs
+     * under Livewire as chores are claimed and filters change, and a client-side
+     * open/closed map keyed by row is exactly the thing that survives a morph
+     * pointing at the wrong chore.
+     */
+    public ?int $confirmingChoreId = null;
+
+    /**
      * Why taking a job on the bounty board didn't work. Same reasoning as
      * boardMessage: a sibling can take the same job a second before you do, and
      * a button that silently does nothing explains none of it.
@@ -1006,9 +1023,40 @@ new class extends Component
         app(ChoreService::class)->claim($this->profile, $chore);
     }
 
+    /**
+     * What a tap on a board row now does: opens the sheet rather than claiming.
+     *
+     * Runs the full claimability check first, so a tap on a row a sibling took
+     * a second ago gets the explanation it always got instead of a sheet for a
+     * chore that can no longer be taken — choreIsClaimable() has already
+     * written boardMessage by the time this returns false.
+     */
+    public function askChore(int $choreId): void
+    {
+        $this->boardMessage = null;
+        $this->confirmingChoreId = null;
+
+        if (! $this->choreIsClaimable($choreId)) {
+            return;
+        }
+
+        $this->confirmingChoreId = $choreId;
+    }
+
+    public function cancelChore(): void
+    {
+        $this->confirmingChoreId = null;
+    }
+
+    /**
+     * The confirm. Still the method the board's claim path has always gone
+     * through, and still re-checks everything server-side — the sheet can sit
+     * open for minutes, which is plenty of time for a sibling to take the job.
+     */
     public function claimChore(int $choreId): void
     {
         $this->boardMessage = null;
+        $this->confirmingChoreId = null;
 
         $this->completeChore($choreId);
     }
@@ -1304,6 +1352,14 @@ new class extends Component
             // loaded, and Chore::matches() is the in-memory twin of the
             // scope the parent admin searches with.
             'board' => $filtered,
+            // Resolved off $flagged, not $filtered: a chip or a band changing
+            // under an open sheet must not blank it, and a 'ready' chore is
+            // never one hideUnavailable rejects. Re-checked for 'ready' every
+            // render, so a sheet whose chore a sibling just took closes itself
+            // rather than offering a button that can only fail.
+            'confirming' => $this->confirmingChoreId === null ? null : $flagged->first(
+                fn (array $entry) => $entry['chore']->id === $this->confirmingChoreId && $entry['state'] === 'ready'
+            ),
             // "18 open" when nothing is filtered, "6 of 18" when something is.
             // The first is a board to browse; the second is a board with a
             // question asked of it, and the denominator is what says so.
@@ -2101,6 +2157,7 @@ new class extends Component
                         $state = $entry['state'];
                         $takenBy = $entry['takenBy'];
                         $closesAt = $entry['closesAt'];
+                        $helpWanted = $entry['helpWanted'];
                         $boosted = $questBoosted === false && $boost && $boost->chore_id === $chore->id;
                         $payout = $chore->points * ($boosted ? $boost->multiplier : 1);
                         $boostColor = $boosted && $boost->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)';
@@ -2146,7 +2203,13 @@ new class extends Component
                         // one place it can say what a tap does without putting a
                         // second call to action on a 40px row.
                         $rowTitle = match (true) {
-                            $state === 'ready' => 'Mark it done',
+                            // Not "Mark it done" any more: the tap opens the
+                            // sheet, and a row promising to submit the job on a
+                            // single press is the thing being fixed. It still
+                            // has to say that marking it done is what lies
+                            // through there, or the tap looks like it does
+                            // nothing worth making.
+                            $state === 'ready' => 'See it and mark it done',
                             (bool) $takenBy => 'Taken by '.$takenBy->name,
                             $state === 'expired' => 'A parent took this one',
                             default => $status,
@@ -2157,12 +2220,16 @@ new class extends Component
                         wire:key="chore-{{ $chore->id }}"
                         title="{{ $chore->name }} &mdash; {{ $rowTitle }}"
                         @if ($state === 'ready')
-                            wire:click="claimChore({{ $chore->id }})"
+                            wire:click="askChore({{ $chore->id }})"
                         @else
                             disabled
                         @endif
-                        class="flex items-center gap-[11px] rounded-[17px] px-[13px] py-[11px] text-left {{ $dimmed ? 'opacity-70' : '' }} {{ $chore->isOneTime() || $closesAt ? 'border-2' : 'border border-fq-line' }} {{ $state === 'ready' ? 'transition hover:brightness-115' : 'cursor-default' }}"
-                        style="background: var(--fq-panel); {{ $state === 'pending' ? 'border-color: var(--fq-success-border)' : ($closesAt ? 'border-color: color-mix(in srgb, var(--fq-cyan) 55%, transparent)' : ($chore->isOneTime() ? 'border-color: color-mix(in srgb, var(--fq-gold) 55%, transparent); background: var(--fq-wash-gold)' : '')) }}"
+                        class="flex items-center gap-[11px] rounded-[17px] px-[13px] py-[11px] text-left {{ $dimmed ? 'opacity-70' : '' }} {{ $helpWanted || $chore->isOneTime() || $closesAt ? 'border-2' : 'border border-fq-line' }} {{ $state === 'ready' ? 'transition hover:brightness-115' : 'cursor-default' }}"
+                        {{-- Their own pending claim outranks everything: it is
+                             feedback on a tap they just made. Below that the
+                             order matches the board's own sort — a job a parent
+                             asked for, then a one-time chore, then a clock. --}}
+                        style="background: var(--fq-panel); {{ $state === 'pending' ? 'border-color: var(--fq-success-border)' : ($helpWanted ? 'border-color: color-mix(in srgb, var(--fq-coral) 65%, transparent); background: var(--fq-wash-coral)' : ($closesAt ? 'border-color: color-mix(in srgb, var(--fq-cyan) 55%, transparent)' : ($chore->isOneTime() ? 'border-color: color-mix(in srgb, var(--fq-gold) 55%, transparent); background: var(--fq-wash-gold)' : ''))) }}"
                     >
                         {{-- The same face the chore wears everywhere else. A board
                              of fourteen identical text rows is unusable to a kid
@@ -2185,6 +2252,26 @@ new class extends Component
                             {{-- Flagged, not just sorted: a row sitting at the top
                                  of the list only reads as urgent if you can see why
                                  it's there. --}}
+                            {{-- Above the one-time flag, because it is the
+                                 stronger claim on their attention and it is the
+                                 reason the row is sitting up here.
+
+                                 The ticket comes off the badge once the row is
+                                 no longer claimable. Cooldowns are household
+                                 wide, so a sibling taking it means the ticket is
+                                 genuinely gone — leaving the number on a struck
+                                 through row would be advertising a prize that
+                                 isn't there. The ask itself still shows, since
+                                 it was still made. --}}
+                            @if ($helpWanted)
+                                <span class="mb-[2px] inline-flex items-center gap-[5px] self-start rounded-[8px] px-[8px] py-[2px] font-mono-fq text-[9px] tracking-[0.14em] uppercase" style="background: color-mix(in srgb, var(--fq-coral) 22%, transparent); color: var(--fq-coral)">
+                                    <i class="fa-solid fa-hand" aria-hidden="true"></i>
+                                    Help wanted
+                                    @if ($state === 'ready')
+                                        · +{{ ChoreService::HELP_WANTED_TICKETS }} {{ Str::plural('ticket', ChoreService::HELP_WANTED_TICKETS) }}
+                                    @endif
+                                </span>
+                            @endif
                             @if ($chore->isOneTime())
                                 <span class="mb-[2px] inline-block self-start rounded-[8px] px-[8px] py-[2px] font-mono-fq text-[9px] tracking-[0.14em] uppercase" style="background: color-mix(in srgb, var(--fq-gold) 22%, transparent); color: var(--fq-gold)">
                                     &#9889; One-time
@@ -2251,7 +2338,7 @@ new class extends Component
                         >
                             @if ($state === 'ready')
                                 <i class="fa-solid fa-check" aria-hidden="true"></i>
-                                <span class="sr-only">Mark it done</span>
+                                <span class="sr-only">See it and mark it done</span>
                             @elseif ($state === 'pending')
                                 {{-- Ticked, and waiting on a parent. Their own
                                      tap is the one thing on a dimmed row worth
@@ -2262,6 +2349,137 @@ new class extends Component
                     </button>
                 @endforeach
             </div>
+
+            {{-- The "are you sure?" sheet.
+
+                 Kids kept tapping rows expecting to be told more about a chore
+                 and submitting it for approval instead. So this is deliberately
+                 information first and a question second: everything the row
+                 could not fit, then the one press that actually claims. Reading
+                 it costs nothing, which is what makes the curious tap safe
+                 again.
+
+                 Never the chore's `hint` — that is the Mystery Chore's clue and
+                 the Bonus Shop sells it. Showing it here would give it away to
+                 anyone who opened enough sheets. --}}
+            @if ($confirming)
+                @php
+                    $askChore = $confirming['chore'];
+                    $askBoosted = $questBoosted === false && $boost && $boost->chore_id === $askChore->id;
+                    $askPayout = $askChore->points * ($askBoosted ? $boost->multiplier : 1);
+                    $askTags = [$askChore->cadence->kidLabel()];
+
+                    if ($askChore->effort) {
+                        $askTags[] = $askChore->effort->kidLabel();
+                    }
+
+                    if ($confirming['doneBefore']) {
+                        $askTags[] = 'Done before';
+                    }
+                @endphp
+                <div
+                    x-data
+                    x-on:keydown.escape.window="$wire.cancelChore()"
+                    class="fixed inset-0 z-[60] flex items-end justify-center px-3 pb-3 sm:items-center sm:pb-0"
+                >
+                    {{-- The backdrop is its own element and its own button, so
+                         a tap outside backs out. A sheet a six-year-old cannot
+                         dismiss is a worse trap than the one it replaced. --}}
+                    <button
+                        type="button"
+                        wire:click="cancelChore"
+                        aria-label="Close"
+                        class="absolute inset-0 cursor-default"
+                        style="background: rgba(6, 3, 14, 0.74)"
+                    ></button>
+
+                    <div
+                        class="relative w-full max-w-[420px] rounded-[22px] border p-[18px]"
+                        style="animation: fq-pop .22s ease both;
+                               background: var(--fq-panel);
+                               border-color: var(--fq-line-2);
+                               box-shadow: 0 26px 60px -20px #000"
+                    >
+                        <div class="flex items-center gap-3">
+                            <span
+                                class="grid h-12 w-12 flex-none place-items-center rounded-[14px] border"
+                                style="border-color: var(--fq-line-2); background: var(--fq-sunk); color: var(--fq-text-3)"
+                            >
+                                @if ($askChore->icon)
+                                    <x-chore-icon :icon="$askChore->icon" class="text-[22px]" />
+                                @else
+                                    <span class="font-baloo text-[20px] font-extrabold">{{ mb_substr($askChore->name, 0, 1) }}</span>
+                                @endif
+                            </span>
+
+                            <div class="min-w-0 flex-1">
+                                <p class="font-baloo text-[19px] leading-[1.15] font-extrabold">{{ $askChore->name }}</p>
+                                <p class="mt-[2px] font-mono-fq text-[9px] tracking-[0.06em] text-fq-text-4 uppercase">
+                                    {{ implode(' · ', $askTags) }}
+                                </p>
+                            </div>
+
+                            {{-- The same money-big, points-small treatment as
+                                 the row it came from, so the number a kid
+                                 tapped on is recognisably the number here. --}}
+                            <div class="flex flex-none flex-col items-end">
+                                <span
+                                    class="font-baloo text-[24px] leading-none font-extrabold whitespace-nowrap"
+                                    style="color: {{ $askBoosted ? 'var(--fq-magenta)' : 'var(--fq-lime)' }}"
+                                >{{ $money($askPayout) }}</span>
+                                <span class="font-mono-fq text-[8.5px] text-fq-text-4">{{ $askPayout }} PTS</span>
+                            </div>
+                        </div>
+
+                        @if ($askBoosted || $confirming['helpWanted'] || $confirming['closesAt'])
+                            <div class="mt-3 flex flex-wrap items-center gap-[6px]">
+                                @if ($confirming['helpWanted'])
+                                    <span class="inline-flex items-center gap-[5px] rounded-[8px] px-[8px] py-[3px] font-mono-fq text-[9px] tracking-[0.14em] uppercase" style="background: color-mix(in srgb, var(--fq-coral) 22%, transparent); color: var(--fq-coral)">
+                                        <i class="fa-solid fa-hand" aria-hidden="true"></i>
+                                        Help wanted · +{{ ChoreService::HELP_WANTED_TICKETS }} {{ Str::plural('ticket', ChoreService::HELP_WANTED_TICKETS) }}
+                                    </span>
+                                @endif
+                                @if ($askBoosted)
+                                    <span class="inline-block rounded-[8px] px-[8px] py-[3px] font-mono-fq text-[9px] tracking-[0.14em] uppercase" style="background: color-mix(in srgb, var(--fq-magenta) 22%, transparent); color: var(--fq-magenta)">
+                                        {{ $boost->multiplier }}x wheel boost
+                                    </span>
+                                @endif
+                                @if ($confirming['closesAt'])
+                                    <x-chore-countdown wire:key="ask-closes-{{ $askChore->id }}" :closes-at="$confirming['closesAt']" />
+                                @endif
+                            </div>
+                        @endif
+
+                        {{-- The question, and the only sentence on the card that
+                             really matters: a claim is a statement about work
+                             that already happened, and a parent is about to
+                             check whether it did. --}}
+                        <p class="mt-4 text-[15px] leading-[1.35] font-semibold">Have you finished this one?</p>
+                        <p class="mt-[3px] text-[12.5px] leading-[1.35] text-fq-text-4">
+                            Only say yes if the job is actually done &mdash; a parent has to check it before the points land.
+                        </p>
+
+                        <div class="mt-4 flex gap-2">
+                            {{-- "Not yet" rather than "Cancel": backing out of a
+                                 chore you have not done is a perfectly good
+                                 answer, and it is the one most of these taps
+                                 want. It is listed first for the same reason. --}}
+                            <button
+                                type="button"
+                                wire:click="cancelChore"
+                                class="flex-1 rounded-[14px] border py-[11px] text-[14px] font-semibold"
+                                style="border-color: var(--fq-line-2); background: var(--fq-sunk); color: var(--fq-text-3)"
+                            >Not yet</button>
+                            <button
+                                type="button"
+                                wire:click="claimChore({{ $askChore->id }})"
+                                class="flex-1 rounded-[14px] border py-[11px] text-[14px] font-extrabold"
+                                style="border-color: var(--fq-lime); background: var(--fq-fill-gold); color: var(--fq-ink)"
+                            >Yes, it&rsquo;s done</button>
+                        </div>
+                    </div>
+                </div>
+            @endif
 
             @if ($board->isEmpty())
                 {{-- One panel, three headlines. Hiding everything leaves a blank

@@ -262,6 +262,219 @@ class ArcadeToyTest extends TestCase
         );
     }
 
+    /**
+     * The toy's tuning constants, read out of the shipped file.
+     *
+     * @return array{blobs: int, skins: list<string>}
+     */
+    private function slimeTuning(): array
+    {
+        $source = file_get_contents(resource_path('js/slime.js'));
+
+        preg_match('/const MAX_BLOBS = (\d+);/', $source, $blobs);
+        $this->assertNotEmpty($blobs, 'Could not find MAX_BLOBS in slime.js.');
+
+        preg_match('/const SKINS = \[(.*?)\n\];/s', $source, $block);
+        $this->assertNotEmpty($block, 'Could not find SKINS in slime.js.');
+
+        preg_match_all("/name: '(.+?)'/", $block[1], $names);
+
+        return ['blobs' => (int) $blobs[1], 'skins' => $names[1]];
+    }
+
+    public function test_the_toy_keeps_the_bigger_palette_the_kids_asked_for(): void
+    {
+        /*
+         * The bundle shipped five colours and a cap of four blobs. Both were
+         * raised on request, and both are the kind of single number a
+         * replacement drop puts back without anything looking broken — the toy
+         * would simply be quietly smaller again.
+         */
+        $tuning = $this->slimeTuning();
+
+        $this->assertGreaterThanOrEqual(12, count($tuning['skins']), 'slime.js lost colours.');
+        $this->assertGreaterThanOrEqual(8, $tuning['blobs'], 'slime.js lost blobs.');
+
+        // Asked for by name, so they are checked by name.
+        $this->assertContains('Black', $tuning['skins']);
+        $this->assertContains('White', $tuning['skins']);
+
+        // The five the bundle came with are still in it, and still first: the
+        // starting slime is SKINS[0] and it should stay the green one the game
+        // is named after.
+        $this->assertSame(
+            ['Slime', 'Bubblegum', 'Grape', 'Custard', 'Orange Goo'],
+            array_slice($tuning['skins'], 0, 5)
+        );
+    }
+
+    public function test_the_black_slime_has_a_face_that_can_be_seen(): void
+    {
+        /*
+         * The face is drawn in near-black by default and a black slime swallows
+         * it whole — the blob becomes a featureless lump. Black is the one skin
+         * that overrides the ink, so this is really two assertions about one
+         * thing: the override exists in the palette, and `drawFace()` still
+         * reads it rather than going back to the hardcoded colour it shipped
+         * with.
+         */
+        $source = file_get_contents(resource_path('js/slime.js'));
+
+        $this->assertMatchesRegularExpression(
+            "/name: 'Black'.*ink: '#[0-9a-f]{6}'.*pupil: '#[0-9a-f]{6}'/i",
+            $source,
+            'The black slime no longer overrides its face colour.'
+        );
+
+        preg_match('/    drawFace\(b\) \{(.*?)\n    \}/s', $source, $body);
+
+        $this->assertNotEmpty($body, 'Could not find drawFace() in slime.js.');
+        $this->assertStringContainsString('const ink = b.skin.ink ||', $body[1]);
+        $this->assertStringContainsString('const pupil = b.skin.pupil ||', $body[1]);
+
+        // And nothing in it paints a face in a fixed colour behind the ink's
+        // back — that is exactly how this regresses to an invisible face.
+        $this->assertStringNotContainsString("ctx.fillStyle = '#0a0512'", $body[1]);
+        $this->assertStringNotContainsString("ctx.strokeStyle = '#0a0512'", $body[1]);
+    }
+
+    public function test_colour_is_picked_per_slime_from_a_visible_list(): void
+    {
+        /*
+         * Per-slime colour lives in a picker under the canvas: a chip for every
+         * slime in the room, then the palette. Tap a chip, tap a colour.
+         *
+         * It replaced a version that recoloured "the slime you last touched",
+         * which was correct and still felt broken — the target was invisible,
+         * so one button appeared to recolour all of them, or the last one, or
+         * the first one, depending on state nothing on screen was showing. That
+         * is the regression this test really guards: the thing being changed
+         * has to be the thing that was pointed at.
+         */
+        $source = file_get_contents(resource_path('js/slime.js'));
+
+        $this->assertStringContainsString('buildPicker()', $source, 'The colour picker is gone.');
+        $this->assertStringContainsString(
+            'wrap.appendChild(this.buildPicker());',
+            $source,
+            'The colour picker is never mounted.'
+        );
+
+        // The game's half: paint one slime by position in the room.
+        preg_match('/    setSkin\(index, skinIndex\) \{(.*?)\n    \}/s', $source, $set);
+        $this->assertNotEmpty($set, 'Could not find setSkin() in slime.js.');
+        $this->assertStringContainsString('const b = this.blobs[index];', $set[1]);
+
+        // The chips have to follow the slimes, or the row starts lying about
+        // which colour each one is.
+        $this->assertStringContainsString("this.addEventListener('st-blob', renderBlobs);", $source);
+        $this->assertStringContainsString("this.addEventListener('st-skin', renderBlobs);", $source);
+
+        // And the invisible target is gone for good.
+        $this->assertStringNotContainsString('this.touched', $source, 'The invisible colour target is back.');
+    }
+
+    public function test_the_all_same_button_does_the_same_thing_every_time(): void
+    {
+        /*
+         * The blunt gesture, kept deliberately: "make them ALL black" is worth
+         * one tap. What matters is that it has exactly one behaviour — it is
+         * the button whose unpredictability caused the rewrite, so a branch
+         * reappearing in here is the specific regression to catch.
+         */
+        $source = file_get_contents(resource_path('js/slime.js'));
+
+        preg_match('/    cycleSkin\(\) \{(.*?)\n    \}/s', $source, $body);
+
+        $this->assertNotEmpty($body, 'Could not find cycleSkin() in slime.js.');
+        $this->assertStringContainsString('this.blobs.forEach((b) => {', $body[1]);
+        $this->assertStringNotContainsString('if (', $body[1], 'cycleSkin() has branched again.');
+
+        $this->assertStringContainsString("add('All Same'", $source, 'The all-at-once button lost its name.');
+    }
+
+    public function test_a_new_slime_looks_for_space_before_it_appears(): void
+    {
+        /*
+         * Two slimes could be born inside each other — tap the same patch of
+         * floor twice, or hit "+ Blob" repeatedly, and the second one arrived
+         * on top of the first. The solver does separate them, but it does it by
+         * inflating one out through the other, which reads as a bug.
+         *
+         * The search has to cover the whole room and not just a ring around the
+         * asked-for point: with a full room the free space is usually somewhere
+         * else entirely, and a ring-only search was what still left overlaps.
+         */
+        $source = file_get_contents(resource_path('js/slime.js'));
+
+        preg_match('/    freeSpot\(x, y, r\) \{(.*?)\n    \}/s', $source, $body);
+
+        $this->assertNotEmpty($body, 'Could not find freeSpot() in slime.js.');
+
+        // Existing slimes and the things they can be born inside.
+        $this->assertStringContainsString('this.blobs.forEach', $body[1]);
+        $this->assertStringContainsString("box.kind === 'shelf'", $body[1]);
+        $this->assertStringContainsString("box.kind === 'bucket'", $body[1]);
+
+        // The room-wide sweep, which is what a ring search alone was missing.
+        $this->assertStringContainsString('cy += 12', $body[1], 'freeSpot() no longer sweeps the room.');
+
+        // And spawn actually uses it.
+        preg_match('/    spawn\(x, y, r\) \{(.*?)\n    \}/s', $source, $spawn);
+        $this->assertStringContainsString('const at = this.freeSpot(x, y, r);', $spawn[1]);
+        $this->assertStringContainsString('new Blob(at.x, at.y, r,', $spawn[1]);
+    }
+
+    public function test_every_slime_colour_is_a_distinct_pair_of_real_colours(): void
+    {
+        /*
+         * A blob is drawn as a radial gradient from `fill` to `deep`, so both
+         * have to parse and they have to differ — a skin whose two halves match
+         * renders as a flat disc with no roundness to it, which is the one
+         * thing that makes the goo read as goo when it is sitting still.
+         */
+        $source = file_get_contents(resource_path('js/slime.js'));
+
+        preg_match('/const SKINS = \[(.*?)\n\];/s', $source, $block);
+        preg_match_all("/name: '(.+?)', fill: '(#[0-9a-f]{6})', deep: '(#[0-9a-f]{6})'/i", $block[1], $skins, PREG_SET_ORDER);
+
+        $this->assertCount(count($this->slimeTuning()['skins']), $skins, 'A skin is missing a fill or a deep.');
+
+        $names = [];
+
+        foreach ($skins as [, $name, $fill, $deep]) {
+            $this->assertNotSame(mb_strtolower($fill), mb_strtolower($deep), "{$name} has no shading.");
+            $names[] = $name;
+        }
+
+        $this->assertSame($names, array_unique($names), 'Two slimes share a name.');
+    }
+
+    public function test_a_new_slime_comes_out_a_different_colour(): void
+    {
+        /*
+         * The edit that makes the palette worth having. `cycleSkin()` repaints
+         * every blob at once, so without `spawn()` advancing, a room of eight
+         * would be eight of the same colour however many are on the list — the
+         * kids would have got more slimes and no more colours.
+         */
+        $source = file_get_contents(resource_path('js/slime.js'));
+
+        preg_match('/    spawn\(x, y, r\) \{(.*?)\n    \}/s', $source, $body);
+
+        $this->assertNotEmpty($body, 'Could not find spawn() in slime.js.');
+
+        $this->assertMatchesRegularExpression(
+            '/this\.skin = \(this\.skin \+ 1\) % SKINS\.length;/',
+            $body[1],
+            'spawn() no longer advances the colour, so every slime in the room is the same one.'
+        );
+
+        // Guarded so a reset does not walk the palette every time it drops the
+        // one starting slime.
+        $this->assertStringContainsString('if (this.blobs.length > 0) {', $body[1]);
+    }
+
     public function test_the_toys_artwork_reaches_for_nothing_it_should_not(): void
     {
         // Shipped verbatim from a design bundle and loaded on every page in the

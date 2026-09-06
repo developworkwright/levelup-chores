@@ -40,6 +40,42 @@
  *    kick of the whole board on the hard ones.
  *
  * Events: `st-splat` (with force), `st-blob` when the count changes.
+ *
+ * ---------------------------------------------------------------------------
+ * EDITED FROM THE DESIGN BUNDLE
+ * ---------------------------------------------------------------------------
+ *
+ * This file otherwise ships verbatim, so a replacement drop would undo all of
+ * these without looking broken. Each is marked at its own site with the same
+ * "EDITED FROM THE BUNDLE" phrase — grep for it — and each is pinned by
+ * `ArcadeToyTest`, which is what turns "re-apply these" into a failing test
+ * rather than a thing somebody has to remember.
+ *
+ * 1. `Sfx.ctx()` reads `fq-muted` before opening an AudioContext, so the one
+ *    speaker button in the arcade header governs this game like the others.
+ * 2. `SKINS` carries twelve colours rather than five, including black and
+ *    white, which the kids asked for by name.
+ * 3. `MAX_BLOBS` is eight rather than four.
+ * 4. `spawn()` advances to the next colour, so a room filling up fills up
+ *    with different-coloured slimes instead of eight identical ones, and calls
+ *    `freeSpot()` so two are never born inside each other.
+ * 5. `buildPicker()` is new: a chip per slime and the palette under the
+ *    canvas, which is where per-slime colour lives. `setSkin()` is its half on
+ *    the game, and `st-skin` is what keeps the chips honest.
+ * 6. `drawFace()` takes its ink from the skin, which is what lets a black
+ *    slime have a face at all.
+ *
+ * 2–6 are one request the kids made in stages — more slimes, more colours, and
+ * then a colour each. They only add up to that together: with the bundle's
+ * `cycleSkin()` repainting everything, a longer palette would not have shown
+ * them a single extra colour on screen at once.
+ *
+ * One thing tried and taken back out, worth not repeating: making the Color
+ * button act on "the slime you last touched". It behaved exactly as written and
+ * still felt broken, because nothing on screen said which slime that was — the
+ * same button appeared to recolour all of them, or the last one, or the first
+ * one, depending on invisible state. The picker replaced it. A control whose
+ * effect you cannot predict before pressing it is worse than a blunt one.
  */
 
 const W = 320;
@@ -51,7 +87,25 @@ const WALL = 8;
 /** Ring resolution per blob. 26 is round enough and cheap enough for a tablet. */
 const RING = 26;
 
-const MAX_BLOBS = 4;
+/*
+ * EDITED FROM THE BUNDLE — was 4, and the kids asked for more slimes.
+ *
+ * The cost is the blob-on-blob pass: `collideBlobs()` runs inside `solve()`, so
+ * it is SUBSTEPS × pairs × 2 × RING point tests every frame, and pairs grow
+ * with the square — 4 → 8 blobs takes 6 pairs to 28, near five times that pass.
+ *
+ * Measured rather than guessed, on a full room of eight: step and draw together
+ * come to 0.76ms, which is 4.5% of a 60fps frame, and about 23% of one even if
+ * a tablet runs five times slower. CPU is therefore NOT what caps this.
+ *
+ * The room is. Eight blobs cover about a third of the playable box, which is
+ * crowded enough that they shove each other and still leaves somewhere to throw
+ * them; much past that and there is nothing to aim at but more goo. So raising
+ * this again is a question about the size of the room, not about frame time —
+ * but re-measure anyway, because the next doubling costs four times as much and
+ * not twice.
+ */
+const MAX_BLOBS = 8;
 
 const SUBSTEPS = 5;
 const GRAVITY = 1500;
@@ -107,12 +161,36 @@ const THROW_MIN = 1.4;
 /** How far a constraint may drag a bonded point before the bond tears. */
 const BOND_BREAK = 7;
 
+/*
+ * EDITED FROM THE BUNDLE — the kids asked for more colours. The first five are
+ * the bundle's; the rest were added, drawn from the app's own palette so a
+ * slime never turns up in a colour nothing else in the console uses.
+ *
+ * `deep` is the shaded underside and wants to be the same hue two or three
+ * stops darker, not a different one — the blob is drawn as a radial gradient
+ * from `fill` to `deep`, so a mismatched pair reads as two slimes stuck
+ * together rather than one round one.
+ *
+ * `ink` and `pupil` are optional and only Black sets them. The face is drawn in
+ * near-black by default, which is invisible on a dark slime — a black one with
+ * the default face is a featureless lump, which is why "black" could not simply
+ * be another row of two hex codes. Black flips the face white and the pupils
+ * dark, and is a lifted charcoal rather than true #000 so it still separates
+ * from the room behind it.
+ */
 const SKINS = [
     { name: 'Slime', fill: '#a8f08a', deep: '#4fae63', gloss: 'rgba(255,255,255,0.5)' },
     { name: 'Bubblegum', fill: '#ff8ac7', deep: '#c2418c', gloss: 'rgba(255,255,255,0.55)' },
     { name: 'Grape', fill: '#c9a0ff', deep: '#7a48c9', gloss: 'rgba(255,255,255,0.5)' },
     { name: 'Custard', fill: '#ffe14d', deep: '#c79a15', gloss: 'rgba(255,255,255,0.55)' },
     { name: 'Orange Goo', fill: '#ff9f45', deep: '#c25d12', gloss: 'rgba(255,255,255,0.5)' },
+    { name: 'Blue Raspberry', fill: '#8fd3ff', deep: '#3d7fb5', gloss: 'rgba(255,255,255,0.55)' },
+    { name: 'Cherry', fill: '#ff5d7a', deep: '#c2334f', gloss: 'rgba(255,255,255,0.5)' },
+    { name: 'Mint', fill: '#5ad1c8', deep: '#1f7d78', gloss: 'rgba(255,255,255,0.55)' },
+    { name: 'Toxic', fill: '#d4ff4d', deep: '#8aae10', gloss: 'rgba(255,255,255,0.5)' },
+    { name: 'Bogey', fill: '#a8c04a', deep: '#667a1c', gloss: 'rgba(255,255,255,0.45)' },
+    { name: 'White', fill: '#f7f0ff', deep: '#b9aed0', gloss: 'rgba(255,255,255,0.7)' },
+    { name: 'Black', fill: '#4a4560', deep: '#1a1724', gloss: 'rgba(255,255,255,0.3)', ink: '#f7f0ff', pupil: '#15131d' },
 ];
 
 /**
@@ -153,11 +231,11 @@ const Sfx = {
     ac: null,
 
     ctx() {
-        // ONE LINE EDITED FROM THE BUNDLE. The arcade has a single sound
-        // toggle in the page header, and every game reads this key at the
-        // moment it plays rather than holding its own mute state — see
-        // <x-sound-toggle>. Re-apply this when replacing the file from a
-        // newer bundle; ArcadeToyTest fails if it goes missing.
+        // EDITED FROM THE BUNDLE. The arcade has a single sound toggle in the
+        // page header, and every game reads this key at the moment it plays
+        // rather than holding its own mute state — see <x-sound-toggle>.
+        // Re-apply this when replacing the file from a newer bundle;
+        // ArcadeToyTest fails if it goes missing.
         if (localStorage.getItem('fq-muted') === '1') {
             return null;
         }
@@ -450,12 +528,135 @@ class SlimeTime {
         this.spawn(W / 2, 320, 54);
     }
 
+    /*
+     * EDITED FROM THE BUNDLE — a new slime comes out the NEXT colour along.
+     *
+     * The bundle gave every blob the one current skin, and `cycleSkin()` still
+     * repaints all of them, so however long this list gets only one colour was
+     * ever on screen at a time. Adding colours alone would not have shown the
+     * kids a single extra one. Advancing here is what turns "more slimes" and
+     * "more colours" into the same thing: fill the room and you get a pile of
+     * different ones, press Color and they all agree again.
+     *
+     * Only from the second blob on, so a reset does not walk the palette every
+     * time it drops the starting slime.
+     */
+    /**
+     * Somewhere to put a new slime that is not already occupied.
+     *
+     * EDITED FROM THE BUNDLE — a new blob used to appear exactly where it was
+     * asked for, which meant two of them could be born inside each other. The
+     * solver does eventually shove them apart, but it does it by inflating one
+     * out through the other, which looks like a bug and loses the moment the
+     * `+ Blob` tap was for.
+     *
+     * Returns the asked-for point whenever it is genuinely clear, so a tap on
+     * empty floor still drops the slime under the finger; otherwise it walks
+     * outward in rings looking for room. If the room is truly full it hands
+     * back the roomiest spot it found rather than refusing, because a button
+     * that silently does nothing reads as broken — and with a near-miss the
+     * solver has only a pixel or two to resolve rather than a whole body.
+     */
+    freeSpot(x, y, r) {
+        const minX = WALL + r + 2;
+        const maxX = W - WALL - r - 2;
+        const minY = WALL + r + 2;
+        const maxY = FLOOR - r - 2;
+
+        // Only the things a slime can be born inside. The walls, floor and
+        // ceiling are handled by the clamp above, and they extend off-board, so
+        // treating them as obstacles here would reject the whole room.
+        const solid = BOXES.filter((box) => box.kind === 'shelf' || box.kind === 'bucket');
+
+        // The smallest gap between a candidate and anything already there —
+        // negative when it overlaps.
+        const clearance = (cx, cy) => {
+            let worst = Infinity;
+
+            this.blobs.forEach((b) => {
+                const c = b.centroid();
+
+                worst = Math.min(worst, Math.hypot(cx - c.x, cy - c.y) - (r + b.rEff + 4));
+            });
+
+            solid.forEach((box) => {
+                const nx = clamp(cx, box.x, box.x + box.w);
+                const ny = clamp(cy, box.y, box.y + box.h);
+
+                worst = Math.min(worst, Math.hypot(cx - nx, cy - ny) - (r + 2));
+            });
+
+            return worst;
+        };
+
+        let best = null;
+
+        const consider = (cx, cy) => {
+            // Out of the room entirely. Rejected rather than clamped back
+            // inside: clamping folds whole arcs of candidates onto the same
+            // point on a wall, so the search does far less work than it looks
+            // like it is doing and lines the slimes up along the edges.
+            if (cx < minX || cx > maxX || cy < minY || cy > maxY) {
+                return false;
+            }
+
+            const room = clearance(cx, cy);
+
+            if (best === null || room > best.room) {
+                best = { x: cx, y: cy, room };
+            }
+
+            return room >= 0;
+        };
+
+        // Near the asked-for point first, so a tap on empty floor still drops
+        // the slime under the finger whenever there is room for it there.
+        for (const ring of [0, 26, 52, 78, 104, 130]) {
+            const tries = ring === 0 ? 1 : 12;
+
+            for (let a = 0; a < tries; a++) {
+                // Offset per ring so candidates do not all sit on the same few
+                // spokes out from a blocked point.
+                const ang = (a / tries) * 6.283 + ring * 0.6;
+
+                if (consider(x + Math.cos(ang) * ring, y + Math.sin(ang) * ring)) {
+                    return best;
+                }
+            }
+        }
+
+        // Nowhere near the tap. Sweep the whole room rather than giving up —
+        // the rings only cover a disc around one point, and with a full room
+        // the free space is usually somewhere else entirely. A dozen columns
+        // by a dozen rows against eight blobs is a few hundred comparisons,
+        // once, on a button press.
+        for (let cy = minY; cy <= maxY; cy += 12) {
+            for (let cx = minX; cx <= maxX; cx += 12) {
+                if (consider(cx, cy)) {
+                    return best;
+                }
+            }
+        }
+
+        // Genuinely full. Hand back the roomiest spot found rather than
+        // refusing: a button that silently does nothing reads as broken, and
+        // from a near miss the solver has a pixel or two to resolve rather
+        // than a whole body.
+        return best;
+    }
+
     spawn(x, y, r) {
         if (this.blobs.length >= MAX_BLOBS) {
             return;
         }
 
-        this.blobs.push(new Blob(x, y, r, SKINS[this.skin]));
+        if (this.blobs.length > 0) {
+            this.skin = (this.skin + 1) % SKINS.length;
+        }
+
+        const at = this.freeSpot(x, y, r);
+
+        this.blobs.push(new Blob(at.x, at.y, r, SKINS[this.skin]));
         this.emit('st-blob', { blobs: this.blobs.length });
     }
 
@@ -466,11 +667,85 @@ class SlimeTime {
         this.spawn(W / 2, 320, 54);
     }
 
+    /*
+     * EDITED FROM THE BUNDLE — only in that it now says so when it fires.
+     *
+     * This does what the bundle's did: every slime moves to the next colour
+     * together. It briefly did something cleverer — recolour whichever slime
+     * you last had hold of — and that was a mistake worth recording, because
+     * the behaviour was *correct* and still felt broken. The target was
+     * invisible, so the same button appeared to recolour all of them, or the
+     * one you just threw, or the first one in the room, depending on state
+     * nothing on screen was showing. A control whose effect you cannot predict
+     * before pressing it is worse than a blunt one.
+     *
+     * Per-slime colour lives in the picker under the canvas instead, where the
+     * thing being changed is the thing you tapped. This stays as the one-tap
+     * "make them all the same" gesture.
+     */
     cycleSkin() {
         this.skin = (this.skin + 1) % SKINS.length;
         this.blobs.forEach((b) => {
             b.skin = SKINS[this.skin];
         });
+
+        this.emit('st-skin', { all: true, skin: SKINS[this.skin].name });
+    }
+
+    /**
+     * Paint one slime, by position in the room.
+     *
+     * EDITED FROM THE BUNDLE — the picker's half of the per-slime colour job.
+     * Index rather than a reference because that is what the row of chips under
+     * the canvas is: blobs are only ever appended or cleared wholesale, so an
+     * index is stable for as long as a chip is on screen.
+     */
+    /**
+     * Make one slime wobble.
+     *
+     * EDITED FROM THE BUNDLE — the other half of the picker being pointable.
+     * The chips are in the order the slimes were dropped, which is not an order
+     * you can see in a room where they have rolled around, so a chip wearing
+     * the right colour is still only a guess at *which* slime it is when two
+     * share one. Tapping a chip squashes its slime, and the guess is over.
+     */
+    pointAt(index) {
+        const b = this.blobs[index];
+
+        if (!b) {
+            return;
+        }
+
+        // A small hop, the way boing() does it: the integrator is Verlet, so
+        // velocity is the gap between a point and its previous position, and
+        // putting the previous one BELOW the current one throws it upward.
+        // Half of boing's kick, and no unstick() — pointing at a slime that is
+        // clinging to a shelf should not peel it off.
+        b.pts.forEach((p) => {
+            p.py = p.y + 6 + Math.random() * 2;
+        });
+
+        // Opens its mouth, which is all `squash` drives — it does not deform
+        // the body. Together they read as the slime noticing you.
+        b.squash = Math.max(b.squash, 0.45);
+    }
+
+    setSkin(index, skinIndex) {
+        const b = this.blobs[index];
+
+        if (!b) {
+            return;
+        }
+
+        b.skin = SKINS[((skinIndex % SKINS.length) + SKINS.length) % SKINS.length];
+
+        // Opens its mouth for a moment, so the tap lands on the slime and not
+        // only on the chip that was pressed. `squash` drives the mouth alone —
+        // it does not deform the body, which is what `pointAt()` is for.
+        b.squash = Math.max(b.squash, 0.55);
+        this.skin = SKINS.indexOf(b.skin);
+
+        this.emit('st-skin', { index, skin: b.skin.name });
     }
 
     boing() {
@@ -1588,7 +1863,14 @@ class SlimeTime {
         const gy = clamp(b.face.vy / 90, -1, 1) * eye * 0.5;
         const closed = b.blink < 0;
 
-        ctx.fillStyle = '#0a0512';
+        // EDITED FROM THE BUNDLE — the face takes its colour from the skin.
+        // It was hardcoded near-black, which a dark slime swallows whole; Black
+        // is the only skin that overrides it, and it is what makes a black
+        // slime possible at all rather than a lump with no face on it.
+        const ink = b.skin.ink || '#0a0512';
+        const pupil = b.skin.pupil || '#f7f0ff';
+
+        ctx.fillStyle = ink;
 
         if (closed) {
             ctx.fillRect(c.x - gap - eye, c.y - eye * 0.2, eye * 2, 2.2);
@@ -1599,7 +1881,7 @@ class SlimeTime {
             ctx.ellipse(c.x + gap, c.y, eye, eye * 1.15, 0, 0, 6.29);
             ctx.fill();
 
-            ctx.fillStyle = '#f7f0ff';
+            ctx.fillStyle = pupil;
             ctx.beginPath();
             ctx.arc(c.x - gap + gx, c.y - eye * 0.3 + gy, eye * 0.34, 0, 6.29);
             ctx.arc(c.x + gap + gx, c.y - eye * 0.3 + gy, eye * 0.34, 0, 6.29);
@@ -1608,14 +1890,14 @@ class SlimeTime {
 
         const open = Math.max(b.squash, b.stretchAmount() * 0.6);
 
-        ctx.strokeStyle = '#0a0512';
+        ctx.strokeStyle = ink;
         ctx.lineWidth = 2.4;
         ctx.lineCap = 'round';
         ctx.beginPath();
 
         if (open > 0.18) {
             ctx.ellipse(c.x, c.y + eye * 2.4, eye * 0.9, eye * (0.5 + open), 0, 0, 6.29);
-            ctx.fillStyle = '#0a0512';
+            ctx.fillStyle = ink;
             ctx.fill();
         } else {
             ctx.moveTo(c.x - eye * 0.8, c.y + eye * 2.2);
@@ -1698,6 +1980,7 @@ class SlimeTimeElement extends HTMLElement {
         this.game.mount();
 
         wrap.appendChild(this.buildPad());
+        wrap.appendChild(this.buildPicker());
         this.wire(canvas);
     }
 
@@ -1738,10 +2021,118 @@ class SlimeTimeElement extends HTMLElement {
 
         add('Boing', () => this.game.boing());
         add('+ Blob', () => this.game.spawn(W / 2 + (Math.random() - 0.5) * 80, 70, 30 + Math.random() * 16));
-        add('Color', () => this.game.cycleSkin());
+        // EDITED FROM THE BUNDLE — was "Color", which now names the picker
+        // below rather than this. This is the one-tap "make them all match".
+        add('All Same', () => this.game.cycleSkin());
         add('Reset', () => this.game.reset());
 
         return pad;
+    }
+
+    /**
+     * The colour picker: one chip per slime in the room, and the palette.
+     *
+     * EDITED FROM THE BUNDLE — added whole. Colour used to be one button that
+     * changed everything, and the version that changed only the slime you last
+     * touched was worse: right, but unpredictable, because the target was state
+     * with nothing on screen showing it.
+     *
+     * So the target is now a thing you point at. Tap a chip to choose a slime,
+     * tap a colour to paint it. Two rows and no modes — the chips ARE the list
+     * of what is in the room, in the order they were dropped, wearing the
+     * colours they currently have, so the row doubles as the answer to "which
+     * one is which".
+     *
+     * It rebuilds off `st-blob` and `st-skin` rather than polling, so it costs
+     * nothing on a frame where no colour changed.
+     */
+    buildPicker() {
+        const wrap = document.createElement('div');
+
+        wrap.style.cssText = 'flex:none;display:flex;flex-direction:column;gap:6px;'
+            + 'align-items:center;width:100%;';
+
+        const hint = document.createElement('p');
+
+        hint.textContent = 'TAP A SLIME, THEN A COLOUR';
+        hint.style.cssText = 'margin:0;font:600 8px "JetBrains Mono",ui-monospace,monospace;'
+            + 'letter-spacing:0.14em;color:#4a2f7a;';
+
+        const blobRow = document.createElement('div');
+
+        blobRow.style.cssText = 'display:flex;gap:6px;justify-content:center;flex-wrap:wrap;min-height:30px;';
+
+        const colourRow = document.createElement('div');
+
+        // A fixed six-by-two grid rather than a wrapping row. Left to wrap, the
+        // palette was one row on a wide canvas and three on a narrow one, so the
+        // height of the whole game changed with its width — and that height is
+        // what `ArcadeGame::stageChrome()` has to subtract before sizing the
+        // board for full screen. Two rows always is one number that is right
+        // everywhere.
+        colourRow.style.cssText = 'display:grid;grid-template-columns:repeat(6, 22px);'
+            + 'gap:4px;justify-content:center;';
+
+        this.selected = 0;
+
+        const renderBlobs = () => {
+            const blobs = this.game.blobs;
+
+            // A Reset can leave the selection pointing past the end of the row.
+            if (this.selected >= blobs.length) {
+                this.selected = 0;
+            }
+
+            blobRow.textContent = '';
+
+            blobs.forEach((b, i) => {
+                const chip = document.createElement('button');
+
+                chip.type = 'button';
+                chip.title = b.skin.name;
+                chip.setAttribute('aria-label', 'Slime ' + (i + 1) + ', ' + b.skin.name);
+                chip.style.cssText = 'width:30px;height:30px;border-radius:50%;cursor:pointer;'
+                    + 'background:' + b.skin.fill + ';'
+                    + 'border:' + (i === this.selected ? '3px solid #a8f08a' : '2px solid #3a2360') + ';';
+
+                chip.addEventListener('click', () => {
+                    this.selected = i;
+                    this.game.tap();
+                    this.game.pointAt(i);
+                    renderBlobs();
+                });
+
+                blobRow.appendChild(chip);
+            });
+        };
+
+        SKINS.forEach((skin, index) => {
+            const swatch = document.createElement('button');
+
+            swatch.type = 'button';
+            swatch.title = skin.name;
+            swatch.setAttribute('aria-label', skin.name);
+            swatch.style.cssText = 'width:22px;height:22px;border-radius:50%;cursor:pointer;'
+                + 'border:2px solid #3a2360;background:' + skin.fill + ';';
+
+            swatch.addEventListener('click', () => {
+                this.game.tap();
+                this.game.setSkin(this.selected, index);
+            });
+
+            colourRow.appendChild(swatch);
+        });
+
+        wrap.appendChild(hint);
+        wrap.appendChild(blobRow);
+        wrap.appendChild(colourRow);
+
+        this.addEventListener('st-blob', renderBlobs);
+        this.addEventListener('st-skin', renderBlobs);
+
+        renderBlobs();
+
+        return wrap;
     }
 
     wire(canvas) {

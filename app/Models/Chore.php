@@ -32,6 +32,7 @@ class Chore extends Model
         'used_at',
         'reopened_at',
         'expires_at',
+        'help_wanted_at',
     ];
 
     protected function casts(): array
@@ -53,6 +54,7 @@ class Chore extends Model
             'used_at' => 'datetime',
             'reopened_at' => 'datetime',
             'expires_at' => 'datetime',
+            'help_wanted_at' => 'datetime',
         ];
     }
 
@@ -99,6 +101,23 @@ class Chore extends Model
             $q->where('cadence', '!=', ChoreCadence::Once->value)
                 ->orWhereNull('used_at');
         });
+    }
+
+    /**
+     * Whether a parent has flagged this as the job that needs doing today.
+     *
+     * The stamp records when it was flagged, and like a deadline it binds only
+     * for the household day it lands in — so a flag left on overnight lifts
+     * itself and nobody has to go and tidy it up. That expiry is what keeps the
+     * flag worth anything: a board where half the rows shout is a board where
+     * none of them do, so a parent re-asserts what is actually urgent each day
+     * rather than accumulating flags nobody reads any more.
+     *
+     * $dayStart is the instant today's household day began (see HouseholdClock).
+     */
+    public function isHelpWantedAt(Carbon $dayStart): bool
+    {
+        return $this->help_wanted_at !== null && $this->help_wanted_at->gte($dayStart);
     }
 
     /**
