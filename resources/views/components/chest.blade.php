@@ -38,6 +38,12 @@
     'celebrateMessage' => null,
     'prizeProperty' => null,
     'celebrateOnOpen' => true,
+    {{-- How loud the reveal is. The defaults are what every chest in the app
+         has always thrown; a chest that only happens once a year can ask for
+         the tier and the motion nothing else uses. See CELEBRATION_TIERS. --}}
+    'celebrateTier' => 'small',
+    'celebrateStyle' => 'confetti',
+    'celebrateMotion' => 'burst',
     'confirm' => false,
     'confirmPanel' => null,
 ])
@@ -132,7 +138,7 @@
                 {{-- Burst from the chest rather than rained from the top: the tap
                      that started this is still the last one recorded, even though
                      the rattle has been running for two and a half seconds. --}}
-                window.dispatchEvent(new CustomEvent('celebrate', { detail: { message: @js($celebrateMessage) ?? this.label, style: 'confetti', motion: 'burst', origin: 'tap', hold: 2600 } }));
+                window.dispatchEvent(new CustomEvent('celebrate', { detail: { message: @js($celebrateMessage) ?? this.label, style: @js($celebrateStyle), motion: @js($celebrateMotion), tier: @js($celebrateTier), origin: 'tap', hold: 2600 } }));
             @endif
         },
     }"

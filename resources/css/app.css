@@ -540,6 +540,78 @@ body {
 }
 
 /*
+ * Balloons, on a celebration day. Same place in the stack as the sky above and
+ * held to the same rule: it is a background, so it must never be the thing
+ * competing for a kid's attention with the card that actually pays.
+ *
+ * `overflow: hidden` matters — the rise carries a balloon well past the top of
+ * the viewport, and without it the page grows a scrollbar for something nobody
+ * can see.
+ */
+.fq-balloons {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    overflow: hidden;
+    opacity: 0.42;
+}
+
+.fq-balloon {
+    position: absolute;
+    bottom: -90px;
+    animation-name: fq-balloon-rise;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+}
+
+/*
+ * The sway is a second element inside the rise rather than a second animation
+ * on the same one, because both want `transform` and the last one declared
+ * would win outright.
+ */
+.fq-balloon-sway {
+    animation-name: fq-balloon-sway;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+}
+
+@keyframes fq-balloon-rise {
+    0% {
+        transform: translateY(0);
+    }
+    100% {
+        transform: translateY(calc(-100vh - 140px));
+    }
+}
+
+@keyframes fq-balloon-sway {
+    0%,
+    100% {
+        transform: translateX(calc(var(--fq-balloon-sway) * -1)) rotate(-4deg);
+    }
+    50% {
+        transform: translateX(var(--fq-balloon-sway)) rotate(4deg);
+    }
+}
+
+/*
+ * Held still rather than hidden. The day should still look different for a kid
+ * who has asked for less movement — they just get bunting instead of drift.
+ */
+@media (prefers-reduced-motion: reduce) {
+    .fq-balloon {
+        animation: none;
+        bottom: auto;
+        top: calc(var(--fq-balloon-still, 40) * 1%);
+    }
+
+    .fq-balloon-sway {
+        animation: none;
+    }
+}
+
+/*
  * A chest that is waiting to be opened, rather than one being opened.
  *
  * `fq-chest-jiggle` escalates to ±14° because it is the rattle *before* a lid

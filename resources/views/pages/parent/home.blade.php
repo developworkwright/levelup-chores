@@ -12,6 +12,7 @@ use App\Models\Redemption;
 use App\Enums\Feeling;
 use App\Enums\FeelingVisibility;
 use App\Services\BountyService;
+use App\Services\CelebrationService;
 use App\Services\ChoreService;
 use App\Services\FeelingService;
 use App\Services\LuckyBlockService;
@@ -288,6 +289,14 @@ new class extends Component
             // than a courtesy: a kid who is the only one being asked how he
             // feels is being examined, and answers "fine". See FeelingService.
             'feelingsCard' => app(FeelingService::class)->cardFor($this->profile),
+            // A celebration day, and what the kids said about it. Parents only:
+            // a first day that went badly is not something a sibling who had a
+            // good one gets to read, which is the rule the feelings card's
+            // replies already follow.
+            'celebration' => $celebration = app(CelebrationService::class)->activeFor($this->profile->household),
+            'celebrationAnswers' => $celebration
+                ? app(CelebrationService::class)->houseAnswers($this->profile->household, $celebration['key'])
+                : collect(),
         ];
     }
 }; ?>
@@ -300,6 +309,58 @@ new class extends Component
          actually fill it in — a house where the adults never answer teaches the
          kids exactly what the card is worth. --}}
     <x-feelings-card :card="$feelingsCard" :opened-feeling="$openedFeeling" :lock-message="$feelingLockMessage" class="mb-6" />
+
+    {{-- What the kids said about the celebration day. The whole reason the
+         chest asks a question rather than just opening: a parent gets to see
+         "Hard" next to a name, on the evening it would be most useful to know.
+
+         Nothing here notifies, flags or highlights a difficult answer, for the
+         same reason nothing does on the feelings card — the instant a hard
+         answer summons a parent, saying it costs something. It sits here and
+         waits to be read. --}}
+    @if ($celebration)
+        <div
+            class="mb-6 rounded-[20px] border p-5"
+            style="border-color: {{ $celebration['accent'] }}; background: color-mix(in srgb, {{ $celebration['accent'] }} 10%, var(--fq-panel))"
+        >
+            <div class="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 class="font-baloo text-xl font-bold">{{ $celebration['kicker'] }}</h2>
+                <span class="font-mono-fq text-[10px] tracking-[0.16em] text-fq-text-4 uppercase">Grown-ups only</span>
+            </div>
+
+            @if ($celebrationAnswers->isEmpty())
+                <p class="mt-2 text-sm text-fq-text-3">
+                    Nobody has said how it went yet. Their chest is on their Home page, behind the question.
+                </p>
+            @else
+                <ul class="mt-3 flex flex-col gap-3">
+                    @foreach ($celebrationAnswers as $entry)
+                        @php $option = app(CelebrationService::class)->answerOption($celebration, $entry->answer); @endphp
+
+                        <li wire:key="celebration-answer-{{ $entry->id }}" class="rounded-[14px] bg-fq-sunk px-4 py-3">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <span class="font-baloo text-[16px] font-bold">{{ $entry->profile?->name }}</span>
+
+                                @if ($option)
+                                    <span class="font-mono-fq text-[12px]" style="color: {{ $option['color'] }}">
+                                        <span aria-hidden="true">{{ $option['glyph'] }}</span> {{ $option['label'] }}
+                                    </span>
+                                @endif
+
+                                <span class="ml-auto font-mono-fq text-[10px] text-fq-text-5 uppercase">
+                                    {{ $entry->isOpened() ? 'Chest opened' : 'Chest still shut' }}
+                                </span>
+                            </div>
+
+                            @if ($entry->note)
+                                <p class="mt-2 text-sm leading-relaxed text-fq-text-2">“{{ $entry->note }}”</p>
+                            @endif
+                        </li>
+                    @endforeach
+                </ul>
+            @endif
+        </div>
+    @endif
 
     {{-- Jobs the kids have offered to do, above the approvals queue: this is
          the only thing on the page nobody else can action, and a job offer

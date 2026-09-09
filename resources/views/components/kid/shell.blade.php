@@ -423,6 +423,22 @@
     // pages because the question it answers — how long have I got — is one a
     // kid has while standing on the shop or the badge wall, not only on Home.
     $streakWindow = app(App\Services\StreakService::class)->streakWindowFor($profile);
+
+    /*
+     * Balloons, on a celebration day, behind every page rather than only the one
+     * with the chest on it. The point of decorating the shell is that the app
+     * looks different the moment it opens — a kid who lands on Quests should
+     * already know something is on before they have read a word.
+     *
+     * The day itself only: the card's window runs a couple of days past it so
+     * nobody misses the chest, but decoration that outstays the occasion stops
+     * reading as an occasion.
+     */
+    $celebrations = app(App\Services\CelebrationService::class);
+    $celebration = $celebrations->activeFor($profile->household);
+    $celebrating = $celebration !== null
+        && ($celebration['decor'] ?? 'balloons') === 'balloons'
+        && $celebrations->isTheDay($profile->household, $celebration);
 @endphp
 {{-- `isolate` so the watching monster's negative z-index puts it behind the
      page's content without dropping it behind the page background entirely. --}}
@@ -431,6 +447,10 @@
          it behind the page's content without dropping it behind the page
          background entirely. --}}
     <x-kid.sky :constellations="$sky" />
+
+    @if ($celebrating)
+        <x-kid.balloons />
+    @endif
     {{-- Keyed on what it's announcing, so Livewire tears the element down and
          builds a new one whenever the news changes — which is what re-runs
          x-init. A re-render carrying nothing new renders nothing at all. --}}

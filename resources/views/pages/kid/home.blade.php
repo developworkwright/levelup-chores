@@ -13,6 +13,7 @@ use App\Models\DailyQuest;
 use App\Models\Profile;
 use App\Services\HouseholdService;
 use App\Services\BonusShopService;
+use App\Services\CelebrationService;
 use App\Services\ChestService;
 use App\Services\ChoreService;
 use App\Services\FeelingService;
@@ -141,6 +142,37 @@ new class extends Component
     public function openStreakChest(): void
     {
         app(StreakService::class)->openStreakChest($this->profile);
+    }
+
+    /**
+     * How a celebration day went, in that day's own words.
+     *
+     * Recorded and then never read by anything that pays — see
+     * CelebrationService. This exists so the chest below it can open; what was
+     * said has no bearing on what it holds.
+     */
+    public function answerCelebration(string $answer, ?string $note = null): void
+    {
+        $celebrations = app(CelebrationService::class);
+        $day = $celebrations->activeFor($this->profile->household);
+
+        if ($day === null) {
+            return;
+        }
+
+        $celebrations->answer($this->profile, $day['key'], $answer, $note);
+    }
+
+    public function openCelebrationChest(): void
+    {
+        $celebrations = app(CelebrationService::class);
+        $day = $celebrations->activeFor($this->profile->household);
+
+        if ($day === null) {
+            return;
+        }
+
+        $celebrations->open($this->profile, $day['key']);
     }
 
     /**
@@ -609,6 +641,14 @@ new class extends Component
             'pendingCount' => ChoreCompletion::where('profile_id', $this->profile->id)
                 ->where('status', CompletionStatus::Pending)
                 ->count(),
+            // The celebration day, if today is one — almost always null. The
+            // card is the first thing on the page when it isn't, above even the
+            // feelings card: for the couple of days it exists it is the reason
+            // the kid is looking at the app.
+            'celebration' => $celebration = app(CelebrationService::class)->activeFor($household),
+            'celebrationEntry' => $celebration
+                ? app(CelebrationService::class)->entryFor($this->profile, $celebration['key'])
+                : null,
             // Today's quotes, or the last day that had any. Null only when the
             // household has never written one down, which is the one case where
             // the card has nothing to say — see the service for why it falls
@@ -630,6 +670,20 @@ new class extends Component
     <x-lucky-strip :tickets="$profile->bonus_tickets" :open="$luckyOpen" class="mb-[22px]" />
 
     <div class="flex flex-col gap-[22px]">
+        {{-- A celebration day, on the two or three days a year there is one.
+             Above the feelings card and everything else, because for as long as
+             it is on the page it is the thing the page is about. --}}
+        @if ($celebration)
+            @php $celebrations = app(CelebrationService::class); @endphp
+
+            <x-celebration-card
+                :day="$celebration"
+                :entry="$celebrationEntry"
+                :reward="$celebrations->describeReward($household, $celebration)"
+                :extras="$celebrations->describeExtras($household, $celebration)"
+            />
+        @endif
+
         {{-- First, above everything that pays.
 
              Not because it matters more than the quest, but because putting the
