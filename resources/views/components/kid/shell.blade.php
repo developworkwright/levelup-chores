@@ -327,6 +327,48 @@
     }
 
     /*
+     * Powering up, announced on the day's first chore.
+     *
+     * It was built as a state — the strip on Home says whether today's extras
+     * are on — and the first person to try it did a chore and did not notice
+     * until they had logged out and back in. A reward you have to go and check
+     * is not a reward; it has to arrive.
+     *
+     * The shell is the right place precisely because of where it *doesn't*
+     * happen: a chore goes in on Quests, on Home, or off a bounty on the
+     * Household page, and the shell is the one thing that re-renders on all of
+     * them. Announcing from the submit handler would mean three copies of this
+     * and a fourth the next time somewhere else grows a submit button.
+     *
+     * Once a day, on the first chore, and never again until tomorrow — see the
+     * `powered_up_on` migration.
+     */
+    $poweredUpToday = app(App\Services\StreakService::class)->hasWorkedToday($profile);
+    $poweredUpDay = App\Services\HouseholdClock::for($profile->household)->today();
+
+    // Kids only. hasWorkedToday() is true for a grown-up by definition — they
+    // have no board of chores — so without this a parent who wandered onto a
+    // kid page would be congratulated for nothing.
+    if ($profile->isKid() && $poweredUpToday && ! $profile->powered_up_on?->isSameDay($poweredUpDay)) {
+        $markers['powered_up_on'] = $poweredUpDay;
+
+        $quietRewards->push([
+            'message' => 'POWERED UP!',
+            // The set piece it deserves. This is the one card in the run that is
+            // not reporting a number that already moved — it is telling a kid
+            // the rest of their day just changed.
+            'big' => true,
+            'style' => 'star',
+            'card' => [
+                'accent' => 'var(--fq-lime)',
+                'sub' => 'Powered Up',
+                'label' => 'The day is yours',
+                'note' => 'Better chest · '.App\Services\ChoreService::HAND_BONUS_CARDS.' extra quest cards tomorrow',
+            ],
+        ]);
+    }
+
+    /*
      * One card, however many quotes are waiting.
      *
      * A kid back after a weekend can have four of these, and four cards fired
@@ -446,7 +488,7 @@
     {{-- Inside the isolate, like the watching monster: a negative z-index puts
          it behind the page's content without dropping it behind the page
          background entirely. --}}
-    <x-kid.sky :constellations="$sky" />
+    <x-kid.sky :constellations="$sky" :powered-up="$poweredUpToday" />
 
     @if ($celebrating)
         <x-kid.balloons />
@@ -498,9 +540,25 @@
              screenshot pasted into a desktop. If a control is added here, it
              needs both sizes or it will look wrong on one of them. --}}
         <div class="flex flex-wrap items-center gap-x-[8px] gap-y-[7px] rounded-[16px] border border-fq-nav-line bg-fq-panel px-[10px] py-[9px] md:gap-x-[10px] md:rounded-[22px] md:px-[14px] md:py-[12px]">
+            {{-- The avatar carries the day's state. A ring rather than a badge
+                 somewhere else on the page, because this is the one element on
+                 every kid screen that is unmistakably *them* — powering up the
+                 kid is the idea, and a pill in a corner would read as another
+                 counter. See StreakService::hasWorkedToday(): it is never a
+                 gate, only the switch the day's extras hang off.
+
+                 The rainbow is a rotating conic gradient behind the tile rather
+                 than an animated border, because a border animation repaints
+                 layout and this sits in a header that is on every single kid
+                 page. A conic gradient on a pseudo-element only ever composites.
+                 It stops dead under prefers-reduced-motion — see app.css. --}}
             <span
-                class="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-[11px] font-baloo text-[15px] font-extrabold text-fq-bg md:h-[46px] md:w-[46px] md:rounded-[15px] md:text-[20px]"
+                @class([
+                    'grid h-[34px] w-[34px] shrink-0 place-items-center rounded-[11px] font-baloo text-[15px] font-extrabold text-fq-bg md:h-[46px] md:w-[46px] md:rounded-[15px] md:text-[20px]',
+                    'fq-powered-token' => $poweredUpToday,
+                ])
                 style="background:{{ $profile->color->cssVar() }}"
+                @if ($poweredUpToday) title="Powered up — you did a chore today" @endif
             >{{ mb_substr($profile->name, 0, 1) }}</span>
 
             @php $rank = $profile->rank(); @endphp

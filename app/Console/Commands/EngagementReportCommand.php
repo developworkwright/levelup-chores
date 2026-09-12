@@ -53,6 +53,12 @@ class EngagementReportCommand extends Command
     private const FEATURES = [
         ['Chores submitted', 'chore_completions', 'profile_id', 'submitted_at'],
         ['Chores approved', 'chore_completions', 'profile_id', 'decided_at', ['status', 'approved']],
+        // Pending and rejected are listed separately because the gap between
+        // submitted and approved is a fact about the *parents'* queue, not the
+        // kid's week, and reading it as the kid's is how you end up blaming a
+        // kid for work they actually did.
+        ['Chores still pending', 'chore_completions', 'profile_id', 'submitted_at', ['status', 'pending']],
+        ['Chores rejected', 'chore_completions', 'profile_id', 'decided_at', ['status', 'rejected']],
         ['Help Wanted raised', 'chore_completions', 'profile_id', 'submitted_at', ['help_wanted', 1]],
         ['Daily quest done', 'daily_quests', 'profile_id', 'completed_at'],
         ['Quest hand dealt', 'daily_quests', 'profile_id', 'dealt_at'],
@@ -74,7 +80,13 @@ class EngagementReportCommand extends Command
         ['Trades offered', 'sibling_offers', 'from_profile_id', 'created_at'],
         ['Bounties claimed', 'bounties', 'claimed_by_profile_id', 'claimed_at'],
         ['Nudges sent', 'nudges', 'from_profile_id', 'created_at'],
-        ['Streak rescues given', 'streak_rescues', 'rescued_by_profile_id', 'created_at'],
+        // Two different things that both sound like "streak restore", and
+        // conflating them hides one of them completely. A *repair* is the kid
+        // spending their own Bonus Shop perk on their own run; a *rescue* is a
+        // sibling paying tickets to save somebody else's day.
+        ['Streak repaired (own perk)', 'streak_repairs', 'profile_id', 'repaired_date'],
+        ['Sibling rescues given', 'streak_rescues', 'rescued_by_profile_id', 'created_at'],
+        ['Sibling rescues received', 'streak_rescues', 'profile_id', 'rescued_date'],
         ['Sleep logged', 'sleep_nights', 'profile_id', 'night_date'],
         ['Gratitude written', 'gratitude_entries', 'profile_id', 'entry_date'],
         ['Feelings logged', 'feeling_entries', 'profile_id', 'felt_on'],
@@ -188,11 +200,28 @@ class EngagementReportCommand extends Command
                     $total += $this->countBetween($feature, $kid, $start, $end);
                 }
 
-                $row[] = $total.'  '.$this->bar($total);
+                $row[] = $total;
             }
 
             $rows[] = $row;
         }
+
+        // Scaled to the busiest week in the chart rather than to a fixed
+        // number of actions per block. A fixed scale saturated: every week past
+        // about forty actions drew the same full bar, so a 378 and a 41 were
+        // indistinguishable and the chart said "flat out, always" no matter
+        // what the numbers underneath it did.
+        $peak = collect($rows)
+            ->flatMap(fn (array $row): array => array_slice($row, 1))
+            ->max() ?: 1;
+
+        $rows = array_map(function (array $row) use ($peak): array {
+            foreach (array_slice(array_keys($row), 1) as $column) {
+                $row[$column] = $row[$column].'  '.$this->bar($row[$column], $peak);
+            }
+
+            return $row;
+        }, $rows);
 
         $this->table(array_merge(['Week of'], $kids->pluck('name')->all()), $rows);
     }
@@ -400,9 +429,17 @@ class EngagementReportCommand extends Command
         };
     }
 
-    private function bar(int $total): string
+    /**
+     * A bar 20 blocks wide at the chart's busiest week, so the shape of the
+     * column is the shape of the numbers.
+     */
+    private function bar(int $total, int $peak): string
     {
-        return str_repeat('#', min(20, (int) ceil($total / 2)));
+        if ($total < 1) {
+            return '';
+        }
+
+        return str_repeat('#', max(1, (int) round($total / $peak * 20)));
     }
 
     /**

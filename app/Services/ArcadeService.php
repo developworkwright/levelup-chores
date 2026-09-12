@@ -49,6 +49,8 @@ use Throwable;
  */
 class ArcadeService
 {
+    public function __construct(private StreakService $streaks) {}
+
     /**
      * What topping a finished week is worth.
      *

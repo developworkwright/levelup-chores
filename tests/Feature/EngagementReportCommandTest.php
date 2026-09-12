@@ -64,6 +64,31 @@ class EngagementReportCommandTest extends TestCase
             ->assertSuccessful();
     }
 
+    /**
+     * The bars used to run off a fixed scale and saturate, so every busy week
+     * drew the same full bar and a 378 looked exactly like a 41. Scaling to the
+     * chart's own peak is what makes the column readable as a shape.
+     */
+    public function test_the_weekly_bars_are_scaled_to_the_busiest_week(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create(['name' => 'Rowan']);
+
+        for ($i = 0; $i < 40; $i++) {
+            $this->approvedChore($kid, now()->subWeeks(3));
+        }
+
+        $this->approvedChore($kid, now()->subDay());
+
+        $this->assertSame(0, Artisan::call('engagement:report', ['--weeks' => 4]));
+
+        $output = Artisan::output();
+
+        // The busy week fills the bar; the quiet one must not.
+        $this->assertMatchesRegularExpression('/#{18,20}/', $output);
+        $this->assertDoesNotMatchRegularExpression('/#{21,}/', $output);
+    }
+
     public function test_it_calls_a_kid_gone_when_nothing_happened_this_week(): void
     {
         $household = Household::factory()->create();

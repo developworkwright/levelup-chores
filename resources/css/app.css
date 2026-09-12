@@ -86,10 +86,46 @@ body {
     transform: rotate(0deg);
 }
 
+/*
+ * The door, breathing.
+ *
+ * The login page is the one screen in the app that never changed — same tiles,
+ * same numbers, morning and bedtime — and a door that looks identical whatever
+ * the day did behind it is a dull thing to arrive at. This is the cheap half of
+ * fixing that: the tiles drift, so the row is alive before anything has been
+ * read. The half that carries meaning is the powered-up halo on the tiles of
+ * whoever has done a chore.
+ *
+ * It rides the anchor rather than the tile because the tile's transform is
+ * already carrying the fan's tilt, and a keyframe on the same property would
+ * win and flatten the fan.
+ *
+ * Slow and small on purpose — six seconds and three pixels. Anything faster
+ * stops reading as "alive" and starts reading as "broken".
+ */
+.fq-avatar-idle {
+    animation: fq-avatar-bob 6s ease-in-out infinite;
+}
+
+@keyframes fq-avatar-bob {
+    0%,
+    100% {
+        transform: translate3d(0, 0, 0);
+    }
+
+    50% {
+        transform: translate3d(0, -3px, 0);
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .fq-avatar-tile,
     .fq-avatar-chip {
         transition: none;
+    }
+
+    .fq-avatar-idle {
+        animation: none;
     }
 }
 
@@ -535,6 +571,142 @@ body {
 @media (prefers-reduced-motion: reduce) {
     .fq-star-land,
     .fq-star-halo {
+        animation: none;
+    }
+}
+
+/*
+ * Powered up: the day a kid has put work in, said without words.
+ *
+ * Two pieces, both background. The shooting stars cross the sky behind every
+ * page, and the kid's own token in the header turns over a rainbow. Neither
+ * says anything — the card that announces it has already been and gone by the
+ * time these matter, and what is left is a day that simply looks different.
+ *
+ * Both are composite-only animations (transform, opacity, and a rotating angle
+ * on a pseudo-element). Nothing here may animate a property that triggers
+ * layout: this is on every kid page, all day, including the low-end phone the
+ * six-year-old uses.
+ */
+.fq-shooting-sky {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.fq-shooting-star {
+    position: absolute;
+    width: 2px;
+    height: 2px;
+    border-radius: 50%;
+    background: var(--fq-lime);
+    box-shadow: 0 0 6px 2px var(--fq-lime);
+    opacity: 0;
+    /* The tail. Drawn with a gradient rather than a second element so one span
+       is the whole star, which is what keeps five of them cheap. */
+    animation: fq-shoot 16s linear infinite;
+}
+
+.fq-shooting-star::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: 0;
+    width: 60px;
+    height: 1px;
+    transform: translateY(-50%);
+    background: linear-gradient(to left, var(--fq-lime), transparent);
+    opacity: 0.55;
+}
+
+@keyframes fq-shoot {
+    /* Visible for about a second and a half of every sixteen. The long dark
+       stretch is the point: a sky that is constantly raining stars stops
+       reading as an event and starts reading as wallpaper. */
+    0%,
+    100% {
+        opacity: 0;
+        transform: translate3d(0, 0, 0);
+    }
+
+    2% {
+        opacity: 0.9;
+    }
+
+    9% {
+        opacity: 0;
+        transform: translate3d(220px, 120px, 0);
+    }
+}
+
+/*
+ * The kid's own token, turning over a rainbow.
+ *
+ * The gradient sits on a pseudo-element *behind* the tile rather than on a
+ * border, because an animated border would repaint layout in a header that is
+ * on every page in the app.
+ *
+ * **The colour moves; the shape never does.** Two wrong versions got us here and
+ * both are worth recording, because each looks reasonable written down.
+ *
+ * First attempt rotated the pseudo-element with `transform`. That spins a
+ * rounded *square*, so the halo's corners swung out around the tile and pulled
+ * away from the hard offset shadow, which of course stayed put — a lumpy blob
+ * rather than a glow.
+ *
+ * Second attempt animated the conic gradient's own start angle through a custom
+ * property registered with `@property`. Correct in theory and it does keep the
+ * shape still — but a custom property only interpolates where `@property` is
+ * supported, and where it is not the keyframe silently does nothing at all. The
+ * gradient rendered perfectly and simply never moved.
+ *
+ * So: `hue-rotate`. It is a filter, animatable everywhere conic gradients
+ * already work, needs nothing registered, and cycles every hue in the ring
+ * together — which is the effect that was wanted both times.
+ */
+.fq-powered-token {
+    position: relative;
+    isolation: isolate;
+}
+
+.fq-powered-token::before {
+    content: '';
+    position: absolute;
+    /* Overridable, because the two places this lands sit on different ground.
+       The header tile needs a hairline; the login tile already wears a 3px
+       background-coloured border, and a hairline behind that reads as a
+       rendering artefact rather than a halo. */
+    inset: var(--fq-powered-inset, -3px);
+    z-index: -1;
+    border-radius: inherit;
+    background: conic-gradient(
+        from var(--fq-powered-angle, 0deg),
+        var(--fq-lime),
+        var(--fq-cyan),
+        var(--fq-magenta),
+        var(--fq-gold),
+        var(--fq-lime)
+    );
+    animation: fq-token-spin 3.4s linear infinite;
+}
+
+@keyframes fq-token-spin {
+    to {
+        --fq-powered-angle: 360deg;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    /* The stars go entirely — a streak of light crossing the page is precisely
+       what this setting is asking not to see. The token keeps its rainbow and
+       simply stops turning, so the state is still legible without motion. */
+    .fq-shooting-sky {
+        display: none;
+    }
+
+    .fq-powered-token::before {
         animation: none;
     }
 }

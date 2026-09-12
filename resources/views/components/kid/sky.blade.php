@@ -9,7 +9,13 @@
      having got fuller, not as decoration competing with the page.
 
      `constellations` is SleepService::earnedConstellations(). --}}
-@props(['constellations'])
+@props(['constellations', 'poweredUp' => false])
+
+{{-- In the shell rather than on a page, so it survives navigation: the stars do
+     not restart every time a kid opens something. --}}
+@if ($poweredUp)
+    <x-shooting-stars />
+@endif
 
 @if ($constellations !== [])
     @php

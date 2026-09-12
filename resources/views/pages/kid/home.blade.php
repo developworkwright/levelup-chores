@@ -540,6 +540,11 @@ new class extends Component
 
         return [
             'household' => $household,
+            // The day's extras: whether they are on, and how many cards
+            // yesterday's work bought. Never a gate — see
+            // StreakService::hasWorkedToday().
+            'poweredUp' => app(StreakService::class)->hasWorkedToday($this->profile),
+            'handSize' => app(ChoreService::class)->handSizeFor($this->profile),
             'quest' => $quest,
             'questRevealed' => $quest?->revealed_at !== null,
             // The chest and the pick are separate stamps: the chest stays open
@@ -670,6 +675,16 @@ new class extends Component
     <x-lucky-strip :tickets="$profile->bonus_tickets" :open="$luckyOpen" class="mb-[22px]" />
 
     <div class="flex flex-col gap-[22px]">
+        {{-- What one chore today is worth. Above the run because it is the rule
+             the rest of the page now plays by, and because the kid who most
+             needs to read it is the one who is about to scroll past everything
+             else. --}}
+        <x-powered-up-strip
+            :powered-up="$poweredUp"
+            :hand-size="$handSize"
+            :bonus-cards="\App\Services\ChoreService::HAND_BONUS_CARDS"
+        />
+
         {{-- A celebration day, on the two or three days a year there is one.
              Above the feelings card and everything else, because for as long as
              it is on the page it is the thing the page is about. --}}

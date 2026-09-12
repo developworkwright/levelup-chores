@@ -547,18 +547,53 @@ class StreakService
      */
     public function streakDaySecuredToday(Profile $profile): bool
     {
-        $clock = HouseholdClock::for($profile->household);
-        $today = $clock->today();
+        return $this->workedOn($profile, HouseholdClock::for($profile->household)->today());
+    }
 
-        if ($this->streakDayEarnedOn($profile, $today)) {
+    /**
+     * Whether this profile put work in on a given household day, counting work
+     * still waiting on a grown-up.
+     *
+     * The generalised form of {@see streakDaySecuredToday()} — same rule, any
+     * day — because the day's extras are not all asked about today. The bigger
+     * quest hand is earned by yesterday's work and spent on this morning's
+     * cards, so it has to be able to ask about a day that is already over.
+     */
+    public function workedOn(Profile $profile, Carbon $day): bool
+    {
+        if ($this->streakDayEarnedOn($profile, $day)) {
             return true;
         }
 
+        $clock = HouseholdClock::for($profile->household);
+
         return ChoreCompletion::where('profile_id', $profile->id)
             ->where('status', CompletionStatus::Pending)
-            ->where('submitted_at', '>=', $clock->startOf($today))
-            ->where('submitted_at', '<', $clock->startOf($today->copy()->addDay()))
+            ->where('submitted_at', '>=', $clock->startOf($day))
+            ->where('submitted_at', '<', $clock->startOf($day->copy()->addDay()))
             ->exists();
+    }
+
+    /**
+     * Whether the day's extras are switched on for this profile.
+     *
+     * **Never a gate.** Everything keyed to this turns something *on*; nothing
+     * in the app is taken away when it is false. That is the shape
+     * {@see ChestService::isBoosted()} settled on — a chore buys a better roll,
+     * not the right to open the chest — and the reason it is safe to put in
+     * front of a kid who has already drifted: a locked door tells them to go
+     * away, an upgrade they can see tells them what one chore is worth.
+     *
+     * Grown-ups are always on. They have no board of chores, so the question
+     * does not apply to them.
+     */
+    public function hasWorkedToday(Profile $profile): bool
+    {
+        if (! $profile->isKid()) {
+            return true;
+        }
+
+        return $this->streakDaySecuredToday($profile);
     }
 
     /**

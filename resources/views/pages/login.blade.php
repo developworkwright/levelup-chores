@@ -3,6 +3,7 @@
 use App\Enums\AccentColor;
 use App\Enums\ProfileRole;
 use App\Models\Profile;
+use App\Services\StreakService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
@@ -55,8 +56,27 @@ new class extends Component
     {
         $kids = $this->fannedKids();
 
+        $streaks = app(StreakService::class);
+
+        // Who has put work in today, keyed by id.
+        //
+        // This page is public, so the bar for putting anything on it is what a
+        // stranger with the URL learns. A glowing tile says "this kid did a
+        // chore today" — less than the level and the rank already beside it,
+        // and nothing like the real names and scores that got the arcade moved
+        // behind the PIN. It earns its place by being the only thing here that
+        // changes during a day: a door that looked identical at bedtime and at
+        // breakfast was the whole complaint.
+        $poweredUp = collect($kids)
+            ->mapWithKeys(fn (Profile $kid): array => [$kid->id => $streaks->hasWorkedToday($kid)])
+            ->all();
+
         return [
             'kids' => $kids,
+            'poweredUp' => $poweredUp,
+            // The sky reacts to the house as a whole rather than to one kid,
+            // because nobody is logged in yet — there is no "you" to power up.
+            'anyPoweredUp' => in_array(true, $poweredUp, true),
             // The fan is centred on the row, so the tilt is symmetrical about
             // the middle tile and the step tightens as more kids are added.
             'tiltStep' => min(6, 14 / max(1, count($kids) - 1)),
@@ -69,6 +89,10 @@ new class extends Component
 }; ?>
 
 <div class="mx-auto flex max-w-[560px] flex-col gap-[34px] px-5 pt-16 pb-10">
+    @if ($anyPoweredUp)
+        <x-shooting-stars />
+    @endif
+
     <div class="flex flex-col items-center gap-[14px] text-center">
         <p class="font-mono-fq text-[11px] tracking-[0.34em] text-fq-cyan uppercase">Family Operations</p>
         <h1 class="fq-wordmark font-baloo text-[clamp(38px,11vw,54px)] leading-none font-extrabold">
@@ -84,17 +108,33 @@ new class extends Component
                 $angle = round(($i - (count($kids) - 1) / 2) * $tiltStep, 1);
             @endphp
 
+            {{-- The idle bob rides the anchor, not the tile: the tile's
+                 transform is already carrying the fan's tilt, and an animation
+                 on the same property would win and flatten the fan. Staggered
+                 off the index so the row breathes rather than pulsing in
+                 lockstep. --}}
             <a
                 href="{{ route('pin', $kid) }}"
                 wire:navigate
-                class="fq-avatar flex shrink-0 grow-0 basis-[92px] flex-col items-center gap-[14px] text-fq-text"
-                style="--fq-tilt: {{ $angle }}deg"
+                class="fq-avatar fq-avatar-idle flex shrink-0 grow-0 basis-[92px] flex-col items-center gap-[14px] text-fq-text"
+                style="--fq-tilt: {{ $angle }}deg; animation-delay: {{ round($i * 0.45, 2) }}s"
             >
                 {{-- The offset shadow is the accent at 58% of each channel;
                      mixing toward black in sRGB is exactly that multiply. --}}
                 <div
-                    class="fq-avatar-tile relative grid h-[78px] w-[78px] place-items-center rounded-[24px] border-[3px] border-fq-bg font-baloo text-[34px] font-extrabold text-fq-bg"
-                    style="background: {{ $accent }}; box-shadow: 5px 6px 0 color-mix(in srgb, {{ $accent }} 58%, #000)"
+                    @class([
+                        'fq-avatar-tile relative grid h-[78px] w-[78px] place-items-center rounded-[24px] border-[3px] border-fq-bg font-baloo text-[34px] font-extrabold text-fq-bg',
+                        // Wider than the header's ring, because this tile
+                        // already wears a 3px background-coloured border and a
+                        // hairline behind that would read as a rendering
+                        // artefact rather than a halo.
+                        'fq-powered-token' => $poweredUp[$kid->id] ?? false,
+                    ])
+                    @style([
+                        'background: '.$accent,
+                        'box-shadow: 5px 6px 0 color-mix(in srgb, '.$accent.' 58%, #000)',
+                        '--fq-powered-inset: -7px' => $poweredUp[$kid->id] ?? false,
+                    ])
                 >
                     {{ mb_substr($kid->name, 0, 1) }}
 

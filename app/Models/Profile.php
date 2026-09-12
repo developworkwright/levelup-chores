@@ -50,6 +50,7 @@ class Profile extends Model implements Authenticatable
         'op_spin_armed_at',
         'tickets_granted_through_level',
         'streak',
+        'powered_up_on',
         'pending_streak_chest',
         'badges_seen_at',
         'loot_seen_at',
@@ -96,6 +97,7 @@ class Profile extends Model implements Authenticatable
             'sleep_card_type' => SleepCardType::class,
             'op_spin_armed_at' => 'datetime',
             'streak_milestone_run_started_on' => 'date',
+            'powered_up_on' => 'date',
         ];
     }
 

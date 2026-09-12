@@ -58,6 +58,21 @@ class ChoreService
     public const HAND_SIZE = 3;
 
     /**
+     * How many extra cards yesterday's work is worth on this morning's hand.
+     *
+     * The one reward on the board that is not denominated in currency, which is
+     * deliberate: the kid furthest ahead has more tickets than he can spend, so
+     * another perk means nothing to him — but a wider choice of what to do
+     * still does. It is also aimed at the failure this was written for, a kid
+     * being dealt a hand every day and taking none of it. If the hand is the
+     * problem, more of it is the fix.
+     *
+     * Earned by *yesterday*, because the hand is dealt in the morning before
+     * today's work exists.
+     */
+    public const HAND_BONUS_CARDS = 2;
+
+    /**
      * What the biggest card in the hand pays on top of its own points, as a
      * percentage of them.
      *
@@ -218,18 +233,37 @@ class ChoreService
 
         $free = $this->unclaimed($candidates);
         $pool = $free->isNotEmpty() ? $free : $candidates;
+        $size = $this->handSizeFor($profile);
 
-        if ($pool->count() <= self::HAND_SIZE) {
+        if ($pool->count() <= $size) {
             return $pool->sortBy('points')->values();
         }
 
         return $pool
             ->sortBy('points')
             ->values()
-            ->split(self::HAND_SIZE)
+            ->split($size)
             ->map(fn (Collection $band) => $band->random())
             ->sortBy('points')
             ->values();
+    }
+
+    /**
+     * How many cards this kid is dealt today.
+     *
+     * Wider for a kid who put work in yesterday. The band split means extra
+     * cards are not just more of the same — the pool is cut into as many bands
+     * as there are cards, so a bigger hand is a *finer* spread across the same
+     * range of chores, and the kid gets a genuinely wider choice rather than
+     * two more near-duplicates.
+     */
+    public function handSizeFor(Profile $profile): int
+    {
+        $yesterday = HouseholdClock::for($profile->household)->today()->subDay();
+
+        return $this->streaks->workedOn($profile, $yesterday)
+            ? self::HAND_SIZE + self::HAND_BONUS_CARDS
+            : self::HAND_SIZE;
     }
 
     /**
