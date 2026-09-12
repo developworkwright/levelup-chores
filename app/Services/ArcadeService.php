@@ -10,9 +10,12 @@ use App\Models\ArcadeWeekPrize;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Notifications\ArcadeGameAdded;
+use App\Notifications\ArcadeLastCall;
+use App\Notifications\ArcadeLeadLost;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 use LogicException;
@@ -60,6 +63,58 @@ class ArcadeService
      * is the opposite of the reason it was added.
      */
     public const PRIZE_TICKETS = 3;
+
+    /**
+     * How long a player is left alone after being told they lost a lead, on
+     * that game, that week. See announceLeadChange().
+     */
+    private const LEAD_ALERT_QUIET_MINUTES = 30;
+
+    /**
+     * When the board starts saying the week is nearly over, in hours.
+     *
+     * A deadline nobody can see is not a deadline. The board has always closed
+     * on Sunday night and never said so in a way you could act on, which makes
+     * the last day of a week feel exactly like the first — the least exciting
+     * possible shape for something that is about to pay out.
+     */
+    private const CLOSING_SOON_HOURS = 24;
+
+    /**
+     * How long before bedtime the last call goes out.
+     *
+     * The whole point is that it lands with enough of the evening left to
+     * actually play. A reminder that a board closes at midnight, sent at
+     * bedtime, is not a last call — it is an invitation to be up at midnight,
+     * which is the opposite of what this app is for. Three hours is a run at a
+     * game, a shower and still bed on time.
+     */
+    private const LAST_CALL_BEFORE_BEDTIME_HOURS = 3;
+
+    /** Where the last call lands for a household that has set no bedtime. */
+    private const LAST_CALL_DEFAULT_HOUR = 17;
+
+    /**
+     * The earliest and latest wall-clock hour the last call may be sent at,
+     * whatever bedtime says.
+     *
+     * A household with a very early bedtime must not get this during the school
+     * day, and one with a very late bedtime must not get it at 10pm — the
+     * message would be telling a kid to go and play, which is the thing we are
+     * explicitly not doing.
+     */
+    private const LAST_CALL_EARLIEST_HOUR = 15;
+
+    private const LAST_CALL_LATEST_HOUR = 19;
+
+    /**
+     * How close to the end of the week the last call may go out at all.
+     *
+     * Gated on the *bucket* the scores are in rather than on "is it Sunday
+     * locally", so the week being announced is guaranteed to be the week that
+     * is actually closing — see weekEndsAt() for why both read `now()`.
+     */
+    private const LAST_CALL_WINDOW_HOURS = 14;
 
     /**
      * How far back a lazy settlement will look.
@@ -195,6 +250,239 @@ class ArcadeService
     }
 
     /**
+     * The moment this week's boards close.
+     *
+     * Read off `now()` rather than the household clock, deliberately: the week
+     * a run lands in is decided by `currentWeek()`, which is also `now()`, and
+     * a deadline that disagreed with the bucket it closes would put a run on
+     * next week's board while the page was still counting down to this one.
+     * Both are wrong together in a household whose timezone is set wrong, which
+     * is the tolerable half of that bug — see HouseholdClock.
+     */
+    public function weekEndsAt(): Carbon
+    {
+        return now()->endOfWeek();
+    }
+
+    /**
+     * How long is left, in words a kid can act on: "4 days left", "9 hours
+     * left", "20 minutes left".
+     *
+     * Deliberately coarse at the top and fine at the bottom. On Tuesday the
+     * number of hours left is not information — it is a big number that means
+     * "later". In the last hour it is the whole point.
+     */
+    public function weekCountdown(): string
+    {
+        $left = now()->diffInMinutes($this->weekEndsAt(), absolute: true);
+
+        return match (true) {
+            $left < 60 => max(1, (int) $left).' min left',
+            $left < 60 * 24 => (int) ($left / 60).'h left',
+            default => (int) ceil($left / (60 * 24)).' days left',
+        };
+    }
+
+    /** Whether the board should start behaving like something with a deadline. */
+    public function weekIsClosing(): bool
+    {
+        return now()->diffInHours($this->weekEndsAt(), absolute: true) < self::CLOSING_SOON_HOURS;
+    }
+
+    /**
+     * The household-local hour the last call should go out at: a few hours
+     * before bedtime, clamped to the early evening.
+     *
+     * Falls back to a fixed hour when the house has no bedtime set, rather than
+     * to the end of the week — a household that switched bedtime off has not
+     * asked to be pushed at midnight.
+     */
+    public function lastCallHourFor(Household $household): int
+    {
+        $bedtime = $household->bedtime;
+
+        $hour = $bedtime !== null && preg_match('/^(\d{1,2}):\d{2}$/', trim($bedtime), $parts)
+            ? (int) $parts[1] - self::LAST_CALL_BEFORE_BEDTIME_HOURS
+            : self::LAST_CALL_DEFAULT_HOUR;
+
+        return max(self::LAST_CALL_EARLIEST_HOUR, min(self::LAST_CALL_LATEST_HOUR, $hour));
+    }
+
+    /**
+     * Whether this household's last call is due right now.
+     *
+     * Two gates that answer different questions. The window is measured against
+     * the week the scores are bucketed into, so we can only ever announce the
+     * week that is genuinely closing. The hour is read off the household's own
+     * clock, so a house gets it in its own early evening rather than the
+     * server's.
+     */
+    public function isLastCallDue(Household $household): bool
+    {
+        if (! $this->lastCallWindowIsOpen()) {
+            return false;
+        }
+
+        return HouseholdClock::for($household)->now()->hour === $this->lastCallHourFor($household);
+    }
+
+    /**
+     * Whether the board week is close enough to its end for a last call at all.
+     *
+     * Split out from isLastCallDue() and free of any database work on purpose:
+     * this is the first thing the middleware asks on every authenticated
+     * request, and for six and a half days out of seven it must answer "no"
+     * without touching the household, the cache or a query. See the
+     * SendArcadeLastCall middleware.
+     */
+    public function lastCallWindowIsOpen(): bool
+    {
+        return now()->diffInHours($this->weekEndsAt(), absolute: true) <= self::LAST_CALL_WINDOW_HOURS;
+    }
+
+    /**
+     * What the last call says to one kid, or null when there is nothing worth
+     * buzzing them about.
+     *
+     * Written per kid rather than broadcast, because "the week is ending" is a
+     * newsletter and "you are about to lose Windy Walkies" is a reason to put
+     * your shoes on. Two clauses at most: what they are defending, and one
+     * board they could still take.
+     *
+     * The board they could still take is chosen in rail order, never by
+     * comparing how far behind they are on each — a tower is floors and a
+     * flight is points, so "closest" across two games is not a question this
+     * class is allowed to ask. An unplayed game wins that pick outright: a
+     * board nobody has touched is the one a kid who is behind on everything
+     * can actually take.
+     *
+     * @return array{title: string, body: string}|null
+     */
+    public function lastCallFor(Profile $kid): ?array
+    {
+        $leaders = $this->weeklyLeaders($kid->household);
+
+        $defending = [];
+        $open = null;
+        $chasing = null;
+
+        foreach (ArcadeGame::ranked() as $game) {
+            $leader = $leaders[$game->value] ?? null;
+
+            if ($leader === null) {
+                $open ??= $game;
+
+                continue;
+            }
+
+            if ($leader->profile_id === $kid->id) {
+                $defending[] = $game->label();
+
+                continue;
+            }
+
+            $chasing ??= ['game' => $game, 'leader' => $leader];
+        }
+
+        $clauses = [];
+
+        if ($defending !== []) {
+            $clauses[] = 'You are top of '.$this->readableList($defending).'.';
+        }
+
+        if ($open !== null) {
+            $clauses[] = "Nobody has played {$open->label()} yet — one run takes it.";
+        } elseif ($chasing !== null) {
+            $leader = $chasing['leader'];
+            $game = $chasing['game'];
+
+            $clauses[] = "{$leader->displayName()} leads {$game->label()} with {$leader->score} {$game->unit()} — "
+                .'beat '.$this->beatTarget($leader).'.';
+        }
+
+        if ($clauses === []) {
+            return null;
+        }
+
+        // The deadline the kid can act on is bedtime, not the technical end of
+        // the week. Saying "ends at midnight" to a nine-year-old is telling
+        // them to be awake at midnight.
+        $clauses[] = $kid->household->bedtime !== null
+            ? 'Boards close tonight — you have got until bedtime.'
+            : 'Boards close tonight.';
+
+        return [
+            'title' => 'Last call for the arcade!',
+            'body' => implode(' ', $clauses),
+        ];
+    }
+
+    /**
+     * Send the last call to every kid in a household. Returns how many went.
+     *
+     * Exactly-once per week via the cache, for the same reason `settleWeek()`
+     * leans on a unique key: the command runs hourly, and a scheduler that
+     * fires twice inside the target hour must not buzz the house twice.
+     *
+     * Kids only, matching `announceNewGame()`. A grown-up can top a board and
+     * cannot be paid for it, so a push telling them to defend one is a joke
+     * that stops being funny on the third Sunday.
+     */
+    public function sendLastCall(Household $household, bool $force = false): int
+    {
+        if (! $force && ! $this->isLastCallDue($household)) {
+            return 0;
+        }
+
+        $key = "arcade-last-call:{$household->id}:{$this->currentWeek()}";
+
+        if (! $force && ! Cache::add($key, true, now()->addDays(3))) {
+            return 0;
+        }
+
+        $kids = Profile::where('household_id', $household->id)
+            ->where('role', ProfileRole::Kid)
+            ->get();
+
+        $sent = 0;
+
+        foreach ($kids as $kid) {
+            $message = $this->lastCallFor($kid);
+
+            if ($message === null) {
+                continue;
+            }
+
+            try {
+                $kid->notify(new ArcadeLastCall($message['title'], $message['body']));
+                $sent++;
+            } catch (Throwable $e) {
+                Log::error('Arcade last-call notification failed.', [
+                    'household_id' => $household->id,
+                    'profile_id' => $kid->id,
+                    'exception' => $e,
+                ]);
+            }
+        }
+
+        return $sent;
+    }
+
+    /**
+     * @param  list<string>  $items
+     */
+    private function readableList(array $items): string
+    {
+        if (count($items) < 2) {
+            return $items[0] ?? '';
+        }
+
+        $last = array_pop($items);
+
+        return implode(', ', $items).' and '.$last;
+    }
+
+    /**
      * How far a given score got, in words. Falls back to the first milestone,
      * which is where every run starts.
      */
@@ -237,6 +525,9 @@ class ArcadeService
             return null;
         }
 
+        // Read before the insert, because after it the answer is this run.
+        $dethroned = $this->weeklyTop($profile->household, $game, 1)->first();
+
         // The ceiling belongs to the game rather than to this class: a flight
         // is scored in points earned a dozen a second and a tower in floors
         // climbed one at a time, so one number for all of them would either
@@ -246,7 +537,7 @@ class ArcadeService
             return null;
         }
 
-        return ArcadeScore::create([
+        $run = ArcadeScore::create([
             'household_id' => $profile->household_id,
             'profile_id' => $profile->id,
             'game' => $game,
@@ -254,6 +545,70 @@ class ArcadeService
             'score' => $score,
             'week' => $this->currentWeek(),
         ]);
+
+        $this->announceLeadChange($profile, $game, $score, $dethroned);
+
+        return $run;
+    }
+
+    /**
+     * Tell the previous leader that they are not the leader any more.
+     *
+     * Only fires on an actual takeover: the score has to clear the old leader's
+     * outright — a tie keeps the incumbent, which is the rule `boardFor()`
+     * applies and `beatTarget()` prints — and the old leader has to be somebody
+     * else. Improving your own best does not dethrone you, and a game's first
+     * run of the week takes a lead nobody was holding.
+     *
+     * Throttled per person, per game, per week. Two kids trading a board back
+     * and forth for an hour is the best evening this app can produce and also
+     * the fastest way to make a family mute its notifications; one buzz per
+     * half hour keeps it news. The window is deliberately short enough that a
+     * takeover after tea still lands on a board lost before school.
+     *
+     * Failures are logged and swallowed. A push that does not go out is worth
+     * less than the run the kid just played, and losing the score to a web-push
+     * error would be the worse bug by a distance.
+     */
+    private function announceLeadChange(Profile $scorer, ArcadeGame $game, int $score, ?ArcadeScore $dethroned): void
+    {
+        if ($dethroned === null || $dethroned->profile_id === null) {
+            return;
+        }
+
+        if ($dethroned->profile_id === $scorer->id || $score <= $dethroned->score) {
+            return;
+        }
+
+        $loser = $dethroned->profile;
+
+        if ($loser === null) {
+            return;
+        }
+
+        $key = "arcade-lead-lost:{$loser->id}:{$game->value}:{$this->currentWeek()}";
+
+        if (! Cache::add($key, true, now()->addMinutes(self::LEAD_ALERT_QUIET_MINUTES))) {
+            return;
+        }
+
+        try {
+            $loser->notify(new ArcadeLeadLost(
+                'You lost the lead!',
+                // The number to beat is the run that just landed, not the one
+                // that was knocked off — the reader has to clear the *new*
+                // leader to get their board back.
+                "{$scorer->name} just took {$game->label()} with {$score} {$game->unit()}. "
+                    .'Beat '.($score + 1).' to take it back.',
+                $game->value,
+            ));
+        } catch (Throwable $e) {
+            Log::error('Arcade lead-change notification failed.', [
+                'game' => $game->value,
+                'profile_id' => $loser->id,
+                'exception' => $e,
+            ]);
+        }
     }
 
     /**

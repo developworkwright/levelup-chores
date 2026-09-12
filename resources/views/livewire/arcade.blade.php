@@ -164,6 +164,11 @@ new class extends Component
             'yourBest' => $this->game->isRanked() ? $arcade->personalBest($player, $this->game) : 0,
             'champion' => $this->game->isRanked() ? $arcade->lastChampion($household, $this->game) : null,
             'prize' => ArcadeService::PRIZE_TICKETS,
+            // The deadline, said out loud. A weekly board that never mentions
+            // when the week ends is just a list, and the last day of it felt
+            // exactly like the first.
+            'countdown' => $arcade->weekCountdown(),
+            'closing' => $arcade->weekIsClosing(),
             // A toy has no ladder to hand the canvas, and asking for one throws
             // — see ArcadeService::milestonesFor(). Only the tower reads this
             // anyway; the other games carry their own copy.
@@ -675,7 +680,18 @@ new class extends Component
                 <div class="flex flex-col gap-[6px] rounded-[11px] border border-fq-line-3 bg-fq-sunk p-[11px]">
                     <div class="flex items-baseline justify-between gap-2">
                         <span class="font-mono-fq text-[9.5px] tracking-[0.14em] text-fq-lime uppercase">This week</span>
-                        <span class="shrink-0 font-mono-fq text-[9px] text-fq-text-5">ends Sun</span>
+
+                        {{-- The countdown goes loud in the last day. The rest of
+                             the week it stays a quiet grey note, because "4 days
+                             left" shouted at a kid on Tuesday is the boy who
+                             cried wolf by Sunday, when it actually matters. --}}
+                        <span @class([
+                            'shrink-0 font-mono-fq text-[9px]',
+                            'text-fq-text-5' => ! $closing,
+                            'animate-pulse font-bold text-fq-magenta' => $closing,
+                        ])>
+                            {{ $countdown }}
+                        </span>
                     </div>
 
                     @forelse ($standings->take(3) as $i => $row)

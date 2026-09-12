@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\EnsureRole;
+use App\Http\Middleware\SendArcadeLastCall;
 use App\Http\Middleware\SyncStreak;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -17,6 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'role' => EnsureRole::class,
             'sync-streak' => SyncStreak::class,
+            'arcade-last-call' => SendArcadeLastCall::class,
         ]);
 
         // Laravel Cloud terminates TLS at its edge load balancer, so trust it

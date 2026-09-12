@@ -37,7 +37,7 @@ Route::post('/logout', function () {
     return redirect('/');
 })->middleware('auth:profile')->name('logout');
 
-Route::middleware(['auth:profile', 'role:kid', 'sync-streak'])->prefix('kid')->group(function () {
+Route::middleware(['auth:profile', 'role:kid', 'sync-streak', 'arcade-last-call'])->prefix('kid')->group(function () {
     // Home: the day laid out in the order it should be done in — quest, chest,
     // spin, standings. Household held this slot and the news on it is still the
     // best news in the app, but a landing page has to answer "what do I do now"
@@ -72,7 +72,7 @@ Route::middleware(['auth:profile', 'role:kid', 'sync-streak'])->prefix('kid')->g
     Volt::route('/arcade', 'kid.arcade')->name('kid.arcade');
 });
 
-Route::middleware(['auth:profile', 'role:parent'])->prefix('parent')->group(function () {
+Route::middleware(['auth:profile', 'role:parent', 'arcade-last-call'])->prefix('parent')->group(function () {
     Route::redirect('/', '/parent/home');
     // Kept alive because push notifications already sitting on a phone carry
     // the old path, and because the page was /approvals for months. A parent
