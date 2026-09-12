@@ -89,23 +89,26 @@ class ArcadeFlightTest extends TestCase
             ->assertDontSee('214 km');
     }
 
-    public function test_the_ceiling_leaves_room_above_the_last_city(): void
+    public function test_a_flight_far_past_the_last_city_still_lands(): void
     {
         /*
-         * The ceiling exists to bound what a tampered request can write, not to
-         * cap real play — and a flight is the game where those two are close
-         * enough together to get wrong. The last rung of the ladder is about a
-         * minute of flawless flying, and the score keeps climbing at ten to
-         * twenty points a second after it, so anything near the ladder's own
-         * top would be throwing away honest runs in silence.
+         * This used to assert that the game's ceiling sat well above the last
+         * city. There is no ceiling now — the one on the penguin slide ate a
+         * real 7659m run in silence, and the same species of estimate was
+         * sitting on this game, one long flight away from doing the same thing.
+         *
+         * The property worth keeping is the one the ceiling was a proxy for: a
+         * flight can keep climbing at ten to twenty points a second long after
+         * the last city has gone past, and every metre of that has to reach the
+         * board.
          */
         $ladder = ArcadeService::milestonesFor(ArcadeGame::GrandTour);
         $lastCity = end($ladder)[0];
+        $flight = $lastCity * 20;
 
-        $this->assertGreaterThan(
-            $lastCity * 3,
-            ArcadeGame::GrandTour->maxScore(),
-            'The flight ceiling is close enough to the last city to throw away real runs.'
+        $this->assertNotNull(
+            app(ArcadeService::class)->post(Profile::factory()->create(), ArcadeGame::GrandTour, $flight),
+            'The flight is throwing away runs past the last city.'
         );
     }
 

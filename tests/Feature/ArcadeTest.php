@@ -152,40 +152,46 @@ class ArcadeTest extends TestCase
             ->assertSee('SALTY RATTLE');
     }
 
-    public function test_an_impossible_score_is_not_written(): void
+    public function test_a_run_that_was_never_played_is_not_written(): void
     {
         $kid = $this->loginKid();
 
-        // The score still arrives from the browser, so it is still a claim —
-        // and the ceiling it is measured against belongs to the game it claims
-        // to come off, because the games do not count the same sort of number.
+        // All that is left of the old validation. A run of zero is not a small
+        // run, it is the game never having been played — and a negative one is
+        // not a number this game can produce at all.
         foreach (ArcadeGame::ranked() as $game) {
-            $this->assertNull($this->arcade()->post($kid, $game, $game->maxScore() + 1));
             $this->assertNull($this->arcade()->post($kid, $game, 0));
+            $this->assertNull($this->arcade()->post($kid, $game, -50));
         }
 
         $this->assertSame(0, ArcadeScore::count());
     }
 
-    public function test_a_long_flight_is_believed_where_an_equally_long_tower_would_not_be(): void
+    /**
+     * There is no upper bound any more, on any game.
+     *
+     * There used to be one per game, and it ate a real 7659m run without a word
+     * to anybody — see ArcadePenguinTest for that one by name. The estimates
+     * behind those numbers were guesses about how good a child might get, which
+     * is not a thing anybody should be guessing about in code that silently
+     * discards the answer.
+     *
+     * A tampered score is visible to the whole house on a board a parent can
+     * correct. A refused one is invisible to everybody. Only one of those two
+     * failures is quiet, and quiet is the bad one.
+     */
+    public function test_no_game_has_a_ceiling(): void
     {
-        /*
-         * The reason the ceiling moved onto the game. A flight earns points a
-         * dozen a second, so four figures is a good long run rather than a
-         * tampered request — while the same number of floors is several times
-         * further than anybody has ever stacked. One ceiling for both would
-         * have to either wave the tower through or drop the flight, and
-         * dropping it is silent: the kid is never told, and the run they were
-         * proudest of is the one that vanishes.
-         */
         $kid = $this->loginKid();
-        $flight = 1400;
 
-        $this->assertNotNull($this->arcade()->post($kid, ArcadeGame::GrandTour, $flight));
-        $this->assertNull($this->arcade()->post($kid, ArcadeGame::StackTheMess, $flight));
+        foreach (ArcadeGame::ranked() as $game) {
+            $this->assertNotNull(
+                $this->arcade()->post($kid, $game, 250_000),
+                $game->label().' still refuses a big run.'
+            );
+        }
 
-        $this->assertSame(1, ArcadeScore::count());
-        $this->assertSame(ArcadeGame::GrandTour, ArcadeScore::sole()->game);
+        $this->assertSame(count(ArcadeGame::ranked()), ArcadeScore::count());
     }
 
     public function test_the_board_stops_listening_once_a_player_has_posted_enough(): void

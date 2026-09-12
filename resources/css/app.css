@@ -682,7 +682,6 @@ body {
     z-index: -1;
     border-radius: inherit;
     background: conic-gradient(
-        from var(--fq-powered-angle, 0deg),
         var(--fq-lime),
         var(--fq-cyan),
         var(--fq-magenta),
@@ -694,7 +693,7 @@ body {
 
 @keyframes fq-token-spin {
     to {
-        --fq-powered-angle: 360deg;
+        filter: hue-rotate(1turn);
     }
 }
 

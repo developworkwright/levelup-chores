@@ -74,6 +74,11 @@ new class extends Component
         return [
             'kids' => $kids,
             'poweredUp' => $poweredUp,
+            // How fiercely each run burns, 0-6. Keyed to the milestone ladder,
+            // so the flame grows on the mornings a chest is waiting.
+            'fireTiers' => collect($kids)
+                ->mapWithKeys(fn (Profile $kid): array => [$kid->id => $streaks->fireTier($kid->streak)])
+                ->all(),
             // The sky reacts to the house as a whole rather than to one kid,
             // because nobody is logged in yet — there is no "you" to power up.
             'anyPoweredUp' => in_array(true, $poweredUp, true),
@@ -116,14 +121,26 @@ new class extends Component
             <a
                 href="{{ route('pin', $kid) }}"
                 wire:navigate
-                class="fq-avatar fq-avatar-idle flex shrink-0 grow-0 basis-[92px] flex-col items-center gap-[14px] text-fq-text"
+                class="fq-avatar fq-avatar-idle relative flex shrink-0 grow-0 basis-[92px] flex-col items-center gap-[14px] text-fq-text"
                 style="--fq-tilt: {{ $angle }}deg; animation-delay: {{ round($i * 0.45, 2) }}s"
             >
+                {{-- The run, burning. A sibling of the tile rather than a child
+                     of it, because a negative-z child would paint *over* the
+                     tile's own background inside the overlap — the fire has to
+                     be behind the whole tile, not behind its letter. --}}
+                @if (($fireTiers[$kid->id] ?? 0) > 0)
+                    <span
+                        class="fq-streak-fire"
+                        aria-hidden="true"
+                        style="--fq-fire-tier: {{ $fireTiers[$kid->id] }}"
+                    ></span>
+                @endif
+
                 {{-- The offset shadow is the accent at 58% of each channel;
                      mixing toward black in sRGB is exactly that multiply. --}}
                 <div
                     @class([
-                        'fq-avatar-tile relative grid h-[78px] w-[78px] place-items-center rounded-[24px] border-[3px] border-fq-bg font-baloo text-[34px] font-extrabold text-fq-bg',
+                        'fq-avatar-tile relative z-10 grid h-[78px] w-[78px] place-items-center rounded-[24px] border-[3px] border-fq-bg font-baloo text-[34px] font-extrabold text-fq-bg',
                         // Wider than the header's ring, because this tile
                         // already wears a 3px background-coloured border and a
                         // hairline behind that would read as a rendering

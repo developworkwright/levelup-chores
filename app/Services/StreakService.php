@@ -46,6 +46,33 @@ class StreakService
     public const STREAK_CYCLE_DAYS = 30;
 
     /**
+     * How fiercely a run burns on the login door, 0 (no run) to 6.
+     *
+     * The steps are the milestone days above rather than a tidy "every three
+     * days", so the fire grows on exactly the mornings a chest is waiting. A kid
+     * who hits day 7 gets the payout *and* sees the flame jump, which are the
+     * same event told twice — and a ladder invented separately from the one that
+     * pays would have the fire growing on days nothing happens, which teaches
+     * the wrong thing about which days matter.
+     *
+     * Past the last milestone it holds at the top rather than climbing forever:
+     * the track repeats every {@see self::STREAK_CYCLE_DAYS} days, and a fire
+     * that kept growing would be a hundred days tall by spring.
+     */
+    public function fireTier(int $streak): int
+    {
+        return match (true) {
+            $streak < 1 => 0,
+            $streak < 3 => 1,
+            $streak < 5 => 2,
+            $streak < 7 => 3,
+            $streak < 14 => 4,
+            $streak < 30 => 5,
+            default => 6,
+        };
+    }
+
+    /**
      * What every lap after the first pays, against the base map above.
      *
      * Flat rather than compounding, deliberately. Doubling per lap is the

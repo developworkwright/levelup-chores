@@ -129,24 +129,46 @@ class ArcadePenguinTest extends TestCase
         );
     }
 
-    public function test_the_ceiling_leaves_room_above_the_last_rung(): void
+    /**
+     * The run this game lost, by name.
+     *
+     * A kid slid 7659m, which was the best thing that had happened to him all
+     * week, and ran to fetch his brother to show him. The board had never heard
+     * of it: the ceiling was 4000, `post()` refused the score, returned null,
+     * and not one thing anywhere — not the page, not a log, not the kid's own
+     * screen, which went on showing 7659m as his personal best — said so.
+     *
+     * The ceiling is gone rather than raised. The number that was wrong was an
+     * estimate of how good a child might get, and the failure mode of guessing
+     * that too low is silent destruction of the moment it was guessing about.
+     *
+     * This asserts the real number, not a round one, because the point is the
+     * afternoon rather than the arithmetic.
+     */
+    public function test_the_7659_metre_run_reaches_the_board(): void
     {
-        /*
-         * The ceiling bounds what a tampered request can write; it is not a cap
-         * on real play. A run that chains a ring arc onto a glare-ice slide
-         * keeps building long after the last milestone has gone past, so a
-         * ceiling near the top of the ladder would throw away honest runs in
-         * silence — the kid is never told, and the run they were proudest of is
-         * the one that vanishes.
-         */
-        $ladder = ArcadeService::milestonesFor(ArcadeGame::PenguinLaunch);
-        $lastRung = end($ladder)[0];
+        $kid = Profile::factory()->create();
 
-        $this->assertGreaterThan(
-            $lastRung * 3,
-            ArcadeGame::PenguinLaunch->maxScore(),
-            'The slide ceiling is close enough to the last rung to throw away real runs.'
-        );
+        $run = app(ArcadeService::class)->post($kid, ArcadeGame::PenguinLaunch, 7659);
+
+        $this->assertNotNull($run, 'The slide is eating real runs again.');
+        $this->assertSame(7659, $run->score);
+    }
+
+    /**
+     * The column has to be able to hold what the app now accepts. It was an
+     * unsigned smallint and stopped at 65535 — past that MySQL either throws or
+     * truncates, and a truncated score is a *wrong* number on the board, which
+     * is worse than the missing one this all started with.
+     */
+    public function test_a_run_past_the_old_column_limit_survives_the_round_trip(): void
+    {
+        $kid = Profile::factory()->create();
+
+        $run = app(ArcadeService::class)->post($kid, ArcadeGame::PenguinLaunch, 120_000);
+
+        $this->assertNotNull($run);
+        $this->assertSame(120_000, $run->fresh()->score);
     }
 
     public function test_the_page_asks_for_the_element_the_game_file_defines(): void

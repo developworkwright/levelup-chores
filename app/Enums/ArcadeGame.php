@@ -371,47 +371,6 @@ enum ArcadeGame: string
     }
 
     /**
-     * The biggest run this game's board will believe.
-     *
-     * A ceiling on what a tampered request can write, not a cap on real play —
-     * so it sits far enough above the last rung of the ladder that no honest
-     * run ever meets it. A score arrives from a browser and is a claim until
-     * this has looked at it.
-     *
-     * It is per game because the games do not count the same *sort* of number.
-     * Floors and lanes are distances a body travels one at a time, and 999 of
-     * either is several times further than anybody has ever got; points are
-     * earned a dozen a second, so squeezing a flight under the same figure
-     * would throw away good runs in silence and leave a board that looks like a
-     * game nobody is any good at. That is worse than no ceiling at all: the
-     * kid is never told, and the run they were proudest of is the one that
-     * vanishes.
-     */
-    public function maxScore(): int
-    {
-        return match ($this) {
-            self::StackTheMess, self::WindyWalkies => 999,
-            /*
-             * Roughly five times the last city on the ladder, which is itself
-             * about a minute of flawless flying. The score climbs at ten to
-             * twenty points a second once the curve has run out, so a very
-             * good long run reaches four figures and has to be believed.
-             */
-            self::GrandTour => 4000,
-            /*
-             * Metres, and about four times the last rung of its ladder. A
-             * distance game needs a generous ceiling for the same reason the
-             * flight does: a run that chains a ring arc onto a glare-ice slide
-             * keeps building long after the last milestone, and a tighter
-             * number would throw away exactly the runs a kid was proudest of,
-             * in silence.
-             */
-            self::PenguinLaunch => 4000,
-            self::SlimeTime => throw $this->notARankedGame('score ceiling'),
-        };
-    }
-
-    /**
      * The error every score-shaped question raises when it is asked of a toy.
      *
      * A toy has no score, so there is no honest answer — and the dishonest ones

@@ -530,12 +530,17 @@ class ArcadeService
         // Read before the insert, because after it the answer is this run.
         $dethroned = $this->weeklyTop($profile->household, $game, 1)->first();
 
-        // The ceiling belongs to the game rather than to this class: a flight
-        // is scored in points earned a dozen a second and a tower in floors
-        // climbed one at a time, so one number for all of them would either
-        // wave through a tampered tower or throw away an honest flight. See
-        // ArcadeGame::maxScore().
-        if ($score < 1 || $score > $game->maxScore()) {
+        // There is no upper bound, on purpose. There used to be one per game,
+        // and it threw away a real 7659m run without telling anybody — the
+        // estimate behind it was simply wrong, and the cost of being wrong that
+        // way is a child whose best afternoon never reached the board. A
+        // tampered score is visible to the whole house on a board a parent can
+        // correct; a refused one is invisible to everybody. Of the two ways to
+        // be wrong, only one of them is quiet, and quiet is the bad one.
+        //
+        // The floor stays. A run of zero is not a small run, it is the game
+        // never having been played.
+        if ($score < 1) {
             return null;
         }
 
