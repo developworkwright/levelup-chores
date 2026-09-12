@@ -606,8 +606,16 @@ class FamilyFeedTest extends TestCase
 
     public function test_a_parent_can_open_the_feed_and_a_kid_cannot_open_the_parent_page(): void
     {
-        $this->actingAs($this->mom, 'profile')->get('/parent/family')->assertOk();
-        $this->actingAs($this->raylan, 'profile')->get('/parent/family')->assertForbidden();
+        // The feed is on parent Home now, not a page of its own.
+        $this->feed()->say($this->raylan, $this->room(FeedRoomKind::Everyone), 'can we have pizza');
+
+        Auth::guard('profile')->login($this->mom);
+        Volt::test('parent.home')
+            ->assertSee('can we have pizza')
+            ->assertSee('Message everyone', escape: false);
+        Auth::guard('profile')->logout();
+
+        $this->actingAs($this->mom, 'profile')->get('/parent/family')->assertNotFound();
         $this->actingAs($this->raylan, 'profile')->get('/kid/family')->assertOk();
     }
 }

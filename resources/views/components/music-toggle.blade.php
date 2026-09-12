@@ -286,8 +286,14 @@
                     @endif
                 </div>
 
-                {{-- What is being looked at, and everything in it. --}}
-                <div class="flex min-h-0 flex-1 flex-col gap-2">
+                {{-- What is being looked at, and everything in it.
+
+                     `min-w-0`, or this column is as wide as the longest song
+                     title: every title is `truncate`, which is nowrap, and a
+                     flex item will not shrink below its content. One long
+                     "Song - Artist" filename pushed the whole list, the Play
+                     all and the scrollbar out past the panel's right edge. --}}
+                <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
                     <div class="flex shrink-0 flex-wrap items-end justify-between gap-3">
                         <div class="min-w-0">
                             <span class="block font-mono-fq text-[9.5px] tracking-[0.14em] text-fq-text-4 uppercase" x-text="viewKindLabel"></span>

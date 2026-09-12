@@ -11,11 +11,11 @@ use Livewire\Volt\Component;
 /**
  * The family feed — rooms, and the quiet half.
  *
- * One component for both consoles. The kid page and the parent page are thin
- * wrappers around it, the same way the arcade's are, because this is one feed
- * with one set of rooms in it: a copy per side would be two implementations of
- * FeedRoom::readableBy()'s consequences, and the whole point of that method is
- * that there is exactly one.
+ * One component for both consoles. It is embedded on kid Home and parent Home,
+ * and the kids also have it full-height at /kid/family — the same component
+ * each time, because this is one feed with one set of rooms in it: a copy per
+ * side would be two implementations of FeedRoom::readableBy()'s consequences,
+ * and the whole point of that method is that there is exactly one.
  *
  * ## Two screens on a phone, two columns on a laptop
  *

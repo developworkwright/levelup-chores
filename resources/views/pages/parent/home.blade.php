@@ -304,6 +304,20 @@ new class extends Component
 <x-parent.shell :profile="$profile" active="home">
     <livewire:push-toggle audience="parent" />
 
+    {{-- The family feed, in full, near the top — the same component the kids'
+         Home draws, and the only place a grown-up reads it now. It used to be a
+         page of its own at /parent/family; a page you have to go to is a page
+         you check when you already suspect something is there, and a message
+         from one of the kids is the one thing on this screen somebody is
+         waiting on an answer to. `embedded` drops the component's own heading
+         and caps the messages to a scrolling box so the approval queues below
+         don't get pushed down by a busy afternoon. --}}
+    <div class="mb-6 flex flex-col gap-3">
+        <h2 class="font-baloo text-xl font-bold">Family</h2>
+
+        <livewire:family-feed :embedded="true" />
+    </div>
+
     {{-- Above the queue on purpose. This is the landing page a parent opens
          several times a day, and the card only does its job if the grown-ups
          actually fill it in — a house where the adults never answer teaches the

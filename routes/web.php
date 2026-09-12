@@ -112,10 +112,6 @@ Route::middleware(['auth:profile', 'role:parent', 'arcade-last-call'])->prefix('
     // The music library. Songs live on a disk rather than in the repository,
     // so adding one is a page rather than a commit — see MusicService.
     Volt::route('/music', 'parent.music')->name('parent.music');
-    // The same feed the kids have, not an administration screen: nothing to
-    // approve and nothing to moderate. See pages/parent/family.blade.php for
-    // what a grown-up can and deliberately cannot read here.
-    Volt::route('/family', 'parent.family')->name('parent.family');
     Volt::route('/kids', 'parent.kids')->name('parent.kids');
     Volt::route('/standings', 'parent.standings')->name('parent.standings');
     Volt::route('/activity', 'parent.activity')->name('parent.activity');

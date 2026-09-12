@@ -93,7 +93,8 @@ class FamilyFeedNotificationTest extends TestCase
         });
 
         Notification::assertSentTo($this->mom, FeedMessagePosted::class, function (FeedMessagePosted $n) {
-            return $this->push($this->mom, $n)['data']['url'] === '/parent/family';
+            // Parent Home carries the feed; there is no parent Family page.
+            return $this->push($this->mom, $n)['data']['url'] === '/parent/home';
         });
     }
 

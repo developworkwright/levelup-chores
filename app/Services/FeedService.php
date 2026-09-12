@@ -751,8 +751,8 @@ class FeedService
                     $room->id,
                     $title,
                     mb_strimwidth(trim($body), 0, 140, '…'),
-                    // Kids land on Home, which is where the feed lives for them.
-                    $recipient->isParent() ? '/parent/family' : '/kid/home',
+                    // Home, for both: that is where the feed lives on each side.
+                    $recipient->isParent() ? '/parent/home' : '/kid/home',
                 ));
             } catch (Throwable $e) {
                 Log::error('Family feed notification failed.', [
