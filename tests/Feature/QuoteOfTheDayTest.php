@@ -2,10 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Enums\FeedMessageKind;
+use App\Enums\FeedRoomKind;
+use App\Models\FeedMessage;
+use App\Models\FeedRoom;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Models\Quote;
-use App\Notifications\QuoteAdded;
+use App\Services\FeedService;
 use App\Services\HouseholdClock;
 use App\Services\QuoteService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -148,39 +152,70 @@ class QuoteOfTheDayTest extends TestCase
         $this->assertNull(app(QuoteService::class)->latestDay($this->household()));
     }
 
-    public function test_the_whole_household_is_told_except_the_parent_who_typed_it(): void
+    /**
+     * A quote lands in the room the house is talking in, attributed to the kid
+     * who said it. It used to be a push notification to everybody but the
+     * author; the room carries its own unread count on every screen in the app,
+     * so a banner saying the same thing is the same news told twice.
+     */
+    public function test_a_new_quote_lands_in_the_family_feed(): void
     {
         Notification::fake();
 
         $household = $this->household();
         $author = Profile::factory()->parent()->for($household)->create();
-        $otherParent = Profile::factory()->parent()->for($household)->create();
         $speaker = Profile::factory()->for($household)->create(['name' => 'Otto']);
-        $sibling = Profile::factory()->for($household)->create();
-        $elsewhere = Profile::factory()->for(Household::factory())->create();
 
+        app(FeedService::class)->ensureRooms($household);
         app(QuoteService::class)->record($author, 'Cheese is just angry milk.', $speaker);
 
-        // Including the kid who said it — being told your line got written down
-        // is most of the reward.
-        foreach ([$speaker, $sibling] as $kid) {
-            Notification::assertSentTo($kid, QuoteAdded::class, function (QuoteAdded $notification) use ($kid) {
-                $message = $notification->toWebPush($kid, $notification)->toArray();
+        $everyone = FeedRoom::where('household_id', $household->id)
+            ->where('kind', FeedRoomKind::Everyone)
+            ->firstOrFail();
 
-                return $message['title'] === 'Otto said…'
-                    && str_contains($message['body'], 'Cheese is just angry milk.')
-                    && $message['data']['url'] === '/kid/home#quote-of-the-day';
-            });
+        $message = FeedMessage::where('room_id', $everyone->id)->firstOrFail();
+
+        $this->assertSame(FeedMessageKind::Quote, $message->kind);
+        $this->assertSame('Cheese is just angry milk.', $message->body);
+        // Under the kid's name, not the parent's: the row is the thing Otto
+        // said, and the grown-up only held the pen.
+        $this->assertSame($speaker->id, $message->profile_id);
+        $this->assertTrue($message->source->is($this->latestQuote($household)));
+
+        Notification::assertNothingSent();
+    }
+
+    /** No quote left behind: a funny day is allowed to fill the room. */
+    public function test_every_quote_of_a_day_gets_its_own_row(): void
+    {
+        $household = $this->household();
+        $parent = Profile::factory()->parent()->for($household)->create();
+
+        app(FeedService::class)->ensureRooms($household);
+
+        foreach (['Angry milk', 'Moon follows us', 'I am not tired'] as $line) {
+            app(QuoteService::class)->record($parent, $line);
         }
 
-        // The grown-up who wasn't in the room still wants to hear it — but the
-        // kid page is behind role:kid, so their link has to go somewhere else.
-        Notification::assertSentTo($otherParent, QuoteAdded::class, function (QuoteAdded $notification) use ($otherParent) {
-            return $notification->toWebPush($otherParent, $notification)->toArray()['data']['url'] === '/parent/quotes';
-        });
+        $this->assertSame(3, FeedMessage::where('household_id', $household->id)->count());
+    }
 
-        Notification::assertNotSentTo($author, QuoteAdded::class);
-        Notification::assertNotSentTo($elsewhere, QuoteAdded::class);
+    /** No feed room yet — an older household, or a half-run migration. */
+    public function test_a_quote_still_saves_when_there_is_nowhere_to_post_it(): void
+    {
+        $household = $this->household();
+        $parent = Profile::factory()->parent()->for($household)->create();
+
+        $quote = app(QuoteService::class)->record($parent, 'Still worth keeping');
+
+        $this->assertNotNull($quote);
+        $this->assertDatabaseHas('quotes', ['id' => $quote->id]);
+        $this->assertSame(0, FeedMessage::count());
+    }
+
+    private function latestQuote(Household $household): Quote
+    {
+        return Quote::where('household_id', $household->id)->latest('id')->firstOrFail();
     }
 
     public function test_the_parent_page_saves_a_quote_and_says_how_many_contenders_there_are(): void
@@ -365,21 +400,25 @@ class QuoteOfTheDayTest extends TestCase
     }
 
     /**
-     * Home is the punchline, so the line stands on its own there — half these
-     * quotes are only funny because you don't know what was going on.
+     * The feed is the punchline, so the line stands on its own there — half
+     * these quotes are only funny because you don't know what was going on.
      */
-    public function test_the_home_card_withholds_the_context(): void
+    public function test_the_feed_withholds_the_context(): void
     {
         $household = $this->household();
         $kid = Profile::factory()->for($household)->create();
-        Quote::factory()->for($household)->create([
-            'text' => 'I am not tired',
-            'context' => 'Asleep on the stairs four minutes later',
-        ]);
+        $parent = Profile::factory()->parent()->for($household)->create();
+
+        app(FeedService::class)->ensureRooms($household);
+        app(QuoteService::class)->record(
+            $parent,
+            'I am not tired',
+            context: 'Asleep on the stairs four minutes later',
+        );
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.home')
+        Volt::test('family-feed')
             ->assertSee('I am not tired')
             ->assertDontSee('Asleep on the stairs four minutes later');
     }
@@ -416,23 +455,19 @@ class QuoteOfTheDayTest extends TestCase
         Volt::test('parent.quotes')->assertSee('Asleep on the stairs four minutes later');
     }
 
-    /** The push carries the line and nothing else, for the same reason. */
-    public function test_the_notification_body_carries_no_context(): void
+    /**
+     * The feed row copies the line and nothing else. The context lives on the
+     * Quote and reaches the Journal from there.
+     */
+    public function test_the_feed_row_carries_the_line_and_not_the_story(): void
     {
-        Notification::fake();
-
         $household = $this->household();
         $author = Profile::factory()->parent()->for($household)->create();
-        $kid = Profile::factory()->for($household)->create();
 
+        app(FeedService::class)->ensureRooms($household);
         app(QuoteService::class)->record($author, 'I am not tired', context: 'Asleep on the stairs');
 
-        Notification::assertSentTo($kid, QuoteAdded::class, function (QuoteAdded $notification) use ($kid) {
-            $body = $notification->toWebPush($kid, $notification)->toArray()['body'];
-
-            return str_contains($body, 'I am not tired')
-                && ! str_contains($body, 'Asleep on the stairs');
-        });
+        $this->assertSame('I am not tired', FeedMessage::firstOrFail()->body);
     }
 
     public function test_a_kid_cannot_open_the_parent_quotes_page(): void
@@ -442,28 +477,38 @@ class QuoteOfTheDayTest extends TestCase
         $this->actingAs($kid, 'profile')->get('/parent/quotes')->assertForbidden();
     }
 
-    public function test_the_kid_home_page_shows_the_days_contenders(): void
+    public function test_the_family_feed_shows_the_days_contenders(): void
     {
         $household = $this->household();
         $kid = Profile::factory()->for($household)->create();
-        Quote::factory()->for($household)->create(['text' => 'Angry milk', 'said_by' => 'Otto']);
-        Quote::factory()->for($household)->create(['text' => 'Moon follows us', 'said_by' => 'Mabel']);
+        $parent = Profile::factory()->parent()->for($household)->create();
+
+        app(FeedService::class)->ensureRooms($household);
+        app(QuoteService::class)->record($parent, 'Angry milk', saidBy: 'Otto');
+        app(QuoteService::class)->record($parent, 'Moon follows us', saidBy: 'Mabel');
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.home')
-            ->assertSee('Contenders for Quote of the Day')
+        Volt::test('family-feed')
             ->assertSee('Angry milk')
             ->assertSee('Moon follows us');
     }
 
-    public function test_the_kid_home_page_hides_the_card_when_nothing_has_been_said(): void
+    /**
+     * Home used to carry the card, dead last, which is where nobody scrolls.
+     * It doesn't any more — that is the whole reason the quote moved.
+     */
+    public function test_the_kid_home_page_no_longer_carries_the_quote_card(): void
     {
-        $kid = Profile::factory()->for($this->household())->create();
+        $household = $this->household();
+        $kid = Profile::factory()->for($household)->create();
+        Quote::factory()->for($household)->create(['text' => 'Angry milk', 'said_by' => 'Otto']);
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.home')->assertDontSee('Quote of the Day');
+        Volt::test('kid.home')
+            ->assertDontSee('Quote of the Day')
+            ->assertDontSee('Angry milk');
     }
 
     public function test_the_journal_holds_the_quote_wall_alongside_gratitude(): void

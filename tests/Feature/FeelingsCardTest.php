@@ -307,13 +307,17 @@ class FeelingsCardTest extends TestCase
 
         Auth::guard('profile')->login($this->kid);
 
+        // Read from the feelings card down rather than across the whole page:
+        // the family feed sits above it and names the grown-ups legitimately,
+        // because a kid's room to them is called after them.
+        $html = Volt::test('kid.home')->assertOk()->html();
+        $below = substr($html, strpos($html, 'wire:key="feelings-card"'));
+
         // A word is the house's the moment it exists. Naming its author turns
         // "somebody here needed this word" into a fact about one person, which
         // is what stops the next word being added.
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('Anxious')
-            ->assertDontSee('Bartholomew');
+        $this->assertStringContainsString('Anxious', $below);
+        $this->assertStringNotContainsString('Bartholomew', $below);
     }
 
     public function test_a_word_is_tidied_and_capped(): void
@@ -589,6 +593,10 @@ class FeelingsCardTest extends TestCase
         Auth::guard('profile')->login($this->kid);
 
         Volt::test('kid.home')
+            // Answered before this visit started, so Home folds the card to a
+            // line — the lock lives behind the same "Change it" that re-answering
+            // does, since both are things you do *to* an answer already given.
+            ->set('showFeelings', true)
             ->assertOk()
             // Offered after saving, never before: there is nothing to seal until
             // something has been written down.

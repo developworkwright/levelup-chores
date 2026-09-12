@@ -52,9 +52,15 @@ class GratitudeService
      * written, or when fewer than ITEMS things were actually named — a blank
      * line is not something to be grateful for.
      *
+     * `$shared` is the per-entry opt-out from the family feed's Grateful today
+     * card. It defaults to true because a gratitude line is nearly always about
+     * somebody else in this house and the whole value of it is that they hear
+     * it — see the `shared` column's migration for the full argument, and for
+     * why this is the opposite default to FeelingVisibility.
+     *
      * @param  array<int, string|null>  $items
      */
-    public function record(Profile $profile, array $items): ?GratitudeEntry
+    public function record(Profile $profile, array $items, bool $shared = true): ?GratitudeEntry
     {
         $items = $this->clean($items);
 
@@ -62,12 +68,13 @@ class GratitudeService
             return null;
         }
 
-        return DB::transaction(function () use ($profile, $items) {
+        return DB::transaction(function () use ($profile, $items, $shared) {
             $entry = GratitudeEntry::create([
                 'household_id' => $profile->household_id,
                 'profile_id' => $profile->id,
                 'entry_date' => HouseholdClock::for($profile->household)->today(),
                 'items' => $items,
+                'shared' => $shared,
             ]);
 
             $this->tickets->record(
@@ -95,6 +102,25 @@ class GratitudeService
             ->latest('entry_date')
             ->latest('id')
             ->paginate($perPage);
+    }
+
+    /**
+     * Today's entries for the whole house, shared and not.
+     *
+     * Unfiltered on purpose: the family feed's card needs to know that somebody
+     * wrote one and kept it to themselves, so it can say "Westin kept his
+     * private" rather than leaving him out as though he'd written nothing.
+     * Filtering happens one layer up, in FeedService::gratitudeToday(), through
+     * GratitudeEntry::visibleTo().
+     *
+     * @return Collection<int, GratitudeEntry>
+     */
+    public function todayForHousehold(Household $household): Collection
+    {
+        return GratitudeEntry::where('household_id', $household->id)
+            ->whereDate('entry_date', HouseholdClock::for($household)->today())
+            ->with('profile')
+            ->get();
     }
 
     /**

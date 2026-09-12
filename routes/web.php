@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\FeedDrawingController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
@@ -37,6 +38,13 @@ Route::post('/logout', function () {
     return redirect('/');
 })->middleware('auth:profile')->name('logout');
 
+// A family feed drawing, for anybody who can read the room it was posted in —
+// kids and grown-ups alike, so it sits outside both role groups. The bucket is
+// private and there is no public URL for a drawing; see FeedDrawingController.
+Route::get('/feed/drawings/{message}', FeedDrawingController::class)
+    ->middleware('auth:profile')
+    ->name('feed.drawing');
+
 Route::middleware(['auth:profile', 'role:kid', 'sync-streak', 'arcade-last-call'])->prefix('kid')->group(function () {
     // Home: the day laid out in the order it should be done in — quest, chest,
     // spin, standings. Household held this slot and the news on it is still the
@@ -64,6 +72,10 @@ Route::middleware(['auth:profile', 'role:kid', 'sync-streak', 'arcade-last-call'
     Volt::route('/badges', 'kid.badges')->name('kid.badges');
     Volt::route('/stats', 'kid.stats')->name('kid.stats');
     Volt::route('/journal', 'kid.journal')->name('kid.journal');
+    // Somewhere for the kids to talk. They have this app and no phones, no
+    // accounts and nowhere else — see the family-feed component. Its front door
+    // is a section on Home rather than a rail button, for now.
+    Volt::route('/family', 'kid.family')->name('kid.family');
     // Playlists. Playing music is the header's job on every page; this is the
     // one place a kid builds a list to play — see PlaylistService.
     Volt::route('/music', 'kid.music')->name('kid.music');
@@ -100,6 +112,10 @@ Route::middleware(['auth:profile', 'role:parent', 'arcade-last-call'])->prefix('
     // The music library. Songs live on a disk rather than in the repository,
     // so adding one is a page rather than a commit — see MusicService.
     Volt::route('/music', 'parent.music')->name('parent.music');
+    // The same feed the kids have, not an administration screen: nothing to
+    // approve and nothing to moderate. See pages/parent/family.blade.php for
+    // what a grown-up can and deliberately cannot read here.
+    Volt::route('/family', 'parent.family')->name('parent.family');
     Volt::route('/kids', 'parent.kids')->name('parent.kids');
     Volt::route('/standings', 'parent.standings')->name('parent.standings');
     Volt::route('/activity', 'parent.activity')->name('parent.activity');

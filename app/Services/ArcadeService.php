@@ -529,6 +529,7 @@ class ArcadeService
 
         // Read before the insert, because after it the answer is this run.
         $dethroned = $this->weeklyTop($profile->household, $game, 1)->first();
+        $previousBest = $this->personalBest($profile, $game);
 
         // There is no upper bound, on purpose. There used to be one per game,
         // and it threw away a real 7659m run without telling anybody — the
@@ -554,6 +555,19 @@ class ArcadeService
         ]);
 
         $this->announceLeadChange($profile, $game, $score, $dethroned);
+
+        // A new personal best goes in the room the house is in — but only a
+        // real one, so a first-ever run counts and matching your own does not.
+        // FeedService::event() throttles it to one arcade line per kid per day,
+        // which is what keeps a good afternoon from becoming twenty of these.
+        if ($previousBest > 0 && $score > $previousBest) {
+            app(FeedService::class)->event(
+                $profile,
+                '🏁 '.$profile->name.' beat their best at '.$game->label()
+                    .' — «'.number_format($score).'»',
+                $run,
+            );
+        }
 
         return $run;
     }

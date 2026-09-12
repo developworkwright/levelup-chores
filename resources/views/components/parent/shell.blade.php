@@ -16,6 +16,10 @@
         'home' => ['label' => 'Home', 'icon' => 'fa-house', 'route' => 'parent.home', 'accent' => 'var(--fq-cyan)'],
         'chores' => ['label' => 'Quests', 'icon' => 'fa-flag', 'route' => 'parent.chores', 'accent' => 'var(--fq-cyan)'],
         'kids' => ['label' => 'Kids & Points', 'icon' => 'fa-children', 'route' => 'parent.kids', 'accent' => 'var(--fq-magenta)'],
+        // Not an administration screen: the same rooms the kids are in, with
+        // nothing here to approve or moderate. See pages/parent/family.blade.php
+        // for the one room a grown-up deliberately cannot open.
+        'family' => ['label' => 'Family', 'icon' => 'fa-comments', 'route' => 'parent.family', 'accent' => 'var(--fq-coral)'],
         'activity' => ['label' => 'Activity', 'icon' => 'fa-clock-rotate-left', 'route' => 'parent.activity', 'accent' => 'var(--fq-magenta)'],
         'loot' => ['label' => 'Loot Shop', 'icon' => 'fa-gem', 'route' => 'parent.loot', 'accent' => 'var(--fq-blue)'],
         'lucky' => ['label' => 'Lucky Block', 'icon' => 'fa-dice', 'route' => 'parent.lucky', 'accent' => 'var(--fq-gold)'],
@@ -56,7 +60,7 @@
      * and no state, and exist only so eleven rows can be skimmed.
      */
     $sheetGroups = [
-        'Every day' => ['home', 'chores', 'kids', 'activity'],
+        'Every day' => ['home', 'chores', 'family', 'kids', 'activity'],
         'Set up the game' => ['loot', 'lucky', 'monsters'],
         'Now and then' => [],
     ];

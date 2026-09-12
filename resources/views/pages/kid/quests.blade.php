@@ -393,6 +393,15 @@ new class extends Component
      */
     public array $gratitude = ['', '', ''];
 
+    /**
+     * Whether today's list goes up on the family feed's Grateful today card.
+     *
+     * On by default, and a box rather than a setting: a kid who has to go and
+     * find a preference in order to keep one line to themselves will never keep
+     * anything to themselves. See the `shared` column's migration.
+     */
+    public bool $gratitudeShared = true;
+
     public ?string $gratitudeMessage = null;
 
     public function clearSearch(): void
@@ -703,8 +712,9 @@ new class extends Component
     {
         $service = app(GratitudeService::class);
 
-        if ($service->record($this->profile, $this->gratitude)) {
+        if ($service->record($this->profile, $this->gratitude, $this->gratitudeShared)) {
             $this->gratitude = ['', '', ''];
+            $this->gratitudeShared = true;
             $this->gratitudeMessage = null;
 
             // Hearts, not coins — this is the one quest that isn't about
@@ -1578,6 +1588,9 @@ new class extends Component
                 </div>
 
                 <p class="mt-3 text-[13px] text-fq-text-5">
+                    {{ $gratitudeToday->shared
+                        ? 'The house can read this one on the Family page.'
+                        : 'You kept this one to yourself.' }}
                     A new one opens up tomorrow. Everything you've written is kept in your
                     <a href="{{ route('kid.journal') }}" wire:navigate class="font-semibold underline" style="color: var(--fq-magenta)">Journal</a>.
                 </p>
@@ -1597,6 +1610,25 @@ new class extends Component
                         >
                     @endforeach
                 </div>
+
+                {{-- The opt-out. In front of them at the moment they are
+                     deciding, because a kid who has to go and find a setting to
+                     be private will never be private — the same reasoning the
+                     FeelingVisibility docblock gives, pointed the other way:
+                     this one is shared unless you say otherwise, since a
+                     grateful line is almost always about somebody in this house
+                     and its whole value is that they hear it. --}}
+                <label class="mt-3 flex min-h-[44px] cursor-pointer items-center gap-[10px] rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[13px] py-2">
+                    <input
+                        type="checkbox"
+                        wire:model="gratitudeShared"
+                        class="size-[18px] shrink-0 accent-fq-magenta"
+                    >
+                    <span class="text-[13px] text-fq-text-3">
+                        Let the house read this one
+                        <span class="text-fq-text-5">— it shows up on the Family page</span>
+                    </span>
+                </label>
 
                 <button
                     type="button"

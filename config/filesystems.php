@@ -117,6 +117,55 @@ return [
             'report' => false,
         ],
 
+        /*
+        |----------------------------------------------------------------------
+        | Finger Drawings
+        |----------------------------------------------------------------------
+        |
+        | The PNGs the kids draw in the family feed. On their own disk for the
+        | same reason the mp3s are: they are content a six-year-old makes on a
+        | Tuesday, not something that belongs in git forever.
+        |
+        | Same two-disk shape as the music library, and the same caveat — on
+        | Laravel Cloud neither of these is used, because Cloud builds its own
+        | disk from LARAVEL_CLOUD_DISK_CONFIG and DRAWINGS_DISK names that one.
+        |
+        */
+
+        // Private, and outside public/ entirely: a drawing is only ever read
+        // back through FeedDrawingController, which checks the viewer can read
+        // the room it was posted in. No 'url' — there is no public address for
+        // one to have. The `drawings/` folder is part of every path FeedDrawings
+        // writes (see FOLDER there), so files land in
+        // storage/app/private/drawings/{household}/.
+        'drawings' => [
+            'driver' => 'local',
+            'root' => storage_path('app/private'),
+            'visibility' => 'private',
+            'throw' => true,
+            'report' => false,
+        ],
+
+        'drawings_cloud' => [
+            'driver' => 's3',
+            'key' => env('AWS_ACCESS_KEY_ID'),
+            'secret' => env('AWS_SECRET_ACCESS_KEY'),
+            'region' => env('AWS_DEFAULT_REGION'),
+            'bucket' => env('AWS_BUCKET'),
+            'url' => env('AWS_URL'),
+            'endpoint' => env('AWS_ENDPOINT'),
+            'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+            // No 'root' prefix, matching the music disk and the disk Laravel
+            // Cloud builds for the bucket. The `drawings/` folder comes from the
+            // path FeedDrawings writes, so it is the same on every disk and a
+            // root here would file them under drawings/drawings/.
+            // Thrown rather than swallowed. This is written to from a screen a
+            // kid is looking at, and a failed upload has to say so rather than
+            // return false into a room that then shows an empty frame.
+            'throw' => true,
+            'report' => false,
+        ],
+
     ],
 
     /*
@@ -137,6 +186,20 @@ return [
     */
 
     'music_disk' => env('MUSIC_DISK', 'music'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Drawings Disk
+    |--------------------------------------------------------------------------
+    |
+    | Which disk the family feed's finger drawings land on. Same rules as the
+    | music disk above: the local folder by default so development needs no
+    | bucket at all, and on Laravel Cloud the name of the attached bucket's
+    | disk as it appears in the dashboard rather than 'drawings_cloud'.
+    |
+    */
+
+    'drawings_disk' => env('DRAWINGS_DISK', 'drawings'),
 
     /*
     |--------------------------------------------------------------------------

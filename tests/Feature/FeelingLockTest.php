@@ -250,7 +250,10 @@ class FeelingLockTest extends TestCase
         Chore::factory()->for($this->household)->create();
         Auth::guard('profile')->login($this->kid);
 
-        $html = Volt::test('kid.home')->assertOk()->html();
+        // With the card open, which is the hard case: today was answered before
+        // this visit started, so Home folds the card to a line until it is
+        // asked for — and the sealed reason must not leak from the card either.
+        $html = Volt::test('kid.home')->set('showFeelings', true)->assertOk()->html();
 
         // Not rendered, not hidden with CSS, not sitting in the Livewire
         // payload — the only route to it is a PIN.

@@ -17,6 +17,7 @@ class GratitudeEntry extends Model
         'profile_id',
         'entry_date',
         'items',
+        'shared',
     ];
 
     protected function casts(): array
@@ -24,7 +25,24 @@ class GratitudeEntry extends Model
         return [
             'entry_date' => 'date',
             'items' => 'array',
+            'shared' => 'boolean',
         ];
+    }
+
+    /**
+     * Whether `$viewer` may read this list.
+     *
+     * Shared by default and opted out of per entry — the opposite of
+     * FeelingVisibility, and deliberately so; the migration says why at length.
+     * The writer always sees their own, whatever they chose.
+     */
+    public function visibleTo(Profile $viewer): bool
+    {
+        if ((int) $viewer->household_id !== (int) $this->household_id) {
+            return false;
+        }
+
+        return $this->shared || (int) $viewer->id === (int) $this->profile_id;
     }
 
     public function household(): BelongsTo

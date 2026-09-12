@@ -7,6 +7,7 @@ use App\Models\Household;
 use App\Models\Profile;
 use App\Models\Quote;
 use App\Models\QuoteReaction;
+use App\Services\FeedService;
 use App\Services\QuoteService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -111,7 +112,10 @@ class QuoteReactionTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        $page = Volt::test('kid.home');
+        app(FeedService::class)->ensureRooms($household);
+        app(FeedService::class)->quote($quote);
+
+        $page = Volt::test('family-feed');
 
         foreach (ReactionKind::cases() as $kind) {
             $page->assertSee($kind->emoji(), escape: false);
@@ -128,7 +132,7 @@ class QuoteReactionTest extends TestCase
         }
     }
 
-    public function test_a_kid_reacts_from_the_home_page(): void
+    public function test_a_kid_reacts_from_the_family_feed(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
@@ -136,7 +140,10 @@ class QuoteReactionTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.home')->call('react', $quote->id, 'laugh');
+        app(FeedService::class)->ensureRooms($household);
+        app(FeedService::class)->quote($quote);
+
+        Volt::test('family-feed')->call('react', $quote->id, 'laugh');
 
         $this->assertDatabaseHas('quote_reactions', [
             'quote_id' => $quote->id,
@@ -183,7 +190,17 @@ class QuoteReactionTest extends TestCase
         $this->assertNotNull($kid->refresh()->quotes_seen_at);
     }
 
-    public function test_a_quote_added_since_the_last_look_is_celebrated_and_then_is_not(): void
+    /**
+     * A new quote used to fire a celebration card here, and a push notification
+     * besides. Neither exists now: the quote lands in the family feed's
+     * Everyone room, which carries its own unread count on every screen in this
+     * app, and announcing a line that is already sitting in a room with a
+     * number on it is the same news told twice.
+     *
+     * The marker still has to move, because it is shared with the reaction
+     * cards below — the half of this feature that did survive.
+     */
+    public function test_a_new_quote_is_no_longer_celebrated_on_arrival(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['quotes_seen_at' => now()->subDay()]);
@@ -191,104 +208,50 @@ class QuoteReactionTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        // The reward rides to the browser as JSON on the dispatching element.
-        Volt::test('kid.home')->assertSee('Granny said something!', escape: false);
+        Volt::test('kid.home')
+            ->assertDontSee('Granny said something!', escape: false)
+            ->assertDontSee('new quotes', escape: false)
+            ->assertDontSee('more on the Quote Wall', escape: false);
 
-        // The marker moved, so the next visit is quiet — this is the half that
-        // regresses if the shell ever stops writing it.
-        Volt::test('kid.home')->assertDontSee('Granny said something!', escape: false);
+        $this->assertTrue($kid->refresh()->quotes_seen_at->greaterThan(now()->subMinute()));
     }
 
-    /**
-     * One quote, every kid in the house told — including the siblings it was
-     * nothing to do with.
-     *
-     * The regression this guards is a live one: on the first real quote only
-     * one of three kids saw the card, because the other two still had a null
-     * `quotes_seen_at` and their first page load after the deploy burned the
-     * marker silently. The seeding guard was right; the profiles predating it
-     * should have been backfilled, which they now are.
-     */
-    public function test_every_kid_in_the_house_is_celebrated_at_not_just_the_first_one(): void
-    {
-        $household = Household::factory()->create();
-        $kids = collect(['Nova', 'Scout', 'Ziggy'])->map(
-            fn (string $name) => Profile::factory()->for($household)->create([
-                'name' => $name,
-                'quotes_seen_at' => now()->subHour(),
-            ]),
-        );
-
-        Quote::factory()->for($household)->create([
-            'text' => 'You bled on my chore!',
-            'profile_id' => $kids->first()->id,
-            'said_by' => null,
-        ]);
-
-        foreach ($kids as $kid) {
-            Auth::guard('profile')->login($kid);
-
-            Volt::test('kid.home')->assertSee(
-                $kid->is($kids->first()) ? 'Your line got written down!' : 'Nova said something!',
-                escape: false,
-            );
-
-            Auth::guard('profile')->logout();
-        }
-    }
-
-    /**
-     * A kid back after a weekend gets one card, not a queue of them. Four
-     * celebrations fired in sequence is something to sit through rather than a
-     * surprise, and the fourth joke lands on a kid who stopped watching.
-     */
-    public function test_several_new_quotes_collapse_into_one_celebration(): void
+    /** Being quoted yourself is not announced here either. It is in the room. */
+    public function test_being_quoted_yourself_is_not_celebrated_on_arrival(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['quotes_seen_at' => now()->subDay()]);
+        Quote::factory()->for($household)->create(['profile_id' => $kid->id, 'said_by' => null]);
+
+        Auth::guard('profile')->login($kid);
+
+        Volt::test('kid.home')->assertDontSee('Your line got written down!', escape: false);
+    }
+
+    /**
+     * Where it goes instead. A backlog of three is three rows in the room, not
+     * one card that collapses them — a room is allowed to hold a funny day.
+     */
+    public function test_a_backlog_of_quotes_is_waiting_in_the_room_instead(): void
+    {
+        $household = Household::factory()->create();
+        $kid = Profile::factory()->for($household)->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
+
+        app(FeedService::class)->ensureRooms($household);
 
         foreach (['Angry milk', 'Moon follows us', 'Dogs have no elbows'] as $text) {
-            Quote::factory()->for($household)->create(['text' => $text, 'said_by' => 'Granny']);
+            app(QuoteService::class)->record($parent, $text, saidBy: 'Granny');
         }
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.home')
-            ->assertSee('3 new quotes!', escape: false)
-            // The newest leads, and the card says what is still waiting.
-            ->assertSee('Dogs have no elbows', escape: false)
-            ->assertSee('+2 more on the Quote Wall', escape: false)
-            // The single-quote wording must not also fire.
-            ->assertDontSee('Granny said something!', escape: false);
-    }
+        $this->assertSame(3, app(FeedService::class)->unreadTotal($kid));
 
-    /** The combined card still flags one of them being the kid's own. */
-    public function test_a_combined_celebration_says_when_one_of_them_is_yours(): void
-    {
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create(['quotes_seen_at' => now()->subDay()]);
-
-        Quote::factory()->for($household)->create(['text' => 'Theirs', 'said_by' => 'Granny']);
-        Quote::factory()->for($household)->create(['text' => 'Mine', 'profile_id' => $kid->id, 'said_by' => null]);
-
-        Auth::guard('profile')->login($kid);
-
-        Volt::test('kid.home')->assertSee('2 new quotes, including yours!', escape: false);
-    }
-
-    /** One quote still reads exactly as it did — no "+0 more" tacked on. */
-    public function test_a_single_new_quote_is_unchanged(): void
-    {
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create(['quotes_seen_at' => now()->subDay()]);
-        Quote::factory()->for($household)->create(['text' => 'Angry milk', 'said_by' => 'Granny']);
-
-        Auth::guard('profile')->login($kid);
-
-        Volt::test('kid.home')
-            ->assertSee('Granny said something!', escape: false)
-            ->assertDontSee('more on the Quote Wall', escape: false)
-            ->assertDontSee('new quotes', escape: false);
+        Volt::test('family-feed')
+            ->assertSee('Angry milk')
+            ->assertSee('Moon follows us')
+            ->assertSee('Dogs have no elbows');
     }
 
     /** A profile created after the feature shipped still starts quiet. */
@@ -303,24 +266,6 @@ class QuoteReactionTest extends TestCase
 
         Volt::test('kid.home')->assertDontSee('Granny said something!', escape: false);
         $this->assertNotNull($newKid->refresh()->quotes_seen_at);
-    }
-
-    /**
-     * The toast changes for the kid who said it; the card's kicker does not.
-     * That kicker names the feature, not who it happened to.
-     */
-    public function test_being_quoted_yourself_reads_differently_but_still_says_quote_of_the_day(): void
-    {
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create(['quotes_seen_at' => now()->subDay()]);
-        Quote::factory()->for($household)->create(['profile_id' => $kid->id, 'said_by' => null]);
-
-        Auth::guard('profile')->login($kid);
-
-        Volt::test('kid.home')
-            ->assertSee('Your line got written down!', escape: false)
-            ->assertSee('Quote of the Day', escape: false)
-            ->assertDontSee('You said it', escape: false);
     }
 
     public function test_a_sibling_reacting_to_your_quote_is_celebrated(): void

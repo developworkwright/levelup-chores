@@ -572,6 +572,20 @@ class MonsterService
                 'pending_monster_kills' => array_slice($queue, -self::KILL_QUEUE_LIMIT),
             ])->save();
         }
+
+        // One line in the room the house is in, attributed to whoever landed
+        // the blow — or, when nobody can be named, to the first kid on the
+        // board, since FeedService::event() needs somebody to hang the row on.
+        // A kill is the house's news whoever finished it.
+        $about = $finisher ?? $kids->first();
+
+        if ($about) {
+            app(FeedService::class)->event(
+                $about,
+                '💀 «'.$monster->displayName().'» went down',
+                $monster,
+            );
+        }
     }
 
     /**

@@ -118,6 +118,99 @@ body {
     }
 }
 
+/*
+ * The run, burning behind the tile on the login door.
+ *
+ * Everything scales off one number, `--fq-fire-tier`, which is 1-6 and comes
+ * from StreakService::fireTier(). Its steps are the milestone days — 3, 5, 7,
+ * 14, 30 — so the flame grows on exactly the mornings a chest is waiting rather
+ * than on a tidy schedule of its own. A kid sees it get bigger on the day they
+ * get paid, which is the same event told twice.
+ *
+ * It grows *upward only*. The bottom edge stays pinned just under the tile,
+ * because the name, the level and the rank sit directly below and a flame that
+ * grew in both directions would be through the middle of them by day 30.
+ *
+ * The tile carries `z-10` and this does not, so the fire is behind the whole
+ * tile rather than behind its letter. It is a sibling of the tile inside the
+ * anchor for that reason — as a child it would have had to use a negative
+ * z-index, which paints *over* the element's own background and would have put
+ * flames across the middle of the avatar.
+ *
+ * Two layers: a broad body and a smaller, hotter core that leans white as the
+ * tier climbs. One layer flickering alone reads as a pulsing blob; two at
+ * different speeds is what makes it look like it is burning.
+ */
+.fq-streak-fire {
+    --t: var(--fq-fire-tier, 1);
+
+    position: absolute;
+    left: 50%;
+    width: calc(62px + var(--t) * 8px);
+    height: calc(90px + var(--t) * 11px);
+    /* Bottom edge held at 86px — 8px below the 78px tile — whatever the height. */
+    top: calc(86px - (90px + var(--t) * 11px));
+    transform: translateX(-50%);
+    pointer-events: none;
+    opacity: calc(0.46 + var(--t) * 0.075);
+}
+
+.fq-streak-fire::before,
+.fq-streak-fire::after {
+    content: '';
+    position: absolute;
+    /* A teardrop: round and heavy at the base, drawn to a point at the top. */
+    border-radius: 46% 46% 44% 44% / 64% 64% 36% 36%;
+}
+
+.fq-streak-fire::before {
+    inset: 0;
+    background: radial-gradient(
+        ellipse at 50% 78%,
+        #ffb43a 0%,
+        #ff7a18 44%,
+        rgb(255 60 0 / 0%) 74%
+    );
+    filter: blur(calc(5px + var(--t) * 0.6px));
+    animation: fq-fire-body 1.9s ease-in-out infinite alternate;
+}
+
+.fq-streak-fire::after {
+    /* Inset from the body so the core never reaches its edge. */
+    inset: 22% 26% 5% 26%;
+    background: radial-gradient(
+        ellipse at 50% 80%,
+        #fff6c8 0%,
+        var(--fq-gold) 40%,
+        rgb(255 140 0 / 0%) 70%
+    );
+    filter: blur(3px);
+    /* The white-hot centre is what a long run looks like: barely there on day
+       one, unmistakable by day 30. */
+    opacity: calc(0.32 + var(--t) * 0.11);
+    animation: fq-fire-core 1.25s ease-in-out infinite alternate;
+}
+
+@keyframes fq-fire-body {
+    from {
+        transform: scale(1.02, 0.95) translateY(2px);
+    }
+
+    to {
+        transform: scale(0.96, 1.07) translateY(-2px);
+    }
+}
+
+@keyframes fq-fire-core {
+    from {
+        transform: scale(0.92, 0.9) translateY(3px);
+    }
+
+    to {
+        transform: scale(1.05, 1.12) translateY(-3px);
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .fq-avatar-tile,
     .fq-avatar-chip {
@@ -125,6 +218,13 @@ body {
     }
 
     .fq-avatar-idle {
+        animation: none;
+    }
+
+    /* The flame stays — it is the streak, and losing it would lose the
+       information. It simply stops moving. */
+    .fq-streak-fire::before,
+    .fq-streak-fire::after {
         animation: none;
     }
 }

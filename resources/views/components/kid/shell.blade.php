@@ -28,6 +28,13 @@
         'household' => ['label' => 'Household', 'short' => 'House', 'icon' => 'fa-ranking-star', 'route' => 'kid.household', 'accent' => 'var(--fq-green)'],
         'trades' => ['label' => 'Trades & Jobs', 'short' => 'Trades', 'icon' => 'fa-right-left', 'route' => 'kid.trades', 'accent' => 'var(--fq-coral)'],
         'journal' => ['label' => 'Journal', 'icon' => 'fa-feather', 'route' => 'kid.journal', 'accent' => 'var(--fq-green)'],
+        // The thirteenth, and the only page here that isn't about the game: the
+        // kids have no phones and nowhere to talk to each other. Its front door
+        // is a section on Home rather than a rail button — the rail is for the
+        // thing a kid opens the app *to do*, and this is the thing that comes
+        // looking for them. The count is why: a message waiting says so from
+        // whatever page they happen to be on.
+        'family' => ['label' => 'Family', 'icon' => 'fa-comments', 'route' => 'kid.family', 'accent' => 'var(--fq-coral)', 'countWord' => 'new'],
         // This used to carry a hardcoded `new` flag, on the reasoning that the
         // arcade would only ever be news once and a column was not worth it.
         // A second game ended that: news now arrives one game at a time and
@@ -90,7 +97,7 @@
      * sheet is allowed to hold every page in the app.
      */
     $sheetGroups = [
-        'Every day' => ['home', 'quests', 'loot', 'journal'],
+        'Every day' => ['home', 'quests', 'family', 'loot', 'journal'],
         'The house' => ['household', 'trades'],
         'Now and then' => ['bonus', 'arcade', 'music'],
     ];
@@ -118,6 +125,12 @@
         'trades' => $offersWaiting + app(App\Services\BountyService::class)->waitingOn($profile),
         'loot' => app(App\Services\StoreService::class)->newCountFor($profile),
         'arcade' => app(App\Services\ArcadeService::class)->newCountFor($profile),
+        // Family joins them, and it is the one count here that is genuinely
+        // *waiting*: the others are news, this one is your brother having asked
+        // you something an hour ago. It has to be visible from whatever page a
+        // kid happens to be standing on, or the room only works for whoever
+        // happened to open it.
+        'family' => app(App\Services\FeedService::class)->unreadTotal($profile),
     ];
 
     /*
@@ -369,52 +382,18 @@
     }
 
     /*
-     * One card, however many quotes are waiting.
+     * There used to be a card here for every new quote.
      *
-     * A kid back after a weekend can have four of these, and four cards fired
-     * one after another turns a nice surprise into something to sit through —
-     * the queue holds each for three seconds, so the fourth joke lands on a kid
-     * who stopped looking at the second. The single-quote card is unchanged;
-     * everything past one collapses into a card that leads with the newest and
-     * says how many more are behind it.
+     * There isn't now, and it went with the push notification for the same
+     * reason: a quote lands in the family feed's Everyone room, and that room
+     * carries an unread count on every screen in this app. Announcing a line
+     * that is already sitting in a room with a number on it is the same news
+     * told twice, and the second telling is the one that gets ignored.
      *
-     * The newest rather than the oldest, because it is the one most likely to
-     * be about today, and because the rest are a scroll away on the Quote Wall.
-     * `newsFor()` orders by id, so last() is the freshest.
+     * What stayed is the card below — somebody laughing at *your* quote. That
+     * is not the same news: it never appears in the room at all, it is about
+     * you, and there is nowhere else a kid would ever find it.
      */
-    $newQuotes = $quoteNews['quotes'];
-    $newest = $newQuotes->last();
-    $mineCount = $newQuotes->filter(fn ($row) => $row->profile_id === $profile->id)->count();
-
-    if ($newQuotes->isNotEmpty()) {
-        $quietRewards->push([
-            // Being quoted is the better half of this feature, so it keeps its
-            // own line rather than "Someone said something" with your own name
-            // in it — and the combined card still says when one of them is
-            // yours, which is the part a kid actually wants to know.
-            'message' => match (true) {
-                $newQuotes->count() > 1 && $mineCount > 0 => $newQuotes->count().' new quotes, including yours!',
-                $newQuotes->count() > 1 => $newQuotes->count().' new quotes!',
-                $mineCount > 0 => 'Your line got written down!',
-                default => $newest->attribution().' said something!',
-            },
-            'big' => false,
-            'style' => 'confetti',
-            'card' => [
-                'accent' => 'var(--fq-gold)',
-                // Always the feature's own name, whoever said it. The card's
-                // kicker is what the thing *is*, not who it happened to —
-                // that's the toast's job, one line above.
-                'sub' => 'Quote of the Day',
-                // Trimmed: the card draws its label at 28px, and a rambling
-                // three-line quote pushes the note off the bottom of it. The
-                // whole thing is a scroll away on the Quote Wall.
-                'label' => Str::limit($newest->text, 90),
-                'note' => '— '.$newest->attribution()
-                    .($newQuotes->count() > 1 ? ' · +'.($newQuotes->count() - 1).' more on the Quote Wall' : ''),
-            ],
-        ]);
-    }
 
     // Grouped by quote, so three siblings piling onto one line is one card
     // rather than three. Keyed on the quote id because a kid can have several
@@ -568,7 +547,32 @@
                  bank stays beside the name on a tablet and drops below it on a
                  phone, which is the behaviour this row wants. --}}
             <div class="min-w-0 flex-1 basis-[110px]">
-                <div class="truncate font-baloo text-[14.5px] font-bold md:text-[19px]">{{ $profile->name }}</div>
+                {{-- The powered-up bolt, beside the name.
+
+                     This replaced a whole card on Home that spelled the extras
+                     out. The header is on every page, so one glyph here says
+                     more, more often, than a paragraph on one page did — dim
+                     until the day's first chore goes in, lit from then on.
+
+                     Never a gate, and the dim state must never read as one:
+                     the tooltip says what a chore switches on, not what is
+                     being withheld. See StreakService::hasWorkedToday(). --}}
+                <div class="flex min-w-0 items-center gap-[6px]">
+                    <span class="truncate font-baloo text-[14.5px] font-bold md:text-[19px]">{{ $profile->name }}</span>
+                    <i
+                        @class([
+                            'fa-solid fa-bolt shrink-0 text-[12px] md:text-[15px]',
+                            'text-fq-lime drop-shadow-[0_0_6px_var(--fq-lime)]' => $poweredUpToday,
+                            'text-fq-text-6' => ! $poweredUpToday,
+                        ])
+                        role="img"
+                        data-powered="{{ $poweredUpToday ? 'on' : 'off' }}"
+                        aria-label="{{ $poweredUpToday ? 'Powered up today' : 'Not powered up yet' }}"
+                        title="{{ $poweredUpToday
+                            ? 'Powered up — the chest rolls on the good table, and '.\App\Services\ChoreService::HAND_BONUS_CARDS.' extra quest cards tomorrow'
+                            : 'Do one chore today to power up: the chest rolls on the good table, and '.\App\Services\ChoreService::HAND_BONUS_CARDS.' extra quest cards tomorrow' }}"
+                    ></i>
+                </div>
                 {{-- The number alone never changed colour, so it never read as
                      progress. The rank does: it repaints every fifth level, and
                      the title is what a kid actually calls themselves.

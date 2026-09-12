@@ -92,6 +92,54 @@ class MusicTest extends TestCase
         $this->assertStringContainsString('Undertale/toby%20fox%20-%2002%20Start%20Menu.mp3', $url);
     }
 
+    /**
+     * The bucket is private now — the family feed's drawings live in it — so a
+     * disk that can sign links hands out signed ones.
+     *
+     * The expiry is pinned to the end of tomorrow rather than "an hour from
+     * now", which is what keeps the browser cache working: every link made in
+     * one day is identical, so a song downloads at most once a day instead of on
+     * every render. Tomorrow, so a track list cached just before midnight still
+     * opens after it.
+     */
+    public function test_a_disk_that_can_sign_hands_out_links_that_stay_the_same_all_day(): void
+    {
+        $this->library(['Snowglobe_Ruins.mp3']);
+
+        // Configured as a bucket, so the service treats it as one. The disk
+        // instance it reads through is still the faked one from library(),
+        // which is what lets the signer below stand in for S3's.
+        config(['filesystems.disks.music.driver' => 's3']);
+
+        $expiries = [];
+        Storage::disk('music')->buildTemporaryUrlsUsing(function (string $path, $expiration) use (&$expiries) {
+            $expiries[] = $expiration->getTimestamp();
+
+            return 'https://bucket.test/'.$path.'?expires='.$expiration->getTimestamp();
+        });
+
+        $this->travelTo(now()->setTime(9, 0));
+        $morning = app(MusicService::class)->tracks()[0]['url'];
+
+        $this->travelTo(now()->setTime(23, 50));
+        $lateNight = app(MusicService::class)->tracks()[0]['url'];
+
+        $this->assertStringStartsWith('https://bucket.test/Snowglobe_Ruins.mp3?expires=', $morning);
+        $this->assertSame($morning, $lateNight, 'Same day, same link — so the browser cache holds.');
+        $this->assertSame(now()->startOfDay()->addDays(2)->getTimestamp(), $expiries[0], 'Good until the end of tomorrow.');
+
+        $this->travelTo(now()->addDay()->setTime(9, 0));
+        $this->assertNotSame($morning, app(MusicService::class)->tracks()[0]['url'], 'A new day signs a new link.');
+    }
+
+    /** The local folder can't sign and needs nothing signed. */
+    public function test_the_local_folder_keeps_plain_links(): void
+    {
+        $this->library(['Snowglobe_Ruins.mp3']);
+
+        $this->assertStringNotContainsString('expires', app(MusicService::class)->tracks()[0]['url']);
+    }
+
     public function test_it_groups_songs_into_the_folders_they_sit_in(): void
     {
         $this->library([

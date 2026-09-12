@@ -786,6 +786,16 @@ class StreakService
         $profile->streak_milestone_paid_through = max($profile->streak_milestone_paid_through, $day);
         $profile->save();
 
+        // The house hears about a milestone, in the room the house is in. On
+        // opening rather than on reaching: the chest is the moment, and a line
+        // congratulating somebody for something they have not opened yet gives
+        // the surprise away to them along with everybody else.
+        app(FeedService::class)->event(
+            $profile,
+            '🔥 '.$profile->name.' is «'.$day.' days» in a row',
+            $profile,
+        );
+
         return ['day' => $day, 'dollars' => $dollars];
     }
 

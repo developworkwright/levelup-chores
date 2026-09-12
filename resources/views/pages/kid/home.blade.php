@@ -16,12 +16,12 @@ use App\Services\BonusShopService;
 use App\Services\CelebrationService;
 use App\Services\ChestService;
 use App\Services\ChoreService;
+use App\Services\FeedService;
 use App\Services\FeelingService;
 use App\Services\HouseholdClock;
 use App\Services\LuckyBlockService;
 use App\Services\MonsterService;
 use App\Services\PerkInventoryService;
-use App\Services\QuoteService;
 use App\Services\SpinService;
 use App\Services\StreakService;
 use Illuminate\Support\Facades\Auth;
@@ -32,11 +32,16 @@ use Livewire\Volt\Component;
  *
  * The daily quest, the bonus chest and the streak chest — the three a kid does
  * themselves — then the two the house does together: the weekly prize and the
- * boss fight. The standings go last, because they are the only card that ranks
- * the kids against each other. Every other kid page is organised by *what kind
- * of thing* it holds, which works fine once you know what you're looking for
- * and is no help at all to a kid asking "what now?" — this one is organised by
- * when.
+ * boss fight. Every other kid page is organised by *what kind of thing* it
+ * holds, which works fine once you know what you're looking for and is no help
+ * at all to a kid asking "what now?" — this one is organised by when.
+ *
+ * Three things have left it, all for the same reason: a page that answers
+ * "what do I do now" should hold nothing that only answers "what happened".
+ * The house standings went to Household, where the full table already was; the
+ * Quote of the Day went into the family feed, which is where the house is
+ * talking; and the feelings card folds to a line once it has been answered,
+ * because everybody's answers are on the Family page now.
  *
  * Deliberately not numbered. The order is the habit, not a rule: nothing here is
  * gated on anything above it, and a kid who wants to open the second chest
@@ -101,6 +106,7 @@ new class extends Component
         // Through questOrNull() rather than isQuestDoneToday(), which asks for a
         // quest and throws when the household has nothing to draw one from.
         $this->questDoneOnArrival = $this->questOrNull()?->completed_at !== null;
+        $this->feelingsAnsweredOnArrival = app(FeelingService::class)->hasAnswered($this->profile);
 
         $chests = app(ChestService::class);
         $openedChest = $chests->openedToday($this->profile);
@@ -244,6 +250,29 @@ new class extends Component
     public ?string $openedFeeling = null;
 
     public ?string $feelingLockMessage = null;
+
+    /**
+     * Whether the kid has asked for the answered card back on this visit.
+     *
+     * Home shows the feelings card as a *prompt*, which is a job it stops doing
+     * once it has been answered — the house's answers live on the Family page
+     * now, and a second copy of that strip here would be two screens that can
+     * disagree. What is left in its place is one line saying what you picked,
+     * and this, which puts the card back: feelings move during a day and
+     * changing your answer has to stay possible from where you answered it.
+     */
+    public bool $showFeelings = false;
+
+    /**
+     * Whether today was already answered when this visit started.
+     *
+     * Snapshotted at mount for the same reason `questDoneOnArrival` is:
+     * answering *during* this visit must not fold the card out from under the
+     * moment. The house opening up underneath is the whole reward for pressing
+     * the button, and locking the reason is reached from the card too — both
+     * would vanish mid-tap if this were recomputed in with().
+     */
+    public bool $feelingsAnsweredOnArrival = false;
 
     /** Seals today's reason with this kid's own PIN. */
     public function lockFeeling(string $pin): void
@@ -453,42 +482,6 @@ new class extends Component
         return $monster ? $monsters->stateFor($monster) : null;
     }
 
-    /**
-     * The simplified standings: one row per kid, sorted by the run they're on.
-     *
-     * Deliberately a fraction of what Household draws. The full page has lanes,
-     * flags, a monster and a ticker; this is the league table underneath all of
-     * it, which is the part a kid can read in two seconds on the way past.
-     *
-     * Wrapped, because HouseholdService::tonightFor() draws a quest for every kid in
-     * the house and a household with nothing eligible makes that throw. On the
-     * Household that's the page; here it's one card of four, and losing it must not
-     * take the landing page down with it.
-     *
-     * @return \Illuminate\Support\Collection<int, array<string, mixed>>
-     */
-    private function standings(): \Illuminate\Support\Collection
-    {
-        try {
-            return app(HouseholdService::class)
-                ->tonightFor($this->profile->household)
-                ->sortByDesc('streak')
-                ->values();
-        } catch (\RuntimeException) {
-            return collect();
-        }
-    }
-
-    /**
-     * Laugh at a quote, or take it back. The rule about who may react to what
-     * lives in the service — this page and the Journal both reach it, and a
-     * scope check written twice is a scope check that eventually differs.
-     */
-    public function react(int $quoteId, string $reaction): void
-    {
-        app(QuoteService::class)->react($this->profile, $quoteId, $reaction);
-    }
-
     public function with(): array
     {
         $service = app(ChoreService::class);
@@ -540,11 +533,6 @@ new class extends Component
 
         return [
             'household' => $household,
-            // The day's extras: whether they are on, and how many cards
-            // yesterday's work bought. Never a gate — see
-            // StreakService::hasWorkedToday().
-            'poweredUp' => app(StreakService::class)->hasWorkedToday($this->profile),
-            'handSize' => app(ChoreService::class)->handSizeFor($this->profile),
             'quest' => $quest,
             'questRevealed' => $quest?->revealed_at !== null,
             // The chest and the pick are separate stamps: the chest stays open
@@ -628,11 +616,23 @@ new class extends Component
             // profile — the block itself, its rules and its prize list all
             // live in the Loot Shop, which is the point of it being a strip.
             'luckyOpen' => app(LuckyBlockService::class)->isOpenFor($this->profile),
-            'standings' => $this->standings(),
+            // Only for the section header's "n waiting" pill. The feed itself
+            // is a nested component and reads its own rooms — this page holds
+            // none of its state.
+            'feedUnread' => app(FeedService::class)->unreadTotal($this->profile),
             // The house's feelings for today. The service returns the strip as
             // null until this kid has answered — see FeelingService for why the
             // gate lives there rather than in the card.
-            'feelingsCard' => app(FeelingService::class)->cardFor($this->profile),
+            'feelingsCard' => $feelingsCard = app(FeelingService::class)->cardFor($this->profile),
+            // Whether the card folds to a line. Three things have to be true,
+            // and the third is the interesting one: a grown-up's reply is read
+            // *on this card* and nowhere else in the app, so a card with one
+            // waiting on it never folds. Folding it would be the app quietly
+            // hiding the one message here that was written by hand.
+            'feelingsFolded' => $this->feelingsAnsweredOnArrival
+                && ! $this->showFeelings
+                && $feelingsCard['answered'] !== null
+                && $feelingsCard['answered']->replies()->doesntExist(),
             // The week's shared chore target and what hitting it pays. Null
             // when a parent hasn't set one, which takes the bar with it.
             'houseWeek' => app(HouseholdService::class)->houseWeek($household),
@@ -654,11 +654,6 @@ new class extends Component
             'celebrationEntry' => $celebration
                 ? app(CelebrationService::class)->entryFor($this->profile, $celebration['key'])
                 : null,
-            // Today's quotes, or the last day that had any. Null only when the
-            // household has never written one down, which is the one case where
-            // the card has nothing to say — see the service for why it falls
-            // back rather than emptying.
-            'quoteDay' => app(QuoteService::class)->latestDay($household),
         ];
     }
 }; ?>
@@ -675,16 +670,6 @@ new class extends Component
     <x-lucky-strip :tickets="$profile->bonus_tickets" :open="$luckyOpen" class="mb-[22px]" />
 
     <div class="flex flex-col gap-[22px]">
-        {{-- What one chore today is worth. Above the run because it is the rule
-             the rest of the page now plays by, and because the kid who most
-             needs to read it is the one who is about to scroll past everything
-             else. --}}
-        <x-powered-up-strip
-            :powered-up="$poweredUp"
-            :hand-size="$handSize"
-            :bonus-cards="\App\Services\ChoreService::HAND_BONUS_CARDS"
-        />
-
         {{-- A celebration day, on the two or three days a year there is one.
              Above the feelings card and everything else, because for as long as
              it is on the page it is the thing the page is about. --}}
@@ -699,14 +684,82 @@ new class extends Component
             />
         @endif
 
-        {{-- First, above everything that pays.
+        {{-- The family feed, in full, at the top of the run.
 
-             Not because it matters more than the quest, but because putting the
-             one card that is worth nothing underneath four that are worth
-             something says exactly what it looks like it says. It is also the
-             only card here that isn't a task, and it reads as one the moment it
-             is filed among them. --}}
-        <x-feelings-card :card="$feelingsCard" :opened-feeling="$openedFeeling" :lock-message="$feelingLockMessage" />
+             A one-line strip pointing at /kid/family was tried here first and
+             rejected, in one sentence: "otherwise new messages will get missed".
+             That is right, and it is the whole argument. Everything else on this
+             page is a thing waiting patiently — a chest does not mind being
+             opened tomorrow — but a message is somebody's brother having asked
+             them a question an hour ago, and a link is something you tap only
+             when you already suspect there is something behind it.
+
+             So it is not a link, and it is not underneath the day either. It is
+             the rooms, the messages and the composer, above the quest, where it
+             cannot be scrolled past.
+
+             The same component the page at /kid/family draws — see
+             resources/views/livewire/family-feed.blade.php. `embedded` drops
+             only its own <h1>, since the section header above says it. --}}
+        <div class="flex flex-col gap-3">
+            <x-home-section
+                title="Family"
+                accent="var(--fq-coral)"
+                :status="$feedUnread > 0 ? $feedUnread.' waiting' : null"
+                status-color="var(--fq-coral)"
+            />
+
+            <livewire:family-feed :embedded="true" />
+        </div>
+
+        {{-- Today's feeling, asked only until it is answered.
+
+             Above everything that pays — not because it matters more than the
+             quest, but because putting the one card that is worth nothing
+             underneath four that are worth something says exactly what it looks
+             like it says. It is also the only card here that isn't a task, and
+             it reads as one the moment it is filed among them.
+
+             It folds to a line on the visit *after* it is answered. An answered
+             card is not something to do, it is something to read — and the
+             house's answers are already on the feed directly above this, which
+             is a much better place for them than a strip inside a form. Two
+             copies of that strip on one page is how the two of them start
+             disagreeing about what it says.
+
+             Not on the visit it is answered on, though: the house opening up
+             underneath is the whole reward for pressing the button, and the
+             lock is reached from the card. See `feelingsFolded` in with() for
+             the third condition, which is a waiting reply.
+
+             Folded, not removed. Feelings move during a day and being able to
+             change your answer says so — see the feeling_entries migration —
+             so the card is always one tap from where it was. --}}
+        @if ($feelingsFolded)
+            @php $mine = $feelingsCard['answered']; @endphp
+
+            <button
+                type="button"
+                wire:click="$toggle('showFeelings')"
+                class="flex min-h-[44px] items-center gap-3 rounded-[18px] border border-fq-line-2 bg-fq-panel px-4 py-3 text-left transition hover:border-fq-line-4"
+            >
+                <span
+                    class="grid size-8 shrink-0 place-items-center rounded-full text-[15px]"
+                    style="border: 1.5px solid {{ $mine->color() }}"
+                >{{ $mine->glyph() }}</span>
+
+                <span class="min-w-0 flex-1 text-[13.5px] text-fq-text-4">
+                    Today you said
+                    <span class="font-baloo font-bold" style="color: {{ $mine->color() }}">{{ $mine->label() }}</span>
+                    &mdash; the rest of the house is on
+                    <span class="text-fq-text-3">Family</span>.
+                </span>
+
+                <span class="shrink-0 font-mono-fq text-[10px] tracking-[0.12em] text-fq-text-5 uppercase">Change it</span>
+            </button>
+        @else
+            <x-feelings-card :card="$feelingsCard" :opened-feeling="$openedFeeling" :lock-message="$feelingLockMessage" />
+        @endif
 
         {{-- The daily quest, opened right here. The hero is the same component
              the Quests page draws, so the chest, the hand, the charm window and
@@ -1270,157 +1323,21 @@ new class extends Component
             </div>
         @endif
 
-        {{-- Where the house stands, and the last thing on the page. The league
-             table under Household and nothing else from it: no candles, no
-             lanes, no monster. A kid glancing at this should get who is ahead
-             and who still has work to do, and go to Household when they want
-             the story.
+        {{-- Where the house stands used to be the last card here, and the
+             Quote of the Day the one under it. Both are gone, and for the
+             same reason: this page answers "what do I do now", and neither of
+             them answered it.
 
-             Last on purpose. Everything above it is something to go and do or
-             something the house is doing together; this is the only card that
-             ranks the kids against each other, and it shouldn't be what sits
-             between a kid and the rest of their day. --}}
-        <div class="flex flex-col gap-3">
-            @php
-                $mine = $standings->first(fn (array $row) => $row['profile']->is($profile));
-                $openCount = $standings->where('state', '!==', App\Services\HouseholdService::STATE_SAFE)->count();
-            @endphp
+             The standings were already the Household page in miniature, so
+             they were a second copy of a table that ranks the kids against
+             each other — the last thing a kid should have to scroll past on
+             the way out of their own day.
 
-            <x-home-section
-                title="House Standings"
-                accent="var(--fq-violet)"
-                :done="$standings->isNotEmpty() && $openCount === 0"
-                :status="$standings->isEmpty()
-                    ? null
-                    : ($openCount === 0
-                        ? 'Everyone cleared'
-                        : $openCount.' still open')"
-                :status-color="$openCount === 0 ? 'var(--fq-lime)' : 'var(--fq-text-4)'"
-            />
-
-            <div class="rounded-[24px] border border-fq-line bg-fq-panel p-[18px]">
-
-                @if ($standings->isEmpty())
-                    <p class="text-[13px] text-fq-text-5">
-                        Nothing to stand on yet — the table fills up once there are quests to clear.
-                    </p>
-                @else
-                    <div class="flex flex-col gap-[9px]">
-                        @foreach ($standings as $index => $row)
-                            @php
-                                $kid = $row['profile'];
-                                $isMe = $kid->is($profile);
-
-                                [$stateLabel, $stateInk] = match (true) {
-                                    $row['state'] === App\Services\HouseholdService::STATE_SAFE => ['Cleared', 'var(--fq-lime)'],
-                                    $row['state'] === App\Services\HouseholdService::STATE_AT_RISK => ['At risk', 'var(--fq-streak)'],
-                                    $row['state'] === App\Services\HouseholdService::STATE_BROKEN => ['Back to zero', 'var(--fq-text-4)'],
-                                    default => ['Still open', 'var(--fq-text-3)'],
-                                };
-                            @endphp
-
-                            <div
-                                wire:key="standing-{{ $kid->id }}"
-                                class="flex items-center gap-3 rounded-[16px] border p-[10px_12px]"
-                                style="border-color: {{ $isMe ? $kid->color->cssVar() : 'var(--fq-line)' }};
-                                       background: {{ $isMe ? 'var(--fq-tab-active)' : 'var(--fq-sunk)' }}"
-                            >
-                                <span class="w-[16px] shrink-0 text-center font-mono-fq text-[12px] text-fq-text-4">{{ $index + 1 }}</span>
-
-                                <span
-                                    class="grid h-[36px] w-[36px] shrink-0 place-items-center rounded-[12px] font-baloo text-[16px] font-extrabold"
-                                    style="background: {{ $kid->color->cssVar() }}; color: var(--fq-bg)"
-                                >{{ mb_substr($kid->name, 0, 1) }}</span>
-
-                                <span class="min-w-0 flex-1">
-                                    <span class="block truncate font-baloo text-[16px] font-bold">{{ $kid->name }}</span>
-                                    <span class="font-mono-fq text-[10px] tracking-[0.12em] text-fq-text-4">
-                                        {{ $row['streak'] }} {{ Str::plural('NIGHT', $row['streak']) }} IN A ROW
-                                    </span>
-                                </span>
-
-                                <span
-                                    class="shrink-0 rounded-full px-[10px] py-[4px] font-mono-fq text-[10px] font-semibold tracking-[0.12em] whitespace-nowrap uppercase"
-                                    style="background: var(--fq-panel-alt); color: {{ $stateInk }}"
-                                >{{ $stateLabel }}</span>
-                            </div>
-                        @endforeach
-                    </div>
-
-                    <div class="mt-[14px] flex flex-wrap items-center justify-between gap-3">
-                        <p class="text-[13px] text-fq-text-4">
-                            @if ($mine && $mine['state'] === App\Services\HouseholdService::STATE_SAFE)
-                                Your night is safe. Do something every day and the run keeps climbing.
-                            @else
-                                Get any chore signed off and tonight counts towards your run.
-                            @endif
-                        </p>
-
-                        <a
-                            href="{{ route('kid.household') }}?world=house"
-                            wire:navigate
-                            class="rounded-[13px] border border-fq-line-3 bg-fq-sunk px-[16px] py-[10px] text-[13px] whitespace-nowrap text-fq-text-2-b transition hover:border-fq-lime hover:text-fq-text"
-                        >See Household &rarr;</a>
-                    </div>
-                @endif
-            </div>
-        </div>
-
-        {{-- Quote of the Day. Dead last, and the only card here that isn't
-             about points: everything above is something to go and do, and this
-             is the one thing on the page that is just nice to find. It earns
-             the bottom of the page rather than the top for the same reason the
-             standings do — a kid opening the app to answer "what now?" should
-             not have to scroll past a joke to get to their quest.
-
-             The push notification lands on #quote-of-the-day, so a kid told
-             about a new one arrives here rather than at the top of the day.
-
-             Nothing is ranked. One quote is the Quote of the Day; several are
-             contenders, permanently — QuoteService::heading() owns that wording
-             for all three screens that say it.
-
-             Renders nothing at all until the house has written one down, which
-             is the only state where the card would be a promise instead of a
-             thing. --}}
-        @if ($quoteDay)
-            @php
-                $quotes = $quoteDay['quotes'];
-                $quoteIsToday = app(QuoteService::class)->isToday($household, $quoteDay['date']);
-            @endphp
-
-            <div id="quote-of-the-day" class="flex flex-col gap-3 scroll-mt-4">
-                <x-home-section
-                    :title="\App\Services\QuoteService::heading($quotes->count())"
-                    accent="var(--fq-gold)"
-                    :status="$quoteIsToday ? 'Said today' : $quoteDay['date']->diffForHumans()"
-                    :status-color="$quoteIsToday ? 'var(--fq-gold)' : 'var(--fq-text-4)'"
-                />
-
-                <div class="rounded-[24px] border border-fq-line bg-fq-panel p-[18px]">
-                    <div class="flex flex-col gap-[9px]">
-                        @foreach ($quotes as $quote)
-                            <x-quote-line :quote="$quote" :viewer="$profile" wire:key="quote-{{ $quote->id }}" />
-                        @endforeach
-                    </div>
-
-                    <div class="mt-[14px] flex flex-wrap items-center justify-between gap-3">
-                        <p class="text-[13px] text-fq-text-4">
-                            @if ($quotes->count() > 1)
-                                A good day for it — all of these are in the running.
-                            @else
-                                Say something ridiculous and a grown-up might write it down.
-                            @endif
-                        </p>
-
-                        <a
-                            href="{{ route('kid.journal') }}?tab=quotes&world=me"
-                            wire:navigate
-                            class="rounded-[13px] border border-fq-line-3 bg-fq-sunk px-[16px] py-[10px] text-[13px] whitespace-nowrap text-fq-text-2-b transition hover:border-fq-gold hover:text-fq-text"
-                        >Every quote ever &rarr;</a>
-                    </div>
-                </div>
-            </div>
-        @endif
+             The quotes moved somewhere better rather than away: a funny thing
+             your brother said is conversation, so it now lands in the family
+             feed, which is where the conversation is and which carries its own
+             unread count on every screen. The push notification that existed to
+             make up for nobody scrolling this far went with it. The whole
+             archive is still on the Journal's Quote Wall. --}}
     </div>
 </x-kid.shell>

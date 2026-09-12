@@ -13,6 +13,7 @@ use App\Models\Household;
 use App\Models\Profile;
 use App\Services\ChestService;
 use App\Services\ChoreService;
+use App\Services\FeedService;
 use App\Services\MonsterService;
 use App\Services\SpinService;
 use App\Services\StreakService;
@@ -76,11 +77,9 @@ class KidHomePageTest extends TestCase
                 // Not a section any more — a strip pointing at the wheel on
                 // Quests, which still sits in the run where the wheel was.
                 'Your Bonus Wheel spin is waiting',
-                // Then what the house does together, and only then the one
-                // card that ranks the kids against each other.
+                // Then what the house does together, and that is the end of it.
                 'Weekly Prize',
                 'The Fight',
-                'House Standings',
             ]);
     }
 
@@ -332,7 +331,16 @@ class KidHomePageTest extends TestCase
             ->assertDontSee('Weekly Prize');
     }
 
-    public function test_the_standings_rank_the_house_by_the_run_each_kid_is_on(): void
+    /**
+     * The standings used to be the last card here — the Household page in
+     * miniature, and the only card on Home that ranks the kids against each
+     * other. They are gone, and the full table they were a copy of is where
+     * they always were.
+     *
+     * A kid opening the app to answer "what do I do now" should not have to
+     * scroll past who is beating them to get out of their own day.
+     */
+    public function test_the_standings_have_left_the_page(): void
     {
         $nova = Profile::factory()->for($this->household)->create(['name' => 'Nova']);
 
@@ -341,9 +349,44 @@ class KidHomePageTest extends TestCase
 
         Volt::test('kid.home')
             ->assertOk()
-            // Nova is ahead, so Nova is first — the whole point of a table.
-            ->assertSeeInOrder(['Nova', '9 NIGHTS IN A ROW', 'Rex', '2 NIGHTS IN A ROW'])
-            ->assertSee(route('kid.household'), false);
+            ->assertDontSee('House Standings')
+            ->assertDontSee('9 NIGHTS IN A ROW');
+    }
+
+    /**
+     * The family feed is *on* this page, not linked from it.
+     *
+     * A one-line pointer was tried first and rejected: "otherwise new messages
+     * will get missed". A link is something you tap when you already suspect
+     * there is something behind it, which is exactly the wrong shape for the
+     * one thing on this page that somebody else is waiting on an answer to.
+     */
+    public function test_the_family_feed_is_on_the_page_rather_than_linked_from_it(): void
+    {
+        $sibling = Profile::factory()->for($this->household)->create(['name' => 'Nova']);
+
+        app(FeedService::class)->ensureRooms($this->household);
+        app(FeedService::class)->say(
+            $sibling,
+            app(FeedService::class)->roomFor($sibling),
+            'anyone want to build the lego castle',
+        );
+
+        Volt::test('kid.home')
+            ->assertOk()
+            // The message itself, on the landing page, with no tap in between.
+            ->assertSee('anyone want to build the lego castle')
+            ->assertSee('Everyone')
+            // And the composer, so it can be answered from here too.
+            ->assertSee('Message everyone', escape: false);
+    }
+
+    /** Above the quest, because a chest does not mind being opened tomorrow. */
+    public function test_the_feed_sits_above_the_day(): void
+    {
+        Volt::test('kid.home')
+            ->assertOk()
+            ->assertSeeInOrder(['Family', 'Daily Quest', 'Bonus Chest']);
     }
 
     /** A genuine run of cleared quests, so syncStreak() leaves the streak alone. */
@@ -448,7 +491,11 @@ class KidHomePageTest extends TestCase
         // compare "100" against "4000" in their head, so the chests carry it.
         $html = Volt::test('kid.home')->assertOk()->html();
 
-        preg_match_all('/width: (\d+)px; height: \d+px/', $html, $matches);
+        // Anchored on the `background` that <x-chest-block> always writes
+        // ahead of its computed box. A bare `width: Npx; height: Npx` matches
+        // anything else on the page that happens to size itself inline — the
+        // family feed's avatars do — and this is counting chests.
+        preg_match_all('/background: [^";]+; width: (\d+)px; height: \d+px/', $html, $matches);
 
         $widths = array_map('intval', $matches[1]);
 

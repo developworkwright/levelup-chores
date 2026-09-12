@@ -134,19 +134,25 @@ class PoweredUpDayTest extends TestCase
         $this->assertCount(ChoreService::HAND_SIZE, $this->chores()->offeredChoresFor($kid));
     }
 
-    public function test_home_names_the_extras_when_they_are_off(): void
+    /**
+     * The Home card that spelled the extras out is gone. What is left is a bolt
+     * beside the kid's name in the header — on every page, not just Home — dim
+     * until the day's first chore and lit after it.
+     */
+    public function test_the_bolt_beside_the_name_is_dim_before_a_chore(): void
     {
         $kid = Profile::factory()->create();
 
         Auth::guard('profile')->login($kid);
 
         Volt::test('kid.home')
+            ->assertSee('data-powered="off"', false)
             ->assertSee('Not powered up yet')
-            ->assertSee('Do one chore today')
-            ->assertSee('extra quest cards tomorrow');
+            // The card's own wording must not have survived somewhere.
+            ->assertDontSee('Any chore counts, and it happens');
     }
 
-    public function test_home_says_so_when_they_are_on(): void
+    public function test_the_bolt_lights_once_a_chore_is_in(): void
     {
         $kid = Profile::factory()->create();
 
@@ -155,8 +161,20 @@ class PoweredUpDayTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         Volt::test('kid.home')
-            ->assertSee('Powered up')
-            ->assertDontSee('Not powered up yet');
+            ->assertSee('data-powered="on"', false)
+            ->assertSee('Powered up today');
+    }
+
+    /** The header draws it, so it is on every kid page, not only Home. */
+    public function test_the_bolt_is_in_the_header_on_other_pages_too(): void
+    {
+        $kid = Profile::factory()->create();
+
+        $this->submitChore($kid);
+
+        Auth::guard('profile')->login($kid);
+
+        Volt::test('kid.journal')->assertSee('data-powered="on"', false);
     }
 
     /**
@@ -242,21 +260,26 @@ class PoweredUpDayTest extends TestCase
     }
 
     /**
-     * The guard rail. Nothing on this strip may ever be phrased as something
-     * taken away, because the kid reading it is the one who has done nothing
-     * today and a locked door tells them to go away.
+     * The guard rail, moved onto the bolt. Nothing about the dim state may ever
+     * be phrased as something taken away, because the kid reading it is the one
+     * who has done nothing today and a locked door tells them to go away.
      */
-    public function test_the_strip_never_says_anything_is_locked(): void
+    public function test_the_dim_bolt_never_says_anything_is_locked(): void
     {
-        // Rendered on its own rather than through the page: the shell's push
-        // toggle says "blocked", which contains the word being looked for and
-        // has nothing to do with this.
-        $html = $this->blade(
-            '<x-powered-up-strip :powered-up="false" :hand-size="3" :bonus-cards="2" />'
-        );
+        $kid = Profile::factory()->create();
+
+        Auth::guard('profile')->login($kid);
+
+        $html = Volt::test('kid.home')->html();
+
+        // Just the bolt's own tag — the rest of the shell has a push toggle
+        // that says "blocked", which contains the word being looked for.
+        preg_match('/<i[^>]*data-powered="off"[^>]*>/s', $html, $bolt);
+
+        $this->assertNotEmpty($bolt, 'The dim bolt is drawn.');
 
         foreach (['lock', 'Lock', 'earn it', 'can\'t', 'cannot'] as $forbidden) {
-            $html->assertDontSee($forbidden, false);
+            $this->assertStringNotContainsString($forbidden, $bolt[0]);
         }
     }
 }

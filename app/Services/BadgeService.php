@@ -526,5 +526,15 @@ class BadgeService
 
         // That XP may have crossed a level, which mints again on its own.
         $this->tickets->syncLevelTickets($profile);
+
+        // And the house hears about it, in the room the house is in. One line,
+        // no avatar, nothing to tap — see FeedService::event(). Throttled to
+        // one badge line per kid per day there, so a kid who unlocks four at
+        // once doesn't take over the room.
+        app(FeedService::class)->event(
+            $profile,
+            '🏅 '.$profile->name.' earned «'.$badge->name.'»',
+            $badge,
+        );
     }
 }

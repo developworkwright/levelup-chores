@@ -7,12 +7,10 @@ use App\Models\Household;
 use App\Models\Profile;
 use App\Models\Quote;
 use App\Models\QuoteReaction;
-use App\Notifications\QuoteAdded;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Notification;
 use Throwable;
 
 /**
@@ -24,8 +22,13 @@ use Throwable;
  * label is the joke, not a bracket to settle — see the migration.
  *
  * Entry is parent-only, because the whole feature depends on somebody being in
- * the room when the line lands. Everything after that is for everyone: the day's
- * quotes sit on the kid Home page and the whole archive is on the Journal.
+ * the room when the line lands. Everything after that is for everyone: a new
+ * quote lands in the family feed's Everyone room, where the house is already
+ * talking, and the whole archive is on the Journal's Quote Wall.
+ *
+ * It used to have a card at the bottom of the kids' Home page and a push
+ * notification to make up for the fact that nobody scrolls to the bottom of
+ * Home. Both are gone. See announce().
  */
 class QuoteService
 {
@@ -292,34 +295,23 @@ class QuoteService
     }
 
     /**
-     * Tells the whole household — every kid, including whoever said it, and
-     * every parent except the one who just wrote it down.
+     * Puts the quote in the room where the house is talking.
      *
-     * Parents are in the audience because a house has more than one grown-up in
-     * it and only one of them was in the room. The author is left out for the
-     * same reason: they are holding the phone they typed it into.
+     * This used to be a push notification to everybody but the author. It isn't
+     * any more, and the two halves of that change go together: the quote now
+     * lands in the family feed's Everyone room, which carries its own unread
+     * count on every screen in the app, so a banner announcing a line that is
+     * already sitting in the room is the same news told twice.
      *
-     * The quote rides in the body: it is the rare notification whose entire
-     * content fits in the banner, and making anyone open the app to read one
-     * line would be worse than the line. Failures are logged, never thrown — a
-     * dead push subscription must not lose the quote that was just written.
+     * Failures are logged, never thrown. A feed that is briefly unhappy must
+     * not lose the quote that was just written down.
      */
     private function announce(Quote $quote): void
     {
-        $audience = Profile::where('household_id', $quote->household_id)
-            ->when(
-                $quote->added_by_profile_id !== null,
-                fn ($query) => $query->whereKeyNot($quote->added_by_profile_id),
-            )
-            ->get();
-
         try {
-            Notification::send($audience, new QuoteAdded(
-                $quote->attribution().' said…',
-                '“'.$quote->text.'”',
-            ));
+            app(FeedService::class)->quote($quote);
         } catch (Throwable $e) {
-            Log::error('Quote added notification failed.', [
+            Log::error('Quote could not be posted to the family feed.', [
                 'quote_id' => $quote->id,
                 'exception' => $e,
             ]);

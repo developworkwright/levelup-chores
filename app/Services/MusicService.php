@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -400,20 +402,50 @@ class MusicService
      * filenames it came with, spaces included, rather than the underscored
      * ones store() writes.
      */
+    /**
+     * When a song's signed link stops working: the end of *tomorrow*.
+     *
+     * A fixed moment rather than a duration, so that every link made during one
+     * day carries the same expiry and therefore the same signature — the URL
+     * does not change between renders and the browser keeps the mp3 it already
+     * downloaded. Tomorrow rather than today, because the bucket's track list
+     * is cached for CACHE_MINUTES: a list read at 23:50 is still being served
+     * after midnight, and its links have to still open.
+     */
+    public function signedUntil(): Carbon
+    {
+        return Carbon::now(config('app.timezone'))->startOfDay()->addDays(2);
+    }
+
     private function urlFor(Filesystem $disk, string $path): string
     {
         /*
-         * A plain, permanent URL, which means the bucket has to stay publicly
-         * readable. A private one answers a kid's <audio> element with 403 and
-         * says nothing about it — so the songs already in the browser cache go
-         * on playing while every other one is silently dead, which reads as
-         * random songs being broken.
+         * A signed link, on any disk that can make one — which is the bucket.
          *
-         * Signed URLs are the alternative and were tried: they work on a
-         * private bucket, but they bypass the platform's own access domain and
-         * have to be rotated, so a browser re-downloads several megabytes of
-         * mp3 whenever the signature changes. Public is the better trade here.
+         * The bucket went private on 2026-09-12, because the family feed's
+         * drawings live in it and some of those are posted in rooms a parent
+         * cannot read. A plain URL on a private bucket answers a kid's <audio>
+         * element with a silent 403, so the songs had to be signed.
+         *
+         * Signed links were tried once before and dropped, for a real reason:
+         * a link whose signature changes every time it is made has a new URL
+         * every time, and a browser re-downloads several megabytes of mp3 for
+         * each one. That is what signedUntil() is for. The expiry is pinned to
+         * a fixed moment rather than "now plus an hour", so every link made in
+         * the same day is byte-for-byte identical and the browser cache keeps
+         * working — a song re-downloads at most once a day.
+         *
+         * The local music folder cannot sign anything and needs nothing signed,
+         * so it keeps the plain URL below.
          */
+        // Gated on the configured driver as well as on the capability, because a
+        // local disk can report it signs too (Laravel's `serve` links) — and a
+        // signed local link carries the raw path, spaces and all, which is the
+        // exact bug the plain-URL branch below exists to prevent.
+        if (! $this->isLocal() && $disk instanceof FilesystemAdapter && $disk->providesTemporaryUrls()) {
+            return $disk->temporaryUrl($path, $this->signedUntil());
+        }
+
         $base = config('filesystems.disks.'.config('filesystems.music_disk').'.url');
 
         if (! is_string($base) || $base === '') {

@@ -103,6 +103,13 @@ import './penguin-launch.js';
  */
 import './music.js';
 
+/*
+ * The family feed's finger pad. Registers `fqDrawPad` and nothing else. Its own
+ * file rather than inline in the page, because it owns a <canvas> that has to
+ * live behind `wire:ignore` — see the file for why.
+ */
+import './draw.js';
+
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js').catch(() => {});
