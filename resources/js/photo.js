@@ -73,7 +73,7 @@ document.addEventListener('alpine:init', () => {
 
             // A failure here is not fatal: the original still goes, and the
             // ceiling check below catches it if it is too big to send.
-            const file = (await this.shrink(picked)) ?? picked;
+            const file = (await this.shrink(picked, ceilingKb * 1024)) ?? picked;
 
             if (file.size > ceilingKb * 1024) {
                 this.busy = false;
@@ -109,46 +109,85 @@ document.addEventListener('alpine:init', () => {
          * browser that cannot do this is a browser that uploads a big file, not
          * a browser that cannot post a photo.
          */
-        async shrink(file) {
+        async shrink(file, ceilingBytes) {
             if (!file.type.startsWith('image/') || file.size <= SHRINK_ABOVE_BYTES) {
                 return null;
             }
 
             try {
                 const source = await this.decode(file);
-                const scale = maxEdge / Math.max(source.width, source.height);
 
-                if (!(scale < 1)) {
-                    return null;
+                // Clamped at 1 rather than bailing out when the photo is
+                // already narrower than maxEdge. Pixel count is not the only
+                // thing that makes a file heavy: a 1920x1080 PNG screenshot is
+                // comfortably under the edge and comfortably over 2MB, and
+                // re-encoding it to JPEG is what fixes that. Returning early on
+                // those sent the original untouched and then refused it.
+                const fit = Math.min(1, maxEdge / Math.max(source.width, source.height));
+
+                /*
+                 * Down a ladder until it fits, rather than one pass and hope.
+                 *
+                 * The first rung is the one that should nearly always win:
+                 * full permitted size, near-lossless. The rest exist for the
+                 * genuinely enormous — a panorama, a 100-megapixel phone — and
+                 * trade quality for getting there at all, because a photo that
+                 * arrives slightly softer beats one that cannot be sent.
+                 */
+                let best = null;
+
+                for (const [scale, quality] of [
+                    [fit, QUALITY],
+                    [fit, 0.82],
+                    [fit * 0.75, 0.82],
+                    [fit * 0.5, 0.78],
+                ]) {
+                    const blob = await this.encode(source, scale, quality);
+
+                    if (!blob) {
+                        break;
+                    }
+
+                    if (!best || blob.size < best.size) {
+                        best = blob;
+                    }
+
+                    if (blob.size <= ceilingBytes) {
+                        break;
+                    }
                 }
-
-                const canvas = document.createElement('canvas');
-                canvas.width = Math.max(1, Math.round(source.width * scale));
-                canvas.height = Math.max(1, Math.round(source.height * scale));
-
-                const ctx = canvas.getContext('2d');
-
-                // White underneath, because the output is a JPEG and JPEG has no
-                // alpha — a transparent PNG would otherwise come out on black.
-                // The server does the same thing for the same reason.
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
 
                 source.close?.();
 
-                const blob = await new Promise((resolve) =>
-                    canvas.toBlob(resolve, 'image/jpeg', QUALITY),
-                );
-
-                if (!blob || blob.size >= file.size) {
+                // Re-encoding does not always help — an already-optimised JPEG
+                // can come back bigger. Sending the original is then the better
+                // of the two, and the ceiling check still has the last word.
+                if (!best || best.size >= file.size) {
                     return null;
                 }
 
-                return new File([blob], 'photo.jpg', { type: 'image/jpeg' });
+                return new File([best], 'photo.jpg', { type: 'image/jpeg' });
             } catch {
                 return null;
             }
+        },
+
+        /** One pass: draw the source at `scale` and encode it at `quality`. */
+        async encode(source, scale, quality) {
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(source.width * scale));
+            canvas.height = Math.max(1, Math.round(source.height * scale));
+
+            const ctx = canvas.getContext('2d');
+
+            // White underneath, because the output is a JPEG and JPEG has no
+            // alpha — a transparent PNG would otherwise come out on black.
+            // The server does the same thing for the same reason.
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+
+            return await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
         },
 
         /**
