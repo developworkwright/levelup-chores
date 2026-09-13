@@ -211,7 +211,10 @@ new class extends Component
             'photo.image' => 'That has to be a photo.',
             'photo.mimetypes' => 'That has to be a photo — a JPEG, a PNG or a WebP.',
             'photo.extensions' => 'That has to be a photo — a JPEG, a PNG or a WebP.',
-            'photo.max' => 'That photo is over '.round(FeedPhotos::MAX_UPLOAD_KB / 1024).'MB.',
+            // The real ceiling, not the one this app would like to have: on an
+            // under-configured server they differ, and quoting the bigger
+            // number would be the app blaming a photo for its own php.ini.
+            'photo.max' => 'That photo is over '.round(FeedPhotos::uploadCeilingKb() / 1024).'MB.',
         ];
     }
 
@@ -552,7 +555,14 @@ new class extends Component
                          photo library side by side. Two buttons here would be
                          us re-implementing a choice the phone already makes
                          better. --}}
+                    {{-- The upload is driven by hand rather than by
+                         `wire:model`, so that a file too big for this server
+                         can be turned down before any of it is sent — see
+                         resources/js/photo.js for what happens when it isn't.
+                         The ceiling comes from PHP's own limits, not from a
+                         number written here. --}}
                     <label
+                        x-data="fqPhotoPicker({{ \App\Services\FeedPhotos::uploadCeilingKb() }})"
                         @class([
                             'grid size-11 shrink-0 cursor-pointer place-items-center rounded-[13px] border border-fq-line-2 text-[15px]',
                             'bg-fq-panel text-fq-text-3' => $tray !== 'photo',
@@ -561,12 +571,12 @@ new class extends Component
                     >
                         <span class="sr-only">Add a photo</span>
 
-                        <span wire:loading.remove wire:target="photo" aria-hidden="true">&#128247;</span>
-                        <span wire:loading wire:target="photo" class="font-mono-fq text-[10px]" aria-hidden="true">&hellip;</span>
+                        <span x-show="! busy" aria-hidden="true">&#128247;</span>
+                        <span x-cloak x-show="busy" class="font-mono-fq text-[9px]" aria-hidden="true" x-text="percent + '%'"></span>
 
                         <input
                             type="file"
-                            wire:model="photo"
+                            x-on:change="choose($event)"
                             accept="{{ implode(',', \App\Services\FeedPhotos::ACCEPT) }}"
                             class="hidden"
                             aria-label="Add a photo"

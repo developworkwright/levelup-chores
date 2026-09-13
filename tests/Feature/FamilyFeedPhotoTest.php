@@ -331,6 +331,100 @@ class FamilyFeedPhotoTest extends TestCase
 
     /*
      * ------------------------------------------------------------------
+     * The upload ceiling
+     * ------------------------------------------------------------------
+     */
+
+    /**
+     * The ceiling is the smallest of what the app wants and what PHP will
+     * carry, because `upload_max_filesize` and `post_max_size` are
+     * PHP_INI_PERDIR — no application code can raise them, so an app that
+     * merely asserts 12MB is an app that drops photos silently.
+     */
+    public function test_the_ceiling_never_exceeds_what_php_will_actually_carry(): void
+    {
+        $ceiling = FeedPhotos::uploadCeilingKb();
+
+        $this->assertGreaterThan(0, $ceiling);
+        $this->assertLessThanOrEqual(FeedPhotos::MAX_UPLOAD_KB, $ceiling);
+
+        foreach (['upload_max_filesize', 'post_max_size'] as $directive) {
+            $limit = $this->iniKilobytes($directive);
+
+            if ($limit !== null) {
+                $this->assertLessThanOrEqual(
+                    $limit,
+                    $ceiling,
+                    "The ceiling is above php.ini's {$directive}, so uploads at it would be discarded before Laravel saw them.",
+                );
+            }
+        }
+    }
+
+    /** The button quotes the real ceiling, so the number on screen is true. */
+    public function test_the_camera_button_carries_the_real_ceiling(): void
+    {
+        Auth::guard('profile')->login($this->raylan);
+
+        Volt::test('family-feed')
+            ->call('open', $this->everyone()->id)
+            ->assertSee('fqPhotoPicker('.FeedPhotos::uploadCeilingKb().')', false);
+    }
+
+    /**
+     * The upload must not be started by `wire:model`.
+     *
+     * That is what made an oversized file unrecoverable: Livewire sends it the
+     * instant it is chosen, PHP throws the body away, and the 419 HTML page
+     * comes back as a console error with nothing on screen. The picker has to
+     * own the upload so it can refuse a file first.
+     */
+    public function test_the_file_input_does_not_auto_upload(): void
+    {
+        Auth::guard('profile')->login($this->raylan);
+
+        $html = Volt::test('family-feed')->call('open', $this->everyone()->id)->html();
+
+        $input = substr($html, strpos($html, 'type="file"'), 400);
+
+        $this->assertStringNotContainsString('wire:model', $input);
+        $this->assertStringContainsString('choose($event)', $input);
+    }
+
+    /**
+     * The shorthand php.ini uses for these directives, in every form it takes.
+     *
+     * Worth pinning because getting it wrong is invisible: a parser that read
+     * "12M" as 12 kilobytes would simply refuse every photo, and one that read
+     * "2M" as unlimited would go back to dropping them silently.
+     */
+    public function test_php_ini_size_shorthand_is_read_correctly(): void
+    {
+        $this->assertSame(2048, FeedPhotos::kilobytesFromShorthand('2M'));
+        $this->assertSame(12288, FeedPhotos::kilobytesFromShorthand('12M'));
+        $this->assertSame(20480, FeedPhotos::kilobytesFromShorthand('20M'));
+        $this->assertSame(8192, FeedPhotos::kilobytesFromShorthand('8192K'));
+        $this->assertSame(1048576, FeedPhotos::kilobytesFromShorthand('1G'));
+        // A bare number is bytes, which is what php.ini means without a suffix.
+        $this->assertSame(2, FeedPhotos::kilobytesFromShorthand('2048'));
+        // Case and stray whitespace both turn up in real ini files.
+        $this->assertSame(12288, FeedPhotos::kilobytesFromShorthand(' 12m '));
+
+        // "no limit" must not read as "no headroom".
+        $this->assertSame(PHP_INT_MAX, FeedPhotos::kilobytesFromShorthand('0'));
+        $this->assertSame(PHP_INT_MAX, FeedPhotos::kilobytesFromShorthand(''));
+    }
+
+    /** A php.ini shorthand value, in kilobytes, or null when unlimited. */
+    private function iniKilobytes(string $directive): ?int
+    {
+        $kb = FeedPhotos::kilobytesFromShorthand((string) ini_get($directive));
+
+        return $kb === PHP_INT_MAX ? null : $kb;
+    }
+
+    /*
+     * ------------------------------------------------------------------
      * Who may see one
      * ------------------------------------------------------------------
      */

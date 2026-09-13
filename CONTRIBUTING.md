@@ -31,6 +31,21 @@ SESSION_SECURE_COOKIE=false
 
 Leave it `true` and the browser refuses to store the session cookie, so every request fails CSRF and you get **419 | Page Expired** on the PIN pad. Setting `APP_DEBUG=true` locally is also worth it.
 
+### php.ini, for family feed photos
+
+The feed accepts photos up to 12MB. PHP's stock limits are well under that, and no amount of application code can raise them — `upload_max_filesize` and `post_max_size` are `PHP_INI_PERDIR`, so they come from php.ini and nowhere else. Set both:
+
+```ini
+upload_max_filesize = 12M
+post_max_size = 16M
+```
+
+`post_max_size` covers the whole multipart request rather than just the file, so it has to sit above `upload_max_filesize` with room to spare.
+
+Leave them at the defaults and a normal phone photo fails in the least helpful way available: past `post_max_size` PHP discards the entire request body, CSRF token included, so Laravel answers Livewire's upload endpoint with a **419** HTML page, the uploader tries to `JSON.parse` it, and you get `Unexpected token '<'` in the console with nothing in `laravel.log` and nothing on screen.
+
+The app defends itself as far as it can — `FeedPhotos::uploadCeilingKb()` reads the real limits and the camera button refuses anything above them before sending — so a misconfigured server produces an honest "that photo is over 2MB" rather than silence. But 12MB only works if php.ini says it does.
+
 ## Before you open a PR
 
 ```bash

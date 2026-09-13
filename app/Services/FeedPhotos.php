@@ -88,6 +88,74 @@ class FeedPhotos
     /** The image types this will decode, by getimagesize()'s constants. */
     private const TYPES = [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_WEBP];
 
+    /**
+     * The biggest upload that can actually get here, in kilobytes.
+     *
+     * MAX_UPLOAD_KB above is what this app wants to accept. This is what the
+     * stack underneath it will really carry, and the two are not the same
+     * thing: `upload_max_filesize` and `post_max_size` are both PHP_INI_PERDIR,
+     * so no amount of application code can raise them — they come from php.ini
+     * and nowhere else.
+     *
+     * Getting that wrong fails in the worst available way. Past `post_max_size`
+     * PHP discards the entire request body, CSRF token and all, so Laravel
+     * answers Livewire's upload endpoint with a 419 *HTML* page, the uploader
+     * tries to JSON.parse it, and the kid gets a console error and a button
+     * that did nothing. Nothing in the log, nothing on the screen.
+     *
+     * So the ceiling is read rather than assumed, and it is what the picker
+     * checks against and what the error message quotes. On a correctly
+     * configured host this is simply MAX_UPLOAD_KB; on an under-configured one
+     * the app says the smaller true number instead of promising 12MB and
+     * silently dropping a 3MB photo.
+     *
+     * @see CONTRIBUTING.md for the php.ini values this expects.
+     */
+    public static function uploadCeilingKb(): int
+    {
+        return (int) min(
+            self::MAX_UPLOAD_KB,
+            self::iniKilobytes('upload_max_filesize'),
+            // The whole multipart body, not just the file, so a request at the
+            // file ceiling still needs headroom above it here.
+            self::iniKilobytes('post_max_size'),
+        );
+    }
+
+    private static function iniKilobytes(string $directive): int
+    {
+        return self::kilobytesFromShorthand((string) ini_get($directive));
+    }
+
+    /**
+     * A php.ini byte-shorthand value ("2M", "8192K", "1G") in kilobytes.
+     *
+     * Split from the ini read so it can be tested: the two directives this is
+     * used on are PHP_INI_PERDIR, so a test cannot set them to try a value —
+     * which is the same reason the app cannot raise them at runtime either.
+     *
+     * An empty or unlimited setting — post_max_size accepts 0 for "no limit" —
+     * reads as no constraint, so it never drags the ceiling to nothing. A bare
+     * number is bytes, which is what php.ini means without a suffix.
+     */
+    public static function kilobytesFromShorthand(string $raw): int
+    {
+        $raw = trim($raw);
+
+        if ($raw === '' || (int) $raw === 0) {
+            return PHP_INT_MAX;
+        }
+
+        $value = (int) $raw;
+
+        return match (strtolower(substr($raw, -1))) {
+            'g' => $value * 1024 * 1024,
+            'm' => $value * 1024,
+            'k' => $value,
+            default => intdiv($value, 1024),
+        };
+    }
+
     /** Shares the drawings disk: private, no public URL, filed by household. */
     public function disk(): Filesystem
     {
