@@ -59,8 +59,20 @@ class FeedPhotos
      */
     public const MAX_PIXELS = 50000000;
 
-    /** The longest side kept. A phone camera is far past this and nobody needs it. */
-    public const MAX_EDGE = 1600;
+    /**
+     * The longest side kept.
+     *
+     * 2560, which is generous on purpose. The feed draws a photo at well under
+     * a thousand CSS pixels, so 1600 was already enough to *look* right — but
+     * these are the only copy of a kid's fort that anybody keeps, and a photo
+     * is looked at properly, zoomed into, and sometimes printed. Storage is the
+     * cheap half of this trade and detail thrown away is gone for good.
+     *
+     * The browser resizes to this same number before uploading (see
+     * resources/js/photo.js), so raising it costs bandwidth rather than saving
+     * it — which is the right way round.
+     */
+    public const MAX_EDGE = 2560;
 
     public const QUALITY = 82;
 

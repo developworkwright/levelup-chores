@@ -31,9 +31,21 @@ SESSION_SECURE_COOKIE=false
 
 Leave it `true` and the browser refuses to store the session cookie, so every request fails CSRF and you get **419 | Page Expired** on the PIN pad. Setting `APP_DEBUG=true` locally is also worth it.
 
-### php.ini, for family feed photos
+### Family feed photos, and the three size limits
 
-The feed accepts photos up to 12MB. PHP's stock limits are well under that, and no amount of application code can raise them — `upload_max_filesize` and `post_max_size` are `PHP_INI_PERDIR`, so they come from php.ini and nowhere else. Set both:
+A kid may pick a photo up to 12MB (`FeedPhotos::MAX_UPLOAD_KB`). What actually crosses the wire is much smaller: the browser resizes it to `FeedPhotos::MAX_EDGE` first (see `resources/js/photo.js`), which is the same downscale the server would apply on arrival, so nothing is lost by doing it early. A 12MB phone photo leaves as roughly a megabyte.
+
+That matters because three separate limits sit in the way and the application controls none of them:
+
+| Limit | Default | Where it lives |
+|---|---|---|
+| `upload_max_filesize` | 2M | php.ini (`PHP_INI_PERDIR` — unreachable from app code) |
+| `post_max_size` | 8M | php.ini (same) |
+| `client_max_body_size` | 1m | nginx |
+
+Shrinking first is what keeps a normal photo under all three without configuring anything. If you do hit them, there are two routes:
+
+**Self-hosted / Herd** — raise them in php.ini and restart:
 
 ```ini
 upload_max_filesize = 12M
@@ -42,9 +54,19 @@ post_max_size = 16M
 
 `post_max_size` covers the whole multipart request rather than just the file, so it has to sit above `upload_max_filesize` with room to spare.
 
-Leave them at the defaults and a normal phone photo fails in the least helpful way available: past `post_max_size` PHP discards the entire request body, CSRF token included, so Laravel answers Livewire's upload endpoint with a **419** HTML page, the uploader tries to `JSON.parse` it, and you get `Unexpected token '<'` in the console with nothing in `laravel.log` and nothing on screen.
+**A managed host that won't let you** (Laravel Cloud, say) — upload straight to the bucket instead, which bypasses PHP and nginx entirely because the browser `PUT`s to a presigned URL rather than posting through the app:
 
-The app defends itself as far as it can — `FeedPhotos::uploadCeilingKb()` reads the real limits and the camera button refuses anything above them before sending — so a misconfigured server produces an honest "that photo is over 2MB" rather than silence. But 12MB only works if php.ini says it does.
+```dotenv
+LIVEWIRE_TEMPORARY_FILE_UPLOAD_DISK=s3
+```
+
+See `Livewire\Features\SupportFileUploads\GenerateSignedUploadUrl`. Note that this disk must not be used with a `multiple` file input — Livewire throws `S3DoesntSupportMultipleFileUploads` off the attribute rather than the file count — which is one reason the feed's picker takes one photo at a time.
+
+#### The failure this all exists to prevent
+
+Exceed `post_max_size` and PHP discards the entire request body, CSRF token included. Laravel answers Livewire's upload endpoint with a **419** HTML page, the uploader tries to `JSON.parse` it, and you get `Unexpected token '<', "<!DOCTYPE "...` in the console — with nothing in `laravel.log` and nothing on screen.
+
+There is no hook to catch that after the fact, so the app avoids reaching it: `FeedPhotos::uploadCeilingKb()` reads the real limits off the running server, and the camera button refuses anything still above them after shrinking. A misconfigured host therefore produces an honest "that photo is too big to send — over 2MB" rather than silence.
 
 ## Before you open a PR
 

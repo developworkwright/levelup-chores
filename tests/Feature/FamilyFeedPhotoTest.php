@@ -361,14 +361,39 @@ class FamilyFeedPhotoTest extends TestCase
         }
     }
 
-    /** The button quotes the real ceiling, so the number on screen is true. */
-    public function test_the_camera_button_carries_the_real_ceiling(): void
+    /**
+     * The button quotes the real ceiling and the real edge.
+     *
+     * Both are read by the browser: the ceiling is what it refuses above, and
+     * the edge is what it resizes to before sending. A hardcoded number in the
+     * JS would be one that drifts from the server's the first time either
+     * constant moves — and the drift would show up as photos that upload fine
+     * and then come back a different size.
+     */
+    public function test_the_camera_button_carries_the_real_ceiling_and_edge(): void
     {
         Auth::guard('profile')->login($this->raylan);
 
         Volt::test('family-feed')
             ->call('open', $this->everyone()->id)
-            ->assertSee('fqPhotoPicker('.FeedPhotos::uploadCeilingKb().')', false);
+            ->assertSee('fqPhotoPicker('.FeedPhotos::uploadCeilingKb().', '.FeedPhotos::MAX_EDGE.')', false);
+    }
+
+    /**
+     * These are the only copy of a kid's fort that anybody keeps, so the stored
+     * image is generous rather than merely big enough for the feed's own
+     * layout — which is well under a thousand CSS pixels.
+     */
+    public function test_photos_are_kept_at_a_size_worth_keeping(): void
+    {
+        $this->assertGreaterThanOrEqual(2560, FeedPhotos::MAX_EDGE);
+
+        $message = app(FeedService::class)->photo($this->raylan, $this->everyone(), $this->photo(6000, 4000));
+
+        $this->assertSame(FeedPhotos::MAX_EDGE, $message->image_width);
+
+        // And the column can actually hold it — image_width is a smallint.
+        $this->assertLessThanOrEqual(65535, FeedPhotos::MAX_EDGE);
     }
 
     /**

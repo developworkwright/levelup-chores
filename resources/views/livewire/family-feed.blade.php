@@ -562,7 +562,7 @@ new class extends Component
                          The ceiling comes from PHP's own limits, not from a
                          number written here. --}}
                     <label
-                        x-data="fqPhotoPicker({{ \App\Services\FeedPhotos::uploadCeilingKb() }})"
+                        x-data="fqPhotoPicker({{ \App\Services\FeedPhotos::uploadCeilingKb() }}, {{ \App\Services\FeedPhotos::MAX_EDGE }})"
                         @class([
                             'grid size-11 shrink-0 cursor-pointer place-items-center rounded-[13px] border border-fq-line-2 text-[15px]',
                             'bg-fq-panel text-fq-text-3' => $tray !== 'photo',
