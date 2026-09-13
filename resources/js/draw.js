@@ -52,7 +52,7 @@ const remember = (key, value) => {
 };
 
 document.addEventListener('alpine:init', () => {
-    window.Alpine.data('fqDrawPad', (width, height, paper, brushes) => ({
+    window.Alpine.data('fqDrawPad', (width, height, paper, brushes, palette) => ({
         /** @type {Array<{color: string, size: number, points: Array<[number, number]>}>} */
         strokes: [],
         current: null,
@@ -199,20 +199,25 @@ document.addEventListener('alpine:init', () => {
             // Only colours that aren't already on the pad are worth keeping,
             // and only the newest few: this row sits beside six presets on a
             // 390px screen, and a fourth would wrap it.
-            if (this.presets().includes(color)) {
+            /*
+             * `palette` is handed in from PHP rather than read back out of the
+             * DOM, and that is the fix for a real bug rather than a tidy-up.
+             *
+             * This used to ask `this.$el` for the swatch buttons. Inside a
+             * method invoked from a button's own x-on:click, `$el` is *that
+             * button* — not the component root — so the query matched nothing,
+             * every preset looked like a colour nobody had seen before, and
+             * clicking one filed it in the recents row beside itself. Three
+             * clicks and the row of colours you mixed had been pushed out by
+             * copies of the six already on screen.
+             */
+            if (palette.includes(color)) {
                 return;
             }
 
             this.recents = [color, ...this.recents.filter((hex) => hex !== color)].slice(0, MAX_RECENTS);
 
             remember(STORE.recents, this.recents);
-        },
-
-        /** The six built-in colours, read off the swatch buttons the page drew. */
-        presets() {
-            return Array.from(this.$el.querySelectorAll('[data-fq-swatch]')).map(
-                (button) => button.dataset.fqSwatch,
-            );
         },
 
         setSize(size) {

@@ -365,6 +365,47 @@ class FamilyFeedQuietHalfTest extends TestCase
     }
 
     /**
+     * The pad is handed its palette, rather than reading it back off the page.
+     *
+     * It used to find the six preset colours by querying `this.$el` for the
+     * swatch buttons. Inside a method called from a button's own x-on:click,
+     * `$el` is *that button* rather than the component root, so the query
+     * matched nothing and every preset looked like a colour nobody had used
+     * before — clicking one filed it into the recent-colours row beside itself,
+     * and a few clicks pushed out every colour the kid had actually mixed.
+     *
+     * Passing the palette in is what makes that impossible, so the contract
+     * worth pinning is that it really is passed.
+     */
+    public function test_the_drawing_pad_is_given_its_palette_and_brushes(): void
+    {
+        Auth::guard('profile')->login($this->raylan);
+
+        $html = Volt::test('family-feed')
+            ->call('open', app(FeedService::class)->roomFor($this->raylan)->id)
+            ->call('showTray', 'draw')
+            ->html();
+
+        preg_match('/x-data="fqDrawPad\((.*?)\)"/s', $html, $args);
+
+        $this->assertNotEmpty($args, 'The drawing pad should be mounted with arguments.');
+
+        foreach (FeedDrawings::PALETTE as $name => $hex) {
+            $this->assertStringContainsString(
+                $hex,
+                $args[1],
+                "The {$name} swatch is not in the palette handed to the pad, so clicking it would be filed as a new colour.",
+            );
+        }
+
+        foreach (FeedDrawings::BRUSHES as $brush) {
+            $this->assertStringContainsString((string) $brush, $args[1]);
+        }
+
+        $this->assertStringContainsString(FeedDrawings::PAPER, $args[1]);
+    }
+
+    /**
      * The prefix is not the picture.
      *
      * Writing `data:image/png;base64,` in front of something is free, so for a

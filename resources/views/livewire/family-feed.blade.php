@@ -711,7 +711,8 @@ new class extends Component
                             {{ \App\Services\FeedDrawings::WIDTH }},
                             {{ \App\Services\FeedDrawings::HEIGHT }},
                             @js(\App\Services\FeedDrawings::PAPER),
-                            @js(array_values(\App\Services\FeedDrawings::BRUSHES))
+                            @js(array_values(\App\Services\FeedDrawings::BRUSHES)),
+                            @js(array_values(\App\Services\FeedDrawings::PALETTE))
                         )"
                         class="flex flex-col gap-2 rounded-[16px] border border-fq-line-2 bg-fq-sunk p-2"
                     >
@@ -731,7 +732,6 @@ new class extends Component
                             @foreach (\App\Services\FeedDrawings::PALETTE as $name => $swatch)
                                 <button
                                     type="button"
-                                    data-fq-swatch="{{ $swatch }}"
                                     x-on:click="pick(@js($swatch))"
                                     :class="color === @js($swatch) && ! erasing ? 'outline outline-2 outline-offset-2 outline-fq-text' : ''"
                                     :aria-pressed="color === @js($swatch) && ! erasing ? 'true' : 'false'"
