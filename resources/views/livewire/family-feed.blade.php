@@ -799,11 +799,20 @@ new class extends Component
                                 >
                                     {{-- The dot is the nib at its real width, so
                                          the button shows the answer instead of
-                                         naming it. --}}
+                                         naming it.
+
+                                         The colour is bound as an *object*, not
+                                         a string. Alpine's string form calls
+                                         setAttribute('style', …), which replaces
+                                         the whole attribute — taking the width
+                                         and height below with it and leaving a
+                                         nought-sized, invisible dot. The object
+                                         form goes through setProperty() and
+                                         merges. --}}
                                     <span
                                         class="rounded-full"
                                         style="width: {{ $brush }}px; height: {{ $brush }}px"
-                                        :style="`background: ${erasing ? 'var(--fq-text-4)' : color}`"
+                                        :style="{ background: erasing ? 'var(--fq-text-4)' : color }"
                                     ></span>
                                 </button>
                             @endforeach
@@ -813,9 +822,17 @@ new class extends Component
                                 x-on:click="toggleEraser()"
                                 :class="erasing ? 'border-fq-text text-fq-text' : 'border-fq-line-2 text-fq-text-3'"
                                 :aria-pressed="erasing ? 'true' : 'false'"
-                                class="grid size-11 place-items-center rounded-[12px] border text-[17px]"
+                                class="grid size-11 place-items-center rounded-[12px] border text-[15px]"
                                 aria-label="Rub out"
-                            >&#9013;</button>
+                            >
+                                {{-- A drawn eraser rather than a glyph. This
+                                     button used to carry &#9013; — U+2335
+                                     COUNTERSINK, a typo for U+232B — which drew
+                                     a chevron and meant nothing to anybody. The
+                                     app already loads Font Awesome, and a
+                                     six-year-old recognises the object. --}}
+                                <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                            </button>
 
                             <span class="flex-1"></span>
 
