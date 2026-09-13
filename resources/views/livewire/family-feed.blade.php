@@ -3,10 +3,12 @@
 use App\Enums\FeedStamp;
 use App\Models\FeedRoom;
 use App\Models\Profile;
+use App\Services\FeedPhotos;
 use App\Services\FeedService;
 use App\Services\QuoteService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
+use Livewire\WithFileUploads;
 
 /**
  * The family feed — rooms, and the quiet half.
@@ -39,6 +41,8 @@ use Livewire\Volt\Component;
  */
 new class extends Component
 {
+    use WithFileUploads;
+
     public Profile $profile;
 
     /** The open room. Null is the phone's room list; a laptop lands on Everyone. */
@@ -46,8 +50,23 @@ new class extends Component
 
     public string $draft = '';
 
-    /** Which composer tray is open, if any: 'stamps', 'draw' or 'shout'. */
+    /** Which composer tray is open, if any: 'stamps', 'draw', 'shout' or 'photo'. */
     public ?string $tray = null;
+
+    /**
+     * The photo being posted. One at a time, and deliberately untyped.
+     *
+     * Not `multiple`, however much a camera roll wants it to be: Livewire's S3
+     * temporary-upload driver refuses a multiple input outright — see
+     * S3DoesntSupportMultipleFileUploads, thrown from _startUpload the instant a
+     * file is chosen, off the attribute rather than the number of files. Locally
+     * it never fires, because a local temporary disk is not S3; in production it
+     * always would.
+     *
+     * Untyped because Livewire assigns a bare TemporaryUploadedFile here, and a
+     * typed property refuses it.
+     */
+    public $photo = null;
 
     public ?int $shoutSubject = null;
 
@@ -152,6 +171,119 @@ new class extends Component
 
         $this->closeTrays();
         $this->feed()->markRead($this->profile, $room);
+    }
+
+    /**
+     * The rules the upload has to clear before anything decodes it.
+     *
+     * Three overlapping checks rather than one, because they disagree in useful
+     * ways: `mimetypes` reads the file's own magic bytes through finfo and does
+     * not trust the browser's Content-Type header, `extensions` reads the name,
+     * and `image` is Laravel's own — which excludes SVG unless asked otherwise,
+     * and is deliberately not asked. An SVG is an XML document that can carry a
+     * script, and one served inline from this app's origin is stored XSS
+     * against the whole family.
+     *
+     * Everything past this is FeedPhotos, which does not trust this either: it
+     * re-reads the header itself and then redraws the picture from scratch.
+     *
+     * @return array<string, mixed>
+     */
+    public function rules(): array
+    {
+        return [
+            'photo' => [
+                'required',
+                'file',
+                'image',
+                'mimetypes:'.implode(',', FeedPhotos::ACCEPT),
+                'extensions:jpg,jpeg,png,webp',
+                'max:'.FeedPhotos::MAX_UPLOAD_KB,
+            ],
+        ];
+    }
+
+    /** @return array<string, string> */
+    public function messages(): array
+    {
+        return [
+            'photo.required' => 'Pick a photo first.',
+            'photo.image' => 'That has to be a photo.',
+            'photo.mimetypes' => 'That has to be a photo — a JPEG, a PNG or a WebP.',
+            'photo.extensions' => 'That has to be a photo — a JPEG, a PNG or a WebP.',
+            // The real ceiling, not the one this app would like to have: on an
+            // under-configured server they differ, and quoting the bigger
+            // number would be the app blaming a photo for its own php.ini.
+            'photo.max' => 'That photo is over '.round(FeedPhotos::uploadCeilingKb() / 1024).'MB.',
+        ];
+    }
+
+    /**
+     * Checked the moment one is chosen, and shown before it is sent.
+     *
+     * A photo is the one thing in this composer you cannot take back once the
+     * room has seen it, so it gets a look at what is about to be posted — which
+     * is also where a wrong file gets caught, one tap before it matters.
+     */
+    public function updatedPhoto(): void
+    {
+        $this->notice = null;
+
+        try {
+            $this->validateOnly('photo');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->reset('photo');
+
+            $this->tray = null;
+            $this->notice = $e->validator->errors()->first('photo');
+
+            return;
+        }
+
+        $this->tray = 'photo';
+    }
+
+    /** Posts the chosen photo, with whatever is in the composer as its caption. */
+    public function postPhoto(): void
+    {
+        $room = $this->requireRoom();
+
+        if (! $this->photo) {
+            return;
+        }
+
+        try {
+            $this->validateOnly('photo');
+
+            $this->feed()->photo($this->profile, $room, $this->photo, $this->draft);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->reset('photo');
+            $this->tray = null;
+            $this->notice = $e->validator->errors()->first('photo');
+
+            return;
+        } catch (\RuntimeException $e) {
+            // Said out loud rather than swallowed, exactly like a drawing that
+            // could not be read. A photo that vanishes with no explanation
+            // reads as the app having eaten it.
+            $this->reset('photo');
+            $this->tray = null;
+            $this->notice = $e->getMessage();
+
+            return;
+        }
+
+        $this->reset('photo');
+        $this->draft = '';
+        $this->closeTrays();
+        $this->feed()->markRead($this->profile, $room);
+    }
+
+    /** Backs out of a chosen photo without posting it. */
+    public function discardPhoto(): void
+    {
+        $this->reset('photo');
+        $this->closeTrays();
     }
 
     public function sendShoutOut(): void
@@ -259,6 +391,7 @@ new class extends Component
             'messages' => $room ? $feed->messagesIn($this->profile, $room) : collect(),
             'house' => $feed->houseToday($this->profile),
             'gratitude' => $feed->gratitudeToday($this->profile),
+            'dinner' => $feed->dinner($this->profile),
             'roster' => $roster,
             'stamps' => FeedStamp::cases(),
             'reactions' => FeedService::REACTIONS,
@@ -321,7 +454,7 @@ new class extends Component
                 @endforeach
             </div>
 
-            <x-feed.house-card :house="$house" :gratitude="$gratitude" />
+            <x-feed.house-card :house="$house" :gratitude="$gratitude" :dinner="$dinner" :viewer="$profile" />
 
             <x-feed.grateful-card :gratitude="$gratitude" :roster="$roster->count()" />
         </div>
@@ -416,6 +549,40 @@ new class extends Component
                         aria-label="Draw something"
                     >&#9998;</button>
 
+                    {{-- A label wrapping a hidden input rather than a button:
+                         on a phone this one control opens the operating
+                         system's own sheet, which offers the camera and the
+                         photo library side by side. Two buttons here would be
+                         us re-implementing a choice the phone already makes
+                         better. --}}
+                    {{-- The upload is driven by hand rather than by
+                         `wire:model`, so that a file too big for this server
+                         can be turned down before any of it is sent — see
+                         resources/js/photo.js for what happens when it isn't.
+                         The ceiling comes from PHP's own limits, not from a
+                         number written here. --}}
+                    <label
+                        x-data="fqPhotoPicker({{ \App\Services\FeedPhotos::uploadCeilingKb() }}, {{ \App\Services\FeedPhotos::MAX_EDGE }})"
+                        @class([
+                            'grid size-11 shrink-0 cursor-pointer place-items-center rounded-[13px] border border-fq-line-2 text-[15px]',
+                            'bg-fq-panel text-fq-text-3' => $tray !== 'photo',
+                            'bg-fq-panel-alt text-fq-text' => $tray === 'photo',
+                        ])
+                    >
+                        <span class="sr-only">Add a photo</span>
+
+                        <span x-show="! busy" aria-hidden="true">&#128247;</span>
+                        <span x-cloak x-show="busy" class="font-mono-fq text-[9px]" aria-hidden="true" x-text="percent + '%'"></span>
+
+                        <input
+                            type="file"
+                            x-on:change="choose($event)"
+                            accept="{{ implode(',', \App\Services\FeedPhotos::ACCEPT) }}"
+                            class="hidden"
+                            aria-label="Add a photo"
+                        >
+                    </label>
+
                     <button
                         type="button"
                         wire:click="send"
@@ -496,6 +663,43 @@ new class extends Component
                     </div>
                 @endif
 
+                @if ($tray === 'photo' && $photo)
+                    {{-- The one thing in this composer that cannot be taken
+                         back once the room has seen it, so it is looked at
+                         first. The caption is the composer's own line, left
+                         where it is — a second box here would be a second place
+                         to type the same thing. --}}
+                    <div class="flex flex-col gap-2 rounded-[16px] border border-fq-line-2 bg-fq-sunk p-2">
+                        <img
+                            src="{{ $photo->temporaryUrl() }}"
+                            alt="The photo you are about to send"
+                            class="max-h-[320px] w-full rounded-[12px] border border-fq-line object-contain"
+                        >
+
+                        <div class="flex flex-wrap items-center gap-[6px]">
+                            <span class="min-w-0 flex-1 text-[13px] text-fq-text-4">
+                                {{ $draft !== '' ? 'Sending with: '.$draft : 'Add a caption above, or just send it.' }}
+                            </span>
+
+                            <button
+                                type="button"
+                                wire:click="discardPhoto"
+                                class="grid size-11 place-items-center rounded-[12px] border border-fq-line-2 text-fq-text-3"
+                                aria-label="Don't send this photo"
+                            >&#10005;</button>
+
+                            <button
+                                type="button"
+                                wire:click="postPhoto"
+                                wire:loading.attr="disabled"
+                                wire:target="postPhoto"
+                                class="grid h-11 place-items-center rounded-[12px] px-4 font-baloo text-[14px] font-extrabold disabled:opacity-50"
+                                style="background: var(--fq-rail); color: var(--fq-ink)"
+                            >Send it</button>
+                        </div>
+                    </div>
+                @endif
+
                 @if ($tray === 'draw')
                     {{-- `wire:ignore` and a stable key: the canvas is not
                          Livewire's to reconcile, and a round trip that morphed
@@ -503,7 +707,13 @@ new class extends Component
                     <div
                         wire:ignore
                         wire:key="draw-pad"
-                        x-data="fqDrawPad({{ \App\Services\FeedDrawings::WIDTH }}, {{ \App\Services\FeedDrawings::HEIGHT }})"
+                        x-data="fqDrawPad(
+                            {{ \App\Services\FeedDrawings::WIDTH }},
+                            {{ \App\Services\FeedDrawings::HEIGHT }},
+                            @js(\App\Services\FeedDrawings::PAPER),
+                            @js(array_values(\App\Services\FeedDrawings::BRUSHES)),
+                            @js(array_values(\App\Services\FeedDrawings::PALETTE))
+                        )"
                         class="flex flex-col gap-2 rounded-[16px] border border-fq-line-2 bg-fq-sunk p-2"
                     >
                         <canvas
@@ -512,17 +722,117 @@ new class extends Component
                             style="aspect-ratio: {{ \App\Services\FeedDrawings::WIDTH }} / {{ \App\Services\FeedDrawings::HEIGHT }}"
                         ></canvas>
 
+                        {{-- Two rows, not one. Six swatches plus a nib picker,
+                             an eraser and three actions do not fit across a
+                             390px phone at the 44px every one of them has to
+                             be, and a control a finger misses is worse than a
+                             control that wrapped. Colour on top, because that
+                             is the one a kid reaches for mid-picture. --}}
                         <div class="flex flex-wrap items-center gap-[6px]">
-                            @foreach (['#ffe14d', '#ff8ac7', '#d8b4ff', '#7fe6c0', '#ff6b6b', '#f7f0ff'] as $swatch)
+                            @foreach (\App\Services\FeedDrawings::PALETTE as $name => $swatch)
                                 <button
                                     type="button"
-                                    x-on:click="pick('{{ $swatch }}')"
-                                    :class="color === '{{ $swatch }}' ? 'outline outline-2 outline-offset-2 outline-fq-text' : ''"
+                                    x-on:click="pick(@js($swatch))"
+                                    :class="color === @js($swatch) && ! erasing ? 'outline outline-2 outline-offset-2 outline-fq-text' : ''"
+                                    :aria-pressed="color === @js($swatch) && ! erasing ? 'true' : 'false'"
                                     class="size-11 rounded-full border border-fq-line-3"
                                     style="background: {{ $swatch }}"
-                                    aria-label="Draw in this colour"
+                                    aria-label="Draw in {{ mb_strtolower($name) }}"
                                 ></button>
                             @endforeach
+
+                            {{-- The colours mixed in the picker, kept so that
+                                 going back for one is not another trip through
+                                 the operating system's full-screen sheet. --}}
+                            <template x-for="hex in recents" :key="hex">
+                                <button
+                                    type="button"
+                                    x-on:click="pick(hex)"
+                                    :class="color === hex && ! erasing ? 'outline outline-2 outline-offset-2 outline-fq-text' : ''"
+                                    :aria-pressed="color === hex && ! erasing ? 'true' : 'false'"
+                                    :style="`background: ${hex}`"
+                                    :aria-label="`Draw in ${hex}`"
+                                    class="size-11 rounded-full border border-dashed border-fq-line-3"
+                                ></button>
+                            </template>
+
+                            {{-- Any other colour. The browser hands this to the
+                                 operating system's own picker, which is a
+                                 spectrum and a hex box on every phone and
+                                 laptop in the house — so there is nothing here
+                                 for us to build, draw or keep working. --}}
+                            <label
+                                class="relative grid size-11 place-items-center rounded-full border border-dashed border-fq-line-3 text-[15px] text-fq-text-3"
+                                :style="`background: ${erasing ? 'transparent' : color}`"
+                            >
+                                <span class="sr-only">Pick any other colour</span>
+                                {{-- `input` fires continuously while a finger
+                                     drags across the spectrum, so it only moves
+                                     the pen; `change` fires once, when the
+                                     colour is actually settled on, and that is
+                                     the one that earns a place in the recents
+                                     row. --}}
+                                <input
+                                    type="color"
+                                    x-on:input="preview($event.target.value)"
+                                    x-on:change="pick($event.target.value)"
+                                    :value="color"
+                                    class="absolute inset-0 size-full cursor-pointer opacity-0"
+                                    aria-label="Pick any other colour"
+                                >
+                                <span aria-hidden="true" class="pointer-events-none mix-blend-difference">&plus;</span>
+                            </label>
+                        </div>
+
+                        <div class="flex flex-wrap items-center gap-[6px]">
+                            {{-- Three nibs rather than a slider: a slider is a
+                                 drag you have to aim, and the useful range here
+                                 is a line, a thick line, and wiping a corner. --}}
+                            @foreach (\App\Services\FeedDrawings::BRUSHES as $brush)
+                                <button
+                                    type="button"
+                                    x-on:click="setSize({{ $brush }})"
+                                    :class="size === {{ $brush }} ? 'border-fq-text' : 'border-fq-line-2'"
+                                    :aria-pressed="size === {{ $brush }} ? 'true' : 'false'"
+                                    class="grid size-11 place-items-center rounded-[12px] border"
+                                    aria-label="{{ ['Thin', 'Medium', 'Thick'][$loop->index] ?? 'Nib' }} brush"
+                                >
+                                    {{-- The dot is the nib at its real width, so
+                                         the button shows the answer instead of
+                                         naming it.
+
+                                         The colour is bound as an *object*, not
+                                         a string. Alpine's string form calls
+                                         setAttribute('style', …), which replaces
+                                         the whole attribute — taking the width
+                                         and height below with it and leaving a
+                                         nought-sized, invisible dot. The object
+                                         form goes through setProperty() and
+                                         merges. --}}
+                                    <span
+                                        class="rounded-full"
+                                        style="width: {{ $brush }}px; height: {{ $brush }}px"
+                                        :style="{ background: erasing ? 'var(--fq-text-4)' : color }"
+                                    ></span>
+                                </button>
+                            @endforeach
+
+                            <button
+                                type="button"
+                                x-on:click="toggleEraser()"
+                                :class="erasing ? 'border-fq-text text-fq-text' : 'border-fq-line-2 text-fq-text-3'"
+                                :aria-pressed="erasing ? 'true' : 'false'"
+                                class="grid size-11 place-items-center rounded-[12px] border text-[15px]"
+                                aria-label="Rub out"
+                            >
+                                {{-- A drawn eraser rather than a glyph. This
+                                     button used to carry &#9013; — U+2335
+                                     COUNTERSINK, a typo for U+232B — which drew
+                                     a chevron and meant nothing to anybody. The
+                                     app already loads Font Awesome, and a
+                                     six-year-old recognises the object. --}}
+                                <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                            </button>
 
                             <span class="flex-1"></span>
 
@@ -551,13 +861,28 @@ new class extends Component
                      that a new message is seen: the box and the newest message
                      stay at the top of this list, visible at a glance.
 
-                     The full page at /kid/family has no such cap — there the room
-                     *is* the page. --}}
+                     **But only on a laptop.** That box was sized when a message
+                     was a line of text or a stamp; a photo is not. A portrait
+                     phone photo renders about 417px tall on a 390px screen, and
+                     with a name above it and a reaction row below it one message
+                     is taller than the 440px box was — so the box became a
+                     letterbox you dragged a picture past, inside a page that is
+                     itself scrolling. Two nested scrollers on a touch screen
+                     means the page takes over at the boundary, and the bottom of
+                     the photo is unreachable in practice however correct the
+                     scrollHeight is.
+
+                     So on a phone there is no inner scroller at all: the page
+                     scrolls, which is the one thing a thumb never gets wrong.
+                     Home is longer for it, which is the lesser problem.
+
+                     The full page at /kid/family has no cap on any screen —
+                     there the room *is* the page. --}}
                 <div
                     data-feed-messages
                     @class([
                         'flex flex-col gap-[13px]',
-                        'max-h-[440px] overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin] [scrollbar-color:var(--fq-line-3)_transparent] lg:max-h-[520px]' => $embedded,
+                        'lg:max-h-[520px] lg:overflow-y-auto lg:overscroll-contain lg:pr-1 lg:[scrollbar-width:thin] lg:[scrollbar-color:var(--fq-line-3)_transparent]' => $embedded,
                     ])
                 >
                     @forelse ($messages->reverse() as $message)

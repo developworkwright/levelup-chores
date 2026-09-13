@@ -27,6 +27,50 @@ class FeedDrawings
 
     public const HEIGHT = 380;
 
+    /**
+     * The paper the pad is painted on, and the colour the eraser draws in.
+     *
+     * It lives here rather than in draw.js because the tray's markup and the
+     * canvas both need it, and a second copy of a hex is how the eraser ends up
+     * leaving faint rectangles a shade off the background.
+     *
+     * The paper is opaque for a reason — see paint() in resources/js/draw.js.
+     */
+    public const PAPER = '#150c26';
+
+    /**
+     * The six colours on the pad, by the name a screen reader reads out.
+     *
+     * Named rather than a bare list of hexes because every swatch used to carry
+     * the identical label "Draw in this colour", which told a kid using
+     * VoiceOver nothing at all about which of the six they had landed on.
+     *
+     * Six, and a picker beside them for anything else. A grid of forty colours
+     * is a thing to browse; this is a thing to reach for mid-drawing.
+     *
+     * @var array<string, string>
+     */
+    public const PALETTE = [
+        'Yellow' => '#ffe14d',
+        'Pink' => '#ff8ac7',
+        'Purple' => '#d8b4ff',
+        'Mint' => '#7fe6c0',
+        'Red' => '#ff6b6b',
+        'White' => '#f7f0ff',
+    ];
+
+    /**
+     * The three nib widths, in canvas pixels, thin to fat.
+     *
+     * Three rather than a slider: a slider is a drag a six-year-old has to aim,
+     * and the useful range here is "a line", "a thick line" and "wipe a big
+     * area". The fattest doubles as the eraser's footprint, which is why it is
+     * wide enough to clear a corner in one stroke.
+     *
+     * @var array<int, int>
+     */
+    public const BRUSHES = [4, 10, 22];
+
     /** The folder every drawing is filed under, on whichever disk is in use. */
     public const FOLDER = 'drawings';
 
@@ -64,6 +108,35 @@ class FeedDrawings
             throw new RuntimeException('That drawing could not be read.');
         }
 
+        /*
+         * And the bytes have to actually *be* a PNG.
+         *
+         * For a while this checked only that the string started with the PNG
+         * data-URL prefix, which a hand-edited payload writes for free — so
+         * anything at all could be stored under a .png name and served back
+         * with a PNG content type. Nothing could execute it (the type is a
+         * constant and the response carries nosniff, and only the household can
+         * fetch it), but "arbitrary bytes on our disk, unexecutable for now" is
+         * not a property worth keeping.
+         *
+         * Read as a header rather than decoded: this is the same ordering
+         * FeedPhotos::store() uses and for the same reason — the size check
+         * above has already run, so a declared-huge image never reaches a
+         * decoder. A bound rather than an equality, so the one-pixel PNG the
+         * tests post still passes and a retina canvas stays possible later.
+         */
+        $info = @getimagesizefromstring($binary);
+
+        if (! is_array($info)
+            || ($info[2] ?? null) !== IMAGETYPE_PNG
+            || (int) $info[0] < 1
+            || (int) $info[1] < 1
+            || (int) $info[0] > self::WIDTH
+            || (int) $info[1] > self::HEIGHT
+        ) {
+            throw new RuntimeException('That drawing could not be read.');
+        }
+
         // Under `drawings/` in the path itself rather than in a disk's `root`,
         // so the folder is the same on every disk — including the one Laravel
         // Cloud builds for the bucket, which has no root prefix and shares the
@@ -81,7 +154,7 @@ class FeedDrawings
     /*
      * There is deliberately no url() here. A drawing has no public address: the
      * bucket is private, and every drawing is fetched through
-     * FeedDrawingController, which checks the viewer can read the room it was
-     * posted in. See FeedMessage::drawingUrl().
+     * FeedMediaController, which checks the viewer can read the room it was
+     * posted in. See FeedMessage::mediaUrl().
      */
 }

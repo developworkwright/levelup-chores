@@ -13,12 +13,62 @@
 @props([
     'house' => null,
     'gratitude' => ['lists' => [], 'withheld' => [], 'total' => 0],
+    'dinner' => ['tonight' => null, 'tomorrow' => null],
+    'viewer' => null,
 ])
 
 @php $shared = count($gratitude['lists']); @endphp
 
 <div class="flex flex-col gap-[9px] rounded-[18px] border border-fq-line bg-fq-panel p-3">
     <span class="font-mono-fq text-[9.5px] tracking-[0.2em] text-fq-text-4 uppercase">Today in the house</span>
+
+    {{-- Dinner, and deliberately *above* the feelings gate below.
+
+         That gate — "say how your day went first" — exists to protect the
+         feelings: reading everybody else's answer is what answering buys you.
+         Dinner is not one of those things. A kid must not have to file a
+         feeling to find out what's for tea, and putting it behind the same
+         door would turn a privacy rule into a toll booth.
+
+         Drawn only when there is something to say. A standing "no dinner
+         planned" line would be the app nagging a grown-up on the one screen
+         the grown-ups are not the audience for. --}}
+    @if ($dinner['tonight'] || $dinner['tomorrow'])
+        @php $isParent = $viewer?->isParent() ?? false; @endphp
+
+        <div class="flex flex-col gap-[3px] rounded-[13px] bg-fq-sunk p-[9px_11px]">
+            @if ($dinner['tonight'])
+                <div class="flex items-baseline gap-[7px]">
+                    <span class="font-mono-fq text-[9px] tracking-[0.16em] uppercase" style="color: var(--fq-gold)">Tonight</span>
+                    <span class="min-w-0 flex-1 font-baloo text-[15px] font-bold">{{ $dinner['tonight']->name }}</span>
+                </div>
+
+                @if ($dinner['tonight']->note)
+                    <div class="text-[12.5px] text-fq-text-4">{{ $dinner['tonight']->note }}</div>
+                @endif
+            @endif
+
+            {{-- Quieter than tonight's, because it is the answer to a question
+                 nobody asked yet. --}}
+            @if ($dinner['tomorrow'])
+                <div class="flex items-baseline gap-[7px] {{ $dinner['tonight'] ? 'mt-[3px]' : '' }}">
+                    <span class="font-mono-fq text-[9px] tracking-[0.16em] text-fq-text-5 uppercase">Tomorrow</span>
+                    <span class="min-w-0 flex-1 text-[13.5px] text-fq-text-3">{{ $dinner['tomorrow']->name }}</span>
+                </div>
+            @endif
+
+            {{-- Only a grown-up has anywhere to go from here. --}}
+            @if ($isParent)
+                <a href="{{ route('parent.meals') }}" wire:navigate class="mt-[2px] font-mono-fq text-[9px] tracking-[0.16em] uppercase underline" style="color: var(--fq-text-4)">Change the menu</a>
+            @endif
+        </div>
+    @elseif ($viewer?->isParent())
+        {{-- The one case where the empty state earns its place: a grown-up is
+             the person who can fix it, and this is a screen they are on daily. --}}
+        <a href="{{ route('parent.meals') }}" wire:navigate class="rounded-[13px] bg-fq-sunk p-[9px_11px] text-[13px] text-fq-text-4">
+            No dinner set yet. <span class="font-semibold underline" style="color: var(--fq-gold)">Set the menu</span>
+        </a>
+    @endif
 
     @if ($house === null)
         {{-- The feelings card's own rule, kept rather than routed around:

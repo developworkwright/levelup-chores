@@ -110,6 +110,12 @@ import './music.js';
  */
 import './draw.js';
 
+/*
+ * The camera button beside it, which drives its own upload so that it can turn
+ * a file down before sending it — see the file for what happens when it can't.
+ */
+import './photo.js';
+
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js').catch(() => {});

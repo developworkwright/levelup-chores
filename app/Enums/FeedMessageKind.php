@@ -19,6 +19,19 @@ enum FeedMessageKind: string
     case Event = 'event';
 
     /**
+     * A photograph, off a camera or a camera roll.
+     *
+     * A person talking, like a drawing is — same avatar, same name, same
+     * reactions — and under exactly the same room rule: one posted in a room a
+     * grown-up cannot read is one a grown-up cannot read. That is the whole
+     * reason the disk it lands on is private and there is no public URL for it.
+     *
+     * It may carry a `body`, which is the caption. Nothing else does that with
+     * a picture, and it costs a column nobody had to add.
+     */
+    case Photo = 'photo';
+
+    /**
      * A quote a grown-up wrote down, relayed into the room it belongs in.
      *
      * It used to be a card at the bottom of Home, which is the last place
@@ -55,7 +68,14 @@ enum FeedMessageKind: string
         return match ($this) {
             self::Stamp => 'sent a stamp',
             self::Drawing => 'sent a drawing',
+            self::Photo => 'sent a photo',
             self::Text, self::Shoutout, self::Event, self::Quote => null,
         };
+    }
+
+    /** Whether this kind's picture is fetched through FeedMediaController. */
+    public function isMedia(): bool
+    {
+        return $this === self::Drawing || $this === self::Photo;
     }
 }
