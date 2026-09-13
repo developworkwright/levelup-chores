@@ -861,13 +861,28 @@ new class extends Component
                      that a new message is seen: the box and the newest message
                      stay at the top of this list, visible at a glance.
 
-                     The full page at /kid/family has no such cap — there the room
-                     *is* the page. --}}
+                     **But only on a laptop.** That box was sized when a message
+                     was a line of text or a stamp; a photo is not. A portrait
+                     phone photo renders about 417px tall on a 390px screen, and
+                     with a name above it and a reaction row below it one message
+                     is taller than the 440px box was — so the box became a
+                     letterbox you dragged a picture past, inside a page that is
+                     itself scrolling. Two nested scrollers on a touch screen
+                     means the page takes over at the boundary, and the bottom of
+                     the photo is unreachable in practice however correct the
+                     scrollHeight is.
+
+                     So on a phone there is no inner scroller at all: the page
+                     scrolls, which is the one thing a thumb never gets wrong.
+                     Home is longer for it, which is the lesser problem.
+
+                     The full page at /kid/family has no cap on any screen —
+                     there the room *is* the page. --}}
                 <div
                     data-feed-messages
                     @class([
                         'flex flex-col gap-[13px]',
-                        'max-h-[440px] overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin] [scrollbar-color:var(--fq-line-3)_transparent] lg:max-h-[520px]' => $embedded,
+                        'lg:max-h-[520px] lg:overflow-y-auto lg:overscroll-contain lg:pr-1 lg:[scrollbar-width:thin] lg:[scrollbar-color:var(--fq-line-3)_transparent]' => $embedded,
                     ])
                 >
                     @forelse ($messages->reverse() as $message)

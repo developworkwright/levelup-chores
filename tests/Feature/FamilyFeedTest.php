@@ -518,8 +518,8 @@ class FamilyFeedTest extends TestCase
 
     /**
      * On Home the messages scroll inside a fixed height, so a long conversation
-     * can't push the rest of the day down the page. The full page has no cap —
-     * there the room is the page.
+     * can't push the rest of the day down the page — but only on a laptop. The
+     * full page has no cap on any screen; there the room is the page.
      */
     public function test_the_messages_scroll_inside_a_capped_box_only_on_home(): void
     {
@@ -531,9 +531,39 @@ class FamilyFeedTest extends TestCase
         preg_match('/<div[^>]*data-feed-messages[^>]*>/s', $embedded, $home);
         preg_match('/<div[^>]*data-feed-messages[^>]*>/s', $page, $full);
 
-        $this->assertStringContainsString('overflow-y-auto', $home[0]);
-        $this->assertStringContainsString('max-h-[440px]', $home[0]);
+        $this->assertStringContainsString('lg:overflow-y-auto', $home[0]);
+        $this->assertStringContainsString('lg:max-h-[520px]', $home[0]);
         $this->assertStringNotContainsString('overflow-y-auto', $full[0]);
+    }
+
+    /**
+     * And on a phone there is no inner scroller at all.
+     *
+     * The cap was sized when a message was a line of text. A portrait photo is
+     * taller than the box was, which turned it into a letterbox you dragged a
+     * picture past — inside a page that is itself scrolling. Two nested
+     * scrollers on a touch screen means the page takes over at the boundary and
+     * the bottom of the photo cannot be reached, however correct the
+     * scrollHeight is. Unprefixed scroll classes here would put that back.
+     */
+    public function test_home_has_no_nested_scroller_on_a_phone(): void
+    {
+        Auth::guard('profile')->login($this->raylan);
+
+        preg_match(
+            '/<div[^>]*data-feed-messages[^>]*>/s',
+            Volt::test('family-feed', ['embedded' => true])->html(),
+            $home,
+        );
+
+        // Every scrolling class has to carry the lg: prefix.
+        foreach (['overflow-y-auto', 'max-h-', 'overscroll-contain'] as $class) {
+            $this->assertDoesNotMatchRegularExpression(
+                '/(?<!lg:)'.preg_quote($class, '/').'/',
+                $home[0],
+                "`{$class}` is unprefixed, so it applies on phones and brings back the nested scroller.",
+            );
+        }
     }
 
     public function test_sending_from_the_page_posts_into_the_open_room(): void
