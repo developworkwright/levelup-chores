@@ -73,11 +73,12 @@ class ParentNavTest extends TestCase
             $this->assertStringContainsString(route($route), $rail, $route.' belongs on the rail.');
         }
 
-        // The seven set-up pages reach the sheet instead. A rail that grows
-        // back to eleven is the thing this whole change undid.
+        // The eight set-up pages reach the sheet instead. A rail that grows
+        // back to twelve is the thing this whole change undid.
         foreach ([
             'parent.loot', 'parent.lucky', 'parent.monsters',
             'parent.standings', 'parent.quotes', 'parent.arcade', 'parent.music',
+            'parent.meals',
         ] as $route) {
             $this->assertStringNotContainsString(route($route), $rail, $route.' should be a sheet row, not a rail button.');
         }
@@ -91,6 +92,7 @@ class ParentNavTest extends TestCase
             'parent.home', 'parent.chores', 'parent.kids', 'parent.activity',
             'parent.loot', 'parent.lucky', 'parent.monsters',
             'parent.standings', 'parent.quotes', 'parent.arcade', 'parent.music',
+            'parent.meals',
         ] as $route) {
             $test->assertSee(route($route), false);
         }

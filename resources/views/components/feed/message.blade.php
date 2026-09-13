@@ -87,13 +87,35 @@
 
                 @case (FeedMessageKind::Drawing)
                     <img
-                        src="{{ $message->drawingUrl() }}"
+                        src="{{ $message->mediaUrl() }}"
                         alt="A drawing by {{ $author?->name }}"
                         width="{{ \App\Services\FeedDrawings::WIDTH }}"
                         height="{{ \App\Services\FeedDrawings::HEIGHT }}"
                         loading="lazy"
                         class="mt-[6px] w-full rounded-[13px] border border-fq-line"
                     >
+                    @break
+
+                @case (FeedMessageKind::Photo)
+                    {{-- The real stored dimensions, unlike the drawing above
+                         whose size is known at compile time. Without them the
+                         browser reserves nothing and every photo that loads
+                         shoves the conversation down the page under the reader. --}}
+                    <img
+                        src="{{ $message->mediaUrl() }}"
+                        alt="{{ $message->body ? $message->body.' — a photo by '.$author?->name : 'A photo by '.$author?->name }}"
+                        width="{{ $message->image_width }}"
+                        height="{{ $message->image_height }}"
+                        loading="lazy"
+                        class="mt-[6px] w-full rounded-[13px] border border-fq-line"
+                    >
+
+                    {{-- The caption, at the same 16px a message body gets. It
+                         is a message body; it just happens to have a picture
+                         above it. --}}
+                    @if ($message->body)
+                        <div class="mt-[6px] text-[16px] leading-[1.45] [text-wrap:pretty]">{{ $message->body }}</div>
+                    @endif
                     @break
             @endswitch
 

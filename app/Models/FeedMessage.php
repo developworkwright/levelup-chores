@@ -28,6 +28,9 @@ class FeedMessage extends Model
         'body',
         'stamp',
         'drawing_path',
+        'image_path',
+        'image_width',
+        'image_height',
         'subject_id',
         'source_type',
         'source_id',
@@ -93,14 +96,21 @@ class FeedMessage extends Model
     }
 
     /**
-     * Where the browser fetches a drawing from. Null for every other kind.
+     * Where the browser fetches this message's picture from — a finger drawing
+     * or a photograph. Null for every other kind.
      *
      * Always the app's own route, never a bucket URL: the bucket is private,
      * and the route is what checks the viewer can read this message's room.
+     * Both names land on the same controller, so there is one copy of that
+     * check rather than two — see FeedMediaController.
      */
-    public function drawingUrl(): ?string
+    public function mediaUrl(): ?string
     {
-        return $this->drawing_path ? route('feed.drawing', $this) : null;
+        return match (true) {
+            $this->kind === FeedMessageKind::Drawing && (bool) $this->drawing_path => route('feed.drawing', $this),
+            $this->kind === FeedMessageKind::Photo && (bool) $this->image_path => route('feed.photo', $this),
+            default => null,
+        };
     }
 
     /**
@@ -115,6 +125,8 @@ class FeedMessage extends Model
             FeedMessageKind::Quote => '“'.$this->body.'”',
             FeedMessageKind::Stamp => $this->stamp?->label() ?? 'sent a stamp',
             FeedMessageKind::Drawing => 'sent a drawing',
+            // The caption where there is one: it is what was actually said.
+            FeedMessageKind::Photo => (string) ($this->body ?: 'sent a photo'),
         };
     }
 }

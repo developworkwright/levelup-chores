@@ -12,15 +12,18 @@ use App\Models\FeedRoomMember;
 use App\Models\FeedRoomRead;
 use App\Models\FeelingEntry;
 use App\Models\Household;
+use App\Models\Meal;
 use App\Models\Profile;
 use App\Models\Quote;
 use App\Notifications\FeedMessagePosted;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 use RuntimeException;
 use Throwable;
 
@@ -67,6 +70,11 @@ class FeedService
      */
     public const PER_ROOM = 60;
 
+    /** How many pictures one person may post in MEDIA_WINDOW_SECONDS. */
+    public const MEDIA_PER_WINDOW = 20;
+
+    public const MEDIA_WINDOW_SECONDS = 300;
+
     /**
      * The household roster, memoised for the life of one request — every room
      * in the list asks for it, and it is the same five people each time.
@@ -75,7 +83,10 @@ class FeedService
      */
     private array $roster = [];
 
-    public function __construct(private FeedDrawings $drawings) {}
+    public function __construct(
+        private FeedDrawings $drawings,
+        private FeedPhotos $photos,
+    ) {}
 
     /*
      * ------------------------------------------------------------------
@@ -345,9 +356,64 @@ class FeedService
     {
         abort_unless($room->readableBy($author), 403);
 
+        $this->allowMedia($author);
+
         return $this->write($author, $room, FeedMessageKind::Drawing, [
             'drawing_path' => $this->drawings->store($author, $dataUrl),
         ]);
+    }
+
+    /**
+     * Posts a photograph, with the composer's line as its caption.
+     *
+     * Same rooms and the same rule as a drawing: one posted in a room a
+     * grown-up cannot read is one a grown-up cannot read. What is stored is not
+     * the file that arrived — see FeedPhotos, which keeps the pixels and throws
+     * everything else away.
+     *
+     * @throws RuntimeException when the upload isn't a photograph this can
+     *                          read, which the page shows rather than swallows
+     */
+    public function photo(Profile $author, FeedRoom $room, UploadedFile $file, string $caption = ''): FeedMessage
+    {
+        abort_unless($room->readableBy($author), 403);
+
+        $this->allowMedia($author);
+
+        $stored = $this->photos->store($author, $file);
+
+        return $this->write($author, $room, FeedMessageKind::Photo, [
+            'image_path' => $stored['path'],
+            'image_width' => $stored['width'],
+            'image_height' => $stored['height'],
+            'body' => $this->clean($caption) ?: null,
+        ]);
+    }
+
+    /**
+     * The one throttle in the feed, and it is on the two kinds that cost a disk.
+     *
+     * Talking is deliberately unlimited — this is where these kids talk to each
+     * other and rationing that would be the wrong app. A picture is different:
+     * every one is a write to a bucket that somebody pays for, and the arrival
+     * of a camera button is the arrival of a six-year-old who has discovered a
+     * camera button. Twenty in five minutes is far past enthusiasm and well
+     * short of anything a real afternoon produces.
+     *
+     * @throws RuntimeException phrased for the kid holding the phone
+     */
+    private function allowMedia(Profile $author): void
+    {
+        $allowed = RateLimiter::attempt(
+            'feed-media:'.$author->id,
+            self::MEDIA_PER_WINDOW,
+            fn () => true,
+            self::MEDIA_WINDOW_SECONDS,
+        );
+
+        if (! $allowed) {
+            throw new RuntimeException('That is a lot of pictures at once. Try again in a few minutes.');
+        }
     }
 
     /**
@@ -648,6 +714,29 @@ class FeedService
         return app(FeelingService::class)->houseToday($viewer);
     }
 
+    /**
+     * What's for dinner tonight, and tomorrow if a grown-up has got that far.
+     *
+     * A delegate, like houseToday() and gratitudeToday() above it: the feed
+     * draws the answer, MealService decides it, and there is exactly one place
+     * that knows the household day rolls at 4am.
+     *
+     * Unlike the feelings beside it this is not gated on anything. Dinner is
+     * not private — see the house card for why it is drawn above the line that
+     * asks a kid to say how their day went first.
+     *
+     * @return array{tonight: ?Meal, tomorrow: ?Meal}
+     */
+    public function dinner(Profile $viewer): array
+    {
+        $meals = app(MealService::class);
+
+        return [
+            'tonight' => $meals->tonight($viewer->household),
+            'tomorrow' => $meals->tomorrow($viewer->household),
+        ];
+    }
+
     /*
      * ------------------------------------------------------------------
      * Internals
@@ -743,6 +832,9 @@ class FeedService
             $body = match ($message->kind) {
                 FeedMessageKind::Stamp => ($message->stamp?->glyph() ?? '').' '.($message->stamp?->label() ?? ''),
                 FeedMessageKind::Drawing => 'Sent a drawing',
+                // The caption where there is one — it is what they actually
+                // said, and "Sent a photo" under it would say less.
+                FeedMessageKind::Photo => (string) ($message->body ?: 'Sent a photo'),
                 default => (string) $message->body,
             };
 

@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\FeedDrawingController;
+use App\Http\Controllers\FeedMediaController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
@@ -38,12 +38,14 @@ Route::post('/logout', function () {
     return redirect('/');
 })->middleware('auth:profile')->name('logout');
 
-// A family feed drawing, for anybody who can read the room it was posted in —
-// kids and grown-ups alike, so it sits outside both role groups. The bucket is
-// private and there is no public URL for a drawing; see FeedDrawingController.
-Route::get('/feed/drawings/{message}', FeedDrawingController::class)
-    ->middleware('auth:profile')
-    ->name('feed.drawing');
+// A family feed picture — a finger drawing or a photograph — for anybody who
+// can read the room it was posted in. Kids and grown-ups alike, so these sit
+// outside both role groups. The bucket is private and there is no public URL
+// for either; see FeedMediaController, which is one gate behind both names.
+Route::middleware('auth:profile')->group(function () {
+    Route::get('/feed/drawings/{message}', FeedMediaController::class)->name('feed.drawing');
+    Route::get('/feed/photos/{message}', FeedMediaController::class)->name('feed.photo');
+});
 
 Route::middleware(['auth:profile', 'role:kid', 'sync-streak', 'arcade-last-call'])->prefix('kid')->group(function () {
     // Home: the day laid out in the order it should be done in — quest, chest,
@@ -112,6 +114,11 @@ Route::middleware(['auth:profile', 'role:parent', 'arcade-last-call'])->prefix('
     // The music library. Songs live on a disk rather than in the repository,
     // so adding one is a page rather than a commit — see MusicService.
     Volt::route('/music', 'parent.music')->name('parent.music');
+    // What's for dinner. The third screen over here that isn't administration:
+    // it answers a question the kids ask out loud every afternoon, on the feed
+    // card they are already looking at. See the meals migration for the meal
+    // planning this is deliberately not yet.
+    Volt::route('/meals', 'parent.meals')->name('parent.meals');
     Volt::route('/kids', 'parent.kids')->name('parent.kids');
     Volt::route('/standings', 'parent.standings')->name('parent.standings');
     Volt::route('/activity', 'parent.activity')->name('parent.activity');

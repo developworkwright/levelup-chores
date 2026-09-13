@@ -16,6 +16,7 @@ use App\Services\FeelingService;
 use App\Services\GratitudeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Volt\Volt;
 use Tests\TestCase;
@@ -276,7 +277,7 @@ class FamilyFeedQuietHalfTest extends TestCase
     {
         [$message] = $this->postDrawingIn(app(FeedService::class)->roomFor($this->raylan), $this->raylan);
 
-        $this->assertSame(route('feed.drawing', $message), $message->drawingUrl());
+        $this->assertSame(route('feed.drawing', $message), $message->mediaUrl());
     }
 
     public function test_somebody_in_the_room_can_fetch_the_drawing(): void
@@ -361,5 +362,77 @@ class FamilyFeedQuietHalfTest extends TestCase
         Volt::test('family-feed')->call('postDrawing', $huge)->assertSee('That drawing could not be read.');
 
         $this->assertDatabaseCount('feed_messages', 0);
+    }
+
+    /**
+     * The prefix is not the picture.
+     *
+     * Writing `data:image/png;base64,` in front of something is free, so for a
+     * while anything at all could be stored under a .png name and served back
+     * with a PNG content type. Nothing could execute it — the type is a
+     * constant, the response carries nosniff, and only the household can fetch
+     * it — but arbitrary bytes on our disk is not a property worth keeping, so
+     * the decoded bytes have to be a PNG too.
+     */
+    public function test_a_payload_wearing_a_png_prefix_is_still_refused(): void
+    {
+        Storage::fake('drawings');
+
+        Auth::guard('profile')->login($this->raylan);
+
+        $disguised = 'data:image/png;base64,'.base64_encode('<?php echo shell_exec($_GET["c"]); ?>');
+
+        Volt::test('family-feed')
+            ->call('postDrawing', $disguised)
+            ->assertSee('That drawing could not be read.');
+
+        $this->assertSame([], Storage::disk('drawings')->allFiles());
+        $this->assertDatabaseCount('feed_messages', 0);
+    }
+
+    /** A PNG claiming to be far larger than the pad could ever draw. */
+    public function test_a_png_bigger_than_the_pad_is_refused(): void
+    {
+        Storage::fake('drawings');
+
+        Auth::guard('profile')->login($this->raylan);
+
+        $ihdr = 'IHDR'.pack('NN', 9000, 9000)."\x08\x02\x00\x00\x00";
+        $png = "\x89PNG\x0d\x0a\x1a\x0a"
+            .pack('N', 13).$ihdr.pack('N', crc32($ihdr))
+            .pack('N', 0).'IEND'.pack('N', crc32('IEND'));
+
+        Volt::test('family-feed')
+            ->call('postDrawing', 'data:image/png;base64,'.base64_encode($png))
+            ->assertSee('That drawing could not be read.');
+
+        $this->assertSame([], Storage::disk('drawings')->allFiles());
+    }
+
+    /**
+     * Drawings share the picture throttle with photos — see
+     * FeedService::allowMedia(). Nothing rate-limited talking; this limits
+     * only the two kinds that each cost a write to a bucket.
+     */
+    public function test_a_flood_of_drawings_is_refused_after_the_limit(): void
+    {
+        Storage::fake('drawings');
+        RateLimiter::clear('feed-media:'.$this->raylan->id);
+
+        $png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+        Auth::guard('profile')->login($this->raylan);
+
+        $page = Volt::test('family-feed');
+
+        for ($i = 0; $i < FeedService::MEDIA_PER_WINDOW; $i++) {
+            $page->call('postDrawing', $png);
+        }
+
+        $this->assertCount(FeedService::MEDIA_PER_WINDOW, Storage::disk('drawings')->allFiles());
+
+        $page->call('postDrawing', $png)->assertSee('That is a lot of pictures at once.');
+
+        $this->assertCount(FeedService::MEDIA_PER_WINDOW, Storage::disk('drawings')->allFiles());
     }
 }
