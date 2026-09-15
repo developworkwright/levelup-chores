@@ -517,6 +517,105 @@ class FamilyFeedTest extends TestCase
     }
 
     /**
+     * The feed opens in Everyone, on every screen.
+     *
+     * A phone used to land on the room list and make you pick before it would
+     * show you a word. The answer was Everyone almost every time, so the app was
+     * charging a screen and a tap for a question it could answer itself.
+     */
+    public function test_the_feed_opens_in_everyone_without_being_asked(): void
+    {
+        $this->feed()->say($this->westin, $this->room(FeedRoomKind::Everyone), 'already here');
+
+        Auth::guard('profile')->login($this->raylan);
+
+        Volt::test('family-feed')
+            ->assertSet('roomId', $this->room(FeedRoomKind::Everyone)->id)
+            ->assertSee('already here');
+    }
+
+    /** Landing in a room reads it, so the count doesn't outlive the reading. */
+    public function test_landing_in_everyone_clears_its_unread_count(): void
+    {
+        $this->feed()->say($this->westin, $this->room(FeedRoomKind::Everyone), 'morning');
+
+        Auth::guard('profile')->login($this->raylan);
+
+        Volt::test('family-feed')->html();
+
+        $this->assertSame(0, $this->feed()->unreadTotal($this->raylan));
+    }
+
+    /**
+     * What the room list was doing that the room cannot do for itself: saying
+     * that something is waiting somewhere else. Folding the list behind the
+     * picker without this would have quietly cost the visibility the feed is on
+     * Home for.
+     */
+    public function test_the_picker_carries_the_unread_count_from_the_other_rooms(): void
+    {
+        $this->feed()->say($this->westin, $this->room(FeedRoomKind::Kids), 'in here instead');
+
+        Auth::guard('profile')->login($this->raylan);
+
+        // Everyone is open, so the one waiting message is elsewhere.
+        $picker = $this->picker(Volt::test('family-feed')->html());
+
+        $this->assertStringContainsString('Switch rooms', $picker);
+        $this->assertStringContainsString('1 unread elsewhere', $picker);
+
+        // Read it, and the count on the picker goes with it.
+        $open = Volt::test('family-feed')->call('open', $this->room(FeedRoomKind::Kids)->id);
+
+        $this->assertStringNotContainsString('unread elsewhere', $this->picker($open->html()));
+    }
+
+    /**
+     * The picker is the room's header on a phone, so it carries the same
+     * who-can-read line the laptop header does. Nobody learns their audience
+     * after posting — on any screen.
+     */
+    public function test_the_picker_draws_the_who_can_read_line(): void
+    {
+        Auth::guard('profile')->login($this->raylan);
+
+        $everyone = $this->room(FeedRoomKind::Everyone);
+
+        $this->assertStringContainsString(
+            $everyone->audienceLineFor($this->raylan, $this->feed()->roster($this->household)),
+            $this->picker(Volt::test('family-feed')->html()),
+        );
+    }
+
+    /**
+     * The room list is drawn twice — the laptop's rail and the phone's picker —
+     * and a wire:key used twice in one component is one element as far as
+     * morphing is concerned, which leaves one of the two copies looking right
+     * and doing nothing when tapped.
+     */
+    public function test_the_two_copies_of_the_room_list_do_not_share_wire_keys(): void
+    {
+        Auth::guard('profile')->login($this->raylan);
+
+        preg_match_all('/wire:key="([^"]+)"/', Volt::test('family-feed')->html(), $keys);
+
+        $this->assertNotEmpty($keys[1]);
+        $this->assertSame(
+            $keys[1],
+            array_unique($keys[1]),
+            'A wire:key is used twice on the page; one of the rows carrying it will stop responding.',
+        );
+    }
+
+    /** The picker's markup, which is the only part of the page a phone sees. */
+    private function picker(string $html): string
+    {
+        $this->assertSame(1, preg_match('/<div\s+class="relative lg:hidden".*?<\/button>/s', $html, $found));
+
+        return $found[0];
+    }
+
+    /**
      * On Home the messages scroll inside a fixed height, so a long conversation
      * can't push the rest of the day down the page — but only on a laptop. The
      * full page has no cap on any screen; there the room is the page.
@@ -584,11 +683,11 @@ class FamilyFeedTest extends TestCase
 
         Auth::guard('profile')->login($this->mom);
 
-        // Falls back to Everyone rather than throwing: a stale link in a PWA
-        // should land somewhere, not on an error page.
+        // Stays where it landed rather than throwing: a stale link in a PWA
+        // should leave you somewhere, not on an error page.
         Volt::test('family-feed')
             ->call('open', $room->id)
-            ->assertSet('roomId', null);
+            ->assertSet('roomId', $this->room(FeedRoomKind::Everyone)->id);
     }
 
     /**

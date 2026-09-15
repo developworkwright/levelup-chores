@@ -101,6 +101,12 @@ new class extends Component
         // scheduled, the host scales to zero and a cron would never fire. Two
         // lookups on a normal visit; one insert on the day a kid is added.
         $this->feed()->ensureRooms($this->profile->household);
+
+        // Landed in rather than chosen. roomFor(null) is Everyone — held here
+        // instead of resolved again at render time so that the room the picker
+        // names, the room markRead() clears and the room send() posts into are
+        // all the same one, without any of them having to know the default.
+        $this->roomId = $this->feed()->roomFor($this->profile)?->id;
     }
 
     public function open(int $roomId): void
@@ -115,13 +121,6 @@ new class extends Component
         $this->closeTrays();
 
         $this->feed()->markRead($this->profile, $room);
-    }
-
-    /** Back to the room list. Only the phone has anywhere to go back to. */
-    public function back(): void
-    {
-        $this->roomId = null;
-        $this->closeTrays();
     }
 
     public function showTray(string $tray): void
@@ -380,12 +379,22 @@ new class extends Component
 
         return [
             'rooms' => array_filter($rooms, fn (array $r) => $r['room']->kind->isGroup()),
+            // Everything waiting in a room that is not the open one. On a phone
+            // the room list is behind the picker, so this number is the only
+            // thing left saying that somewhere else is worth a look — without
+            // it, folding the list away would quietly cost the visibility the
+            // feed is on Home for in the first place.
+            'elsewhere' => collect($rooms)
+                ->reject(fn (array $r) => $room && (int) $r['room']->id === (int) $room->id)
+                ->sum('unread'),
             // Every other person in the house, each with their one-to-one if
             // it exists yet — see FeedService::peopleFor().
             'people' => $feed->peopleFor($this->profile, $rooms),
             'room' => $room,
             'roomName' => $room?->nameFor($this->profile, $roster),
             'audience' => $room?->audienceLineFor($this->profile, $roster),
+            'monogram' => $room?->monogramFor($this->profile, $roster),
+            'accent' => $room?->accentFor($this->profile, $roster) ?? 'var(--fq-text-3)',
             'members' => $room?->membersFrom($roster) ?? collect(),
             'placeholder' => $room?->composerPlaceholderFor($this->profile, $roster) ?? '',
             'messages' => $room ? $feed->messagesIn($this->profile, $room) : collect(),
@@ -400,16 +409,13 @@ new class extends Component
     }
 }; ?>
 
-@php
-    $opened = $roomId !== null;
-    // What each column does on a phone: one of them is the screen you are on.
-    $listSide = $opened ? 'hidden lg:flex' : 'flex';
-    $roomSide = $opened ? 'flex' : 'hidden lg:flex';
-@endphp
-
 <div class="flex flex-col gap-3">
     @unless ($embedded)
-        <h1 @class(['font-baloo text-[23px] font-extrabold', 'max-lg:hidden' => $opened])>Family</h1>
+        {{-- The phone's room picker names the room a line below this, and the
+             nav already says which page this is, so the heading would be the
+             third answer to a question nobody asked — at the top of the one
+             screen the feed has. --}}
+        <h1 class="font-baloo text-[23px] font-extrabold max-lg:hidden">Family</h1>
     @endunless
 
     <div class="grid gap-3 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start lg:gap-4">
@@ -420,39 +426,22 @@ new class extends Component
              Two columns rather than the handoff's three. The house is five
              people, so the rail was never going to be long, and the room is the
              thing that grows — it takes all the width to the right, where the
-             drawings and the longer messages have room to be read. On a phone
-             this column is screen one and the room is screen two. --}}
-        <div class="min-w-0 flex-col gap-3 {{ $listSide }}">
-            <div class="flex flex-col gap-[6px] max-lg:gap-[7px]">
-                <span class="pl-[2px] font-mono-fq text-[9.5px] tracking-[0.2em] text-fq-text-4 uppercase">Rooms</span>
+             drawings and the longer messages have room to be read.
 
-                @foreach ($rooms as $entry)
-                    <x-feed.room-row
-                        :entry="$entry"
-                        :selected="$room && $room->id === $entry['room']->id"
-                        :tz="$tz"
-                    />
-                @endforeach
-            </div>
-
-            {{-- Everybody else in the house, already listed. There is no "Start
-                 one" and no picker: a family of five does not need to go looking
-                 for who it can talk to, and a six-year-old should find his
-                 brother's name where it always is. A conversation's room is made
-                 the first time somebody taps a name — see peopleFor(). --}}
-            <div class="flex flex-col gap-[6px] max-lg:gap-[7px]">
-                <span class="pl-[2px] font-mono-fq text-[9.5px] tracking-[0.2em] text-fq-text-4 uppercase">Just you two</span>
-
-                @foreach ($people as $person)
-                    <x-feed.room-row
-                        :entry="$person['entry']"
-                        :selected="$room && $person['entry']['room'] && $room->id === $person['entry']['room']->id"
-                        :click="$person['started'] ? null : 'startWith('.$person['profile']->id.')'"
-                        :row-key="'person-'.$person['profile']->id"
-                        :tz="$tz"
-                    />
-                @endforeach
-            </div>
+             On a phone there is one column and the room is at the top of it:
+             the rooms fold into the picker, and the quiet half sorts *under*
+             the room rather than above it. `order` rather than a second copy of
+             these two cards somewhere else in the markup — Today in the house
+             is worth reading and worth nobody's morning being spent scrolling
+             past it to reach what was actually said. --}}
+        <div class="flex min-w-0 flex-col gap-3 max-lg:order-2">
+            <x-feed.room-list
+                class="max-lg:hidden"
+                :rooms="$rooms"
+                :people="$people"
+                :room="$room"
+                :tz="$tz"
+            />
 
             <x-feed.house-card :house="$house" :gratitude="$gratitude" :dinner="$dinner" :viewer="$profile" />
 
@@ -460,19 +449,25 @@ new class extends Component
         </div>
 
         {{-- The room. --}}
-        <div class="min-w-0 flex-col gap-[11px] {{ $roomSide }}">
+        <div class="flex min-w-0 flex-col gap-[11px] max-lg:order-1">
             @if ($room)
-                <div class="flex items-start gap-[10px] border-b border-[var(--fq-divider)] pb-[11px]">
-                    {{-- Only the phone has a screen to go back to; on a laptop
-                         the rail is right there and a back button would be a
-                         control that undoes nothing. --}}
-                    <button
-                        type="button"
-                        wire:click="back"
-                        class="grid size-11 shrink-0 place-items-center rounded-[14px] border border-fq-line-2 bg-fq-sunk text-[17px] text-fq-text-3 lg:hidden"
-                        aria-label="Back to rooms"
-                    >&lsaquo;</button>
+                <x-feed.room-picker
+                    :rooms="$rooms"
+                    :people="$people"
+                    :room="$room"
+                    :room-name="$roomName"
+                    :audience="$audience"
+                    :monogram="$monogram"
+                    :accent="$accent"
+                    :elsewhere="$elsewhere"
+                    :tz="$tz"
+                />
 
+                {{-- The laptop's header. On a phone the picker above is the
+                     header: it carries the same name and the same who-can-read
+                     line, and drawing both would be the room introducing itself
+                     twice on the screen with the least room to do it. --}}
+                <div class="flex items-start gap-[10px] border-b border-[var(--fq-divider)] pb-[11px] max-lg:hidden">
                     <div class="flex min-w-0 flex-1 flex-col gap-px">
                         <span class="font-baloo text-[20px] font-extrabold lg:text-[22px]">
                             @if ($room->kind->glyph()) {{ $room->kind->glyph() }} @endif {{ $roomName }}
