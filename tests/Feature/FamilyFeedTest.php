@@ -636,6 +636,24 @@ class FamilyFeedTest extends TestCase
     }
 
     /**
+     * The production bug: picking a room from the dropdown left you in
+     * Everyone. Livewire 4 resolves wire:click="open(2)" against the Alpine
+     * scope around it first, and the picker's own flag was called `open` — so
+     * the flag got called instead of the component. Nothing in the picker's
+     * scope may share a name with the actions its rows call.
+     */
+    public function test_the_room_picker_scope_never_shadows_the_room_actions(): void
+    {
+        Auth::guard('profile')->login($this->raylan);
+
+        $html = Volt::test('family-feed', ['embedded' => true])->html();
+
+        $this->assertSame(1, preg_match('/x-data="\{([^"]*)\}"[^>]*>\s*<button[^>]*picking/s', $html, $scope), 'The picker scope was not found.');
+        $this->assertDoesNotMatchRegularExpression('/\b(open|startWith)\b/', $scope[1]);
+        $this->assertStringContainsString('wire:click="open(', $html);
+    }
+
+    /**
      * The kid's Home gives the room a column of its own with nothing under it,
      * so there the box comes off and the messages simply run down the page.
      * Parent Home keeps it: the approval queues are below.

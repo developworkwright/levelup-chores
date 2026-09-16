@@ -18,16 +18,20 @@
      before knowing who hears it. --}}
 @props(['rooms', 'people', 'room', 'roomName', 'audience', 'monogram' => null, 'accent' => 'var(--fq-text-3)', 'elsewhere' => 0, 'tz' => 'UTC', 'always' => false])
 
+{{-- `picking`, never `open`. Livewire 4 resolves a wire:click against the
+     Alpine scope around it before the component, and the rows in here call the
+     feed's open(id) — so a flag named `open` got called instead, threw, and
+     every room you picked left you in Everyone. --}}
 <div
     @class(['relative', 'lg:hidden' => ! $always])
-    x-data="{ open: false }"
-    x-on:keydown.escape.window="open = false"
+    x-data="{ picking: false }"
+    x-on:keydown.escape.window="picking = false"
 >
     <button
         type="button"
-        x-on:click="open = ! open"
-        x-on:click.outside="open = false"
-        :aria-expanded="open"
+        x-on:click="picking = ! picking"
+        x-on:click.outside="picking = false"
+        :aria-expanded="picking"
         class="flex w-full items-center gap-[11px] rounded-[15px] border border-fq-line bg-fq-panel p-[11px] text-left"
     >
         {{-- The same glyph-or-monogram the row in the list carries, so the room
@@ -60,7 +64,7 @@
         @endif
 
         <span class="shrink-0 text-[13px] text-fq-text-4" aria-hidden="true">
-            <i class="fa-solid fa-chevron-down transition" :class="open ? 'rotate-180' : ''"></i>
+            <i class="fa-solid fa-chevron-down transition" :class="picking ? 'rotate-180' : ''"></i>
         </span>
 
         <span class="sr-only">Switch rooms{{ $elsewhere > 0 ? ' — '.$elsewhere.' unread elsewhere' : '' }}</span>
@@ -76,9 +80,9 @@
          tap has already chosen a room, and a menu that stays open over the
          answer is a menu you have to dismiss twice. --}}
     <div
-        x-show="open"
+        x-show="picking"
         x-cloak
-        x-on:click="open = false"
+        x-on:click="picking = false"
         x-transition:enter="transition ease-out duration-150"
         x-transition:enter-start="opacity-0 -translate-y-1"
         x-transition:enter-end="opacity-100 translate-y-0"
