@@ -581,6 +581,40 @@ class FeedService
         ]);
     }
 
+    /**
+     * Takes a message down, with its reactions.
+     *
+     * Its author or a grown-up — see FeedMessage::deletableBy() — and only in a
+     * room the viewer can read, so a parent still cannot reach into a
+     * conversation between two kids. Returns false for anything refused.
+     *
+     * A drawing or photo's file is left on the disk. The row is gone, so nothing
+     * links to it and FeedMediaController has nothing to stream it for.
+     *
+     * The room's `last_message_at` falls back to what is now its newest message,
+     * so deleting the latest line doesn't leave the room sorted above rooms that
+     * really are busier.
+     */
+    public function delete(Profile $viewer, int $messageId): bool
+    {
+        $message = FeedMessage::with('room.memberRows')->find($messageId);
+
+        if (! $message || ! $message->room->readableBy($viewer) || ! $message->deletableBy($viewer)) {
+            return false;
+        }
+
+        DB::transaction(function () use ($message) {
+            FeedReaction::where('message_id', $message->id)->delete();
+            $message->delete();
+
+            $message->room->forceFill([
+                'last_message_at' => FeedMessage::where('room_id', $message->room_id)->max('created_at'),
+            ])->save();
+        });
+
+        return true;
+    }
+
     /** Marks a room read up to its last message. */
     public function markRead(Profile $viewer, FeedRoom $room): void
     {

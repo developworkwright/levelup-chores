@@ -346,6 +346,12 @@ new class extends Component
         $this->feed()->react($this->profile, $messageId, $emoji);
     }
 
+    /** Takes a message down — its author's, or any grown-up's call. */
+    public function deleteMessage(int $messageId): void
+    {
+        $this->feed()->delete($this->profile, $messageId);
+    }
+
     /**
      * Laugh at a quote, or take it back.
      *

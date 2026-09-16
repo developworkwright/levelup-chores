@@ -96,6 +96,24 @@ class FeedMessage extends Model
     }
 
     /**
+     * Whether `$viewer` may take this message down: the person who said it, or
+     * any grown-up.
+     *
+     * Only a person talking. An event is the app talking and a quote row is a
+     * pointer to a Quote that lives on the Journal — neither has an author here
+     * to take it back. Room readability is checked by FeedService::delete(),
+     * which is also what keeps a grown-up out of a kid-to-kid conversation.
+     */
+    public function deletableBy(Profile $viewer): bool
+    {
+        if (! $this->kind->isFromAPerson() || (int) $viewer->household_id !== (int) $this->household_id) {
+            return false;
+        }
+
+        return (int) $this->profile_id === (int) $viewer->id || $viewer->isParent();
+    }
+
+    /**
      * Where the browser fetches this message's picture from — a finger drawing
      * or a photograph. Null for every other kind.
      *

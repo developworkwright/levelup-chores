@@ -95,6 +95,16 @@ class FamilyFeedPhotoTest extends TestCase
     }
 
     /** Whatever arrived, what is stored is a JPEG this app drew itself. */
+    public function test_deleting_a_photo_leaves_its_file_on_the_disk(): void
+    {
+        $message = $this->postPhotoIn($this->everyone(), $this->raylan);
+
+        $this->assertTrue(app(FeedService::class)->delete($this->raylan, $message->id));
+
+        $this->assertModelMissing($message);
+        Storage::disk('drawings')->assertExists($message->image_path);
+    }
+
     public function test_every_upload_is_re_encoded_to_one_format(): void
     {
         app(FeedService::class)->photo($this->raylan, $this->everyone(), UploadedFile::fake()->image('shot.png', 400, 300));

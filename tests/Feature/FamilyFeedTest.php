@@ -712,6 +712,117 @@ class FamilyFeedTest extends TestCase
         $this->assertSame('anyone want to play', FeedMessage::firstOrFail()->body);
     }
 
+    /*
+     * ------------------------------------------------------------------
+     * Deleting
+     * ------------------------------------------------------------------
+     */
+
+    public function test_an_author_can_delete_their_own_message_and_its_reactions(): void
+    {
+        $message = $this->feed()->say($this->raylan, $this->room(FeedRoomKind::Everyone), 'oops');
+        $this->feed()->react($this->westin, $message->id, '😂');
+
+        $this->assertTrue($this->feed()->delete($this->raylan, $message->id));
+
+        $this->assertModelMissing($message);
+        $this->assertSame(0, FeedReaction::count());
+    }
+
+    public function test_a_kid_cannot_delete_somebody_elses_message(): void
+    {
+        $message = $this->feed()->say($this->westin, $this->room(FeedRoomKind::Everyone), 'mine');
+
+        $this->assertFalse($this->feed()->delete($this->raylan, $message->id));
+
+        $this->assertModelExists($message);
+    }
+
+    public function test_a_parent_can_delete_a_kids_message(): void
+    {
+        $message = $this->feed()->say($this->raylan, $this->room(FeedRoomKind::Kids), 'something rude');
+
+        $this->assertTrue($this->feed()->delete($this->mom, $message->id));
+
+        $this->assertModelMissing($message);
+    }
+
+    public function test_a_parent_cannot_delete_inside_a_conversation_between_two_kids(): void
+    {
+        $room = $this->feed()->directRoomWith($this->raylan, $this->westin);
+        $message = $this->feed()->say($this->raylan, $room, 'just us');
+
+        $this->assertFalse($this->feed()->delete($this->mom, $message->id));
+
+        $this->assertModelExists($message);
+    }
+
+    public function test_nobody_can_delete_a_message_from_another_household(): void
+    {
+        $message = $this->feed()->say($this->raylan, $this->room(FeedRoomKind::Everyone), 'hi');
+        $stranger = Profile::factory()->parent()->for(Household::factory())->create();
+
+        $this->assertFalse($this->feed()->delete($stranger, $message->id));
+
+        $this->assertModelExists($message);
+    }
+
+    public function test_an_event_cannot_be_deleted(): void
+    {
+        $event = $this->feed()->event($this->raylan, 'earned a badge');
+
+        $this->assertFalse($this->feed()->delete($this->raylan, $event->id));
+        $this->assertFalse($this->feed()->delete($this->mom, $event->id));
+
+        $this->assertModelExists($event);
+    }
+
+    public function test_deleting_the_newest_message_moves_the_room_back_to_the_one_before(): void
+    {
+        $room = $this->room(FeedRoomKind::Everyone);
+
+        $this->travelTo(now()->subHour());
+        $first = $this->feed()->say($this->raylan, $room, 'first');
+        $this->travelBack();
+
+        $second = $this->feed()->say($this->raylan, $room, 'second');
+
+        $this->feed()->delete($this->raylan, $second->id);
+
+        $this->assertSame($first->created_at->toDateTimeString(), $room->fresh()->last_message_at->toDateTimeString());
+
+        $this->feed()->delete($this->raylan, $first->id);
+
+        $this->assertNull($room->fresh()->last_message_at);
+    }
+
+    public function test_the_delete_button_is_drawn_only_for_who_may_use_it(): void
+    {
+        $this->feed()->say($this->westin, $this->room(FeedRoomKind::Everyone), 'from westin');
+
+        Auth::guard('profile')->login($this->raylan);
+        Volt::test('family-feed')->assertDontSeeHtml('wire:click="deleteMessage(');
+
+        Auth::guard('profile')->login($this->westin);
+        Volt::test('family-feed')->assertSeeHtml('aria-label="Delete your message"');
+
+        Auth::guard('profile')->login($this->mom);
+        Volt::test('family-feed')->assertSeeHtml('aria-label="Delete Westin&#039;s message"');
+    }
+
+    public function test_deleting_from_the_page_takes_the_message_down(): void
+    {
+        $message = $this->feed()->say($this->raylan, $this->room(FeedRoomKind::Everyone), 'take this back');
+
+        Auth::guard('profile')->login($this->raylan);
+
+        Volt::test('family-feed')
+            ->call('deleteMessage', $message->id)
+            ->assertDontSee('take this back');
+
+        $this->assertModelMissing($message);
+    }
+
     public function test_the_page_will_not_open_a_room_the_reader_cannot_read(): void
     {
         $room = $this->feed()->directRoomWith($this->raylan, $this->westin);

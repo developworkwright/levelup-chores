@@ -177,6 +177,23 @@
                         @endforeach
                     </div>
                 </div>
+
+                {{-- Pushed to the far end of the row, away from the reactions a
+                     thumb is actually aiming at, and behind a confirm: this is
+                     the one tap in the room that cannot be taken back. --}}
+                @if ($message->deletableBy($viewer))
+                    <button
+                        type="button"
+                        wire:click="deleteMessage({{ $message->id }})"
+                        wire:confirm="Delete this message? Everyone in the room stops seeing it."
+                        class="ml-auto grid size-[44px] place-items-center rounded-full text-[15px] text-fq-text-5 transition hover:text-fq-text-3"
+                        aria-label="Delete {{ (int) $message->profile_id === (int) $viewer->id ? 'your' : $author?->name.'\'s' }} message"
+                    >
+                        <svg viewBox="0 0 24 24" class="size-[17px]" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />
+                        </svg>
+                    </button>
+                @endif
             </div>
         </div>
     </div>
