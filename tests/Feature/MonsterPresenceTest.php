@@ -45,13 +45,18 @@ class MonsterPresenceTest extends TestCase
     {
         $this->spawn('Weekend away');
 
-        // The strip moved to Home with the rest of the daily loop, and on Home
-        // it lives behind the fight row; the Quests page keeps only the monster
-        // watching from behind the board.
-        Volt::test('kid.home')->call('toggleRow', 'fight')
+        // Back on Quests, beside the board that hurts it. Home no longer has a
+        // fight row at all.
+        Volt::test('kid.quests')
             ->assertOk()
             ->assertSee('Boss Fight')
             ->assertSee('Weekend away');
+
+        Volt::test('kid.home')
+            ->assertOk()
+            ->assertDontSee('Boss Fight')
+            ->assertDontSee("toggleRow('fight')", false)
+            ->assertDontSee('fq-watcher', false);
     }
 
     public function test_the_strip_shows_the_health_total_not_just_a_percentage(): void
@@ -60,14 +65,14 @@ class MonsterPresenceTest extends TestCase
 
         // Untouched it reads 100%, which says nothing about whether this is a
         // week's work or an afternoon's.
-        Volt::test('kid.home')->call('toggleRow', 'fight')
+        Volt::test('kid.quests')
             ->assertOk()
             ->assertSee('8,000 HP');
     }
 
     public function test_the_strip_stays_off_the_page_when_nothing_stands(): void
     {
-        Volt::test('kid.home')->call('toggleRow', 'fight')
+        Volt::test('kid.quests')
             ->assertOk()
             ->assertDontSee('Boss Fight');
     }

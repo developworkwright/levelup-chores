@@ -25,9 +25,8 @@ use Tests\TestCase;
  * was a typed search, unusable by exactly the kid who needs it most.
  *
  * The filtered list is read off `viewData('board')` rather than asserted
- * against the rendered page: the adding-up card below the list names two
- * chores of its own, deliberately ignoring the band and the chip, so an
- * `assertDontSee` on a chore name would be testing the adder by accident.
+ * against the rendered page, where other cards (the wheel, the charm strip)
+ * can name a chore the filter has hidden.
  */
 class QuestBoardFilterTest extends TestCase
 {
@@ -310,7 +309,7 @@ class QuestBoardFilterTest extends TestCase
         $this->assertSame(['Mow the lawn'], $this->shown($page));
     }
 
-    public function test_an_empty_combination_points_at_the_adder(): void
+    public function test_an_empty_combination_says_which_control_to_loosen(): void
     {
         $household = $this->household();
         $this->chore($household, 'Brush your teeth', 100);
@@ -319,7 +318,7 @@ class QuestBoardFilterTest extends TestCase
         Volt::test('kid.quests')
             ->set('band', PriceBand::RareOnes->value)
             ->assertSee('Nothing on the board matches that right now.')
-            ->assertSee('Try a different amount, or add two smaller jobs together below.');
+            ->assertSee('Try a different amount.');
     }
 
     public function test_a_row_shows_the_money_and_the_points(): void

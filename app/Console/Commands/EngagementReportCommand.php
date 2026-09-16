@@ -89,6 +89,7 @@ class EngagementReportCommand extends Command
         ['Sibling rescues given', 'streak_rescues', 'rescued_by_profile_id', 'created_at'],
         ['Sibling rescues received', 'streak_rescues', 'profile_id', 'rescued_date'],
         ['Sleep logged', 'sleep_nights', 'profile_id', 'night_date'],
+        ['Gifts given', 'sibling_gifts', 'giver_id', 'gift_date'],
         ['Gratitude written', 'gratitude_entries', 'profile_id', 'entry_date'],
         ['Feelings logged', 'feeling_entries', 'profile_id', 'felt_on'],
         ['Quotes reacted to', 'quote_reactions', 'profile_id', 'created_at'],

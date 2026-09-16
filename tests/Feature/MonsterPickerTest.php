@@ -127,9 +127,8 @@ class MonsterPickerTest extends TestCase
     {
         $this->spawn('Weekend away');
 
-        // The strip moved to Home, and on Home it lives behind the fight row:
-        // the Quests page keeps only the watcher.
-        Volt::test('kid.home')->call('toggleRow', 'fight')
+        // The strip lives on Quests, beside the board that hurts it.
+        Volt::test('kid.quests')
             ->assertOk()
             ->assertSee('Boss Fight')
             ->assertSee('Weekend away');

@@ -41,6 +41,9 @@
             aria-controls="day-panel"
             @class([
                 'relative flex min-h-[72px] flex-col justify-center gap-[3px] rounded-[14px] border px-2 py-[9px] text-center transition',
+                // A tile left alone on the last line of three takes the line,
+                // rather than sitting in the corner looking like it fell off.
+                'col-span-3' => $loop->last && count($rows) % 3 === 1,
                 'opacity-[.72]' => ! $open && ($row['done'] || $row['quiet']),
             ])
             @if ($attention) data-attention @endif

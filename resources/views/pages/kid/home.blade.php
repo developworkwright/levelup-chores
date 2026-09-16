@@ -6,18 +6,17 @@ use App\Enums\FeelingVisibility;
 use App\Enums\PerkEffect;
 use App\Exceptions\PerkUnavailableException;
 use App\Models\Chore;
-use App\Models\ChoreCompletion;
 use App\Models\Profile;
 use App\Services\CelebrationService;
 use App\Services\ChestService;
 use App\Services\ChoreService;
 use App\Services\FeedService;
 use App\Services\FeelingService;
+use App\Services\GiftService;
 use App\Services\GratitudeService;
 use App\Services\HouseholdClock;
 use App\Services\HouseholdService;
 use App\Services\MealService;
-use App\Services\MonsterService;
 use App\Services\PerkInventoryService;
 use App\Services\SpinService;
 use App\Services\StreakService;
@@ -30,7 +29,7 @@ use Livewire\Volt\Component;
  * Home — the day, in the order it usually goes.
  *
  * The bonus chest and the streak chest — the two a kid opens themselves — then
- * the two the house does together: the weekly prize and the boss fight. Every
+ * the weekly prize the house chases together. Every
  * other kid page is organised by *what kind of thing* it holds, which works
  * fine once you know what you're looking for and is no help at all to a kid
  * asking "what now?" — this one is organised by when.
@@ -41,6 +40,9 @@ use Livewire\Volt\Component;
  * Quote of the Day went into the family feed, which is where the house is
  * talking; and the feelings card folds to a line once it has been answered,
  * because everybody's answers are on the Family page now.
+ *
+ * The boss fight left too, watcher and all, for Quests: every hit on the
+ * monster is a chore off that board, so that is where it stands.
  *
  * Deliberately not numbered. The order is the habit, not a rule: nothing here is
  * gated on anything above it, and a kid who wants to open the second chest
@@ -55,12 +57,13 @@ use Livewire\Volt\Component;
  * and a board belongs on Quests.
  *
  * Quests keeps what this page doesn't: the bonus wheel, the board and its
- * charms, the mystery chore, the bounty board, the sleep card.
+ * charms, the boss fight, the mystery chore, the bounty board, the sleep card.
  *
- * Under the six rows of the day sit three about the house rather than the
- * work — Feelings, Gratitude and Meals. They open like the rest but are not
- * part of the "n of 6": a feeling is never a task to tick off, and nobody
- * finishes dinner by reading the menu.
+ * Under the five rows of the day sit the ones about the house rather than the
+ * work — the Daily Gift (for a kid with a sibling), Feelings, Gratitude and
+ * Meals. They open like the rest but are not part of the "n of 5": a feeling is
+ * never a task to tick off, nobody finishes dinner by reading the menu, and a
+ * gift that counted toward your own day would be given for the tick.
  */
 new class extends Component
 {
@@ -90,18 +93,18 @@ new class extends Component
     /**
      * Which row of "Your day" is open, by key, or null for none.
      *
-     * One at a time, and remembered per kid for the household day — see
-     * {@see self::rememberOpenRow()}. It is a server property rather than
-     * Alpine state because it has to survive `wire:navigate`: a kid who closed
-     * the chest, went to the board and came back should find it closed.
+     * One at a time, and every visit starts with none, the way parent Home
+     * does. The index is the page: a kid arriving should read every row's
+     * status at a glance, and an open panel pushes most of them off a phone.
+     * Nothing is remembered and nothing opens itself, not even a waiting streak
+     * chest — its row says READY, which is the nudge.
+     *
+     * The one way in with a row open is a link that names it (`?row=`).
      */
     public ?string $openRow = null;
 
-    /** The key every row that has never been touched starts on. */
-    private const DEFAULT_ROW = 'work';
-
     /** Every row a link may ask for with `?row=`. */
-    private const ROWS = ['work', 'chest', 'wheel', 'streak', 'prize', 'fight', 'feelings', 'gratitude', 'meals'];
+    private const ROWS = ['work', 'chest', 'wheel', 'streak', 'prize', 'gift', 'feelings', 'gratitude', 'meals'];
 
     /**
      * The three boxes of the gratitude quest. Deferred rather than live —
@@ -133,17 +136,13 @@ new class extends Component
         abort_unless($this->profile->isKid(), 403);
 
         $this->feelingsAnsweredOnArrival = app(FeelingService::class)->hasAnswered($this->profile);
-        $this->openRow = $this->resolveOpenRow();
-
-        // A link that names a row opens it — the Journal's "write today's" and
-        // the feed's gratitude arrow land a kid on the form rather than on
-        // whichever row they last left open. Remembered like a tap, so it
-        // stays open on the way back.
+        // A link that names a row opens it — the Journal's "write today's", the
+        // feed's gratitude arrow and the gift push land a kid on the thing they
+        // were sent to rather than on a shut index.
         $requested = request()->query('row');
 
         if (is_string($requested) && in_array($requested, self::ROWS, true)) {
-            $this->openRow = $requested;
-            $this->rememberOpenRow($requested);
+            $this->toggleRow($requested);
         }
 
         $chests = app(ChestService::class);
@@ -164,59 +163,19 @@ new class extends Component
     }
 
     /**
-     * Which row this kid should arrive at open.
-     *
-     * Three rules, in the order they beat each other:
-     *
-     * 1. **Urgency opens a row itself.** A streak chest sitting unopened is the
-     *    one thing on this page that is worth something and expires, so it
-     *    outranks a remembered close — once. Persisting it is what makes it
-     *    once: closing it again sticks.
-     * 2. **A remembered answer stands**, for the household day it was given on.
-     *    `home_day_open` holds the row and null means "closed everything"; the
-     *    date beside it is what tells those apart from never having touched it.
-     * 3. **Otherwise Work is open**, because a kid who has just arrived is being
-     *    asked "what now" and that is the row that answers it.
-     */
-    private function resolveOpenRow(): ?string
-    {
-        $today = HouseholdClock::for($this->profile->household)->today();
-        $remembered = $this->profile->home_day_closed_on?->isSameDay($today) ?? false;
-
-        $alreadyNudged = $this->profile->home_day_urgent_on?->isSameDay($today) ?? false;
-
-        if ($this->profile->pending_streak_chest && ! $alreadyNudged) {
-            $this->rememberOpenRow('streak');
-
-            // Stamped so this happens once. Without it, closing the row a chest
-            // opened would re-open it on the very next render — an argument
-            // rather than a nudge.
-            $this->profile->forceFill(['home_day_urgent_on' => $today])->save();
-
-            return 'streak';
-        }
-
-        return $remembered ? $this->profile->home_day_open : self::DEFAULT_ROW;
-    }
-
-    /**
      * Opens a row, or shuts the open one. Only ever one at a time: without that
      * the column grows back into the page of stacked heroes this replaced.
+     *
+     * Opening the gift row is what reads the gifts in it — the row's alert is
+     * for gifts nobody has looked at yet.
      */
     public function toggleRow(string $key): void
     {
         $this->openRow = $this->openRow === $key ? null : $key;
 
-        $this->rememberOpenRow($this->openRow);
-    }
-
-    /** Both columns together, so "closed everything" can never read as "new kid". */
-    private function rememberOpenRow(?string $key): void
-    {
-        $this->profile->forceFill([
-            'home_day_open' => $key,
-            'home_day_closed_on' => HouseholdClock::for($this->profile->household)->today(),
-        ])->save();
+        if ($this->openRow === 'gift') {
+            app(GiftService::class)->markSeen($this->profile);
+        }
     }
 
     /**
@@ -285,6 +244,28 @@ new class extends Component
         $this->gratitudeMessage = $service->isAvailable($this->profile)
             ? 'Fill in all three before you hand it in.'
             : "Today's gratitude quest is already done — back tomorrow!";
+    }
+
+    /**
+     * Today's gift, to the sibling picked. The service re-checks both the
+     * sibling and the day, so a stale page can only ever fail to give — never
+     * give twice.
+     */
+    public function giveGift(int $recipientId): void
+    {
+        $gift = app(GiftService::class)->give($this->profile, $recipientId);
+
+        if ($gift === null) {
+            return;
+        }
+
+        $this->dispatch(
+            'celebrate',
+            message: "{$gift->recipient->name} got your ticket!",
+            style: 'heart',
+            motion: 'burst',
+            origin: 'tap',
+        );
     }
 
     public function openDailyChest(): void
@@ -490,15 +471,6 @@ new class extends Component
         $this->dispatch('celebrate', message: $outcome, style: $case->celebrationStyle(), motion: 'burst', origin: 'tap');
     }
 
-    /** The monster standing, as the boss strip and the watcher want it. */
-    private function monsterState(): ?array
-    {
-        $monsters = app(MonsterService::class);
-        $monster = $monsters->rotateWeakness($this->profile->household);
-
-        return $monster ? $monsters->stateFor($monster) : null;
-    }
-
     public function with(): array
     {
         $streaks = app(StreakService::class);
@@ -528,7 +500,6 @@ new class extends Component
         $chestAvailable = $chests->isAvailable($this->profile);
         $spunToday = $boost !== null;
         $houseWeek = app(HouseholdService::class)->houseWeek($household);
-        $monsterState = $this->monsterState();
         $streakWindow = $streaks->streakWindowFor($this->profile);
 
         // The countdown the streak row wears when nothing is in yet. Rendered
@@ -541,12 +512,13 @@ new class extends Component
             : null;
 
         /*
-         * The six rows of "Your day", in the order the handoff fixes: the work,
-         * the two things waiting to be opened, the run, and then the two the
-         * house is doing together.
+         * The five rows of "Your day": the work, the two things waiting to be
+         * opened, the run, and then the prize the house is chasing together.
+         * The fight was the sixth and went to Quests, beside the board that
+         * hurts it.
          *
-         * `done` is what greys a row and what the "n of 6" counts. The last two
-         * are news rather than tasks, so they are drawn quiet from the start —
+         * `done` is what greys a row and what the "n of 5" counts. The prize
+         * is news rather than a task, so it is drawn quiet from the start —
          * see `quiet`.
          */
         $dayRows = [
@@ -621,25 +593,6 @@ new class extends Component
                 // News, not a task: drawn quiet from the start, however it goes.
                 'quiet' => true,
             ],
-            [
-                'key' => 'fight',
-                'glyph' => '💀',
-                'label' => 'The Fight',
-                'accent' => 'var(--fq-coral)',
-                'tileLabel' => 'Fight',
-                'sub' => $monsterState
-                    ? $monsterState['name'].' · '.number_format($monsterState['maxHealth'] - $monsterState['damage']).' HP left'
-                    : 'Nothing standing',
-                'status' => $monsterState
-                    ? number_format($monsterState['maxHealth'] - $monsterState['damage']).' HP'
-                    : 'NONE',
-                'statusColor' => 'var(--fq-text-4)',
-                // A monster on its knees is done; an empty arena is not — there
-                // is nothing to have finished, and counting it toward "n of 6"
-                // would hand a kid a day that starts one-sixth over.
-                'done' => $monsterState !== null && $monsterState['damage'] >= $monsterState['maxHealth'],
-                'quiet' => true,
-            ],
         ];
 
         $feelingsCard = app(FeelingService::class)->cardFor($this->profile);
@@ -649,12 +602,45 @@ new class extends Component
         $meals = app(MealService::class)->upcoming($household);
         $tonight = $meals->first(fn ($meal) => $meal->served_on->isSameDay(HouseholdClock::for($household)->today()));
 
+        $gifts = app(GiftService::class);
+        $giftSiblings = $gifts->siblingsOf($this->profile);
+        $giftGiven = $gifts->givenToday($this->profile);
+        $giftsReceived = $gifts->receivedToday($this->profile);
+        $giftsUnseen = $giftsReceived->whereNull('seen_at');
+
         /*
-         * The house rows, under the day's six. They open like the rest but are
-         * left out of the "n of 6" — see the class docblock — so `done` only
+         * The house rows, under the day's five. They open like the rest but are
+         * left out of the "n of 5" — see the class docblock — so `done` only
          * greys them.
          */
         $houseRows = [
+            // Only with somebody to give to — an only child gets no row rather
+            // than a picker with nobody in it.
+            ...($giftSiblings->isEmpty() ? [] : [[
+                'key' => 'gift',
+                'glyph' => '🎟',
+                'label' => 'Daily Gift',
+                'accent' => 'var(--fq-lime)',
+                'tileLabel' => 'Gift',
+                'sub' => match (true) {
+                    $giftsUnseen->isNotEmpty() => $giftsUnseen->last()->giver->name.' gave you a ticket!',
+                    $giftsReceived->isNotEmpty() && ! $giftGiven => $giftsReceived->last()->giver->name.' gave you one — give one too',
+                    $giftGiven !== null => 'You gave '.$giftGiven->recipient->name.' a ticket',
+                    default => 'Pick a sibling to get a ticket',
+                },
+                'status' => match (true) {
+                    $giftsUnseen->count() > 1 => $giftsUnseen->count().' NEW GIFTS',
+                    $giftsUnseen->isNotEmpty() => 'NEW GIFT',
+                    $giftGiven !== null => 'GIVEN',
+                    default => '1 TO GIVE',
+                },
+                'statusColor' => $giftGiven ? 'var(--fq-text-4)' : 'var(--fq-lime)',
+                'done' => $giftGiven !== null,
+                'quiet' => false,
+                // A ticket from a sibling that this kid hasn't opened the row to
+                // see yet. Cleared by opening it — see toggleRow().
+                'attention' => $giftsUnseen->isNotEmpty(),
+            ]]),
             [
                 'key' => 'feelings',
                 'glyph' => '💬',
@@ -704,6 +690,9 @@ new class extends Component
             'dayRows' => $allRows,
             'daysDone' => $allRows->where('counted', true)->where('done', true)->count(),
             'dayCount' => $allRows->where('counted', true)->count(),
+            'giftSiblings' => $giftSiblings,
+            'giftGiven' => $giftGiven,
+            'giftsReceived' => $giftsReceived,
             'gratitudeToday' => $gratitudeToday,
             'gratitudeHouse' => $gratitudeHouse,
             // Every night a grown-up has filled in, tonight first.
@@ -769,16 +758,6 @@ new class extends Component
             // The week's shared chore target and what hitting it pays. Null
             // when a parent hasn't set one, which takes the bar with it.
             'houseWeek' => app(HouseholdService::class)->houseWeek($household),
-            // Status only — no replay, and nothing marked seen. See
-            // <x-monster-mini> for why the catch-up belongs to Household.
-            'monsterState' => $this->monsterState(),
-            // A count rather than a list. The claim a kid is waiting on already
-            // says so on its own card over on Quests, and the number that
-            // matters here is how much damage is still in the post — which is
-            // why it rides on the boss caption.
-            'pendingCount' => ChoreCompletion::where('profile_id', $this->profile->id)
-                ->where('status', CompletionStatus::Pending)
-                ->count(),
             // The celebration day, if today is one — almost always null. The
             // card is the first thing on the page when it isn't, above even the
             // feelings card: for the couple of days it exists it is the reason
@@ -792,11 +771,6 @@ new class extends Component
 }; ?>
 
 <x-kid.shell :profile="$profile" active="home">
-    {{-- The monster, watching the day get cleared. --}}
-    @if ($monsterState)
-        <x-monster-watcher :state="$monsterState" />
-    @endif
-
     {{-- A celebration day, on the two or three days a year there is one. Above
          both columns, because for as long as it is on the page it is the thing
          the page is about. --}}
@@ -1466,21 +1440,71 @@ new class extends Component
 
                 @endif
 
-                @if ($openRow === 'fight')
-                {{-- The boss fight, moved off the Quests page. It sits above the
-                     standings because it is the other thing the house is doing
-                     *together* — like the weekly prize above it, and unlike the
-                     standings, which are the one card on the page about who is beating
-                     whom. That one goes last. --}}
-                @if ($monsterState)
-                    <div class="flex flex-col gap-3">
-
-                        <div wire:key="family-boss">
-                            <x-monster-mini :state="$monsterState" :pending="$pendingCount" />
-                        </div>
+                @if ($openRow === 'gift' && $giftSiblings->isNotEmpty())
+                {{-- The daily gift: one ticket, minted by the house, for whichever
+                     sibling this kid picks — see GiftService. The house hears
+                     about each one in the feed; this panel is the two kids' own
+                     view of it. --}}
+                <div
+                    wire:key="panel-gift"
+                    class="flex flex-col gap-[10px] rounded-[18px] border p-3"
+                    style="border-color: var(--fq-line-2); background: linear-gradient(160deg, color-mix(in srgb, var(--fq-lime) 12%, transparent), var(--fq-panel) 72%)"
+                >
+                    <div class="flex items-center gap-2">
+                        <span class="font-mono-fq text-[9px] tracking-[0.2em] uppercase" style="color: var(--fq-lime)">Daily gift</span>
+                        <span class="flex-1"></span>
+                        <button
+                            type="button"
+                            wire:click="toggleRow('gift')"
+                            aria-label="Close"
+                            class="grid h-8 w-8 place-items-center rounded-[11px] border text-[12px]"
+                            style="border-color: var(--fq-line-2); background: var(--fq-sunk); color: var(--fq-text-3)"
+                        >▲</button>
                     </div>
-                @endif
 
+                    @foreach ($giftsReceived as $received)
+                        <div
+                            wire:key="gift-in-{{ $received->id }}"
+                            class="flex items-center gap-[10px] rounded-[13px] border px-[10px] py-[9px]"
+                            style="border-color: var(--fq-line); background: var(--fq-sunk)"
+                        >
+                            <x-feed.avatar :profile="$received->giver" :size="30" :radius="10" :text="13" />
+                            <span class="min-w-0 flex-1 text-[14px] text-fq-text-2">
+                                <span class="font-semibold">{{ $received->giver->name }}</span> gave you a ticket
+                            </span>
+                            <span class="flex-none font-mono-fq text-[10.5px]" style="color: var(--fq-lime)">+{{ GiftService::TICKETS }} 🎟</span>
+                        </div>
+                    @endforeach
+
+                    @if ($giftGiven)
+                        <p class="font-baloo text-[18px] leading-tight font-extrabold">
+                            You gave {{ $giftGiven->recipient->name }} a ticket today.
+                        </p>
+                        <p class="text-[13px] text-fq-text-4">You get another one to give tomorrow.</p>
+                    @else
+                        <p class="font-baloo text-[18px] leading-tight font-extrabold">Who gets your ticket today?</p>
+                        <p class="text-[13px] text-fq-text-4">
+                            It costs you nothing, but it's gone at the end of the day if you don't give it.
+                        </p>
+
+                        <div class="flex flex-col gap-[7px]">
+                            @foreach ($giftSiblings as $sibling)
+                                <button
+                                    type="button"
+                                    wire:key="gift-to-{{ $sibling->id }}"
+                                    wire:click="giveGift({{ $sibling->id }})"
+                                    wire:loading.attr="disabled"
+                                    class="flex h-12 items-center gap-[10px] rounded-[14px] border px-[10px] text-left transition hover:brightness-110 disabled:opacity-60"
+                                    style="border-color: var(--fq-line-2); background: var(--fq-panel-alt)"
+                                >
+                                    <x-feed.avatar :profile="$sibling" :size="30" :radius="10" :text="13" />
+                                    <span class="min-w-0 flex-1 truncate font-baloo text-[16px] font-extrabold">{{ $sibling->name }}</span>
+                                    <span class="flex-none font-mono-fq text-[10px] tracking-[0.12em] uppercase" style="color: var(--fq-lime)">Give 🎟</span>
+                                </button>
+                            @endforeach
+                        </div>
+                    @endif
+                </div>
                 @endif
 
                 @if ($openRow === 'feelings')

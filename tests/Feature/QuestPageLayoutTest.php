@@ -79,13 +79,13 @@ class QuestPageLayoutTest extends TestCase
 
     public function test_the_extras_left_the_board_for_home(): void
     {
-        // The loot tray, the streak track and the boss strip are all on Home
-        // now. The board is the board — plus the wheel that boosts it.
+        // The loot tray and the streak track are on Home now. The board is the
+        // board — plus the wheel that boosts it and the monster it hurts, which
+        // MonsterPresenceTest covers.
         Volt::test('kid.quests')
             ->assertOk()
             ->assertDontSee('Loot Tray')
-            ->assertDontSee('Streak Chest')
-            ->assertDontSee('Boss Fight');
+            ->assertDontSee('Streak Chest');
     }
 
     public function test_the_spin_happens_on_the_board_it_boosts(): void

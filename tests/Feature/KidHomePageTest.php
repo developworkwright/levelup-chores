@@ -34,8 +34,9 @@ use Tests\TestCase;
  *
  * The mechanics themselves belong to the suites that own them — the chest to
  * DailyChestTest, the spin to SpinFlowTest, the run to StreakDecayTest. What is
- * pinned here is the shape: what each row says while it is shut, that only one
- * opens, that the answer is remembered, and that everything still acts in place.
+ * pinned here is the shape: what each row says while it is shut, that every
+ * visit starts shut, that only one opens, and that everything still acts in
+ * place.
  */
 class KidHomePageTest extends TestCase
 {
@@ -97,7 +98,7 @@ class KidHomePageTest extends TestCase
 
     public function test_the_day_is_an_index_and_the_room_is_beside_it(): void
     {
-        Volt::test('kid.home')
+        $this->open('work')
             ->assertOk()
             ->assertSeeInOrder([
                 // The index, its open panel, and the house rows under it — then
@@ -113,7 +114,7 @@ class KidHomePageTest extends TestCase
 
     /**
      * Feelings, Gratitude and Meals open like the day's rows but are not tasks,
-     * so the counter still counts six — and answering does not move it.
+     * so the counter still counts five — and answering does not move it.
      */
     public function test_the_house_rows_are_not_counted_as_the_day(): void
     {
@@ -121,7 +122,7 @@ class KidHomePageTest extends TestCase
 
         Volt::test('kid.home')
             ->assertOk()
-            ->assertSee('0 of 6 done')
+            ->assertSee('0 of 5 done')
             ->assertSee("toggleRow('feelings')", escape: false)
             ->assertSee("toggleRow('gratitude')", escape: false)
             ->assertSee("toggleRow('meals')", escape: false);
@@ -136,8 +137,10 @@ class KidHomePageTest extends TestCase
             ->assertSee('Bonus Wheel')
             ->assertSee('Streak Chest')
             ->assertSee('Weekly Prize')
-            ->assertSee('The Fight')
-            ->assertSee("toggleRow('chest')", escape: false);
+            ->assertSee("toggleRow('chest')", escape: false)
+            // The fight went to Quests, beside the board that hurts it.
+            ->assertDontSee('The Fight')
+            ->assertDontSee("toggleRow('fight')", escape: false);
     }
 
     /** A shut row still answers "what now". */
@@ -152,7 +155,7 @@ class KidHomePageTest extends TestCase
 
     public function test_the_counter_says_how_much_of_the_day_is_done(): void
     {
-        Volt::test('kid.home')->assertOk()->assertSee('0 of 6 done');
+        Volt::test('kid.home')->assertOk()->assertSee('0 of 5 done');
 
         app(ChoreService::class)->claim($this->kid, $this->household->chores->first());
         app(ChestService::class)->open($this->kid);
@@ -160,21 +163,22 @@ class KidHomePageTest extends TestCase
         // Three, not two: the work is in, the chest is open, and the work
         // being in is also what makes tonight safe — a pending claim settles
         // the run's day, so the streak row is done as well.
-        Volt::test('kid.home')->assertOk()->assertSee('3 of 6 done');
+        Volt::test('kid.home')->assertOk()->assertSee('3 of 5 done');
     }
 
-    /** A kid who has never touched it arrives at the row that answers "what now". */
-    public function test_work_is_the_row_that_starts_open(): void
+    /** Every visit starts on the shut index, the way parent Home does. */
+    public function test_nothing_is_open_on_arrival(): void
     {
         Volt::test('kid.home')
             ->assertOk()
-            ->assertSet('openRow', 'work')
-            ->assertSee('Work today');
+            ->assertSet('openRow', null)
+            ->assertDontSee('Work today');
     }
 
     public function test_only_one_row_is_open_at_a_time(): void
     {
-        $this->open('chest')
+        $this->open('work')->assertSee('Work today')
+            ->call('toggleRow', 'chest')
             ->assertSet('openRow', 'chest')
             ->assertSee("Open today's bonus chest")
             // Work shut itself on the way past. Without this the column grows
@@ -184,65 +188,38 @@ class KidHomePageTest extends TestCase
 
     public function test_tapping_the_open_row_shuts_it(): void
     {
-        Volt::test('kid.home')
+        $this->open('work')
             ->call('toggleRow', 'work')
             ->assertSet('openRow', null)
             ->assertDontSee('Work today');
     }
 
-    /** A row a kid closed stays closed — across a page load, not just a render. */
-    public function test_a_closed_row_is_remembered_for_the_household_day(): void
+    /** An open row is not remembered: the next visit starts shut again. */
+    public function test_an_open_row_is_not_remembered(): void
     {
-        Volt::test('kid.home')->call('toggleRow', 'work');
-
-        $this->assertNull($this->kid->refresh()->home_day_open);
-        $this->assertTrue($this->kid->home_day_closed_on->isSameDay(HouseholdClock::for($this->household)->today()));
+        $this->open('prize');
 
         $this->reopen()->assertSet('openRow', null);
     }
 
-    public function test_an_open_row_is_remembered_too(): void
+    /** Not even a waiting streak chest opens itself — its row says READY. */
+    public function test_a_waiting_streak_chest_does_not_open_its_row(): void
     {
-        Volt::test('kid.home')->call('toggleRow', 'prize');
-
-        $this->assertSame('prize', $this->kid->refresh()->home_day_open);
-
-        $this->reopen()->assertSet('openRow', 'prize');
-    }
-
-    /** Yesterday's answer is yesterday's. */
-    public function test_the_next_day_opens_work_again(): void
-    {
-        Volt::test('kid.home')->call('toggleRow', 'work')->assertSet('openRow', null);
-
-        $this->travelTo(Carbon::parse('2026-05-02 12:00', $this->household->timezone));
-
-        $this->reopen()->assertSet('openRow', 'work');
-    }
-
-    /**
-     * Urgency outranks a remembered close, once: a streak chest is the one thing
-     * on this page that is worth something and expires.
-     */
-    public function test_a_waiting_streak_chest_opens_its_own_row(): void
-    {
-        Volt::test('kid.home')->call('toggleRow', 'work')->assertSet('openRow', null);
-
         $this->kid->update(['streak' => 3, 'pending_streak_chest' => 3]);
 
         $this->reopen()
-            ->assertSet('openRow', 'streak')
-            ->assertSee('Your streak chest is waiting');
+            ->assertSet('openRow', null)
+            ->assertSee('READY')
+            ->assertDontSee('Your streak chest is waiting');
     }
 
-    /** Once, though — closing it again has to stick. */
-    public function test_closing_the_urgent_row_sticks(): void
+    public function test_a_link_naming_a_row_still_opens_it(): void
     {
-        $this->kid->update(['streak' => 3, 'pending_streak_chest' => 3]);
+        $this->get(route('kid.home', ['row' => 'prize']))->assertOk();
 
-        Volt::test('kid.home')->assertSet('openRow', 'streak')->call('toggleRow', 'streak');
-
-        $this->reopen()->assertSet('openRow', null);
+        $this->get(route('kid.home', ['row' => 'work']))
+            ->assertOk()
+            ->assertSee('Work today');
     }
 
     /*
@@ -259,7 +236,7 @@ class KidHomePageTest extends TestCase
 
         $service->approve($service->claim($this->kid, $chore), $parent);
 
-        Volt::test('kid.home')
+        $this->open('work')
             ->assertOk()
             // Dollars are the headline and points the footnote, the same way a
             // board row is written.
@@ -286,7 +263,7 @@ class KidHomePageTest extends TestCase
 
         $service->sendBack($service->claim($this->kid, $this->household->chores->first()), $parent);
 
-        Volt::test('kid.home')->assertOk()->assertSee('SENT BACK');
+        $this->open('work')->assertOk()->assertSee('SENT BACK');
     }
 
     /**
@@ -297,7 +274,7 @@ class KidHomePageTest extends TestCase
     {
         Chore::factory()->for($this->household)->create(['name' => 'Feed the cat', 'points' => 20]);
 
-        Volt::test('kid.home')
+        $this->open('work')
             ->assertOk()
             ->assertSee('$0.00')
             ->assertSee('Feed the cat')
@@ -326,7 +303,7 @@ class KidHomePageTest extends TestCase
 
         app(ChoreService::class)->claim($sibling, $cheap);
 
-        Volt::test('kid.home')
+        $this->open('work')
             ->call('claimSuggested', $cheap->id)
             ->assertSee('That one just went');
 
@@ -337,7 +314,7 @@ class KidHomePageTest extends TestCase
     {
         app(ChoreService::class)->claim($this->kid, $this->household->chores->first());
 
-        Volt::test('kid.home')->assertOk()->assertSee('on the board');
+        $this->open('work')->assertOk()->assertSee('on the board');
     }
 
     /*
@@ -391,8 +368,8 @@ class KidHomePageTest extends TestCase
     {
         $this->kid->update(['streak' => 3, 'pending_streak_chest' => 3]);
 
-        Volt::test('kid.home')
-            ->assertSet('openRow', 'streak')
+        $this->open('streak')
+            ->assertSee('Your streak chest is waiting')
             ->call('openStreakChest')
             ->assertOk();
 
@@ -416,16 +393,14 @@ class KidHomePageTest extends TestCase
         Volt::test('kid.home')->assertOk()->assertSee('NONE SET');
     }
 
-    public function test_the_fight_panel_draws_the_monster(): void
+    /** A stale link or saved state naming the old row opens nothing. */
+    public function test_the_fight_is_no_longer_a_row(): void
     {
         app(MonsterService::class)->spawn($this->household, 'Pizza night', 1000);
 
-        $this->open('fight')->assertOk()->assertSee('Pizza night');
-    }
+        $this->get(route('kid.home', ['row' => 'fight']))->assertOk();
 
-    public function test_a_household_with_nothing_standing_says_so_on_the_row(): void
-    {
-        Volt::test('kid.home')->assertOk()->assertSee('Nothing standing');
+        $this->open('fight')->assertOk()->assertDontSee('Pizza night');
     }
 
     /*
@@ -548,7 +523,7 @@ class KidHomePageTest extends TestCase
         // must never be the thing that breaks.
         Chore::query()->delete();
 
-        Volt::test('kid.home')
+        $this->open('work')
             ->assertOk()
             ->assertSee('Your day')
             ->assertSee('Nothing on the board right now');

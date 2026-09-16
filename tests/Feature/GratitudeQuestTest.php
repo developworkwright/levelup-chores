@@ -280,8 +280,6 @@ class GratitudeQuestTest extends TestCase
             ->assertOk()
             ->assertSee('Hand it in');
 
-        $this->assertSame('gratitude', $kid->refresh()->home_day_open);
-
         Volt::test('kid.journal')->assertSee(route('kid.home', ['row' => 'gratitude']), false);
     }
 
@@ -291,9 +289,8 @@ class GratitudeQuestTest extends TestCase
 
         $this->actingAs($kid, 'profile')
             ->get(route('kid.home', ['row' => 'nonsense']))
-            ->assertOk();
-
-        $this->assertNotSame('nonsense', $kid->refresh()->home_day_open);
+            ->assertOk()
+            ->assertDontSee('Hand it in');
     }
 
     public function test_the_journal_page_reads_every_day_back(): void
