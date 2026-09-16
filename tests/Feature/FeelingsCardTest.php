@@ -216,7 +216,7 @@ class FeelingsCardTest extends TestCase
 
         Auth::guard('profile')->login($this->kid);
 
-        Volt::test('kid.home')
+        Volt::test('kid.home')->set('openRow', 'feelings')
             ->assertOk()
             ->assertSee('How are you feeling today?')
             // Covered before answering — the sibling's reason must not be on
@@ -248,7 +248,7 @@ class FeelingsCardTest extends TestCase
         Chore::factory()->for($this->household)->create();
         Auth::guard('profile')->login($this->kid);
 
-        Volt::test('kid.home')->call('answerFeeling', 'ecstatic', 'made up', 'house');
+        Volt::test('kid.home')->set('openRow', 'feelings')->call('answerFeeling', 'ecstatic', 'made up', 'house');
 
         $this->assertNull($this->service()->todayFor($this->kid));
     }
@@ -260,7 +260,7 @@ class FeelingsCardTest extends TestCase
 
         // The safe direction to be wrong in is the one where nothing was shared
         // that the writer didn't mean to share.
-        Volt::test('kid.home')->call('answerFeeling', 'sad', 'a reason', 'everyone-in-the-world');
+        Volt::test('kid.home')->set('openRow', 'feelings')->call('answerFeeling', 'sad', 'a reason', 'everyone-in-the-world');
 
         $this->assertSame(FeelingVisibility::Private, $this->service()->todayFor($this->kid)->visibility);
     }
@@ -272,7 +272,7 @@ class FeelingsCardTest extends TestCase
 
         // Declining must not look like a blank, or a kid picks a feeling to
         // avoid the awkwardness — which is the mask by a different door.
-        Volt::test('kid.home')->assertOk()->assertSee('Not saying today');
+        Volt::test('kid.home')->set('openRow', 'feelings')->assertOk()->assertSee('Not saying today');
     }
 
     public function test_a_kid_adds_a_word_of_their_own(): void
@@ -307,11 +307,12 @@ class FeelingsCardTest extends TestCase
 
         Auth::guard('profile')->login($this->kid);
 
-        // Read from the feelings card down rather than across the whole page:
-        // the family feed sits above it and names the grown-ups legitimately,
-        // because a kid's room to them is called after them.
-        $html = Volt::test('kid.home')->assertOk()->html();
-        $below = substr($html, strpos($html, 'wire:key="feelings-card"'));
+        // Read the feelings card alone rather than the whole page: the family
+        // feed sits below it and names the grown-ups legitimately, because a
+        // kid's room to them is called after them.
+        $html = Volt::test('kid.home')->set('openRow', 'feelings')->assertOk()->html();
+        $start = strpos($html, 'wire:key="feelings-card"');
+        $below = substr($html, $start, strpos($html, 'wire:name="family-feed"', $start) - $start);
 
         // A word is the house's the moment it exists. Naming its author turns
         // "somebody here needed this word" into a fact about one person, which
@@ -461,7 +462,7 @@ class FeelingsCardTest extends TestCase
         // The trap this replaced: fill the whole card in, then find the answer
         // button dead because of an "Add" step nobody thinks to press. Typing
         // the word *is* choosing it now.
-        Volt::test('kid.home')
+        Volt::test('kid.home')->set('openRow', 'feelings')
             ->call('answerFeeling', null, 'first day back', 'parents', 'Buzzing', '🎈')
             ->assertOk();
 
@@ -484,7 +485,7 @@ class FeelingsCardTest extends TestCase
         // Typing "happy" means happy. The difference between typing it and
         // tapping it is not one anybody should have to care about, and it must
         // not leave a duplicate chip behind either.
-        Volt::test('kid.home')
+        Volt::test('kid.home')->set('openRow', 'feelings')
             ->call('answerFeeling', null, null, 'private', 'happy');
 
         $this->assertSame(Feeling::Happy, $this->service()->todayFor($this->kid)->feeling);
@@ -499,7 +500,7 @@ class FeelingsCardTest extends TestCase
         // The card clears one when the other is set, so this shouldn't arise —
         // but if it ever does, the word somebody typed is the more deliberate
         // of the two and must not be silently discarded.
-        Volt::test('kid.home')
+        Volt::test('kid.home')->set('openRow', 'feelings')
             ->call('answerFeeling', 'proud', null, 'private', 'Wobbly');
 
         $this->assertSame('Wobbly', $this->service()->todayFor($this->kid)->label());
@@ -510,7 +511,7 @@ class FeelingsCardTest extends TestCase
         Chore::factory()->for($this->household)->create();
         Auth::guard('profile')->login($this->kid);
 
-        Volt::test('kid.home')
+        Volt::test('kid.home')->set('openRow', 'feelings')
             ->call('answerFeeling', 'proud', null, 'private', '   ');
 
         $this->assertSame(Feeling::Proud, $this->service()->todayFor($this->kid)->feeling);
@@ -522,7 +523,7 @@ class FeelingsCardTest extends TestCase
         Chore::factory()->for($this->household)->create();
         Auth::guard('profile')->login($this->kid);
 
-        Volt::test('kid.home')->call('answerFeeling', null, 'a reason', 'house', null);
+        Volt::test('kid.home')->set('openRow', 'feelings')->call('answerFeeling', null, 'a reason', 'house', null);
 
         $this->assertNull($this->service()->todayFor($this->kid));
     }
@@ -534,7 +535,7 @@ class FeelingsCardTest extends TestCase
 
         Auth::guard('profile')->login($this->kid);
 
-        Volt::test('kid.home')->call('answerFeeling', null, null, 'private', 'anxious');
+        Volt::test('kid.home')->set('openRow', 'feelings')->call('answerFeeling', null, null, 'private', 'anxious');
 
         $this->assertSame($existing->id, $this->service()->todayFor($this->kid)->feeling_word_id);
         $this->assertCount(1, $this->service()->wordsFor($this->household));
@@ -545,7 +546,7 @@ class FeelingsCardTest extends TestCase
         Chore::factory()->for($this->household)->create();
         Auth::guard('profile')->login($this->kid);
 
-        $html = Volt::test('kid.home')->html();
+        $html = Volt::test('kid.home')->set('openRow', 'feelings')->html();
 
         // x-data is delimited by double quotes, so one literal `"` anywhere
         // inside it — in a comment as readily as in code — closes the attribute
@@ -573,7 +574,7 @@ class FeelingsCardTest extends TestCase
         Chore::factory()->for($this->household)->create();
         Auth::guard('profile')->login($this->kid);
 
-        $html = Volt::test('kid.home')->assertOk()->html();
+        $html = Volt::test('kid.home')->set('openRow', 'feelings')->assertOk()->html();
 
         // `[^<>]*` is the whole point: it requires the opening tag to contain no
         // markup of its own. A stray element landing *inside* it — which is how
@@ -592,7 +593,7 @@ class FeelingsCardTest extends TestCase
 
         Auth::guard('profile')->login($this->kid);
 
-        Volt::test('kid.home')
+        Volt::test('kid.home')->set('openRow', 'feelings')
             // Answered before this visit started, so Home folds the card to a
             // line — the lock lives behind the same "Change it" that re-answering
             // does, since both are things you do *to* an answer already given.

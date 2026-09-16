@@ -16,10 +16,10 @@
      drawn on every screen, always — this control is the room's header on a
      phone, and a header without that line is a room somebody could post in
      before knowing who hears it. --}}
-@props(['rooms', 'people', 'room', 'roomName', 'audience', 'monogram' => null, 'accent' => 'var(--fq-text-3)', 'elsewhere' => 0, 'tz' => 'UTC'])
+@props(['rooms', 'people', 'room', 'roomName', 'audience', 'monogram' => null, 'accent' => 'var(--fq-text-3)', 'elsewhere' => 0, 'tz' => 'UTC', 'always' => false])
 
 <div
-    class="relative lg:hidden"
+    @class(['relative', 'lg:hidden' => ! $always])
     x-data="{ open: false }"
     x-on:keydown.escape.window="open = false"
 >

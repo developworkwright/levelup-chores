@@ -172,7 +172,7 @@ class GratitudeQuestTest extends TestCase
         $this->assertCount(3, $this->gratitude()->journalForHousehold($kid->household));
     }
 
-    public function test_the_quests_page_takes_an_entry_and_pays_out(): void
+    public function test_home_takes_an_entry_and_pays_out(): void
     {
         $kid = $this->kid(['bonus_tickets' => 0]);
 
@@ -180,12 +180,12 @@ class GratitudeQuestTest extends TestCase
 
         // The card keeps one title in both states now, so the button is what
         // says whether there is still something to fill in.
-        Volt::test('kid.quests')
+        Volt::test('kid.home')->call('toggleRow', 'gratitude')
             ->assertSee('Hand it in')
             ->set('gratitude', $this->threeThings())
             ->call('logGratitude')
             // Hearts rather than the money rain every other quest throws. This
-            // is the one thing on the board that isn't about earning, and the
+            // is the one quest that isn't about earning, and the
             // tickets it pays are a thank-you rather than the point of it.
             ->assertDispatched(
                 'celebrate',
@@ -208,7 +208,7 @@ class GratitudeQuestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.quests')
+        Volt::test('kid.home')->call('toggleRow', 'gratitude')
             ->set('gratitude', ['My dog', '', ''])
             ->call('logGratitude')
             ->assertNotDispatched('celebrate')
@@ -225,7 +225,7 @@ class GratitudeQuestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        $component = Volt::test('kid.quests')
+        $component = Volt::test('kid.home')->call('toggleRow', 'gratitude')
             ->set('gratitude', $this->threeThings())
             ->call('logGratitude');
 
@@ -240,10 +240,10 @@ class GratitudeQuestTest extends TestCase
         $this->assertSame(GratitudeService::TICKETS, $kid->refresh()->bonus_tickets);
     }
 
-    public function test_the_quests_page_keeps_only_today_and_points_at_the_journal(): void
+    public function test_home_keeps_only_today_and_points_at_the_journal(): void
     {
-        // Older days belong on the Journal tab — the Quests page is the day in
-        // front of you, and a growing list under the card would bury the board.
+        // Older days belong on the Journal tab — Home is the day in front of
+        // you, and a growing list under the card would bury the rest of it.
         $kid = $this->kid();
 
         GratitudeEntry::factory()->for($kid->household)->for($kid)->daysAgo(1)
@@ -251,12 +251,49 @@ class GratitudeQuestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.quests')
+        Volt::test('kid.home')->call('toggleRow', 'gratitude')
             ->set('gratitude', $this->threeThings())
             ->call('logGratitude')
             ->assertSee('Pancakes')
             ->assertDontSee('Yesterday one')
             ->assertSee(route('kid.journal'), false);
+    }
+
+    /** It moved to Home, and lives in one place only. */
+    public function test_the_quests_page_no_longer_carries_the_form(): void
+    {
+        Auth::guard('profile')->login($this->kid());
+
+        Volt::test('kid.quests')
+            ->assertOk()
+            ->assertDontSee('Gratitude Quest')
+            ->assertDontSee('Hand it in');
+    }
+
+    /** The Journal's nudge and the feed's arrow land on the open form. */
+    public function test_a_link_naming_the_row_opens_it(): void
+    {
+        $kid = $this->kid();
+
+        $this->actingAs($kid, 'profile')
+            ->get(route('kid.home', ['row' => 'gratitude']))
+            ->assertOk()
+            ->assertSee('Hand it in');
+
+        $this->assertSame('gratitude', $kid->refresh()->home_day_open);
+
+        Volt::test('kid.journal')->assertSee(route('kid.home', ['row' => 'gratitude']), false);
+    }
+
+    public function test_a_row_nobody_has_heard_of_is_ignored(): void
+    {
+        $kid = $this->kid();
+
+        $this->actingAs($kid, 'profile')
+            ->get(route('kid.home', ['row' => 'nonsense']))
+            ->assertOk();
+
+        $this->assertNotSame('nonsense', $kid->refresh()->home_day_open);
     }
 
     public function test_the_journal_page_reads_every_day_back(): void

@@ -14,6 +14,12 @@ use Illuminate\Support\Facades\Schema;
  * whether that null was a decision. A row nobody has closed today starts open,
  * so without the date every kid would arrive at a shut column every morning.
  *
+ * `home_day_urgent_on` is the third answer, and it is what makes "urgency
+ * outranks a remembered close, *once*" true. A waiting streak chest opens its
+ * own row over the top of whatever the kid last chose; without a record of
+ * having done that, closing it again would simply re-open it on the next
+ * render, which is an argument rather than a nudge.
+ *
  * Not Alpine state and not the session: the day survives `wire:navigate`
  * between kid pages, and a kid on a tablet and the same kid on a phone should
  * find the same column.
@@ -25,13 +31,14 @@ return new class extends Migration
         Schema::table('profiles', function (Blueprint $table) {
             $table->string('home_day_open', 32)->nullable()->after('powered_up_on');
             $table->date('home_day_closed_on')->nullable()->after('home_day_open');
+            $table->date('home_day_urgent_on')->nullable()->after('home_day_closed_on');
         });
     }
 
     public function down(): void
     {
         Schema::table('profiles', function (Blueprint $table) {
-            $table->dropColumn(['home_day_open', 'home_day_closed_on']);
+            $table->dropColumn(['home_day_open', 'home_day_closed_on', 'home_day_urgent_on']);
         });
     }
 };

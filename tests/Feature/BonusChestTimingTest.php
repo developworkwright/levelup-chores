@@ -61,8 +61,8 @@ class BonusChestTimingTest extends TestCase
 
     public function test_an_unearned_chest_stops_to_explain_what_waiting_is_worth(): void
     {
-        Volt::test('kid.home')
-            ->assertSee('Ready to open')
+        Volt::test('kid.home')->call('toggleRow', 'chest')
+            ->assertSee("Open today's bonus chest")
             // The prompt is on the page, hidden until the chest is tapped.
             ->assertSee('Hold on', escape: false)
             ->assertSee('Do a chore first')
@@ -81,13 +81,13 @@ class BonusChestTimingTest extends TestCase
         // Asserted on the attribute rather than on the branch in x-data, which
         // is now always present: the decision has to be re-readable by a
         // component Alpine already initialised. See the test below.
-        $html = Volt::test('kid.home')->html();
+        $html = Volt::test('kid.home')->call('toggleRow', 'chest')->html();
         $this->assertStringContainsString('data-fq-confirm="1"', $html);
 
         $this->doAChore();
 
         // Nothing left to ask: the chest is already on the good table.
-        $cleared = Volt::test('kid.home')->html();
+        $cleared = Volt::test('kid.home')->call('toggleRow', 'chest')->html();
         $this->assertStringNotContainsString('data-fq-confirm="1"', $cleared);
     }
 
@@ -103,28 +103,28 @@ class BonusChestTimingTest extends TestCase
         // directly above this one, but the re-render is the same and so is the
         // trap: the question stopping has to reach the client as an attribute
         // change on the same element.
-        Volt::test('kid.home')
+        Volt::test('kid.home')->call('toggleRow', 'chest')
             ->assertSee('data-fq-confirm="1"', escape: false)
             ->assertSee('Hold on');
 
         $this->doAChore();
 
-        Volt::test('kid.home')
+        Volt::test('kid.home')->call('toggleRow', 'chest')
             ->assertOk()
             ->assertSee('Your chest is OP today')
             ->assertDontSee('Hold on')
             ->assertDontSee('data-fq-confirm="1"', escape: false);
     }
 
-    public function test_a_chore_flags_the_chest_as_op_on_the_shut_tile(): void
+    public function test_a_chore_flags_the_chest_as_op_on_the_shut_row(): void
     {
         $this->doAChore();
 
         // Has to be visible *before* it is opened — a boost discovered
         // afterwards changes nobody's behaviour tomorrow.
-        Volt::test('kid.home')
-            ->assertSee('Ready · OP', escape: false)
-            ->assertSee('Bonus Chest · OP', escape: false)
+        Volt::test('kid.home')->call('toggleRow', 'chest')
+            // The row's own line, so it is readable without opening anything.
+            ->assertSee('Rolling on the good table')
             ->assertSee('Your chest is OP today');
     }
 
@@ -136,8 +136,8 @@ class BonusChestTimingTest extends TestCase
         // queue would be blaming the kid for somebody else's inbox.
         $this->doAChore();
 
-        $page = Volt::test('kid.home')
-            ->assertSee('Ready · OP', escape: false)
+        $page = Volt::test('kid.home')->call('toggleRow', 'chest')
+            ->assertSee('Rolling on the good table')
             ->assertSee('Your chest is OP today');
 
         $this->assertStringNotContainsString('data-fq-confirm="1"', $page->html());
@@ -145,16 +145,16 @@ class BonusChestTimingTest extends TestCase
 
     public function test_the_op_flag_is_absent_while_nothing_has_been_done(): void
     {
-        Volt::test('kid.home')
-            ->assertSee('Ready to open')
-            ->assertDontSee('Ready · OP', escape: false);
+        Volt::test('kid.home')->call('toggleRow', 'chest')
+            ->assertSee('Better after a chore')
+            ->assertDontSee('Rolling on the good table');
     }
 
     public function test_the_chest_still_opens_for_a_kid_who_chooses_not_to_wait(): void
     {
         // The prompt is a stop, not a lock. Opening early is a real choice and
         // has to keep working.
-        Volt::test('kid.home')->call('openDailyChest');
+        Volt::test('kid.home')->call('toggleRow', 'chest')->call('openDailyChest');
 
         $this->assertNotNull(
             app(\App\Services\ChestService::class)->openedToday($this->kid),
@@ -166,7 +166,7 @@ class BonusChestTimingTest extends TestCase
     {
         $this->doAChore();
 
-        Volt::test('kid.home')->call('openDailyChest');
+        Volt::test('kid.home')->call('toggleRow', 'chest')->call('openDailyChest');
 
         $chest = app(\App\Services\ChestService::class)->openedToday($this->kid);
 
@@ -176,7 +176,7 @@ class BonusChestTimingTest extends TestCase
 
     public function test_a_chest_opened_before_any_chore_records_that_it_was_not(): void
     {
-        Volt::test('kid.home')->call('openDailyChest');
+        Volt::test('kid.home')->call('toggleRow', 'chest')->call('openDailyChest');
 
         $this->assertFalse((bool) app(\App\Services\ChestService::class)->openedToday($this->kid)->quest_was_done);
     }

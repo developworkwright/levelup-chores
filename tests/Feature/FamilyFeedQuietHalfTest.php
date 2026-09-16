@@ -72,6 +72,18 @@ class FamilyFeedQuietHalfTest extends TestCase
      * ------------------------------------------------------------------
      */
 
+    /** The card points a kid at their own entry; a grown-up has none to write. */
+    public function test_the_grateful_card_links_a_kid_to_the_gratitude_quest(): void
+    {
+        $link = route('kid.home', ['row' => 'gratitude']);
+
+        Auth::guard('profile')->login($this->raylan);
+        Volt::test('family-feed')->assertSee($link, false);
+
+        Auth::guard('profile')->login($this->mom);
+        Volt::test('family-feed')->assertDontSee($link, false);
+    }
+
     public function test_a_list_is_shared_unless_the_writer_says_otherwise(): void
     {
         $entry = app(GratitudeService::class)->record($this->raylan, ['one', 'two', 'three']);
@@ -133,12 +145,11 @@ class FamilyFeedQuietHalfTest extends TestCase
 
     public function test_the_quest_card_carries_the_opt_out_and_honours_it(): void
     {
-        // The Quests page draws a quest, which needs a board to draw one from.
         Chore::factory()->for($this->household)->create();
 
         Auth::guard('profile')->login($this->raylan);
 
-        Volt::test('kid.quests')
+        Volt::test('kid.home')->call('toggleRow', 'gratitude')
             ->assertSee('Let the house read this one')
             ->set('gratitude', ['one', 'two', 'three'])
             ->set('gratitudeShared', false)

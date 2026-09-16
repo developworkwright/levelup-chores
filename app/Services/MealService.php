@@ -48,6 +48,22 @@ class MealService
         return $this->on($household, HouseholdClock::for($household)->today()->addDay());
     }
 
+    /**
+     * Every night a grown-up has filled in, from tonight on, soonest first.
+     *
+     * What the kids' Meals panel lists. Unset nights are left out rather than
+     * drawn as gaps — see tomorrow() for why a "not set yet" line is a nag.
+     *
+     * @return Collection<int, Meal>
+     */
+    public function upcoming(Household $household): Collection
+    {
+        return Meal::where('household_id', $household->id)
+            ->whereDate('served_on', '>=', HouseholdClock::for($household)->today()->toDateString())
+            ->orderBy('served_on')
+            ->get();
+    }
+
     public function on(Household $household, Carbon $date): ?Meal
     {
         return Meal::where('household_id', $household->id)

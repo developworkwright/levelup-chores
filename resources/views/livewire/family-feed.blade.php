@@ -85,6 +85,37 @@ new class extends Component
     public bool $embedded = false;
 
     /**
+     * Whether the room card carries tonight's dinner.
+     *
+     * Off on the kid's Home, where dinner is the last line of "Your day"
+     * instead: inside the feed it scrolls away like a message, and two copies
+     * of it on one page is two places that can disagree about what is for tea.
+     * On for everybody else — the Family page, and the parent console, where
+     * the card is also the way through to the menu.
+     */
+    public bool $showDinner = true;
+
+    /**
+     * Whether an embedded feed caps its messages to a scrolling box on a laptop.
+     *
+     * On for parent Home, where the approval queues sit underneath and a busy
+     * afternoon would push them down. Off on the kid's Home, where the feed has
+     * a column of its own with nothing below it — a box there only hides
+     * messages behind a second scrollbar for no page it is protecting.
+     */
+    public bool $capped = true;
+
+    /**
+     * Whether the quiet half — Today in the house and Grateful today — is drawn.
+     *
+     * Off on the kid's Home, where the feelings card, the gratitude quest and
+     * the menu are rows of "Your day" with the house's answers inside them. On
+     * a phone the quiet half sorts under the room, so there it was a second
+     * copy of those rows stuck at the foot of however long the chat had got.
+     */
+    public bool $quiet = true;
+
+    /**
      * One service instance for the life of a request. It memoises the household
      * roster, and every room in the list asks for it — resolving a fresh one
      * per call would throw that away several times a render. Private, so
@@ -92,10 +123,13 @@ new class extends Component
      */
     private ?FeedService $feed = null;
 
-    public function mount(bool $embedded = false): void
+    public function mount(bool $embedded = false, bool $showDinner = true, bool $capped = true, bool $quiet = true): void
     {
         $this->profile = Auth::guard('profile')->user();
         $this->embedded = $embedded;
+        $this->showDinner = $showDinner;
+        $this->capped = $capped;
+        $this->quiet = $quiet;
 
         // On the way in rather than on a schedule — nothing in this app is
         // scheduled, the host scales to zero and a cron would never fire. Two
@@ -400,7 +434,9 @@ new class extends Component
             'messages' => $room ? $feed->messagesIn($this->profile, $room) : collect(),
             'house' => $feed->houseToday($this->profile),
             'gratitude' => $feed->gratitudeToday($this->profile),
-            'dinner' => $feed->dinner($this->profile),
+            'dinner' => $this->showDinner
+                ? $feed->dinner($this->profile)
+                : ['tonight' => null, 'tomorrow' => null],
             'roster' => $roster,
             'stamps' => FeedStamp::cases(),
             'reactions' => FeedService::REACTIONS,
@@ -418,7 +454,10 @@ new class extends Component
         <h1 class="font-baloo text-[23px] font-extrabold max-lg:hidden">Family</h1>
     @endunless
 
-    <div class="grid gap-3 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start lg:gap-4">
+    <div @class([
+        'grid gap-3',
+        'lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start lg:gap-4' => ! $embedded,
+    ])>
 
         {{-- The left column: the rooms, the people in this house, and the quiet
              half underneath them.
@@ -436,22 +475,25 @@ new class extends Component
              past it to reach what was actually said. --}}
         <div class="flex min-w-0 flex-col gap-3 max-lg:order-2">
             <x-feed.room-list
-                class="max-lg:hidden"
+                :class="$embedded ? 'hidden' : 'max-lg:hidden'"
                 :rooms="$rooms"
                 :people="$people"
                 :room="$room"
                 :tz="$tz"
             />
 
-            <x-feed.house-card :house="$house" :gratitude="$gratitude" :dinner="$dinner" :viewer="$profile" />
+            @if ($quiet)
+                <x-feed.house-card :house="$house" :gratitude="$gratitude" :dinner="$dinner" :viewer="$profile" />
 
-            <x-feed.grateful-card :gratitude="$gratitude" :roster="$roster->count()" />
+                <x-feed.grateful-card :gratitude="$gratitude" :roster="$roster->count()" :viewer="$profile" />
+            @endif
         </div>
 
         {{-- The room. --}}
         <div class="flex min-w-0 flex-col gap-[11px] max-lg:order-1">
             @if ($room)
                 <x-feed.room-picker
+                    :always="$embedded"
                     :rooms="$rooms"
                     :people="$people"
                     :room="$room"
@@ -467,7 +509,11 @@ new class extends Component
                      header: it carries the same name and the same who-can-read
                      line, and drawing both would be the room introducing itself
                      twice on the screen with the least room to do it. --}}
-                <div class="flex items-start gap-[10px] border-b border-[var(--fq-divider)] pb-[11px] max-lg:hidden">
+                <div @class([
+                    'flex items-start gap-[10px] border-b border-[var(--fq-divider)] pb-[11px]',
+                    'max-lg:hidden' => ! $embedded,
+                    'hidden' => $embedded,
+                ])>
                     <div class="flex min-w-0 flex-1 flex-col gap-px">
                         <span class="font-baloo text-[20px] font-extrabold lg:text-[22px]">
                             @if ($room->kind->glyph()) {{ $room->kind->glyph() }} @endif {{ $roomName }}
@@ -872,12 +918,13 @@ new class extends Component
                      Home is longer for it, which is the lesser problem.
 
                      The full page at /kid/family has no cap on any screen —
-                     there the room *is* the page. --}}
+                     there the room *is* the page — and neither does the kid's
+                     Home, where the room has a column to itself; see `capped`. --}}
                 <div
                     data-feed-messages
                     @class([
                         'flex flex-col gap-[13px]',
-                        'lg:max-h-[520px] lg:overflow-y-auto lg:overscroll-contain lg:pr-1 lg:[scrollbar-width:thin] lg:[scrollbar-color:var(--fq-line-3)_transparent]' => $embedded,
+                        'lg:max-h-[520px] lg:overflow-y-auto lg:overscroll-contain lg:pr-1 lg:[scrollbar-width:thin] lg:[scrollbar-color:var(--fq-line-3)_transparent]' => $embedded && $capped,
                     ])
                 >
                     @forelse ($messages->reverse() as $message)

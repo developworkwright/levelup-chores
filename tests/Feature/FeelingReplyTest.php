@@ -150,7 +150,7 @@ class FeelingReplyTest extends TestCase
 
         Auth::guard('profile')->login($this->sibling);
 
-        Volt::test('kid.home')
+        Volt::test('kid.home')->set('openRow', 'feelings')
             ->assertOk()
             ->assertDontSee('a private thing between us');
     }
@@ -186,7 +186,7 @@ class FeelingReplyTest extends TestCase
 
         Auth::guard('profile')->login($this->kid);
 
-        Volt::test('kid.home')
+        Volt::test('kid.home')->set('openRow', 'feelings')
             ->assertOk()
             ->assertSee('Mom said')
             ->assertSee('I am proud of you for saying so.');

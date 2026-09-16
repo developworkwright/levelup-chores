@@ -53,6 +53,7 @@ class Profile extends Model implements Authenticatable
         'powered_up_on',
         'home_day_open',
         'home_day_closed_on',
+        'home_day_urgent_on',
         'pending_streak_chest',
         'badges_seen_at',
         'loot_seen_at',
@@ -101,6 +102,7 @@ class Profile extends Model implements Authenticatable
             'streak_milestone_run_started_on' => 'date',
             'powered_up_on' => 'date',
             'home_day_closed_on' => 'date',
+            'home_day_urgent_on' => 'date',
         ];
     }
 

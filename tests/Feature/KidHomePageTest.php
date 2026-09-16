@@ -7,29 +7,35 @@ use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyChest;
 use App\Models\Household;
+use App\Models\Meal;
 use App\Models\Profile;
 use App\Services\ChestService;
 use App\Services\ChoreService;
-use App\Services\FeedService;
+use App\Services\GratitudeService;
+use App\Services\HouseholdClock;
 use App\Services\MonsterService;
 use App\Services\SpinService;
 use App\Services\StreakService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Livewire\Features\SupportTesting\Testable;
 use Livewire\Volt\Volt;
 use Tests\TestCase;
 
 /**
- * Home — the kid landing page, laid out as the day in the order it happens.
+ * Home — the feed, and "Your day" beside it.
  *
- * The individual mechanics are owned by the suites they belong to: the chest by
- * DailyChestTest, the spin by SpinFlowTest and WheelClaimTest, the standings by
- * HouseholdPageTest. What is pinned here is the thing the page exists for — the
- * cards, always in the same order, each saying where the kid is on it, and every
- * one of them acting in place rather than pointing somewhere else. The wheel is
- * the one exception, and it earned it: it moved to Quests, so what stands in for
- * it here is a strip that points.
+ * The page was six full-height cards stacked down a scroll with the family feed
+ * underneath them; it is now a six-row index that opens one row at a time, and
+ * the feed gets the room. On a phone that index is a 3×2 board of tiles with the
+ * panel opening below it; at desk size the same six are rows in a 340px column
+ * and the feed sits alongside.
+ *
+ * The mechanics themselves belong to the suites that own them — the chest to
+ * DailyChestTest, the spin to SpinFlowTest, the run to StreakDecayTest. What is
+ * pinned here is the shape: what each row says while it is shut, that only one
+ * opens, that the answer is remembered, and that everything still acts in place.
  */
 class KidHomePageTest extends TestCase
 {
@@ -45,39 +51,485 @@ class KidHomePageTest extends TestCase
 
         $this->household = Household::factory()->create();
 
-        // Pinned to the middle of the day: the standings draw an at-risk state
-        // off the household's evening watch hour, and a test run that happens
-        // to start after it would read as a run on the line.
+        // Pinned to the middle of a household day: every row reads its state off
+        // the household clock, and a run that started either side of the 4am
+        // rollover would be asserting about the clock instead.
         $this->travelTo(Carbon::parse('2026-05-01 12:00', $this->household->timezone));
 
         $this->kid = Profile::factory()->for($this->household)->create(['name' => 'Rex']);
 
-        // Six, not three: the wheel draws from what is left once the quest hand
-        // is dealt, and a household with only a hand's worth of chores leaves it
-        // with nothing to land on.
-        Chore::factory()->for($this->household)->count(6)->create();
+        Chore::factory()->for($this->household)->count(6)->create(['points' => 120]);
+
+        // A hinted decoy, because hinted chores win the mystery draw outright.
+        // Without it the day's mystery can land on a chore one of these tests
+        // approves, and its +500 turns up inside the money on the Work row.
+        // Priced well above everything else so it is never the cheapest job,
+        // which is the one the panel suggests.
+        Chore::factory()->for($this->household)->create([
+            'name' => 'The decoy',
+            'points' => 999,
+            'hint' => 'Somewhere warm',
+        ]);
 
         Auth::guard('profile')->login($this->kid);
     }
 
-    public function test_the_page_lays_the_day_out_in_one_fixed_order(): void
+    private function open(string $row): Testable
     {
-        app(MonsterService::class)->spawn($this->household, 'Pizza night', 1000);
-        $this->household->update(['weekly_chore_target' => 10]);
+        return Volt::test('kid.home')->call('toggleRow', $row);
+    }
 
+    /**
+     * The page, loaded again from scratch.
+     *
+     * The guard hands back the same profile instance for the life of a test,
+     * where a real second request resolves a fresh one from the session — so a
+     * component that wrote to its own profile on the first load would read its
+     * own stale copy on the second. Anything asserting about what a kid comes
+     * back to has to come back properly.
+     */
+    private function reopen(): Testable
+    {
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        return Volt::test('kid.home');
+    }
+
+    public function test_the_day_is_an_index_and_the_room_is_beside_it(): void
+    {
         Volt::test('kid.home')
             ->assertOk()
             ->assertSeeInOrder([
-                'Nothing in yet today',
-                'Bonus Chest',
-                'Streak Chest',
-                // Not a section any more — a strip pointing at the wheel on
-                // Quests, which still sits in the run where the wheel was.
-                'Your Bonus Wheel spin is waiting',
-                // Then what the house does together, and that is the end of it.
-                'Weekly Prize',
-                'The Fight',
+                // The index, its open panel, and the house rows under it — then
+                // the room, which is the reason the day had to get smaller.
+                'Your day',
+                'Feelings',
+                'Gratitude',
+                'Meals',
+                'Work today',
+                'Family',
             ]);
+    }
+
+    /**
+     * Feelings, Gratitude and Meals open like the day's rows but are not tasks,
+     * so the counter still counts six — and answering does not move it.
+     */
+    public function test_the_house_rows_are_not_counted_as_the_day(): void
+    {
+        app(GratitudeService::class)->record($this->kid, ['one', 'two', 'three']);
+
+        Volt::test('kid.home')
+            ->assertOk()
+            ->assertSee('0 of 6 done')
+            ->assertSee("toggleRow('feelings')", escape: false)
+            ->assertSee("toggleRow('gratitude')", escape: false)
+            ->assertSee("toggleRow('meals')", escape: false);
+    }
+
+    public function test_every_row_of_the_day_is_on_the_index(): void
+    {
+        Volt::test('kid.home')
+            ->assertOk()
+            ->assertSee('Work')
+            ->assertSee('Bonus Chest')
+            ->assertSee('Bonus Wheel')
+            ->assertSee('Streak Chest')
+            ->assertSee('Weekly Prize')
+            ->assertSee('The Fight')
+            ->assertSee("toggleRow('chest')", escape: false);
+    }
+
+    /** A shut row still answers "what now". */
+    public function test_a_shut_row_carries_its_status(): void
+    {
+        Volt::test('kid.home')
+            ->assertOk()
+            ->assertSee('READY')
+            ->assertSee('1 WAITING')
+            ->assertSee('NOTHING YET');
+    }
+
+    public function test_the_counter_says_how_much_of_the_day_is_done(): void
+    {
+        Volt::test('kid.home')->assertOk()->assertSee('0 of 6 done');
+
+        app(ChoreService::class)->claim($this->kid, $this->household->chores->first());
+        app(ChestService::class)->open($this->kid);
+
+        // Three, not two: the work is in, the chest is open, and the work
+        // being in is also what makes tonight safe — a pending claim settles
+        // the run's day, so the streak row is done as well.
+        Volt::test('kid.home')->assertOk()->assertSee('3 of 6 done');
+    }
+
+    /** A kid who has never touched it arrives at the row that answers "what now". */
+    public function test_work_is_the_row_that_starts_open(): void
+    {
+        Volt::test('kid.home')
+            ->assertOk()
+            ->assertSet('openRow', 'work')
+            ->assertSee('Work today');
+    }
+
+    public function test_only_one_row_is_open_at_a_time(): void
+    {
+        $this->open('chest')
+            ->assertSet('openRow', 'chest')
+            ->assertSee("Open today's bonus chest")
+            // Work shut itself on the way past. Without this the column grows
+            // back into the page of stacked heroes it replaced.
+            ->assertDontSee('Work today');
+    }
+
+    public function test_tapping_the_open_row_shuts_it(): void
+    {
+        Volt::test('kid.home')
+            ->call('toggleRow', 'work')
+            ->assertSet('openRow', null)
+            ->assertDontSee('Work today');
+    }
+
+    /** A row a kid closed stays closed — across a page load, not just a render. */
+    public function test_a_closed_row_is_remembered_for_the_household_day(): void
+    {
+        Volt::test('kid.home')->call('toggleRow', 'work');
+
+        $this->assertNull($this->kid->refresh()->home_day_open);
+        $this->assertTrue($this->kid->home_day_closed_on->isSameDay(HouseholdClock::for($this->household)->today()));
+
+        $this->reopen()->assertSet('openRow', null);
+    }
+
+    public function test_an_open_row_is_remembered_too(): void
+    {
+        Volt::test('kid.home')->call('toggleRow', 'prize');
+
+        $this->assertSame('prize', $this->kid->refresh()->home_day_open);
+
+        $this->reopen()->assertSet('openRow', 'prize');
+    }
+
+    /** Yesterday's answer is yesterday's. */
+    public function test_the_next_day_opens_work_again(): void
+    {
+        Volt::test('kid.home')->call('toggleRow', 'work')->assertSet('openRow', null);
+
+        $this->travelTo(Carbon::parse('2026-05-02 12:00', $this->household->timezone));
+
+        $this->reopen()->assertSet('openRow', 'work');
+    }
+
+    /**
+     * Urgency outranks a remembered close, once: a streak chest is the one thing
+     * on this page that is worth something and expires.
+     */
+    public function test_a_waiting_streak_chest_opens_its_own_row(): void
+    {
+        Volt::test('kid.home')->call('toggleRow', 'work')->assertSet('openRow', null);
+
+        $this->kid->update(['streak' => 3, 'pending_streak_chest' => 3]);
+
+        $this->reopen()
+            ->assertSet('openRow', 'streak')
+            ->assertSee('Your streak chest is waiting');
+    }
+
+    /** Once, though — closing it again has to stick. */
+    public function test_closing_the_urgent_row_sticks(): void
+    {
+        $this->kid->update(['streak' => 3, 'pending_streak_chest' => 3]);
+
+        Volt::test('kid.home')->assertSet('openRow', 'streak')->call('toggleRow', 'streak');
+
+        $this->reopen()->assertSet('openRow', null);
+    }
+
+    /*
+     * ------------------------------------------------------------------
+     * Work — the row that stands where the daily quest did
+     * ------------------------------------------------------------------
+     */
+
+    public function test_work_counts_today_in_money(): void
+    {
+        $chore = $this->household->chores->first();
+        $service = app(ChoreService::class);
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+
+        $service->approve($service->claim($this->kid, $chore), $parent);
+
+        Volt::test('kid.home')
+            ->assertOk()
+            // Dollars are the headline and points the footnote, the same way a
+            // board row is written.
+            ->assertSee('$1.20')
+            ->assertSee('120 pts')
+            ->assertSee($chore->name)
+            ->assertSee('Pick another job');
+    }
+
+    public function test_a_job_waiting_on_a_parent_says_so_rather_than_paying(): void
+    {
+        app(ChoreService::class)->claim($this->kid, $this->household->chores->first());
+
+        Volt::test('kid.home')
+            ->assertOk()
+            ->assertSee('WAITING')
+            ->assertSee('1 waiting');
+    }
+
+    public function test_a_sent_back_job_is_on_the_list_too(): void
+    {
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        $service = app(ChoreService::class);
+
+        $service->sendBack($service->claim($this->kid, $this->household->chores->first()), $parent);
+
+        Volt::test('kid.home')->assertOk()->assertSee('SENT BACK');
+    }
+
+    /**
+     * The replacement for the quest's *this one, now*. A board of jobs is a
+     * decision, and the six-year-old is the kid who cannot make it.
+     */
+    public function test_an_empty_day_suggests_the_cheapest_job(): void
+    {
+        Chore::factory()->for($this->household)->create(['name' => 'Feed the cat', 'points' => 20]);
+
+        Volt::test('kid.home')
+            ->assertOk()
+            ->assertSee('$0.00')
+            ->assertSee('Feed the cat')
+            ->assertSee('Do this one')
+            ->assertSee('See all');
+    }
+
+    public function test_the_suggested_job_can_be_taken_without_leaving_home(): void
+    {
+        $cheap = Chore::factory()->for($this->household)->create(['name' => 'Feed the cat', 'points' => 20]);
+
+        Volt::test('kid.home')->call('claimSuggested', $cheap->id)->assertOk();
+
+        $this->assertDatabaseHas('chore_completions', [
+            'chore_id' => $cheap->id,
+            'profile_id' => $this->kid->id,
+            'status' => CompletionStatus::Pending->value,
+        ]);
+    }
+
+    /** A suggestion is minutes old by the time it is tapped. */
+    public function test_a_suggested_job_a_sibling_took_first_says_so(): void
+    {
+        $sibling = Profile::factory()->for($this->household)->create();
+        $cheap = Chore::factory()->for($this->household)->create(['name' => 'Feed the cat', 'points' => 20]);
+
+        app(ChoreService::class)->claim($sibling, $cheap);
+
+        Volt::test('kid.home')
+            ->call('claimSuggested', $cheap->id)
+            ->assertSee('That one just went');
+
+        $this->assertSame(0, ChoreCompletion::where('profile_id', $this->kid->id)->count());
+    }
+
+    public function test_the_footer_says_how_big_the_board_is(): void
+    {
+        app(ChoreService::class)->claim($this->kid, $this->household->chores->first());
+
+        Volt::test('kid.home')->assertOk()->assertSee('on the board');
+    }
+
+    /*
+     * ------------------------------------------------------------------
+     * The rest of the day, behind its rows
+     * ------------------------------------------------------------------
+     */
+
+    public function test_the_bonus_chest_opens_in_place(): void
+    {
+        $this->open('chest')
+            ->assertSee("Open today's bonus chest")
+            ->call('openDailyChest')
+            ->assertOk();
+
+        $this->assertNotNull(DailyChest::where('profile_id', $this->kid->id)->first());
+    }
+
+    public function test_the_chest_row_says_it_has_been_opened(): void
+    {
+        app(ChestService::class)->open($this->kid);
+
+        Volt::test('kid.home')->assertOk()->assertSee('OPENED');
+    }
+
+    public function test_the_wheel_row_points_at_the_page_that_spins_it(): void
+    {
+        $this->open('wheel')
+            ->assertSee('Your Bonus Wheel spin is waiting')
+            ->assertSee(route('kid.quests').'#bonus-wheel', escape: false);
+    }
+
+    public function test_a_spun_wheel_reads_as_used(): void
+    {
+        app(SpinService::class)->spin($this->kid);
+
+        Volt::test('kid.home')->assertOk()->assertSee('USED');
+    }
+
+    public function test_the_streak_panel_carries_the_track(): void
+    {
+        $this->kid->update(['streak' => 3]);
+
+        $this->open('streak')
+            ->assertOk()
+            ->assertSee('Streak Chest')
+            ->assertSee('Next chest at day');
+    }
+
+    public function test_a_waiting_streak_chest_can_be_opened_here(): void
+    {
+        $this->kid->update(['streak' => 3, 'pending_streak_chest' => 3]);
+
+        Volt::test('kid.home')
+            ->assertSet('openRow', 'streak')
+            ->call('openStreakChest')
+            ->assertOk();
+
+        $this->assertNull($this->kid->refresh()->pending_streak_chest);
+    }
+
+    public function test_the_weekly_prize_panel_names_the_prize(): void
+    {
+        $this->household->update([
+            'weekly_chore_target' => 20,
+            'weekly_prize' => 'Friday movie pick',
+        ]);
+
+        $this->open('prize')
+            ->assertOk()
+            ->assertSee('Friday movie pick');
+    }
+
+    public function test_the_prize_row_says_when_nothing_is_set(): void
+    {
+        Volt::test('kid.home')->assertOk()->assertSee('NONE SET');
+    }
+
+    public function test_the_fight_panel_draws_the_monster(): void
+    {
+        app(MonsterService::class)->spawn($this->household, 'Pizza night', 1000);
+
+        $this->open('fight')->assertOk()->assertSee('Pizza night');
+    }
+
+    public function test_a_household_with_nothing_standing_says_so_on_the_row(): void
+    {
+        Volt::test('kid.home')->assertOk()->assertSee('Nothing standing');
+    }
+
+    /*
+     * ------------------------------------------------------------------
+     * Dinner, the feed, and the page as a whole
+     * ------------------------------------------------------------------
+     */
+
+    private function meal(int $daysFromToday, string $name, ?string $note = null): Meal
+    {
+        return Meal::create([
+            'household_id' => $this->household->id,
+            'served_on' => HouseholdClock::for($this->household)->today()->addDays($daysFromToday),
+            'name' => $name,
+            'note' => $note,
+        ]);
+    }
+
+    /** Tonight's dinner is on the Meals row's face, without opening anything. */
+    public function test_the_meals_row_says_what_is_for_dinner_tonight(): void
+    {
+        $this->meal(0, 'Chicken curry');
+
+        Volt::test('kid.home')
+            ->assertOk()
+            ->assertSee('Tonight · Chicken curry');
+    }
+
+    /**
+     * An absent answer has to be visibly absent — the same rule the feelings
+     * strip follows. Saying nothing at all would read as the row being broken.
+     */
+    public function test_no_dinner_at_all_still_says_so(): void
+    {
+        Volt::test('kid.home')->assertOk()->assertSee('Tonight · nobody has said yet');
+
+        $this->reopen()->call('toggleRow', 'meals')->assertSee("Nobody has said what's for dinner yet.", false);
+    }
+
+    /** Every night a grown-up has set, tonight first, and nothing already eaten. */
+    public function test_the_meals_panel_lists_every_set_meal_from_tonight_on(): void
+    {
+        $this->meal(-1, 'Last night soup');
+        $this->meal(3, 'Fish pie', 'with peas');
+        $this->meal(0, 'Chicken curry');
+        $this->meal(12, 'Birthday lasagne');
+
+        Volt::test('kid.home')
+            ->call('toggleRow', 'meals')
+            ->assertSeeInOrder(['Tonight', 'Chicken curry', 'Fish pie', 'with peas', 'Birthday lasagne'])
+            ->assertSee('3 SET')
+            ->assertDontSee('Last night soup');
+    }
+
+    /** Said once while the panel is shut: it came out of the feed's card to come here. */
+    public function test_dinner_is_not_also_inside_the_feed(): void
+    {
+        $this->meal(0, 'Chicken curry');
+
+        $html = Volt::test('kid.home')->assertOk()->html();
+
+        $this->assertSame(1, substr_count($html, 'Chicken curry'), 'Dinner must be on the page exactly once.');
+    }
+
+    public function test_the_family_feed_is_on_the_page_rather_than_linked_from_it(): void
+    {
+        Volt::test('kid.home')
+            ->assertOk()
+            ->assertSee('Family')
+            // The composer, so the room can be answered from here.
+            ->assertSee('Message everyone', escape: false);
+    }
+
+    /**
+     * The feelings card is behind its row rather than a card under the day:
+     * open, it was the tallest thing on the page and pushed the feed down.
+     */
+    public function test_the_feelings_card_waits_behind_its_row(): void
+    {
+        Volt::test('kid.home')
+            ->assertOk()
+            ->assertSee('How are you today?')
+            ->assertDontSee('How are you feeling today?');
+
+        $this->reopen()
+            ->call('toggleRow', 'feelings')
+            ->assertSeeInOrder(['Feelings', 'How are you feeling today?', 'Message everyone']);
+    }
+
+    /**
+     * The feed's quiet half — Today in the house and Grateful today — is left
+     * off Home. On a phone it sorted under however long the chat had got, and
+     * both are rows of the day now.
+     */
+    public function test_the_feed_leaves_its_quiet_half_to_the_day(): void
+    {
+        Volt::test('kid.home')
+            ->assertDontSee('Today in the house')
+            ->assertDontSee('Grateful today');
+
+        $this->reopen()
+            ->call('toggleRow', 'gratitude')
+            ->assertSee('Hand it in')
+            ->assertSee('Grateful today');
     }
 
     public function test_the_cards_are_not_numbered(): void
@@ -90,247 +542,31 @@ class KidHomePageTest extends TestCase
             ->assertDontSee('Step 2');
     }
 
-    /**
-     * The quest chest used to be the first thing on this page: opened here,
-     * picked here, claimed here. It is gone, and so is the charm button that
-     * only made sense beside it — a charm lands on the board, so it is bought
-     * and cast on Quests.
-     *
-     * What is left is a line saying whether anything is in yet, and a way
-     * through to the board. Home answers "what now?"; the board is the work.
-     */
-    public function test_the_work_is_pointed_at_rather_than_done_here(): void
+    public function test_home_still_renders_when_the_household_has_no_chores_at_all(): void
     {
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('Nothing in yet today')
-            ->assertSee('Any chore signed off keeps your run alive.')
-            ->assertSee(route('kid.quests'), escape: false)
-            // The chest, the hand and the charm all left together.
-            ->assertDontSee('Quest Chest')
-            ->assertDontSee('Buy a Quest Charm');
-    }
-
-    public function test_work_already_in_reads_as_the_night_being_safe(): void
-    {
-        app(ChoreService::class)->claim($this->kid, $this->household->chores->first());
+        // This is the page a kid always lands on, so it is the one page that
+        // must never be the thing that breaks.
+        Chore::query()->delete();
 
         Volt::test('kid.home')
             ->assertOk()
-            ->assertSee("Work's in — tonight counts", escape: false)
-            ->assertDontSee('Nothing in yet today');
+            ->assertSee('Your day')
+            ->assertSee('Nothing on the board right now');
     }
 
-    public function test_the_bonus_chest_opens_in_place(): void
-    {
-        // One tap, and nowhere else to send them — the chest has no page of its
-        // own, so making a kid travel for it is exactly the errand this page
-        // was built to remove.
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee("Open today's bonus chest")
-            ->call('openDailyChest')
-            ->assertOk();
-
-        $this->assertNotNull(DailyChest::where('profile_id', $this->kid->id)->first());
-    }
-
-    public function test_the_chest_asks_before_it_is_spent_on_the_plain_table(): void
-    {
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('Hold on');
-
-        app(ChoreService::class)->claim($this->kid, $this->household->chores->first());
-
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('Your chest is OP today')
-            ->assertDontSee('Hold on');
-    }
-
-    public function test_a_chest_already_opened_in_another_tab_still_reveals_what_it_held(): void
-    {
-        // A stale tab, or a back-button visit to a page rendered before the
-        // chest went. Opening again must describe the chest that exists rather
-        // than dead-end on an empty prize card.
-        app(ChestService::class)->open($this->kid);
-
-        $page = Volt::test('kid.home')->assertOk()->call('openDailyChest');
-
-        $this->assertNotNull($page->get('dailyChestPrize'));
-        $this->assertSame(1, DailyChest::where('profile_id', $this->kid->id)->count());
-    }
-
-    /**
-     * The wheel went to Quests — the kids kept going there to look for it, and
-     * they were right: it lands on a side quest, and the board is over there.
-     * What is left here is a strip, and the news it carries is the point of it.
-     */
-    public function test_the_wheel_is_a_pointer_at_quests_rather_than_a_spin(): void
-    {
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('Your Bonus Wheel spin is waiting')
-            ->assertSee(route('kid.quests').'#bonus-wheel', escape: false)
-            // The wheel itself, and every control on it, are not here.
-            ->assertDontSee('One Spin Per Day')
-            ->assertDontSee('Active Boost');
-
-        $spin = app(SpinService::class)->spin($this->kid);
-
-        // Once it has gone, the strip stops advertising a spin and starts
-        // reporting the boost that is live.
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee($spin->multiplier.'x on '.$spin->chore->name)
-            ->assertDontSee('Your Bonus Wheel spin is waiting');
-    }
-
-    /**
-     * A streak that survives being looked at.
-     *
-     * The standings sync every kid's streak before drawing them — `streak` is a
-     * cache, and a run with no approved chore behind it is expired on sight. So
-     * a fixture that only sets the number renders as a house of zeroes.
-     */
-    private function runOf(Profile $kid, int $nights): void
-    {
-        $yesterday = Carbon::parse('2026-04-30 12:00', $this->household->timezone);
-        $chore = $this->household->chores->first();
-
-        ChoreCompletion::create([
-            'chore_id' => $chore->id,
-            'profile_id' => $kid->id,
-            'status' => CompletionStatus::Approved,
-            'points_awarded' => $chore->points,
-            'submitted_at' => $yesterday->copy()->setTime(12, 0),
-            'decided_at' => $yesterday->copy()->setTime(13, 0),
-        ]);
-
-        $kid->update(['streak' => $nights]);
-    }
-
-    /** Approved chores this week, which is all the weekly bar counts. */
-    private function choresThisWeek(Profile $kid, int $count): void
-    {
-        $chore = Chore::where('household_id', $this->household->id)->firstOrFail();
-
-        foreach (range(1, $count) as $ignored) {
-            ChoreCompletion::create([
-                'chore_id' => $chore->id,
-                'profile_id' => $kid->id,
-                'status' => CompletionStatus::Approved,
-                'points_awarded' => 10,
-                'submitted_at' => now(),
-                'decided_at' => now(),
-            ]);
-        }
-    }
-
-    public function test_the_weekly_prize_bar_names_the_prize_and_counts_what_is_left(): void
-    {
-        $this->household->update(['weekly_chore_target' => 10, 'weekly_prize' => 'friday movie pick']);
-
-        $nova = Profile::factory()->for($this->household)->create(['name' => 'Nova']);
-
-        $this->choresThisWeek($this->kid, 3);
-        $this->choresThisWeek($nova, 1);
-
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('Weekly Prize')
-            // The prize is the headline. "10 chores" is the price, not the
-            // thing being bought, and a bar promising an unnamed reward is a
-            // bar nobody chases.
-            ->assertSee('friday movie pick')
-            ->assertSee('4 / 10 CHORES', escape: false)
-            ->assertSee('6 chores to go')
-            ->assertSee('nobody has to win it');
-    }
-
-    public function test_a_hit_target_says_the_house_has_won_it(): void
-    {
-        $this->household->update(['weekly_chore_target' => 2, 'weekly_prize' => 'friday movie pick']);
-
-        $this->choresThisWeek($this->kid, 2);
-
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('Won it')
-            ->assertSee('Target smashed');
-    }
-
-    public function test_no_weekly_target_draws_no_bar(): void
-    {
-        // A parent who hasn't set one gets no card at all rather than an empty
-        // bar promising nothing.
-        $this->household->update(['weekly_chore_target' => null]);
-
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertDontSee('Weekly Prize');
-    }
-
-    /**
-     * The standings used to be the last card here — the Household page in
-     * miniature, and the only card on Home that ranks the kids against each
-     * other. They are gone, and the full table they were a copy of is where
-     * they always were.
-     *
-     * A kid opening the app to answer "what do I do now" should not have to
-     * scroll past who is beating them to get out of their own day.
-     */
     public function test_the_standings_have_left_the_page(): void
     {
-        $nova = Profile::factory()->for($this->household)->create(['name' => 'Nova']);
-
-        $this->runOf($nova, 9);
-        $this->runOf($this->kid, 2);
+        Profile::factory()->for($this->household)->create(['name' => 'Nova', 'points' => 900]);
 
         Volt::test('kid.home')
             ->assertOk()
-            ->assertDontSee('House Standings')
-            ->assertDontSee('9 NIGHTS IN A ROW');
+            // Household is where the house is ranked; a second copy of that
+            // table is the last thing a kid should scroll past on the way out
+            // of their own day.
+            ->assertDontSee('Where the house stands');
     }
 
-    /**
-     * The family feed is *on* this page, not linked from it.
-     *
-     * A one-line pointer was tried first and rejected: "otherwise new messages
-     * will get missed". A link is something you tap when you already suspect
-     * there is something behind it, which is exactly the wrong shape for the
-     * one thing on this page that somebody else is waiting on an answer to.
-     */
-    public function test_the_family_feed_is_on_the_page_rather_than_linked_from_it(): void
-    {
-        $sibling = Profile::factory()->for($this->household)->create(['name' => 'Nova']);
-
-        app(FeedService::class)->ensureRooms($this->household);
-        app(FeedService::class)->say(
-            $sibling,
-            app(FeedService::class)->roomFor($sibling),
-            'anyone want to build the lego castle',
-        );
-
-        Volt::test('kid.home')
-            ->assertOk()
-            // The message itself, on the landing page, with no tap in between.
-            ->assertSee('anyone want to build the lego castle')
-            ->assertSee('Everyone')
-            // And the composer, so it can be answered from here too.
-            ->assertSee('Message everyone', escape: false);
-    }
-
-    /** Above the day, because a chest does not mind being opened tomorrow. */
-    public function test_the_feed_sits_above_the_day(): void
-    {
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSeeInOrder(['Family', 'Nothing in yet today', 'Bonus Chest']);
-    }
-
-    /** A genuine run of approved chores, so syncStreak() leaves the streak alone. */
+    /** A run that survives being looked at, for the rows that read it. */
     private function giveKidAStreak(int $days): void
     {
         $chore = Chore::where('household_id', $this->household->id)->firstOrFail();
@@ -351,140 +587,12 @@ class KidHomePageTest extends TestCase
         $this->kid->update(['streak' => $days]);
     }
 
-    public function test_the_streak_header_never_reads_as_a_day_you_are_already_on(): void
+    public function test_the_streak_row_counts_the_run(): void
     {
-        // The old mock's "Day 14 · 6 to go" only works when the milestone is
-        // obviously ahead of you. On a fresh profile the same shape rendered
-        // "DAY 3 · 3 TO GO" beside a header reading 0d, and it looked like it
-        // was telling you what day of the streak you were on.
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('Start a run')
-            ->assertDontSee('Day 3 ·', escape: false);
+        $this->giveKidAStreak(4);
 
-        // A real day behind the counter, not just the number: the page expires
-        // a streak with nothing under it, and a bare update() would be zeroed
-        // again before it rendered.
-        $this->giveKidAStreak(1);
+        app(StreakService::class)->syncStreak($this->kid);
 
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('2 days to go');
-    }
-
-    public function test_the_streak_card_does_not_tell_a_kid_with_no_streak_to_keep_it_alive(): void
-    {
-        // escape: false because this is literal copy in the template rather
-        // than an echoed variable, so Blade leaves the apostrophe alone.
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('Get any chore signed off to start a streak', escape: false)
-            ->assertDontSee('Keep the streak alive');
-    }
-
-    public function test_a_waiting_streak_chest_can_be_opened_here(): void
-    {
-        $this->kid->update(['streak' => 3, 'pending_streak_chest' => 3]);
-
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('Your streak chest is waiting')
-            ->call('openStreakChest')
-            ->assertOk();
-
-        $this->assertNull($this->kid->fresh()->pending_streak_chest);
-    }
-
-    /**
-     * The bug this closes: the bonus used to be credited the moment the
-     * milestone was reached, so a kid logging in the next morning found the
-     * points already in the tile at the top of the page and then opened a chest
-     * that gave them nothing.
-     */
-    public function test_a_waiting_streak_chest_is_not_already_in_the_balance(): void
-    {
-        $this->kid->update(['streak' => 3, 'pending_streak_chest' => 3, 'points' => 0]);
-
-        $page = Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('Your streak chest is waiting');
-
-        $this->assertSame(0, $this->kid->fresh()->points);
-
-        $page->call('openStreakChest')->assertOk();
-
-        // $1 at the household's own rate, and it arrives on the tap.
-        $this->assertSame($this->household->points_per_dollar, $this->kid->fresh()->points);
-    }
-
-    public function test_the_streak_track_draws_its_milestones_as_growing_chests(): void
-    {
-        // The payout curve has to be readable by a kid who isn't going to
-        // compare "100" against "4000" in their head, so the chests carry it.
-        $html = Volt::test('kid.home')->assertOk()->html();
-
-        // Anchored on the `background` that <x-chest-block> always writes
-        // ahead of its computed box. A bare `width: Npx; height: Npx` matches
-        // anything else on the page that happens to size itself inline — the
-        // family feed's avatars do — and this is counting chests.
-        preg_match_all('/background: [^";]+; width: (\d+)px; height: \d+px/', $html, $matches);
-
-        $widths = array_map('intval', $matches[1]);
-
-        $this->assertCount(count(StreakService::STREAK_BONUSES), $widths, 'One chest per milestone.');
-        $this->assertSame($widths, array_values(array_unique($widths)), 'No two chests the same size.');
-
-        $sorted = $widths;
-        sort($sorted);
-
-        $this->assertSame($sorted, $widths, 'The chests grow along the track.');
-    }
-
-    public function test_the_two_chests_are_not_the_same_colour(): void
-    {
-        // They stack on one page. Identical gold boxes read as one thing
-        // repeated rather than as two different rewards. There were three
-        // until the quest chest went.
-        $this->kid->update(['streak' => 3, 'pending_streak_chest' => 3]);
-
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('background: var(--fq-chest-blue-fill)', escape: false)
-            ->assertSee('background: var(--fq-chest-streak-fill)', escape: false);
-    }
-
-    public function test_the_boss_caption_carries_the_pending_count(): void
-    {
-        app(MonsterService::class)->spawn($this->household, 'Pizza night', 1000);
-
-        $service = app(ChoreService::class);
-        $service->claim($this->kid, Chore::where('household_id', $this->household->id)->first());
-
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('The Fight')
-            ->assertSee('Boss Fight')
-            ->assertSee('1 PENDING');
-    }
-
-    public function test_a_household_with_nothing_standing_draws_no_boss(): void
-    {
-        // Nothing spawned, so there is no arena to draw and no strip for it.
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertDontSee('Boss Fight');
-    }
-
-    public function test_home_still_renders_when_the_household_has_no_chores_at_all(): void
-    {
-        // Every chore gone. This is the one page a kid always lands on, so it
-        // is the one page that must never be the thing that breaks. It used to
-        // be able to: asking for a quest in a household with nothing eligible
-        // threw, and every card on the page was guarded against it.
-        Chore::query()->delete();
-
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('Bonus Chest');
+        Volt::test('kid.home')->assertOk()->assertSee('Day 4');
     }
 }

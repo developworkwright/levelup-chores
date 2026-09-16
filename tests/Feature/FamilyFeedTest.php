@@ -636,6 +636,23 @@ class FamilyFeedTest extends TestCase
     }
 
     /**
+     * The kid's Home gives the room a column of its own with nothing under it,
+     * so there the box comes off and the messages simply run down the page.
+     * Parent Home keeps it: the approval queues are below.
+     */
+    public function test_the_kid_home_feed_is_not_capped(): void
+    {
+        Auth::guard('profile')->login($this->raylan);
+
+        $uncapped = Volt::test('family-feed', ['embedded' => true, 'capped' => false])->html();
+        preg_match('/<div[^>]*data-feed-messages[^>]*>/s', $uncapped, $messages);
+        $this->assertStringNotContainsString('overflow-y-auto', $messages[0]);
+
+        preg_match('/<div[^>]*data-feed-messages[^>]*>/s', Volt::test('kid.home')->html(), $home);
+        $this->assertStringNotContainsString('overflow-y-auto', $home[0]);
+    }
+
+    /**
      * And on a phone there is no inner scroller at all.
      *
      * The cap was sized when a message was a line of text. A portrait photo is

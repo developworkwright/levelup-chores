@@ -76,7 +76,7 @@
              second door into the house's feelings would quietly undo that. --}}
         <p class="text-[13.5px] text-fq-text-4">
             Say how your day went first and you'll see everyone else's.
-            <a href="{{ route('kid.quests') }}" wire:navigate class="font-semibold underline" style="color: var(--fq-cyan)">Today's card</a>
+            <a href="{{ route('kid.home') }}" wire:navigate class="font-semibold underline" style="color: var(--fq-cyan)">Today's card</a>
         </p>
     @else
         <div class="flex flex-col gap-2">

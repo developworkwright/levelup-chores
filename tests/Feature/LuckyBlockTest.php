@@ -299,20 +299,20 @@ class LuckyBlockTest extends TestCase
             ->assertDontSee('Journal &middot; not done today', false);
     }
 
-    public function test_home_points_at_the_block_only_from_two_tickets_up(): void
+    /**
+     * Home used to nudge towards the block from two tickets up. It was dropped
+     * with the "Your day" rebuild — the block lives on the Bonus Shop, and the
+     * ticket count in the header already links there.
+     */
+    public function test_home_no_longer_points_at_the_block(): void
     {
         $household = Household::factory()->create();
 
-        $this->loginKid($household, ['bonus_tickets' => 1]);
-        Volt::test('kid.home')->assertDontSee('Lucky Block');
+        $this->loginKid($household, ['bonus_tickets' => 12]);
 
-        Auth::guard('profile')->logout();
-        $this->loginKid($household, ['bonus_tickets' => 2]);
-        Volt::test('kid.home')->assertSee('One more ticket for a Lucky Block');
-
-        Auth::guard('profile')->logout();
-        $this->loginKid($household, ['bonus_tickets' => 3]);
-        Volt::test('kid.home')->assertSee("You've got enough for a Lucky Block", false);
+        Volt::test('kid.home')
+            ->assertDontSee('One more ticket for a Lucky Block')
+            ->assertDontSee("You've got enough for a Lucky Block", false);
     }
 
     public function test_home_says_nothing_when_the_pool_is_empty_however_many_tickets(): void

@@ -44,6 +44,15 @@
     'celebrateTier' => 'small',
     'celebrateStyle' => 'confetti',
     'celebrateMotion' => 'burst',
+    {{-- Drawn inside a rail rather than across a page.
+
+         The text block below asks for 260px beside the chest graphic, which is
+         right when this card has the width of a screen and wrong the moment it
+         is in Home's 340px day column — the title ran straight out of the card,
+         and even without the floor the side-by-side row squeezed the copy into a
+         word per line. So a narrow chest keeps its phone layout at every width.
+         --}}
+    'narrow' => false,
     'confirm' => false,
     'confirmPanel' => null,
 ])
@@ -152,7 +161,10 @@
              The glow is round and the panel is a short wide row, so without
              this it reads as a lamp behind the card rather than as a chest
              about to open. --}}
-        class="flex flex-col items-center gap-[14px] overflow-hidden rounded-[24px] border p-5 text-center sm:flex-row sm:gap-[18px] sm:p-5 sm:text-left"
+        @class([
+            'flex flex-col items-center gap-[14px] overflow-hidden rounded-[24px] border p-5 text-center',
+            'sm:flex-row sm:gap-[18px] sm:text-left' => ! $narrow,
+        ])
         style="animation: fq-pop .3s ease both; background: {{ $wash }}; border-color: {{ $accent }}"
     >
         <div class="relative flex shrink-0 items-center justify-center">
@@ -176,21 +188,21 @@
                 :band="$band"
                 :lock="$lock"
                 radius="12px"
-                class="relative h-[68px] w-[88px] sm:h-[60px] sm:w-[76px]"
+                :class="$narrow ? 'relative h-[68px] w-[88px]' : 'relative h-[68px] w-[88px] sm:h-[60px] sm:w-[76px]'"
                 x-bind:class="phase === 'opening' ? 'fq-chest-opening' : 'fq-chest-idle'"
             />
         </div>
 
-        <div class="min-w-0 flex-1 sm:min-w-[260px]">
+        <div @class(['min-w-0', 'flex-1 sm:min-w-[260px]' => ! $narrow])>
             <p
                 class="font-mono-fq text-[10px] tracking-[0.24em] uppercase"
                 style="color: {{ $accent }}"
                 :class="phase === 'opening' ? 'fq-pulsing' : ''"
             >{{ $kicker }}</p>
 
-            <h2 class="mt-[6px] font-baloo text-[22px] leading-[1.1] font-extrabold sm:text-[26px]">{{ $closedTitle }}</h2>
+            <h2 @class(['mt-[6px] font-baloo text-[22px] leading-[1.1] font-extrabold', 'sm:text-[26px]' => ! $narrow])>{{ $closedTitle }}</h2>
 
-            <p class="mt-[6px] text-[13.5px] text-fq-text-2 sm:text-sm">
+            <p @class(['mt-[6px] text-[13.5px] text-fq-text-2', 'sm:text-sm' => ! $narrow])>
                 {{-- The closed copy stays up through 'confirming': the question
                      being asked replaces the button, not the whole card, and
                      blanking this line would leave a hole above it. --}}
@@ -203,12 +215,15 @@
             type="button"
             x-show="phase === 'closed'"
             @click="open()"
-            class="w-full shrink-0 cursor-pointer rounded-[16px] px-[26px] py-4 font-baloo text-[18px] font-extrabold transition hover:brightness-110 sm:w-auto"
+            @class([
+                'w-full shrink-0 cursor-pointer rounded-[16px] px-[26px] py-4 font-baloo text-[18px] font-extrabold transition hover:brightness-110',
+                'sm:w-auto' => ! $narrow,
+            ])
             style="background: {{ $accent }}; color: var(--fq-bg)"
         >{{ $cta }}</button>
 
         @if ($confirm)
-            <div x-show="phase === 'confirming'" x-cloak class="w-full shrink-0 sm:w-auto">
+            <div x-show="phase === 'confirming'" x-cloak @class(['w-full shrink-0', 'sm:w-auto' => ! $narrow])>
                 {{ $confirmPanel }}
             </div>
         @endif

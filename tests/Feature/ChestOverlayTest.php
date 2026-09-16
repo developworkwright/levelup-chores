@@ -36,7 +36,7 @@ class ChestOverlayTest extends TestCase
         $kid = $this->kidWithChores();
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.home')->assertSee("phase === 'revealed' && justOpened", false);
+        Volt::test('kid.home')->call('toggleRow', 'chest')->assertSee("phase === 'revealed' && justOpened", false);
     }
 
     public function test_a_chest_never_renders_pre_flagged_as_just_opened(): void
@@ -51,7 +51,7 @@ class ChestOverlayTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.home')
+        Volt::test('kid.home')->call('toggleRow', 'chest')
             ->assertSee('justOpened: false', false)
             ->assertDontSee('justOpened: true', false);
     }
@@ -67,7 +67,7 @@ class ChestOverlayTest extends TestCase
         $kid = $this->kidWithChores();
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.home')->assertSee('--fq-glow-size: 120px', false);
+        Volt::test('kid.home')->call('toggleRow', 'chest')->assertSee('--fq-glow-size: 120px', false);
 
         $this->assertStringContainsString(
             'margin-left: calc(var(--fq-glow-size) / -2)',
@@ -86,7 +86,7 @@ class ChestOverlayTest extends TestCase
         $kid = $this->kidWithChores();
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.home')->assertSee('setTimeout(resolve, 2600)', false);
+        Volt::test('kid.home')->call('toggleRow', 'chest')->assertSee('setTimeout(resolve, 2600)', false);
 
         $this->assertStringContainsString(
             'animation: fq-chest-jiggle 2.5s',
@@ -104,9 +104,25 @@ class ChestOverlayTest extends TestCase
         $kid = $this->kidWithChores();
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.home')
+        Volt::test('kid.home')->call('toggleRow', 'chest')
             ->assertSee('hold: 2600', false)
             ->assertSee('show = false, 2200', false);
+    }
+
+    /**
+     * Home's day column is 340px wide on a desktop, so its chests keep the
+     * stacked phone card there too — the side-by-side row squeezed the title
+     * and copy down to a word per line.
+     */
+    public function test_home_draws_its_chest_stacked_at_every_width(): void
+    {
+        $kid = $this->kidWithChores();
+        Auth::guard('profile')->login($kid);
+
+        Volt::test('kid.home')->call('toggleRow', 'chest')
+            ->assertSee("Open today's bonus chest")
+            ->assertDontSee('sm:flex-row sm:gap-[18px]', false)
+            ->assertDontSee('sm:min-w-[260px]', false);
     }
 
     public function test_an_already_opened_chest_still_renders_open(): void
@@ -118,7 +134,7 @@ class ChestOverlayTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         // Suppressing the overlay must not also hide the revealed content.
-        Volt::test('kid.home')
+        Volt::test('kid.home')->call('toggleRow', 'chest')
             ->assertSee("phase: 'revealed'", false)
             ->assertSee('Banked');
     }

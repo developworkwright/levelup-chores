@@ -242,7 +242,7 @@ class StreakDecayTest extends TestCase
 
         Auth::guard('profile')->login($this->kid);
 
-        Volt::test('kid.home')
+        Volt::test('kid.home')->call('toggleRow', 'streak')
             ->assertOk()
             ->assertSee('Streak Rescue')
             ->assertSee('Mar 4, 2026')

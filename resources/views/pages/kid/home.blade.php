@@ -5,19 +5,25 @@ use App\Enums\Feeling;
 use App\Enums\FeelingVisibility;
 use App\Enums\PerkEffect;
 use App\Exceptions\PerkUnavailableException;
+use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\Profile;
 use App\Services\CelebrationService;
 use App\Services\ChestService;
+use App\Services\ChoreService;
 use App\Services\FeedService;
 use App\Services\FeelingService;
+use App\Services\GratitudeService;
+use App\Services\HouseholdClock;
 use App\Services\HouseholdService;
-use App\Services\LuckyBlockService;
+use App\Services\MealService;
 use App\Services\MonsterService;
 use App\Services\PerkInventoryService;
 use App\Services\SpinService;
 use App\Services\StreakService;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 use Livewire\Volt\Component;
 
 /**
@@ -49,7 +55,12 @@ use Livewire\Volt\Component;
  * and a board belongs on Quests.
  *
  * Quests keeps what this page doesn't: the bonus wheel, the board and its
- * charms, the mystery chore, the bounty board, gratitude, the sleep card.
+ * charms, the mystery chore, the bounty board, the sleep card.
+ *
+ * Under the six rows of the day sit three about the house rather than the
+ * work — Feelings, Gratitude and Meals. They open like the rest but are not
+ * part of the "n of 6": a feeling is never a task to tick off, and nobody
+ * finishes dinner by reading the menu.
  */
 new class extends Component
 {
@@ -76,6 +87,45 @@ new class extends Component
 
     public ?int $pendingChestPoints = null;
 
+    /**
+     * Which row of "Your day" is open, by key, or null for none.
+     *
+     * One at a time, and remembered per kid for the household day — see
+     * {@see self::rememberOpenRow()}. It is a server property rather than
+     * Alpine state because it has to survive `wire:navigate`: a kid who closed
+     * the chest, went to the board and came back should find it closed.
+     */
+    public ?string $openRow = null;
+
+    /** The key every row that has never been touched starts on. */
+    private const DEFAULT_ROW = 'work';
+
+    /** Every row a link may ask for with `?row=`. */
+    private const ROWS = ['work', 'chest', 'wheel', 'streak', 'prize', 'fight', 'feelings', 'gratitude', 'meals'];
+
+    /**
+     * The three boxes of the gratitude quest. Deferred rather than live —
+     * nothing on the page reacts to a half-typed answer, so there's no reason
+     * to spend a round trip per keystroke.
+     *
+     * @var array<int, string>
+     */
+    public array $gratitude = ['', '', ''];
+
+    /**
+     * Whether today's list goes up on the family feed's Grateful today card.
+     *
+     * On by default, and a box rather than a setting: a kid who has to go and
+     * find a preference in order to keep one line to themselves will never keep
+     * anything to themselves. See the `shared` column's migration.
+     */
+    public bool $gratitudeShared = true;
+
+    public ?string $gratitudeMessage = null;
+
+    /** Why the suggested job couldn't be taken, when a tap on it bounces. */
+    public ?string $workMessage = null;
+
     public function mount(): void
     {
         $this->profile = Auth::guard('profile')->user();
@@ -83,6 +133,18 @@ new class extends Component
         abort_unless($this->profile->isKid(), 403);
 
         $this->feelingsAnsweredOnArrival = app(FeelingService::class)->hasAnswered($this->profile);
+        $this->openRow = $this->resolveOpenRow();
+
+        // A link that names a row opens it — the Journal's "write today's" and
+        // the feed's gratitude arrow land a kid on the form rather than on
+        // whichever row they last left open. Remembered like a tap, so it
+        // stays open on the way back.
+        $requested = request()->query('row');
+
+        if (is_string($requested) && in_array($requested, self::ROWS, true)) {
+            $this->openRow = $requested;
+            $this->rememberOpenRow($requested);
+        }
 
         $chests = app(ChestService::class);
         $openedChest = $chests->openedToday($this->profile);
@@ -99,6 +161,130 @@ new class extends Component
         $this->pendingChestPoints = $this->pendingChestDay
             ? app(StreakService::class)->pendingStreakChestDollars($this->profile) * $this->profile->household->points_per_dollar
             : null;
+    }
+
+    /**
+     * Which row this kid should arrive at open.
+     *
+     * Three rules, in the order they beat each other:
+     *
+     * 1. **Urgency opens a row itself.** A streak chest sitting unopened is the
+     *    one thing on this page that is worth something and expires, so it
+     *    outranks a remembered close — once. Persisting it is what makes it
+     *    once: closing it again sticks.
+     * 2. **A remembered answer stands**, for the household day it was given on.
+     *    `home_day_open` holds the row and null means "closed everything"; the
+     *    date beside it is what tells those apart from never having touched it.
+     * 3. **Otherwise Work is open**, because a kid who has just arrived is being
+     *    asked "what now" and that is the row that answers it.
+     */
+    private function resolveOpenRow(): ?string
+    {
+        $today = HouseholdClock::for($this->profile->household)->today();
+        $remembered = $this->profile->home_day_closed_on?->isSameDay($today) ?? false;
+
+        $alreadyNudged = $this->profile->home_day_urgent_on?->isSameDay($today) ?? false;
+
+        if ($this->profile->pending_streak_chest && ! $alreadyNudged) {
+            $this->rememberOpenRow('streak');
+
+            // Stamped so this happens once. Without it, closing the row a chest
+            // opened would re-open it on the very next render — an argument
+            // rather than a nudge.
+            $this->profile->forceFill(['home_day_urgent_on' => $today])->save();
+
+            return 'streak';
+        }
+
+        return $remembered ? $this->profile->home_day_open : self::DEFAULT_ROW;
+    }
+
+    /**
+     * Opens a row, or shuts the open one. Only ever one at a time: without that
+     * the column grows back into the page of stacked heroes this replaced.
+     */
+    public function toggleRow(string $key): void
+    {
+        $this->openRow = $this->openRow === $key ? null : $key;
+
+        $this->rememberOpenRow($this->openRow);
+    }
+
+    /** Both columns together, so "closed everything" can never read as "new kid". */
+    private function rememberOpenRow(?string $key): void
+    {
+        $this->profile->forceFill([
+            'home_day_open' => $key,
+            'home_day_closed_on' => HouseholdClock::for($this->profile->household)->today(),
+        ])->save();
+    }
+
+    /**
+     * Takes the one job the Work row suggests, without leaving Home.
+     *
+     * Everything on this page acts in place, and this is the piece that has to:
+     * a suggestion a kid has to go to another page to accept is a link, and the
+     * quest it replaces never needed one.
+     */
+    public function claimSuggested(int $choreId): void
+    {
+        $this->workMessage = null;
+
+        $service = app(ChoreService::class);
+        $chore = Chore::find($choreId);
+
+        // Re-checked server-side rather than trusted from the button: the
+        // suggestion may be minutes old, and a sibling can have taken it since.
+        if (! $chore
+            || $chore->household_id !== $this->profile->household_id
+            || ! $chore->isAppropriateFor($this->profile)
+            || $service->stateFor($this->profile, $chore) !== 'ready') {
+            $this->workMessage = 'That one just went — here is another.';
+
+            return;
+        }
+
+        $service->claim($this->profile, $chore);
+
+        $this->dispatch(
+            'celebrate',
+            message: "{$chore->name} claimed! Waiting on parent.",
+            motion: 'burst',
+            origin: 'tap',
+        );
+    }
+
+    /**
+     * The gratitude quest. Both refusals are worth their own wording: one is
+     * "you missed a box", the other is "you already did this today", and a
+     * button that silently does nothing explains neither.
+     */
+    public function logGratitude(): void
+    {
+        $service = app(GratitudeService::class);
+
+        if ($service->record($this->profile, $this->gratitude, $this->gratitudeShared)) {
+            $this->gratitude = ['', '', ''];
+            $this->gratitudeShared = true;
+            $this->gratitudeMessage = null;
+
+            // Hearts, not coins — this is the one quest that isn't about
+            // earning anything, and the tickets are a thank-you rather than
+            // the point of it.
+            $this->dispatch(
+                'celebrate',
+                message: 'Gratitude logged! +'.GratitudeService::TICKETS.' tickets.',
+                style: 'heart',
+                motion: 'burst',
+                origin: 'tap',
+            );
+
+            return;
+        }
+
+        $this->gratitudeMessage = $service->isAvailable($this->profile)
+            ? 'Fill in all three before you hand it in.'
+            : "Today's gratitude quest is already done — back tomorrow!";
     }
 
     public function openDailyChest(): void
@@ -327,9 +513,209 @@ new class extends Component
         $boost = $spins->today($this->profile);
 
         $household = $this->profile->household;
+        $chores = app(ChoreService::class);
+        $chests = app(ChestService::class);
+
+        $rate = max(1, (int) $household->points_per_dollar);
+        $money = fn (int $points) => '$'.number_format($points / $rate, 2);
+
+        // --- Work: today's tally, and the one job to point at when it is empty.
+        $work = $chores->workTodayFor($this->profile);
+        $earned = (int) $work->where('status', '!=', CompletionStatus::Rejected)->sum('points_awarded');
+        $waiting = $work->where('status', CompletionStatus::Pending)->count();
+
+        $daySecured = $streaks->streakDaySecuredToday($this->profile);
+        $chestAvailable = $chests->isAvailable($this->profile);
+        $spunToday = $boost !== null;
+        $houseWeek = app(HouseholdService::class)->houseWeek($household);
+        $monsterState = $this->monsterState();
+        $streakWindow = $streaks->streakWindowFor($this->profile);
+
+        // The countdown the streak row wears when nothing is in yet. Rendered
+        // server-side as a coarse "4h 51m": the live tick belongs to the timer
+        // inside the panel, and a row that re-rendered every minute would be a
+        // round trip a minute for a number nobody is watching.
+        $closesAt = $streakWindow['closesAt'] ?? null;
+        $leftInWords = $closesAt && $closesAt->isFuture()
+            ? $closesAt->diffForHumans(['parts' => 2, 'short' => true, 'syntax' => Carbon::DIFF_ABSOLUTE])
+            : null;
+
+        /*
+         * The six rows of "Your day", in the order the handoff fixes: the work,
+         * the two things waiting to be opened, the run, and then the two the
+         * house is doing together.
+         *
+         * `done` is what greys a row and what the "n of 6" counts. The last two
+         * are news rather than tasks, so they are drawn quiet from the start —
+         * see `quiet`.
+         */
+        $dayRows = [
+            [
+                'key' => 'work',
+                'glyph' => '⚒',
+                'label' => 'Work',
+                'accent' => 'var(--fq-gold)',
+                'tileLabel' => 'Work',
+                'sub' => $work->isEmpty()
+                    ? 'Nothing in yet'
+                    : $work->count().' '.Str::plural('job', $work->count()).($waiting > 0 ? ' · '.$waiting.' waiting' : ''),
+                'status' => $earned > 0 ? $money($earned).' TODAY' : 'NOTHING YET',
+                'statusColor' => $earned > 0 ? 'var(--fq-lime)' : 'var(--fq-text-4)',
+                'done' => $daySecured,
+                'quiet' => false,
+            ],
+            [
+                'key' => 'chest',
+                'glyph' => '🎁',
+                'label' => 'Bonus Chest',
+                'accent' => 'var(--fq-chest-blue)',
+                'tileLabel' => 'Chest',
+                'sub' => $chests->isBoosted($this->profile) ? 'Rolling on the good table' : 'Better after a chore',
+                'status' => $chestAvailable ? 'READY' : 'OPENED',
+                'statusColor' => $chestAvailable ? 'var(--fq-chest-blue)' : 'var(--fq-text-4)',
+                'done' => ! $chestAvailable,
+                'quiet' => false,
+            ],
+            [
+                'key' => 'wheel',
+                'glyph' => '🍪',
+                'label' => 'Bonus Wheel',
+                'accent' => 'var(--fq-magenta)',
+                'tileLabel' => 'Spin',
+                'sub' => $boost ? $boost->multiplier.'x on '.$boost->chore->name : 'Doubles one chore',
+                'status' => $spunToday ? 'USED' : '1 WAITING',
+                'statusColor' => $spunToday ? 'var(--fq-text-4)' : 'var(--fq-magenta)',
+                'done' => $spunToday,
+                'quiet' => false,
+            ],
+            [
+                'key' => 'streak',
+                'glyph' => '🔥',
+                'label' => 'Streak Chest',
+                'accent' => 'var(--fq-streak)',
+                'tileLabel' => 'Day '.$this->profile->streak,
+                'sub' => 'Day '.$this->profile->streak.' · chest at day '.$streaks->nextStreakMilestone($this->profile),
+                'status' => match (true) {
+                    (bool) $this->pendingChestDay => 'READY',
+                    $daySecured => 'SAFE',
+                    default => strtoupper($leftInWords ?? 'TONIGHT'),
+                },
+                'statusColor' => $this->pendingChestDay || ! $daySecured ? 'var(--fq-streak)' : 'var(--fq-lime)',
+                'done' => $daySecured && ! $this->pendingChestDay,
+                'quiet' => false,
+            ],
+            [
+                'key' => 'prize',
+                'glyph' => '🏆',
+                'label' => 'Weekly Prize',
+                'accent' => 'var(--fq-gold)',
+                'tileLabel' => 'Prize',
+                'sub' => $houseWeek
+                    ? 'House is '.$houseWeek['done'].' of '.$houseWeek['target']
+                    : 'Nothing set this week',
+                'status' => $houseWeek
+                    ? $houseWeek['done'].' OF '.$houseWeek['target']
+                    : 'NONE SET',
+                'statusColor' => 'var(--fq-text-4)',
+                'done' => $houseWeek ? $houseWeek['done'] >= $houseWeek['target'] : false,
+                // News, not a task: drawn quiet from the start, however it goes.
+                'quiet' => true,
+            ],
+            [
+                'key' => 'fight',
+                'glyph' => '💀',
+                'label' => 'The Fight',
+                'accent' => 'var(--fq-coral)',
+                'tileLabel' => 'Fight',
+                'sub' => $monsterState
+                    ? $monsterState['name'].' · '.number_format($monsterState['maxHealth'] - $monsterState['damage']).' HP left'
+                    : 'Nothing standing',
+                'status' => $monsterState
+                    ? number_format($monsterState['maxHealth'] - $monsterState['damage']).' HP'
+                    : 'NONE',
+                'statusColor' => 'var(--fq-text-4)',
+                // A monster on its knees is done; an empty arena is not — there
+                // is nothing to have finished, and counting it toward "n of 6"
+                // would hand a kid a day that starts one-sixth over.
+                'done' => $monsterState !== null && $monsterState['damage'] >= $monsterState['maxHealth'],
+                'quiet' => true,
+            ],
+        ];
+
+        $feelingsCard = app(FeelingService::class)->cardFor($this->profile);
+        $feeling = $feelingsCard['answered'];
+        $gratitudeToday = app(GratitudeService::class)->todayFor($this->profile);
+        $gratitudeHouse = app(FeedService::class)->gratitudeToday($this->profile);
+        $meals = app(MealService::class)->upcoming($household);
+        $tonight = $meals->first(fn ($meal) => $meal->served_on->isSameDay(HouseholdClock::for($household)->today()));
+
+        /*
+         * The house rows, under the day's six. They open like the rest but are
+         * left out of the "n of 6" — see the class docblock — so `done` only
+         * greys them.
+         */
+        $houseRows = [
+            [
+                'key' => 'feelings',
+                'glyph' => '💬',
+                'label' => 'Feelings',
+                'accent' => 'var(--fq-violet)',
+                'tileLabel' => 'Feelings',
+                'sub' => $feeling ? 'Today you said '.$feeling->label() : 'How are you today?',
+                'status' => $feeling ? 'SAID' : 'ASK ME',
+                'statusColor' => $feeling ? 'var(--fq-text-4)' : 'var(--fq-violet)',
+                'done' => $feeling !== null,
+                'quiet' => false,
+            ],
+            [
+                'key' => 'gratitude',
+                'glyph' => '🙏',
+                'label' => 'Gratitude',
+                'accent' => 'var(--fq-magenta)',
+                'tileLabel' => 'Grateful',
+                'sub' => $gratitudeToday
+                    ? $gratitudeHouse['total'].' in the house today'
+                    : 'Three things for '.GratitudeService::TICKETS.' tickets',
+                'status' => $gratitudeToday ? 'DONE' : '+'.GratitudeService::TICKETS.' TICKETS',
+                'statusColor' => $gratitudeToday ? 'var(--fq-text-4)' : 'var(--fq-lime)',
+                'done' => $gratitudeToday !== null,
+                'quiet' => false,
+            ],
+            [
+                'key' => 'meals',
+                'glyph' => '🍽',
+                'label' => 'Meals',
+                'accent' => 'var(--fq-cyan)',
+                'tileLabel' => 'Meals',
+                'sub' => $tonight ? 'Tonight · '.$tonight->name : 'Tonight · nobody has said yet',
+                'status' => $meals->count().' SET',
+                'statusColor' => 'var(--fq-text-4)',
+                'done' => false,
+                // A menu is something to read, never something to finish.
+                'quiet' => true,
+            ],
+        ];
+
+        $allRows = collect($dayRows)->map(fn (array $row) => [...$row, 'counted' => true])
+            ->concat(collect($houseRows)->map(fn (array $row) => [...$row, 'counted' => false]));
 
         return [
             'household' => $household,
+            'dayRows' => $allRows,
+            'daysDone' => $allRows->where('counted', true)->where('done', true)->count(),
+            'dayCount' => $allRows->where('counted', true)->count(),
+            'gratitudeToday' => $gratitudeToday,
+            'gratitudeHouse' => $gratitudeHouse,
+            // Every night a grown-up has filled in, tonight first.
+            'meals' => $meals,
+            'mealsToday' => HouseholdClock::for($household)->today(),
+            'money' => $money,
+            // What the Work panel draws: today's jobs, what they came to, and —
+            // when there are none — the one job worth pointing at.
+            'workJobs' => $work,
+            'workEarned' => $earned,
+            'workSuggestion' => $work->isEmpty() ? $chores->suggestedChoreFor($this->profile) : null,
+            'boardSpan' => $chores->boardSpanFor($this->profile),
             // Whether tonight is in the bag. Nothing on this page is guarded on
             // a quest existing any more — every one of these used to be, because
             // asking for a quest in a household with nothing eligible threw.
@@ -363,11 +749,6 @@ new class extends Component
             // copy asks the chest's own question.
             'chestBoosted' => app(ChestService::class)->isBoosted($this->profile),
             'boost' => $boost,
-            // Whether there is a Lucky Block to point at. The strip above the
-            // run needs one boolean and the ticket count already on the
-            // profile — the block itself, its rules and its prize list all
-            // live in the Loot Shop, which is the point of it being a strip.
-            'luckyOpen' => app(LuckyBlockService::class)->isOpenFor($this->profile),
             // Only for the section header's "n waiting" pill. The feed itself
             // is a nested component and reads its own rooms — this page holds
             // none of its state.
@@ -375,7 +756,7 @@ new class extends Component
             // The house's feelings for today. The service returns the strip as
             // null until this kid has answered — see FeelingService for why the
             // gate lives there rather than in the card.
-            'feelingsCard' => $feelingsCard = app(FeelingService::class)->cardFor($this->profile),
+            'feelingsCard' => $feelingsCard,
             // Whether the card folds to a line. Three things have to be true,
             // and the third is the interesting one: a grown-up's reply is read
             // *on this card* and nowhere else in the app, so a card with one
@@ -416,27 +797,877 @@ new class extends Component
         <x-monster-watcher :state="$monsterState" />
     @endif
 
-    {{-- Above the run, and not a section: it points at something on another
-         page rather than being something to do here. Renders nothing below two
-         tickets, or with an empty pool. --}}
-    <x-lucky-strip :tickets="$profile->bonus_tickets" :open="$luckyOpen" class="mb-[22px]" />
+    {{-- A celebration day, on the two or three days a year there is one. Above
+         both columns, because for as long as it is on the page it is the thing
+         the page is about. --}}
+    @if ($celebration)
+        @php $celebrations = app(CelebrationService::class); @endphp
 
-    <div class="flex flex-col gap-[22px]">
-        {{-- A celebration day, on the two or three days a year there is one.
-             Above the feelings card and everything else, because for as long as
-             it is on the page it is the thing the page is about. --}}
-        @if ($celebration)
-            @php $celebrations = app(CelebrationService::class); @endphp
+        <x-celebration-card
+            :day="$celebration"
+            :entry="$celebrationEntry"
+            :reward="$celebrations->describeReward($household, $celebration)"
+            :extras="$celebrations->describeExtras($household, $celebration)"
+            class="mb-[11px]"
+        />
+    @endif
 
-            <x-celebration-card
-                :day="$celebration"
-                :entry="$celebrationEntry"
-                :reward="$celebrations->describeReward($household, $celebration)"
-                :extras="$celebrations->describeExtras($household, $celebration)"
-            />
-        @endif
+    {{-- Two columns at desk size, one everywhere else.
 
-        {{-- The family feed, in full, at the top of the run.
+         Half the house is on a PC, where the shell is 1080px wide: every
+         phone-shaped fix for "the feed is long and the day was under it" —
+         a pinned strip, a thumb dock — wastes about 700px of it. So the day
+         gets a fixed 340px rail and the room gets everything left over, and
+         neither has to scroll past the other.
+
+         One markup for both. Below `lg` this is a single column and the order
+         falls out exactly as the phone wants it: the day, then the room. The
+         feeling, gratitude and the menu are rows of the day rather than cards
+         under it, so nothing tall sits between a kid and the feed. --}}
+    <div class="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start">
+
+        {{-- ================= Your day ================= --}}
+        @php
+            // Where the open panel goes. The rows and the panel are siblings in
+            // one flex column, ordered rather than nested: on desktop the panel
+            // takes the slot straight after its own row, and on a phone — where
+            // the rows are hidden and the tile board is the handle — it simply
+            // follows the board. Nesting it inside the row instead would mean a
+            // second copy of every panel in the markup, and two copies of the
+            // bonus chest is two Alpine instances of one chest.
+            $openIndex = $dayRows->search(fn (array $row) => $row['key'] === $openRow);
+            $panelOrder = $openIndex === false ? 90 : 3 + $openIndex * 2;
+        @endphp
+
+        <div class="flex flex-col gap-[11px] lg:gap-[9px]">
+            <div class="flex items-center gap-2" style="order: 0">
+                <span class="h-[15px] w-[3px] rounded-[2px]" style="background: var(--fq-gold)"></span>
+                <h2 class="font-baloo text-[17px] font-extrabold">Your day</h2>
+                <span class="flex-1"></span>
+                <span class="font-mono-fq text-[9.5px] tracking-[0.1em] uppercase" style="color: var(--fq-ticket-label)">
+                    {{ $daysDone }} of {{ $dayCount }} done
+                </span>
+            </div>
+
+            {{-- The board, on a phone: nine live statuses in three short rows, with the feed
+                 starting under it rather than over it.
+
+                 The board is the accordion's *handle* — the panel opens below
+                 it, never in place of it, so the index never scrolls away while
+                 a kid is using what it opened. --}}
+            <div class="grid grid-cols-3 gap-[7px] lg:hidden" style="order: 1">
+                @foreach ($dayRows as $row)
+                    @php $open = $openRow === $row['key']; @endphp
+
+                    <button
+                        type="button"
+                        wire:key="tile-{{ $row['key'] }}"
+                        wire:click="toggleRow('{{ $row['key'] }}')"
+                        aria-expanded="{{ $open ? 'true' : 'false' }}"
+                        aria-controls="day-panel"
+                        @class([
+                            'flex min-h-[72px] flex-col justify-center gap-[3px] rounded-[14px] border px-2 py-[9px] text-center transition',
+                            'opacity-[.72]' => ! $open && ($row['done'] || $row['quiet']),
+                        ])
+                        style="{{ $open
+                            ? 'border-color: var(--fq-gold); background: var(--fq-gold-fill); box-shadow: 0 0 0 1px var(--fq-ticket-line)'
+                            : 'border-color: var(--fq-line); background: var(--fq-panel)' }}"
+                    >
+                        <span class="text-[17px]" aria-hidden="true">{{ $row['glyph'] }}</span>
+                        <span
+                            class="font-baloo text-[13.5px] font-extrabold"
+                            style="color: {{ $open ? 'var(--fq-gold)' : $row['accent'] }}"
+                        >{{ $row['tileLabel'] }}</span>
+                        {{-- The status never carries the meaning on its own: the
+                             colour says it twice, and this says it in words. --}}
+                        <span
+                            class="font-mono-fq text-[8px] tracking-[0.1em] uppercase"
+                            style="color: {{ $open ? 'var(--fq-gold)' : 'var(--fq-text-4)' }}"
+                        >{{ $open ? 'Open ▲' : $row['status'] }}</span>
+                    </button>
+                @endforeach
+            </div>
+
+            {{-- The same nine at desk size, where a 340px column has the room to
+                 say what each one is rather than abbreviate it. Each row is a
+                 child of the column itself so the panel can be ordered between
+                 them. --}}
+            @foreach ($dayRows as $index => $row)
+                @php $open = $openRow === $row['key']; @endphp
+
+                    <button
+                        type="button"
+                        wire:key="row-{{ $row['key'] }}"
+                        wire:click="toggleRow('{{ $row['key'] }}')"
+                        aria-expanded="{{ $open ? 'true' : 'false' }}"
+                        aria-controls="day-panel"
+                        @class([
+                            'hidden items-center gap-[11px] rounded-[16px] border p-3 text-left transition lg:flex',
+                            // A breath between the day and the house rows.
+                            'lg:mt-[6px]' => $index === $dayCount,
+                            'opacity-[.72] hover:opacity-100' => ! $open && ($row['done'] || $row['quiet']),
+                        ])
+                        style="order: {{ 2 + $index * 2 }}; {{ $open
+                            ? 'border-color: var(--fq-ticket-line); background: linear-gradient(160deg, var(--fq-gold-fill), var(--fq-panel) 72%)'
+                            : 'border-color: var(--fq-line); background: var(--fq-panel)' }}"
+                    >
+                        <span
+                            class="grid h-[34px] w-[34px] flex-none place-items-center rounded-[11px] text-[16px]"
+                            style="background: var(--fq-sunk)"
+                            aria-hidden="true"
+                        >{{ $row['glyph'] }}</span>
+
+                        <span class="min-w-0 flex-1">
+                            <span
+                                class="block font-baloo text-[16px] font-extrabold"
+                                style="color: {{ $open ? 'var(--fq-gold)' : $row['accent'] }}"
+                            >{{ $row['label'] }}</span>
+                            <span class="block truncate text-[12.5px] text-fq-text-4">{{ $row['sub'] }}</span>
+                        </span>
+
+                        <span
+                            class="flex-none font-mono-fq text-[10px] whitespace-nowrap"
+                            style="color: {{ $open ? 'var(--fq-gold)' : $row['statusColor'] }}"
+                        >{{ $row['status'] }}</span>
+
+                        <span class="flex-none text-[13px]" style="color: {{ $open ? 'var(--fq-gold)' : 'var(--fq-text-5)' }}" aria-hidden="true">
+                            {{ $open ? '▲' : '▼' }}
+                        </span>
+                    </button>
+                @endforeach
+
+            {{-- The one open panel, ordered into place — see $panelOrder above. --}}
+            <div id="day-panel" class="flex min-w-0 flex-col gap-[11px]" style="order: {{ $panelOrder }}">
+                {{-- Work: what today came to, in money.
+
+                     The row that stands where the daily quest did, and the one
+                     genuinely new thing on the page. It is a *tally*, not a
+                     card the app dealt: the board is the work now, and this
+                     says how much of it is in.
+
+                     Dollars are the headline and points the footnote — the same
+                     decision the board shipped with, because he thinks in
+                     dollars and the points are what the rest of the app counts
+                     in. --}}
+                @if ($openRow === 'work')
+                    <div
+                        wire:key="panel-work"
+                        class="flex flex-col gap-[10px] rounded-[18px] border p-3"
+                        style="border-color: var(--fq-ticket-line); background: linear-gradient(160deg, var(--fq-gold-fill), var(--fq-panel) 72%)"
+                    >
+                        <div class="flex items-center gap-2">
+                            <span class="font-mono-fq text-[9px] tracking-[0.2em] uppercase" style="color: var(--fq-ticket-label)">Work today</span>
+                            <span class="flex-1"></span>
+                            <button
+                                type="button"
+                                wire:click="toggleRow('work')"
+                                aria-label="Close"
+                                class="grid h-8 w-8 place-items-center rounded-[11px] border text-[12px]"
+                                style="border-color: var(--fq-line-2); background: var(--fq-sunk); color: var(--fq-text-3)"
+                            >▲</button>
+                        </div>
+
+                        <div class="flex items-end gap-[10px]">
+                            <span
+                                class="font-baloo text-[34px] leading-none font-extrabold"
+                                style="color: {{ $workEarned > 0 ? 'var(--fq-lime)' : 'var(--fq-text-4)' }}"
+                            >{{ $money($workEarned) }}</span>
+                            <span class="pb-[5px] font-mono-fq text-[10px]" style="color: var(--fq-ticket-label)">
+                                {{ number_format($workEarned) }} pts · {{ $workJobs->count() }} {{ Str::plural('job', $workJobs->count()) }}
+                            </span>
+                        </div>
+
+                        @if ($workJobs->isNotEmpty())
+                            <div class="flex flex-col gap-[7px]">
+                                @foreach ($workJobs as $job)
+                                    @php
+                                        // A job says one of three things, and the
+                                        // glyph, the colour and the value all have
+                                        // to agree on which.
+                                        [$mark, $markInk, $markBg, $value, $valueInk] = match (true) {
+                                            $job->status === CompletionStatus::Approved => ['✓', 'var(--fq-lime)', '#0d3323', $money($job->points_awarded), 'var(--fq-lime)'],
+                                            $job->status === CompletionStatus::Rejected => ['✕', 'var(--fq-coral)', 'var(--fq-wash-coral)', 'SENT BACK', 'var(--fq-coral)'],
+                                            default => ['⏳', 'var(--fq-gold)', 'var(--fq-gold-fill)', 'WAITING', 'var(--fq-ticket-label)'],
+                                        };
+                                    @endphp
+
+                                    <div
+                                        wire:key="job-{{ $job->id }}"
+                                        class="flex items-center gap-[9px] rounded-[13px] border px-[10px] py-[9px]"
+                                        style="border-color: var(--fq-line); background: var(--fq-sunk)"
+                                    >
+                                        <span
+                                            class="grid h-[26px] w-[26px] flex-none place-items-center rounded-[9px] text-[12px]"
+                                            style="background: {{ $markBg }}; color: {{ $markInk }}"
+                                            aria-hidden="true"
+                                        >{{ $mark }}</span>
+                                        <span class="min-w-0 flex-1 truncate text-[14.5px] text-fq-text-2">{{ $job->chore?->name ?? 'A chore' }}</span>
+                                        <span class="flex-none font-mono-fq text-[10.5px]" style="color: {{ $valueInk }}">{{ $value }}</span>
+                                    </div>
+                                @endforeach
+                            </div>
+
+                            <a
+                                href="{{ route('kid.quests') }}"
+                                wire:navigate
+                                class="flex h-12 items-center justify-center gap-[9px] rounded-[14px] font-baloo text-[17px] font-extrabold transition hover:brightness-110"
+                                style="background: var(--fq-fill-gold); color: var(--fq-ink)"
+                            >Pick another job ›</a>
+                        @else
+                            {{-- Nothing in yet, so the panel answers the question
+                                 the quest used to: *this one, now*.
+
+                                 The cheapest thing they can claim, because cheap
+                                 is predictable and never intimidating. It
+                                 suggests and nothing more — it is not assigned,
+                                 it does not expire, and it pays exactly what the
+                                 board says it pays. --}}
+                            @if ($workSuggestion)
+                                <div
+                                    class="flex items-center gap-[10px] rounded-[13px] border px-[10px] py-[9px]"
+                                    style="border-color: var(--fq-line-2); background: var(--fq-sunk)"
+                                >
+                                    <span
+                                        class="grid h-[34px] w-[34px] flex-none place-items-center rounded-[11px] border"
+                                        style="border-color: var(--fq-line-2); background: var(--fq-panel-alt); color: var(--fq-gold)"
+                                    >
+                                        @if ($workSuggestion->icon)
+                                            <x-chore-icon :icon="$workSuggestion->icon" class="text-[17px]" />
+                                        @else
+                                            <span class="font-baloo text-[15px] font-extrabold">{{ mb_substr($workSuggestion->name, 0, 1) }}</span>
+                                        @endif
+                                    </span>
+
+                                    <span class="min-w-0 flex-1">
+                                        <span class="block truncate text-[14.5px] font-semibold">{{ $workSuggestion->name }}</span>
+                                        <span class="block font-mono-fq text-[10px] text-fq-text-4">
+                                            {{ $money($workSuggestion->points) }} · {{ number_format($workSuggestion->points) }} pts
+                                        </span>
+                                    </span>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    wire:click="claimSuggested({{ $workSuggestion->id }})"
+                                    class="flex h-12 items-center justify-center gap-[9px] rounded-[14px] font-baloo text-[17px] font-extrabold transition hover:brightness-110"
+                                    style="background: var(--fq-fill-gold); color: var(--fq-ink)"
+                                >Do this one</button>
+
+                                <a
+                                    href="{{ route('kid.quests') }}"
+                                    wire:navigate
+                                    class="text-center font-mono-fq text-[10px] tracking-[0.14em] uppercase"
+                                    style="color: var(--fq-text-4)"
+                                >See all {{ $boardSpan['count'] }} →</a>
+                            @else
+                                <p class="text-[13.5px] text-fq-text-4">
+                                    Nothing on the board right now — a grown-up adds the jobs, so check back later.
+                                </p>
+                            @endif
+                        @endif
+
+                        @if ($workMessage)
+                            <p class="text-[13px]" style="color: var(--fq-gold)">{{ $workMessage }}</p>
+                        @endif
+
+                        {{-- Read live off the board, so a house that added ten
+                             chores this morning says so. --}}
+                        @if ($boardSpan['count'] > 0 && $workJobs->isNotEmpty())
+                            <span class="text-center font-mono-fq text-[9px] tracking-[0.14em] uppercase" style="color: var(--fq-text-5)">
+                                {{ $boardSpan['count'] }} on the board · {{ $money($boardSpan['min']) }} to {{ $money($boardSpan['max']) }}
+                            </span>
+                        @endif
+                    </div>
+                @endif
+
+                @if ($openRow === 'chest')
+                {{-- The bonus chest. Opens right here — it is one tap and it has no page
+                     of its own, so sending a kid somewhere to take it would be the
+                     errand this whole page exists to remove. --}}
+                <div class="flex flex-col gap-3">
+
+                    {{-- Always the chest, never a "come back tomorrow" panel in its
+                         place. A chest already opened from the Quests tray still draws
+                         here and still opens: openDailyChest() finds the one that
+                         exists and describes it, so the tap tells the kid what they got
+                         rather than dead-ending. --}}
+                    <x-chest
+                        narrow
+                        wire-key="home-bonus-chest"
+                        :revealed="$chestOpened"
+                        open-action="openDailyChest"
+                        accent="var(--fq-chest-blue)"
+                        wash="var(--fq-chest-blue-bg)"
+                        fill="var(--fq-chest-blue-fill)"
+                        kicker="Free Every Single Day"
+                        :closed-title="$chestBoosted ? 'Your chest is OP today' : 'Open today\'s bonus chest'"
+                        :closed-text="$chestBoosted
+                            ? 'You got a chore done, so this one rolls on the good table — more tickets, more perks.'
+                            : 'Tickets, points, or a perk. Do any chore first and it rolls on a much better table.'"
+                        cta="Open it"
+                        :prize-label="$dailyChestPrize ?? 'A prize!'"
+                        :prize-sub="$chestBoosted ? 'Bonus Chest · OP' : 'Bonus Chest'"
+                        prize-property="dailyChestPrize"
+                        {{-- The kids were opening this first thing every morning
+                             and never finding out that doing a chore makes it
+                             better. So: stop once and ask. --}}
+                        :confirm="$chestAvailable && ! $chestBoosted"
+                    >
+                        @if ($chestAvailable && ! $chestBoosted)
+                            <x-slot:confirm-panel>
+                                <p class="mb-2 font-mono-fq text-[10px] tracking-[0.16em] uppercase" style="color: var(--fq-lime)">
+                                    Hold on &mdash; OP loot
+                                </p>
+                                <div class="flex flex-col gap-2 sm:flex-row">
+                                    <a
+                                        href="{{ route('kid.quests') }}"
+                                        wire:navigate
+                                        class="rounded-[16px] px-[20px] py-[13px] text-center font-baloo text-[16px] font-extrabold transition hover:brightness-110"
+                                        style="background: var(--fq-lime); color: var(--fq-ink)"
+                                    >Do a chore first</a>
+
+                                    <button
+                                        type="button"
+                                        @click="begin()"
+                                        class="cursor-pointer rounded-[16px] border px-[20px] py-[13px] font-baloo text-[16px] font-bold transition hover:brightness-125"
+                                        style="border-color: var(--fq-line-3); color: var(--fq-text-3)"
+                                    >Open now anyway</button>
+                                </div>
+                            </x-slot:confirm-panel>
+                        @endif
+
+                        <div
+                            class="rounded-[24px] border p-5"
+                            style="animation: fq-pop .3s ease both; background: var(--fq-chest-blue-bg); border-color: var(--fq-chest-blue-line)"
+                        >
+                            <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: var(--fq-chest-blue)">
+                                Today's Bonus Chest
+                            </p>
+                            <p class="mt-[6px] font-baloo text-[22px] leading-[1.15] font-extrabold">
+                                {{ $dailyChestPrize ?? 'Banked!' }}
+                            </p>
+                            <p class="mt-[6px] text-[13px] text-fq-text-4">Banked. There's another one tomorrow.</p>
+                        </div>
+                    </x-chest>
+                </div>
+
+                @endif
+
+                @if ($openRow === 'wheel')
+                {{-- The spin, which lives on the Quests page now.
+
+                     It was a full section here and the kids went looking for it on
+                     Quests anyway — which was them being right. The wheel lands on a
+                     chore and multiplies it, and every one of those rows is over
+                     there, so that is where the wheel went too.
+
+                     What's left is a strip rather than a section, for the same reason
+                     the Lucky Block above the run is one: it points at something on
+                     another page. It still carries the news, which is the half worth
+                     having here — a spin waiting, or the boost that's live. --}}
+                <a
+                    href="{{ route('kid.quests') }}#bonus-wheel"
+                    wire:navigate
+                    class="flex min-h-[64px] items-center gap-3 rounded-[16px] border px-[14px] py-[13px] transition hover:brightness-110"
+                    style="border-color: {{ $boost ? 'var(--fq-line-2)' : 'var(--fq-magenta)' }};
+                           background: {{ $boost ? 'var(--fq-sunk)' : 'color-mix(in srgb, var(--fq-magenta) 14%, transparent)' }}"
+                >
+                    {{-- The wheel at strip size: the same palette the segments cycle
+                         through, run round once, with the hub pin in the middle. Small
+                         enough that a face of real segments would just be noise. --}}
+                    <span
+                        class="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-full"
+                        style="background: conic-gradient(var(--fq-lime), var(--fq-cyan), var(--fq-gold), var(--fq-magenta), var(--fq-coral), var(--fq-violet), var(--fq-lime));
+                               box-shadow: 0 0 0 2px var(--fq-wheel-ring)"
+                        aria-hidden="true"
+                    >
+                        <span
+                            class="h-[12px] w-[12px] rounded-full"
+                            style="background: var(--fq-wheel-hub); box-shadow: inset 0 0 0 2px var(--fq-wheel-hub-line)"
+                        ></span>
+                    </span>
+
+                    <span class="min-w-0 flex-1">
+                        @if ($boost)
+                            <span
+                                class="block font-baloo text-base leading-tight font-extrabold"
+                                style="color: {{ $boost->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)' }}"
+                            >{{ $boost->multiplier }}x on {{ $boost->chore->name }}</span>
+                            <span class="mt-[2px] block text-xs text-fq-text-4">Claim it on the Quests page.</span>
+                        @else
+                            <span class="block font-baloo text-base leading-tight font-extrabold" style="color: var(--fq-magenta)">
+                                Your Bonus Wheel spin is waiting
+                            </span>
+                            <span class="mt-[2px] block text-xs text-fq-text-4">It's on the Quests page, above the board.</span>
+                        @endif
+                    </span>
+
+                    <i aria-hidden="true" class="fa-fw fa-solid fa-arrow-right text-[13px]" style="color: var(--fq-magenta)"></i>
+                </a>
+
+                @endif
+
+                @if ($openRow === 'streak')
+                {{-- The streak chest, moved off the Quests page along with the loot
+                     tray that used to be the only thing able to open one. The chest and
+                     the track that explains what it pays belong together, and this is
+                     the page the rest of the daily loop is on. --}}
+                @if ($streakBonuses->isNotEmpty())
+                    @php
+                        $daysToChest = max(0, $nextMilestone - $profile->streak);
+
+                        // No "all unlocked" any more: the track laps, so there is always
+                        // another chest ahead of whatever they're on.
+                        [$streakStatus, $streakStatusColor] = match (true) {
+                            (bool) $pendingChestDay => ['Ready to open', 'var(--fq-streak)'],
+                            (bool) $streakRepair => ['Streak ended', 'var(--fq-streak)'],
+                            $profile->streak === 0 => ['Start a run', 'var(--fq-text-4)'],
+                            default => [$daysToChest.' '.Str::plural('day', $daysToChest).' to go', 'var(--fq-text-4)'],
+                        };
+                    @endphp
+
+                    {{-- `id` rather than a bare anchor: the header's streak tile links
+                         straight here from whatever page a kid is standing on, and
+                         scroll-mt keeps the section title clear of the top edge instead
+                         of butted against it. --}}
+                    <div id="streak" class="flex scroll-mt-4 flex-col gap-3">
+
+                        {{-- The clock, first thing in the section it is about. It sat
+                             above the whole page for a while, which put the day's
+                             deadline in front of a kid before they'd been told what a
+                             streak was — the timer and the track explain each other, so
+                             they live together and the header tile is what carries the
+                             number everywhere else. --}}
+                        <x-streak-timer
+                            wire:key="streak-timer"
+                            :closes-at="$streakWindow['closesAt']"
+                            :resets-at="$streakWindow['resetsAt']"
+                            :bedtime="$streakWindow['bedtime']"
+                            :timezone="$household->timezone"
+                            :streak="$profile->streak"
+                            :secured="$streakWindow['secured']"
+                            :urgent="$streakWindow['urgent']"
+                            :overtime="$streakWindow['overtime']"
+                        />
+
+                        {{-- Only when there is one to open. Unlike the bonus chest this
+                             is earned rather than handed out, so on every other day the
+                             card below is the whole of it — a track, not a shut box. --}}
+                        @if ($pendingChestDay)
+                            <x-chest
+                                narrow
+                                wire-key="home-streak-chest"
+                                :revealed="false"
+                                open-action="openStreakChest"
+                                accent="var(--fq-streak)"
+                                wash="var(--fq-wash-streak)"
+                                fill="var(--fq-chest-streak-fill)"
+                                :kicker="$pendingChestDay.'-Day Streak · Earned'"
+                                closed-title="Your streak chest is waiting"
+                                :closed-text="'You cleared '.$pendingChestDay.' '.Str::plural('night', $pendingChestDay).' in a row. This one is yours.'"
+                                cta="Open it"
+                                :prize-label="'+'.number_format((int) $pendingChestPoints).' PTS'"
+                                :prize-sub="$pendingChestDay.'-Day Streak Bonus!'"
+                            >
+                                <div
+                                    class="rounded-[24px] border p-5"
+                                    style="animation: fq-pop .3s ease both; background: var(--fq-wash-streak); border-color: color-mix(in srgb, var(--fq-streak) 55%, transparent)"
+                                >
+                                    <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: var(--fq-streak)">
+                                        {{ $pendingChestDay }}-Day Streak Bonus
+                                    </p>
+                                    <p class="mt-[6px] font-baloo text-[22px] leading-[1.15] font-extrabold">
+                                        +{{ number_format((int) $pendingChestPoints) }} PTS banked
+                                    </p>
+                                </div>
+                            </x-chest>
+                        @endif
+
+                        <div
+                            wire:key="streak-track"
+                            class="rounded-[20px] border bg-fq-panel p-[18px]"
+                            style="border-color: color-mix(in srgb, var(--fq-streak) 35%, transparent)"
+                        >
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <h3 class="font-baloo text-lg font-bold">Streak Chest</h3>
+
+                                    {{-- Only from the second lap on. On the first it would be
+                                         labelling a thing that has no other version yet. --}}
+                                    @if ($streakLap > 1)
+                                        <span
+                                            class="rounded-full border px-[10px] py-1 font-mono-fq text-[9.5px] tracking-[0.1em] whitespace-nowrap uppercase"
+                                            style="border-color: color-mix(in srgb, var(--fq-streak) 55%, transparent); background: var(--fq-wash-streak); color: var(--fq-streak)"
+                                        >Round {{ $streakLap }} · Double payouts</span>
+                                    @endif
+                                </div>
+
+                                <span class="font-mono-fq text-[11px] whitespace-nowrap text-fq-streak uppercase">
+                                    {{ $profile->streak }}-day streak · Next chest at day {{ $nextMilestone }}
+                                </span>
+                            </div>
+
+                            <p class="mt-1 text-sm text-fq-text-2">
+                                @if ($streakRepair)
+                                    Your streak ran out — but it isn't gone yet.
+                                @elseif ($profile->streak + 1 === $nextMilestone && ! $daySecured)
+                                    {{-- The one day the general advice isn't the useful thing to
+                                         say: the chest is one signed-off chore away, so say that
+                                         instead of explaining how streaks work. --}}
+                                    Get one chore signed off and come back tomorrow to open the chest!
+                                @elseif ($profile->streak === 0)
+                                    {{-- Nothing to keep alive yet. "Keep the streak alive" to
+                                         somebody on nought days is advice about a thing they
+                                         don't have. --}}
+                                    Get any chore signed off to start a streak. Keep it going and the chests get bigger —
+                                    the first one is day {{ $nextMilestone }}.
+                                @elseif ($streakLap > 1)
+                                    {{-- The reason the numbers on the track just changed. Worth
+                                         saying outright: a kid who cleared day 30 and found a
+                                         fresh row of chests deserves to know they're worth more
+                                         rather than having to remember last month's figures. --}}
+                                    You went all the way round — every chest on this lap pays double.
+                                    Miss a day and you drop back to the last one you cleared.
+                                @else
+                                    Keep the streak alive and the chests get bigger — miss a day and you drop back to
+                                    the last one you cleared.
+                                @endif
+                            </p>
+
+                            {{-- The rescue window, and it really is a window: getting
+                                 anything signed off today starts a fresh chain and closes it,
+                                 so the copy has to say that before a kid taps past it. --}}
+                            @if ($streakRepair)
+                                <div
+                                    wire:key="streak-repair"
+                                    class="mt-4 rounded-[18px] border p-4"
+                                    style="background: var(--fq-wash-streak); border-color: color-mix(in srgb, var(--fq-streak) 55%, transparent)"
+                                >
+                                    <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-streak uppercase">Streak Rescue</p>
+
+                                    <p class="mt-2 text-sm text-fq-text-2">
+                                        You missed {{ $streakRepair['date']->toFormattedDateString() }}. A Streak Restore buys that day
+                                        back and puts you on a
+                                        <span class="font-bold text-fq-streak">{{ $streakRepair['restoresTo'] }}-day streak</span>.
+                                    </p>
+
+                                    <p class="mt-1 font-mono-fq text-[11px] text-fq-text-4">
+                                        Use it before anything you do today gets signed off — after that the day is gone for good.
+                                    </p>
+
+                                    <div class="mt-3">
+                                        @if (isset($heldPerks['streak_restore']))
+                                            <x-perk-button :entry="$heldPerks['streak_restore']" />
+                                        @else
+                                            <a
+                                                href="{{ route('kid.bonus') }}"
+                                                wire:navigate
+                                                class="inline-flex items-center gap-2 rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[13px] py-[8px] text-[13px] text-fq-text-2-b transition hover:border-fq-line-4 hover:text-fq-text"
+                                            >Get a Streak Restore &rarr;</a>
+                                        @endif
+                                    </div>
+                                </div>
+                            @endif
+
+                            {{-- No button in the branch below on purpose. The rescue card above
+                                 owns every case where a restore can actually be spent, so
+                                 anything reaching it is a perk with nothing to fix — and a
+                                 permanently greyed-out "Use Streak Restore" under a healthy
+                                 streak reads as the app being broken rather than as the kid
+                                 having nothing to repair. --}}
+                            @if (isset($heldPerks['streak_restore']) && ! $streakRepair)
+                                @php
+                                    $restoresHeld = $heldPerks['streak_restore']['count'];
+                                    // Built here rather than across template lines, so the
+                                    // sentence renders as one run of text instead of picking up
+                                    // the indentation between its clauses.
+                                    $restoreNote = $restoresHeld > 1
+                                        ? "{$restoresHeld} Streak Restores are in your pocket. Nothing to fix right now — they'll be here if you ever miss a day."
+                                        : "A Streak Restore is in your pocket. Nothing to fix right now — it'll be here if you ever miss a day.";
+                                @endphp
+
+                                <div class="mt-4 flex flex-wrap items-center gap-3 rounded-[14px] border border-fq-steel-line bg-fq-sunk p-[13px]">
+                                    <span class="font-baloo text-sm" style="color: var(--fq-steel-text)">
+                                        {{ App\Enums\PerkEffect::StreakRestore->defaults()['glyph'] }}
+                                    </span>
+                                    <p class="min-w-0 flex-1 text-[13px] text-fq-text-2">{{ $restoreNote }}</p>
+                                </div>
+                            @endif
+
+                            {{-- Chests rather than numbered circles, growing along the rail.
+                                 "Day 30 pays 4000 and day 3 pays 100" is a sentence you have to
+                                 read and compare; a row of chests getting bigger is the same
+                                 fact at a glance, which is the half of the audience that can't
+                                 comfortably do the first. The numbers stay underneath for the
+                                 kids who do want them. --}}
+                            {{-- The rail spans the card rather than huddling on the left. It's
+                                 a track, so the connectors stretch to fill whatever width there
+                                 is and the chests space themselves out along it; on a narrow
+                                 screen they fall back to their own widths and it scrolls. --}}
+                            <div class="mt-4 flex items-start gap-2 overflow-x-auto pb-1 sm:gap-3">
+                                @php
+                                    // Chests are sized off position in the run rather than off
+                                    // the payout: the amounts are set per household and a
+                                    // generous day-3 bonus shouldn't draw a bigger chest than
+                                    // the day-30 one. The rail is a sequence, and that's what
+                                    // the sizes have to say.
+                                    $rungs = max(1, $streakBonuses->count() - 1);
+                                @endphp
+
+                                @foreach ($streakBonuses as $milestone)
+                                    @php
+                                        // Three states, not two: reached, the one being worked
+                                        // towards, and the ones after it. The middle one is what
+                                        // makes the rail a track rather than a scoreboard.
+                                        $isNext = $nextMilestone === $milestone['day'];
+                                        $reached = $milestone['reached'];
+
+                                        $chestWidth = (int) round(26 + $loop->index / $rungs * 26);
+                                        $chestHeight = (int) round($chestWidth * 0.78);
+
+                                        [$chestFill, $labelColour] = match (true) {
+                                            $reached => ['var(--fq-chest-streak-fill)', 'var(--fq-streak)'],
+                                            $isNext => ['var(--fq-chest-streak-next)', 'var(--fq-text-2)'],
+                                            default => ['var(--fq-chest-locked-fill)', 'var(--fq-text-5)'],
+                                        };
+                                    @endphp
+
+                                    {{-- Node and connector are siblings rather than a nested
+                                         pair, so the connector is a flex child of the rail and
+                                         can grow into the space left over. --}}
+                                    <div class="flex flex-shrink-0 flex-col items-center gap-[6px]">
+                                            {{-- Fixed-height box with the chests bottom-aligned,
+                                                 so they grow upwards off a shared line instead
+                                                 of drifting around their own centres. --}}
+                                            <div class="relative flex h-[46px] items-end justify-center">
+                                                <x-chest-block
+                                                    :fill="$chestFill"
+                                                    :width="$chestWidth.'px'"
+                                                    :height="$chestHeight.'px'"
+                                                    radius="8px"
+                                                    class="{{ $reached ? '' : ($isNext ? 'ring-2 ring-fq-streak' : 'opacity-45') }}"
+                                                />
+
+                                                @if ($reached)
+                                                    <span
+                                                        class="absolute -top-[2px] -right-[4px] flex h-[15px] w-[15px] items-center justify-center rounded-full font-baloo text-[10px] font-extrabold"
+                                                        style="background: var(--fq-streak); color: var(--fq-streak-ink)"
+                                                        title="Opened"
+                                                    >&#10003;</span>
+                                                @endif
+                                            </div>
+
+                                        <span class="font-mono-fq text-[9px] whitespace-nowrap text-fq-text-4">Day {{ $milestone['day'] }}</span>
+                                        <span
+                                            class="font-baloo text-[11px] leading-none font-extrabold whitespace-nowrap"
+                                            style="color: {{ $labelColour }}"
+                                        >{{ number_format($milestone['points']) }} pts</span>
+                                    </div>
+
+                                    @unless ($loop->last)
+                                        {{-- Grows into the leftover width, and sits just above
+                                             the shared baseline so it reads as a rail the chests
+                                             stand on. --}}
+                                        <div class="mt-[38px] h-[2px] min-w-[10px] flex-1" style="background: {{ $reached ? 'var(--fq-streak)' : 'var(--fq-line-2)' }}"></div>
+                                    @endunless
+                                @endforeach
+                            </div>
+                        </div>
+                    </div>
+                @endif
+
+                @endif
+
+                @if ($openRow === 'prize')
+                {{-- The weekly prize. A card of its own rather than a strip inside the
+                     standings, which is where it started and where nobody found it:
+                     this is the only thing on the page the whole house is chasing
+                     together, and it has a deadline, so it can't be a footnote under
+                     something else.
+
+                     The bar is segmented per kid because the target is shared — one
+                     undivided bar would hide that somebody did most of it — and the
+                     number rides inside each segment so the colours need no legend. --}}
+                @if ($houseWeek)
+                    @php
+                        $weekLeft = max(0, $houseWeek['target'] - $houseWeek['done']);
+                        $weekPrize = $household->weekly_prize ?: 'a house bonus';
+                        $weekDaysLeft = (int) ceil(now($household->timezone)->diffInDays($houseWeek['resetsAt'], absolute: true));
+                    @endphp
+
+                    <div wire:key="house-week" class="flex flex-col gap-3">
+
+                        <div
+                            class="flex flex-col gap-[11px] rounded-[24px] border p-5"
+                            style="background: var(--fq-wash-gold); border-color: {{ $weekLeft === 0 ? 'var(--fq-lime)' : 'var(--fq-gold)' }}"
+                        >
+                            {{-- The prize is the headline. A bar promising an unnamed
+                                 reward is a bar nobody chases, and "80 chores" is the
+                                 price rather than the thing being bought. --}}
+                            <div class="flex flex-wrap items-baseline justify-between gap-2">
+                                <h3 class="font-baloo text-[22px] leading-[1.15] font-extrabold sm:text-[26px]">{{ $weekPrize }}</h3>
+                                <span class="font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4">
+                                    {{ number_format($houseWeek['done']) }} / {{ number_format($houseWeek['target']) }} CHORES · SUN&ndash;SAT
+                                </span>
+                            </div>
+
+                            <div class="flex h-[30px] overflow-hidden rounded-[10px]" style="background: var(--fq-sunk)">
+                                @foreach ($houseWeek['segments'] as $segment)
+                                    @if ($segment['chores'] > 0)
+                                        <div
+                                            wire:key="week-{{ $segment['profile']->id }}"
+                                            title="{{ $segment['profile']->name }} — {{ $segment['chores'] }}"
+                                            class="grid place-items-center font-mono-fq text-[11px] font-semibold"
+                                            style="width: {{ min(100, $segment['chores'] / max(1, $houseWeek['target']) * 100) }}%;
+                                                   color: var(--fq-bg);
+                                                   background: linear-gradient(90deg, color-mix(in srgb, {{ $segment['profile']->color->cssVar() }} 62%, #000), {{ $segment['profile']->color->cssVar() }})"
+                                        >{{ $segment['chores'] }}</div>
+                                    @endif
+                                @endforeach
+                            </div>
+
+                            <p class="text-[13px] leading-snug text-fq-text-2" style="text-wrap: pretty">
+                                @if ($weekLeft === 0)
+                                    Target smashed — the whole house gets {{ $weekPrize }}. Nobody had to win it.
+                                @else
+                                    {{ number_format($weekLeft) }} more {{ Str::plural('chore', $weekLeft) }} between all of you and
+                                    the whole house gets {{ $weekPrize }}. Everyone's chores count towards the same bar —
+                                    nobody has to win it.
+                                @endif
+                            </p>
+
+                            <p class="font-mono-fq text-[10px] tracking-[0.12em] text-fq-text-5 uppercase">
+                                @if ($weekDaysLeft <= 1)
+                                    Last day &mdash; the bar resets on Sunday
+                                @else
+                                    {{ $weekDaysLeft }} days left &middot; the bar resets on Sunday
+                                @endif
+                            </p>
+                        </div>
+                    </div>
+                @endif
+
+                @endif
+
+                @if ($openRow === 'fight')
+                {{-- The boss fight, moved off the Quests page. It sits above the
+                     standings because it is the other thing the house is doing
+                     *together* — like the weekly prize above it, and unlike the
+                     standings, which are the one card on the page about who is beating
+                     whom. That one goes last. --}}
+                @if ($monsterState)
+                    <div class="flex flex-col gap-3">
+
+                        <div wire:key="family-boss">
+                            <x-monster-mini :state="$monsterState" :pending="$pendingCount" />
+                        </div>
+                    </div>
+                @endif
+
+                @endif
+
+                @if ($openRow === 'feelings')
+                {{-- Today's feeling. Behind a row now rather than a card of its
+                     own: open, it is the tallest thing on the page, and drawn
+                     unasked it pushed the feed a phone-length down.
+
+                     It still folds to a line on the visit *after* it is
+                     answered — an answered card is something to read, not to
+                     do — but never on the visit it is answered on: the house
+                     opening up underneath is the whole reward for pressing the
+                     button, and the lock is reached from the card. See
+                     `feelingsFolded` in with() for the third condition, which is
+                     a waiting reply.
+
+                     Folded, not removed. Feelings move during a day and being
+                     able to change your answer says so — see the
+                     feeling_entries migration. --}}
+                @if ($feelingsFolded)
+                    @php $mine = $feelingsCard['answered']; @endphp
+
+                    <button
+                        type="button"
+                        wire:click="$toggle('showFeelings')"
+                        class="flex min-h-[44px] items-center gap-3 rounded-[18px] border border-fq-line-2 bg-fq-panel px-4 py-3 text-left transition hover:border-fq-line-4"
+                    >
+                        <span
+                            class="grid size-8 shrink-0 place-items-center rounded-full text-[15px]"
+                            style="border: 1.5px solid {{ $mine->color() }}"
+                        >{{ $mine->glyph() }}</span>
+
+                        <span class="min-w-0 flex-1 text-[13.5px] text-fq-text-4">
+                            Today you said
+                            <span class="font-baloo font-bold" style="color: {{ $mine->color() }}">{{ $mine->label() }}</span>
+                            &mdash; the rest of the house is on
+                            <span class="text-fq-text-3">Family</span>.
+                        </span>
+
+                        <span class="shrink-0 font-mono-fq text-[10px] tracking-[0.12em] text-fq-text-5 uppercase">Change it</span>
+                    </button>
+                @else
+                    <x-feelings-card :card="$feelingsCard" :opened-feeling="$openedFeeling" :lock-message="$feelingLockMessage" />
+                @endif
+                @endif
+
+                @if ($openRow === 'gratitude')
+                {{-- The gratitude quest, moved off Quests, with what the rest of
+                     the house wrote underneath it. The feed's own copy of that
+                     card is left off this page — see the feed's `quiet`. --}}
+                <x-gratitude-quest :today="$gratitudeToday" :message="$gratitudeMessage" />
+
+                <x-feed.grateful-card :gratitude="$gratitudeHouse" :roster="$household->profiles()->count()" />
+                @endif
+
+                @if ($openRow === 'meals')
+                {{-- Every night a grown-up has filled in, tonight first. Unset
+                     nights are skipped rather than drawn as gaps: a column of
+                     "not set yet" is the app nagging the grown-ups on the one
+                     screen they are not the audience for. --}}
+                <div
+                    wire:key="home-meals"
+                    class="flex flex-col gap-[7px] rounded-[20px] border p-[13px]"
+                    style="border-color: var(--fq-line-2); background: linear-gradient(120deg, var(--fq-wash-violet), var(--fq-panel) 66%)"
+                >
+                    @forelse ($meals as $meal)
+                        @php
+                            $days = (int) $mealsToday->diffInDays($meal->served_on);
+                            $when = match ($days) {
+                                0 => 'Tonight',
+                                1 => 'Tomorrow',
+                                default => $meal->served_on->format($days < 7 ? 'l' : 'D j M'),
+                            };
+                        @endphp
+
+                        <div
+                            wire:key="meal-{{ $meal->id }}"
+                            class="flex flex-col gap-[2px] rounded-[13px] bg-fq-sunk px-[11px] py-[9px]"
+                        >
+                            <span
+                                class="font-mono-fq text-[9px] tracking-[0.16em] uppercase"
+                                style="color: {{ $days === 0 ? 'var(--fq-gold)' : 'var(--fq-text-5)' }}"
+                            >{{ $when }}</span>
+                            <span @class([
+                                'font-baloo font-bold',
+                                'text-[16px]' => $days === 0,
+                                'text-[14.5px] text-fq-text-2' => $days !== 0,
+                            ])>{{ $meal->name }}</span>
+
+                            @if ($meal->note)
+                                <span class="text-[12.5px] text-fq-text-4">{{ $meal->note }}</span>
+                            @endif
+                        </div>
+                    @empty
+                        <p class="px-1 py-2 text-[13.5px] text-fq-text-5">Nobody has said what's for dinner yet.</p>
+                    @endforelse
+                </div>
+                @endif
+
+            </div>{{-- /the open panel --}}
+        </div>{{-- /Your day --}}
+
+        {{-- ================= The room ================= --}}
+        <div class="flex min-w-0 flex-col gap-[14px]">
+        {{-- The family feed, in full, and the first thing in this column.
 
              A one-line strip pointing at /kid/family was tried here first and
              rejected, in one sentence: "otherwise new messages will get missed".
@@ -446,13 +1677,15 @@ new class extends Component
              them a question an hour ago, and a link is something you tap only
              when you already suspect there is something behind it.
 
-             So it is not a link, and it is not underneath the day either. It is
-             the rooms, the messages and the composer, at the top of the day,
-             where it cannot be scrolled past.
+             So it is not a link, and nothing goes above it: the rooms, the
+             messages and the composer, at the top of the room's own column,
+             where they cannot be scrolled past.
 
              The same component the page at /kid/family draws — see
              resources/views/livewire/family-feed.blade.php. `embedded` drops
-             only its own <h1>, since the section header above says it. --}}
+             its own <h1>, folds the room rail into the picker so this is one
+             column beside the day rather than a third one, and leaves dinner,
+             the feelings and gratitude to "Your day" — see `quiet`. --}}
         <div class="flex flex-col gap-3">
             <x-home-section
                 title="Family"
@@ -461,611 +1694,8 @@ new class extends Component
                 status-color="var(--fq-coral)"
             />
 
-            <livewire:family-feed :embedded="true" />
+            <livewire:family-feed :embedded="true" :show-dinner="false" :capped="false" :quiet="false" />
         </div>
-
-        {{-- Today's feeling, asked only until it is answered.
-
-             Above everything that pays — not because it matters more than the
-             chores do, but because putting the one card that is worth nothing
-             underneath four that are worth something says exactly what it looks
-             like it says. It is also the only card here that isn't a task, and
-             it reads as one the moment it is filed among them.
-
-             It folds to a line on the visit *after* it is answered. An answered
-             card is not something to do, it is something to read — and the
-             house's answers are already on the feed directly above this, which
-             is a much better place for them than a strip inside a form. Two
-             copies of that strip on one page is how the two of them start
-             disagreeing about what it says.
-
-             Not on the visit it is answered on, though: the house opening up
-             underneath is the whole reward for pressing the button, and the
-             lock is reached from the card. See `feelingsFolded` in with() for
-             the third condition, which is a waiting reply.
-
-             Folded, not removed. Feelings move during a day and being able to
-             change your answer says so — see the feeling_entries migration —
-             so the card is always one tap from where it was. --}}
-        @if ($feelingsFolded)
-            @php $mine = $feelingsCard['answered']; @endphp
-
-            <button
-                type="button"
-                wire:click="$toggle('showFeelings')"
-                class="flex min-h-[44px] items-center gap-3 rounded-[18px] border border-fq-line-2 bg-fq-panel px-4 py-3 text-left transition hover:border-fq-line-4"
-            >
-                <span
-                    class="grid size-8 shrink-0 place-items-center rounded-full text-[15px]"
-                    style="border: 1.5px solid {{ $mine->color() }}"
-                >{{ $mine->glyph() }}</span>
-
-                <span class="min-w-0 flex-1 text-[13.5px] text-fq-text-4">
-                    Today you said
-                    <span class="font-baloo font-bold" style="color: {{ $mine->color() }}">{{ $mine->label() }}</span>
-                    &mdash; the rest of the house is on
-                    <span class="text-fq-text-3">Family</span>.
-                </span>
-
-                <span class="shrink-0 font-mono-fq text-[10px] tracking-[0.12em] text-fq-text-5 uppercase">Change it</span>
-            </button>
-        @else
-            <x-feelings-card :card="$feelingsCard" :opened-feeling="$openedFeeling" :lock-message="$feelingLockMessage" />
-        @endif
-
-        {{-- The work, pointed at rather than done here.
-
-             This was the Daily Quest hero: a chest to open, three cards to
-             choose between, and one chore that mattered more than the others.
-             All of that is gone — the board on Quests is the whole of the work
-             now, and it is too long a list to put on a page whose job is "what
-             now?". So this is a strip, like the wheel's below, and it carries
-             the one number that makes it worth tapping: how much is up for
-             grabs. --}}
-        <a
-            href="{{ route('kid.quests') }}"
-            wire:navigate
-            class="flex min-h-[64px] items-center gap-3 rounded-[16px] border px-[14px] py-[13px] transition hover:brightness-110"
-            style="border-color: {{ $daySecured ? 'var(--fq-line-2)' : 'var(--fq-gold)' }};
-                   background: {{ $daySecured ? 'var(--fq-sunk)' : 'var(--fq-wash-gold)' }}"
-        >
-            <span
-                class="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[12px] font-baloo text-[17px] font-extrabold"
-                style="background: var(--fq-panel-alt); color: var(--fq-gold)"
-                aria-hidden="true"
-            >&#10003;</span>
-
-            <span class="min-w-0 flex-1">
-                @if ($daySecured)
-                    <span class="block font-baloo text-base leading-tight font-extrabold" style="color: var(--fq-lime)">
-                        Work's in — tonight counts
-                    </span>
-                    <span class="mt-[2px] block text-xs text-fq-text-4">There's more on the board if you want it.</span>
-                @else
-                    <span class="block font-baloo text-base leading-tight font-extrabold" style="color: var(--fq-gold)">
-                        Nothing in yet today
-                    </span>
-                    <span class="mt-[2px] block text-xs text-fq-text-4">Any chore signed off keeps your run alive.</span>
-                @endif
-            </span>
-
-            <i aria-hidden="true" class="fa-fw fa-solid fa-arrow-right text-[13px]" style="color: var(--fq-gold)"></i>
-        </a>
-
-        @if ($perkMessage)
-            <div class="rounded-[16px] border border-fq-line-2 bg-fq-sunk px-4 py-3 text-sm text-fq-text-2">
-                {{ $perkMessage }}
-            </div>
-        @endif
-
-        {{-- The bonus chest. Opens right here — it is one tap and it has no page
-             of its own, so sending a kid somewhere to take it would be the
-             errand this whole page exists to remove. --}}
-        <div class="flex flex-col gap-3">
-            <x-home-section
-                title="Bonus Chest"
-                accent="var(--fq-chest-blue)"
-                :done="! $chestAvailable"
-                :status="$chestAvailable ? ($chestBoosted ? 'Ready · OP' : 'Ready to open') : 'Opened today'"
-                :status-color="$chestAvailable ? 'var(--fq-chest-blue)' : 'var(--fq-lime)'"
-            />
-
-            {{-- Always the chest, never a "come back tomorrow" panel in its
-                 place. A chest already opened from the Quests tray still draws
-                 here and still opens: openDailyChest() finds the one that
-                 exists and describes it, so the tap tells the kid what they got
-                 rather than dead-ending. --}}
-            <x-chest
-                wire-key="home-bonus-chest"
-                :revealed="$chestOpened"
-                open-action="openDailyChest"
-                accent="var(--fq-chest-blue)"
-                wash="var(--fq-chest-blue-bg)"
-                fill="var(--fq-chest-blue-fill)"
-                kicker="Free Every Single Day"
-                :closed-title="$chestBoosted ? 'Your chest is OP today' : 'Open today\'s bonus chest'"
-                :closed-text="$chestBoosted
-                    ? 'You got a chore done, so this one rolls on the good table — more tickets, more perks.'
-                    : 'Tickets, points, or a perk. Do any chore first and it rolls on a much better table.'"
-                cta="Open it"
-                :prize-label="$dailyChestPrize ?? 'A prize!'"
-                :prize-sub="$chestBoosted ? 'Bonus Chest · OP' : 'Bonus Chest'"
-                prize-property="dailyChestPrize"
-                {{-- The kids were opening this first thing every morning
-                     and never finding out that doing a chore makes it
-                     better. So: stop once and ask. --}}
-                :confirm="$chestAvailable && ! $chestBoosted"
-            >
-                @if ($chestAvailable && ! $chestBoosted)
-                    <x-slot:confirm-panel>
-                        <p class="mb-2 font-mono-fq text-[10px] tracking-[0.16em] uppercase" style="color: var(--fq-lime)">
-                            Hold on &mdash; OP loot
-                        </p>
-                        <div class="flex flex-col gap-2 sm:flex-row">
-                            <a
-                                href="{{ route('kid.quests') }}"
-                                wire:navigate
-                                class="rounded-[16px] px-[20px] py-[13px] text-center font-baloo text-[16px] font-extrabold transition hover:brightness-110"
-                                style="background: var(--fq-lime); color: var(--fq-ink)"
-                            >Do a chore first</a>
-
-                            <button
-                                type="button"
-                                @click="begin()"
-                                class="cursor-pointer rounded-[16px] border px-[20px] py-[13px] font-baloo text-[16px] font-bold transition hover:brightness-125"
-                                style="border-color: var(--fq-line-3); color: var(--fq-text-3)"
-                            >Open now anyway</button>
-                        </div>
-                    </x-slot:confirm-panel>
-                @endif
-
-                <div
-                    class="rounded-[24px] border p-5"
-                    style="animation: fq-pop .3s ease both; background: var(--fq-chest-blue-bg); border-color: var(--fq-chest-blue-line)"
-                >
-                    <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: var(--fq-chest-blue)">
-                        Today's Bonus Chest
-                    </p>
-                    <p class="mt-[6px] font-baloo text-[22px] leading-[1.15] font-extrabold">
-                        {{ $dailyChestPrize ?? 'Banked!' }}
-                    </p>
-                    <p class="mt-[6px] text-[13px] text-fq-text-4">Banked. There's another one tomorrow.</p>
-                </div>
-            </x-chest>
-        </div>
-
-        {{-- The streak chest, moved off the Quests page along with the loot
-             tray that used to be the only thing able to open one. The chest and
-             the track that explains what it pays belong together, and this is
-             the page the rest of the daily loop is on. --}}
-        @if ($streakBonuses->isNotEmpty())
-            @php
-                $daysToChest = max(0, $nextMilestone - $profile->streak);
-
-                // No "all unlocked" any more: the track laps, so there is always
-                // another chest ahead of whatever they're on.
-                [$streakStatus, $streakStatusColor] = match (true) {
-                    (bool) $pendingChestDay => ['Ready to open', 'var(--fq-streak)'],
-                    (bool) $streakRepair => ['Streak ended', 'var(--fq-streak)'],
-                    $profile->streak === 0 => ['Start a run', 'var(--fq-text-4)'],
-                    default => [$daysToChest.' '.Str::plural('day', $daysToChest).' to go', 'var(--fq-text-4)'],
-                };
-            @endphp
-
-            {{-- `id` rather than a bare anchor: the header's streak tile links
-                 straight here from whatever page a kid is standing on, and
-                 scroll-mt keeps the section title clear of the top edge instead
-                 of butted against it. --}}
-            <div id="streak" class="flex scroll-mt-4 flex-col gap-3">
-                <x-home-section
-                    title="Streak Chest"
-                    accent="var(--fq-streak)"
-                    :done="(bool) $pendingChestDay"
-                    :status="$streakStatus"
-                    :status-color="$streakStatusColor"
-                />
-
-                {{-- The clock, first thing in the section it is about. It sat
-                     above the whole page for a while, which put the day's
-                     deadline in front of a kid before they'd been told what a
-                     streak was — the timer and the track explain each other, so
-                     they live together and the header tile is what carries the
-                     number everywhere else. --}}
-                <x-streak-timer
-                    wire:key="streak-timer"
-                    :closes-at="$streakWindow['closesAt']"
-                    :resets-at="$streakWindow['resetsAt']"
-                    :bedtime="$streakWindow['bedtime']"
-                    :timezone="$household->timezone"
-                    :streak="$profile->streak"
-                    :secured="$streakWindow['secured']"
-                    :urgent="$streakWindow['urgent']"
-                    :overtime="$streakWindow['overtime']"
-                />
-
-                {{-- Only when there is one to open. Unlike the bonus chest this
-                     is earned rather than handed out, so on every other day the
-                     card below is the whole of it — a track, not a shut box. --}}
-                @if ($pendingChestDay)
-                    <x-chest
-                        wire-key="home-streak-chest"
-                        :revealed="false"
-                        open-action="openStreakChest"
-                        accent="var(--fq-streak)"
-                        wash="var(--fq-wash-streak)"
-                        fill="var(--fq-chest-streak-fill)"
-                        :kicker="$pendingChestDay.'-Day Streak · Earned'"
-                        closed-title="Your streak chest is waiting"
-                        :closed-text="'You cleared '.$pendingChestDay.' '.Str::plural('night', $pendingChestDay).' in a row. This one is yours.'"
-                        cta="Open it"
-                        :prize-label="'+'.number_format((int) $pendingChestPoints).' PTS'"
-                        :prize-sub="$pendingChestDay.'-Day Streak Bonus!'"
-                    >
-                        <div
-                            class="rounded-[24px] border p-5"
-                            style="animation: fq-pop .3s ease both; background: var(--fq-wash-streak); border-color: color-mix(in srgb, var(--fq-streak) 55%, transparent)"
-                        >
-                            <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: var(--fq-streak)">
-                                {{ $pendingChestDay }}-Day Streak Bonus
-                            </p>
-                            <p class="mt-[6px] font-baloo text-[22px] leading-[1.15] font-extrabold">
-                                +{{ number_format((int) $pendingChestPoints) }} PTS banked
-                            </p>
-                        </div>
-                    </x-chest>
-                @endif
-
-                <div
-                    wire:key="streak-track"
-                    class="rounded-[20px] border bg-fq-panel p-[18px]"
-                    style="border-color: color-mix(in srgb, var(--fq-streak) 35%, transparent)"
-                >
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                        <div class="flex flex-wrap items-center gap-2">
-                            <h3 class="font-baloo text-lg font-bold">Streak Chest</h3>
-
-                            {{-- Only from the second lap on. On the first it would be
-                                 labelling a thing that has no other version yet. --}}
-                            @if ($streakLap > 1)
-                                <span
-                                    class="rounded-full border px-[10px] py-1 font-mono-fq text-[9.5px] tracking-[0.1em] whitespace-nowrap uppercase"
-                                    style="border-color: color-mix(in srgb, var(--fq-streak) 55%, transparent); background: var(--fq-wash-streak); color: var(--fq-streak)"
-                                >Round {{ $streakLap }} · Double payouts</span>
-                            @endif
-                        </div>
-
-                        <span class="font-mono-fq text-[11px] whitespace-nowrap text-fq-streak uppercase">
-                            {{ $profile->streak }}-day streak · Next chest at day {{ $nextMilestone }}
-                        </span>
-                    </div>
-
-                    <p class="mt-1 text-sm text-fq-text-2">
-                        @if ($streakRepair)
-                            Your streak ran out — but it isn't gone yet.
-                        @elseif ($profile->streak + 1 === $nextMilestone && ! $daySecured)
-                            {{-- The one day the general advice isn't the useful thing to
-                                 say: the chest is one signed-off chore away, so say that
-                                 instead of explaining how streaks work. --}}
-                            Get one chore signed off and come back tomorrow to open the chest!
-                        @elseif ($profile->streak === 0)
-                            {{-- Nothing to keep alive yet. "Keep the streak alive" to
-                                 somebody on nought days is advice about a thing they
-                                 don't have. --}}
-                            Get any chore signed off to start a streak. Keep it going and the chests get bigger —
-                            the first one is day {{ $nextMilestone }}.
-                        @elseif ($streakLap > 1)
-                            {{-- The reason the numbers on the track just changed. Worth
-                                 saying outright: a kid who cleared day 30 and found a
-                                 fresh row of chests deserves to know they're worth more
-                                 rather than having to remember last month's figures. --}}
-                            You went all the way round — every chest on this lap pays double.
-                            Miss a day and you drop back to the last one you cleared.
-                        @else
-                            Keep the streak alive and the chests get bigger — miss a day and you drop back to
-                            the last one you cleared.
-                        @endif
-                    </p>
-
-                    {{-- The rescue window, and it really is a window: getting
-                         anything signed off today starts a fresh chain and closes it,
-                         so the copy has to say that before a kid taps past it. --}}
-                    @if ($streakRepair)
-                        <div
-                            wire:key="streak-repair"
-                            class="mt-4 rounded-[18px] border p-4"
-                            style="background: var(--fq-wash-streak); border-color: color-mix(in srgb, var(--fq-streak) 55%, transparent)"
-                        >
-                            <p class="font-mono-fq text-[10px] tracking-[0.24em] text-fq-streak uppercase">Streak Rescue</p>
-
-                            <p class="mt-2 text-sm text-fq-text-2">
-                                You missed {{ $streakRepair['date']->toFormattedDateString() }}. A Streak Restore buys that day
-                                back and puts you on a
-                                <span class="font-bold text-fq-streak">{{ $streakRepair['restoresTo'] }}-day streak</span>.
-                            </p>
-
-                            <p class="mt-1 font-mono-fq text-[11px] text-fq-text-4">
-                                Use it before anything you do today gets signed off — after that the day is gone for good.
-                            </p>
-
-                            <div class="mt-3">
-                                @if (isset($heldPerks['streak_restore']))
-                                    <x-perk-button :entry="$heldPerks['streak_restore']" />
-                                @else
-                                    <a
-                                        href="{{ route('kid.bonus') }}"
-                                        wire:navigate
-                                        class="inline-flex items-center gap-2 rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[13px] py-[8px] text-[13px] text-fq-text-2-b transition hover:border-fq-line-4 hover:text-fq-text"
-                                    >Get a Streak Restore &rarr;</a>
-                                @endif
-                            </div>
-                        </div>
-                    @endif
-
-                    {{-- No button in the branch below on purpose. The rescue card above
-                         owns every case where a restore can actually be spent, so
-                         anything reaching it is a perk with nothing to fix — and a
-                         permanently greyed-out "Use Streak Restore" under a healthy
-                         streak reads as the app being broken rather than as the kid
-                         having nothing to repair. --}}
-                    @if (isset($heldPerks['streak_restore']) && ! $streakRepair)
-                        @php
-                            $restoresHeld = $heldPerks['streak_restore']['count'];
-                            // Built here rather than across template lines, so the
-                            // sentence renders as one run of text instead of picking up
-                            // the indentation between its clauses.
-                            $restoreNote = $restoresHeld > 1
-                                ? "{$restoresHeld} Streak Restores are in your pocket. Nothing to fix right now — they'll be here if you ever miss a day."
-                                : "A Streak Restore is in your pocket. Nothing to fix right now — it'll be here if you ever miss a day.";
-                        @endphp
-
-                        <div class="mt-4 flex flex-wrap items-center gap-3 rounded-[14px] border border-fq-steel-line bg-fq-sunk p-[13px]">
-                            <span class="font-baloo text-sm" style="color: var(--fq-steel-text)">
-                                {{ App\Enums\PerkEffect::StreakRestore->defaults()['glyph'] }}
-                            </span>
-                            <p class="min-w-0 flex-1 text-[13px] text-fq-text-2">{{ $restoreNote }}</p>
-                        </div>
-                    @endif
-
-                    {{-- Chests rather than numbered circles, growing along the rail.
-                         "Day 30 pays 4000 and day 3 pays 100" is a sentence you have to
-                         read and compare; a row of chests getting bigger is the same
-                         fact at a glance, which is the half of the audience that can't
-                         comfortably do the first. The numbers stay underneath for the
-                         kids who do want them. --}}
-                    {{-- The rail spans the card rather than huddling on the left. It's
-                         a track, so the connectors stretch to fill whatever width there
-                         is and the chests space themselves out along it; on a narrow
-                         screen they fall back to their own widths and it scrolls. --}}
-                    <div class="mt-4 flex items-start gap-2 overflow-x-auto pb-1 sm:gap-3">
-                        @php
-                            // Chests are sized off position in the run rather than off
-                            // the payout: the amounts are set per household and a
-                            // generous day-3 bonus shouldn't draw a bigger chest than
-                            // the day-30 one. The rail is a sequence, and that's what
-                            // the sizes have to say.
-                            $rungs = max(1, $streakBonuses->count() - 1);
-                        @endphp
-
-                        @foreach ($streakBonuses as $milestone)
-                            @php
-                                // Three states, not two: reached, the one being worked
-                                // towards, and the ones after it. The middle one is what
-                                // makes the rail a track rather than a scoreboard.
-                                $isNext = $nextMilestone === $milestone['day'];
-                                $reached = $milestone['reached'];
-
-                                $chestWidth = (int) round(26 + $loop->index / $rungs * 26);
-                                $chestHeight = (int) round($chestWidth * 0.78);
-
-                                [$chestFill, $labelColour] = match (true) {
-                                    $reached => ['var(--fq-chest-streak-fill)', 'var(--fq-streak)'],
-                                    $isNext => ['var(--fq-chest-streak-next)', 'var(--fq-text-2)'],
-                                    default => ['var(--fq-chest-locked-fill)', 'var(--fq-text-5)'],
-                                };
-                            @endphp
-
-                            {{-- Node and connector are siblings rather than a nested
-                                 pair, so the connector is a flex child of the rail and
-                                 can grow into the space left over. --}}
-                            <div class="flex flex-shrink-0 flex-col items-center gap-[6px]">
-                                    {{-- Fixed-height box with the chests bottom-aligned,
-                                         so they grow upwards off a shared line instead
-                                         of drifting around their own centres. --}}
-                                    <div class="relative flex h-[46px] items-end justify-center">
-                                        <x-chest-block
-                                            :fill="$chestFill"
-                                            :width="$chestWidth.'px'"
-                                            :height="$chestHeight.'px'"
-                                            radius="8px"
-                                            class="{{ $reached ? '' : ($isNext ? 'ring-2 ring-fq-streak' : 'opacity-45') }}"
-                                        />
-
-                                        @if ($reached)
-                                            <span
-                                                class="absolute -top-[2px] -right-[4px] flex h-[15px] w-[15px] items-center justify-center rounded-full font-baloo text-[10px] font-extrabold"
-                                                style="background: var(--fq-streak); color: var(--fq-streak-ink)"
-                                                title="Opened"
-                                            >&#10003;</span>
-                                        @endif
-                                    </div>
-
-                                <span class="font-mono-fq text-[9px] whitespace-nowrap text-fq-text-4">Day {{ $milestone['day'] }}</span>
-                                <span
-                                    class="font-baloo text-[11px] leading-none font-extrabold whitespace-nowrap"
-                                    style="color: {{ $labelColour }}"
-                                >{{ number_format($milestone['points']) }} pts</span>
-                            </div>
-
-                            @unless ($loop->last)
-                                {{-- Grows into the leftover width, and sits just above
-                                     the shared baseline so it reads as a rail the chests
-                                     stand on. --}}
-                                <div class="mt-[38px] h-[2px] min-w-[10px] flex-1" style="background: {{ $reached ? 'var(--fq-streak)' : 'var(--fq-line-2)' }}"></div>
-                            @endunless
-                        @endforeach
-                    </div>
-                </div>
-            </div>
-        @endif
-
-        {{-- The spin, which lives on the Quests page now.
-
-             It was a full section here and the kids went looking for it on
-             Quests anyway — which was them being right. The wheel lands on a
-             chore and multiplies it, and every one of those rows is over
-             there, so that is where the wheel went too.
-
-             What's left is a strip rather than a section, for the same reason
-             the Lucky Block above the run is one: it points at something on
-             another page. It still carries the news, which is the half worth
-             having here — a spin waiting, or the boost that's live. --}}
-        <a
-            href="{{ route('kid.quests') }}#bonus-wheel"
-            wire:navigate
-            class="flex min-h-[64px] items-center gap-3 rounded-[16px] border px-[14px] py-[13px] transition hover:brightness-110"
-            style="border-color: {{ $boost ? 'var(--fq-line-2)' : 'var(--fq-magenta)' }};
-                   background: {{ $boost ? 'var(--fq-sunk)' : 'color-mix(in srgb, var(--fq-magenta) 14%, transparent)' }}"
-        >
-            {{-- The wheel at strip size: the same palette the segments cycle
-                 through, run round once, with the hub pin in the middle. Small
-                 enough that a face of real segments would just be noise. --}}
-            <span
-                class="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-full"
-                style="background: conic-gradient(var(--fq-lime), var(--fq-cyan), var(--fq-gold), var(--fq-magenta), var(--fq-coral), var(--fq-violet), var(--fq-lime));
-                       box-shadow: 0 0 0 2px var(--fq-wheel-ring)"
-                aria-hidden="true"
-            >
-                <span
-                    class="h-[12px] w-[12px] rounded-full"
-                    style="background: var(--fq-wheel-hub); box-shadow: inset 0 0 0 2px var(--fq-wheel-hub-line)"
-                ></span>
-            </span>
-
-            <span class="min-w-0 flex-1">
-                @if ($boost)
-                    <span
-                        class="block font-baloo text-base leading-tight font-extrabold"
-                        style="color: {{ $boost->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)' }}"
-                    >{{ $boost->multiplier }}x on {{ $boost->chore->name }}</span>
-                    <span class="mt-[2px] block text-xs text-fq-text-4">Claim it on the Quests page.</span>
-                @else
-                    <span class="block font-baloo text-base leading-tight font-extrabold" style="color: var(--fq-magenta)">
-                        Your Bonus Wheel spin is waiting
-                    </span>
-                    <span class="mt-[2px] block text-xs text-fq-text-4">It's on the Quests page, above the board.</span>
-                @endif
-            </span>
-
-            <i aria-hidden="true" class="fa-fw fa-solid fa-arrow-right text-[13px]" style="color: var(--fq-magenta)"></i>
-        </a>
-
-        {{-- The weekly prize. A card of its own rather than a strip inside the
-             standings, which is where it started and where nobody found it:
-             this is the only thing on the page the whole house is chasing
-             together, and it has a deadline, so it can't be a footnote under
-             something else.
-
-             The bar is segmented per kid because the target is shared — one
-             undivided bar would hide that somebody did most of it — and the
-             number rides inside each segment so the colours need no legend. --}}
-        @if ($houseWeek)
-            @php
-                $weekLeft = max(0, $houseWeek['target'] - $houseWeek['done']);
-                $weekPrize = $household->weekly_prize ?: 'a house bonus';
-                $weekDaysLeft = (int) ceil(now($household->timezone)->diffInDays($houseWeek['resetsAt'], absolute: true));
-            @endphp
-
-            <div wire:key="house-week" class="flex flex-col gap-3">
-                <x-home-section
-                    title="Weekly Prize"
-                    accent="var(--fq-gold)"
-                    :done="$weekLeft === 0"
-                    :status="$weekLeft === 0
-                        ? 'Won it'
-                        : number_format($weekLeft).' '.Str::plural('chore', $weekLeft).' to go'"
-                    :status-color="$weekLeft === 0 ? 'var(--fq-lime)' : 'var(--fq-gold)'"
-                />
-
-                <div
-                    class="flex flex-col gap-[11px] rounded-[24px] border p-5"
-                    style="background: var(--fq-wash-gold); border-color: {{ $weekLeft === 0 ? 'var(--fq-lime)' : 'var(--fq-gold)' }}"
-                >
-                    {{-- The prize is the headline. A bar promising an unnamed
-                         reward is a bar nobody chases, and "80 chores" is the
-                         price rather than the thing being bought. --}}
-                    <div class="flex flex-wrap items-baseline justify-between gap-2">
-                        <h3 class="font-baloo text-[22px] leading-[1.15] font-extrabold sm:text-[26px]">{{ $weekPrize }}</h3>
-                        <span class="font-mono-fq text-[10px] whitespace-nowrap text-fq-text-4">
-                            {{ number_format($houseWeek['done']) }} / {{ number_format($houseWeek['target']) }} CHORES · SUN&ndash;SAT
-                        </span>
-                    </div>
-
-                    <div class="flex h-[30px] overflow-hidden rounded-[10px]" style="background: var(--fq-sunk)">
-                        @foreach ($houseWeek['segments'] as $segment)
-                            @if ($segment['chores'] > 0)
-                                <div
-                                    wire:key="week-{{ $segment['profile']->id }}"
-                                    title="{{ $segment['profile']->name }} — {{ $segment['chores'] }}"
-                                    class="grid place-items-center font-mono-fq text-[11px] font-semibold"
-                                    style="width: {{ min(100, $segment['chores'] / max(1, $houseWeek['target']) * 100) }}%;
-                                           color: var(--fq-bg);
-                                           background: linear-gradient(90deg, color-mix(in srgb, {{ $segment['profile']->color->cssVar() }} 62%, #000), {{ $segment['profile']->color->cssVar() }})"
-                                >{{ $segment['chores'] }}</div>
-                            @endif
-                        @endforeach
-                    </div>
-
-                    <p class="text-[13px] leading-snug text-fq-text-2" style="text-wrap: pretty">
-                        @if ($weekLeft === 0)
-                            Target smashed — the whole house gets {{ $weekPrize }}. Nobody had to win it.
-                        @else
-                            {{ number_format($weekLeft) }} more {{ Str::plural('chore', $weekLeft) }} between all of you and
-                            the whole house gets {{ $weekPrize }}. Everyone's chores count towards the same bar —
-                            nobody has to win it.
-                        @endif
-                    </p>
-
-                    <p class="font-mono-fq text-[10px] tracking-[0.12em] text-fq-text-5 uppercase">
-                        @if ($weekDaysLeft <= 1)
-                            Last day &mdash; the bar resets on Sunday
-                        @else
-                            {{ $weekDaysLeft }} days left &middot; the bar resets on Sunday
-                        @endif
-                    </p>
-                </div>
-            </div>
-        @endif
-
-        {{-- The boss fight, moved off the Quests page. It sits above the
-             standings because it is the other thing the house is doing
-             *together* — like the weekly prize above it, and unlike the
-             standings, which are the one card on the page about who is beating
-             whom. That one goes last. --}}
-        @if ($monsterState)
-            <div class="flex flex-col gap-3">
-                <x-home-section title="The Fight" accent="var(--fq-coral)" />
-
-                <div wire:key="family-boss">
-                    <x-monster-mini :state="$monsterState" :pending="$pendingCount" />
-                </div>
-            </div>
-        @endif
-
-        {{-- Where the house stands used to be the last card here, and the
-             Quote of the Day the one under it. Both are gone, and for the
-             same reason: this page answers "what do I do now", and neither of
-             them answered it.
-
-             The standings were already the Household page in miniature, so
-             they were a second copy of a table that ranks the kids against
-             each other — the last thing a kid should have to scroll past on
-             the way out of their own day.
-
-             The quotes moved somewhere better rather than away: a funny thing
-             your brother said is conversation, so it now lands in the family
-             feed, which is where the conversation is and which carries its own
-             unread count on every screen. The push notification that existed to
-             make up for nobody scrolling this far went with it. The whole
-             archive is still on the Journal's Quote Wall. --}}
+        </div>{{-- /the room --}}
     </div>
 </x-kid.shell>

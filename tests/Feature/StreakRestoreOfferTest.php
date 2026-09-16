@@ -79,7 +79,7 @@ class StreakRestoreOfferTest extends TestCase
         $this->travelTo(Carbon::parse('2026-03-05 09:00', $this->household->timezone));
         $this->holdARestore();
 
-        $page = Volt::test('kid.home')->assertOk();
+        $page = Volt::test('kid.home')->call('toggleRow', 'streak')->assertOk();
 
         $page->assertDontSee('Streak Rescue')
             // And no dead button under a healthy streak.
@@ -102,7 +102,7 @@ class StreakRestoreOfferTest extends TestCase
         $this->travelTo(Carbon::parse('2026-03-05 09:00', $this->household->timezone));
         $this->holdARestore();
 
-        Volt::test('kid.home')
+        Volt::test('kid.home')->call('toggleRow', 'streak')
             ->assertOk()
             ->assertSee('Streak Rescue')
             ->assertSee('Use Streak Restore')
@@ -117,7 +117,7 @@ class StreakRestoreOfferTest extends TestCase
         $this->travelTo(Carbon::parse('2026-03-05 09:00', $this->household->timezone));
         $this->holdARestore(2);
 
-        Volt::test('kid.home')
+        Volt::test('kid.home')->call('toggleRow', 'streak')
             ->assertOk()
             ->assertSee('2 Streak Restores are in your pocket', false);
     }
@@ -129,7 +129,7 @@ class StreakRestoreOfferTest extends TestCase
 
         $this->travelTo(Carbon::parse('2026-03-05 09:00', $this->household->timezone));
 
-        Volt::test('kid.home')
+        Volt::test('kid.home')->call('toggleRow', 'streak')
             ->assertOk()
             ->assertDontSee('in your pocket');
     }

@@ -64,12 +64,11 @@ class QuestPageLayoutTest extends TestCase
         // The chests and the boss moved to Home. The wheel went with them and
         // came back, because it lands on a chore and every one of those rows is
         // on this page — so it sits directly above the board. The quest chest
-        // that used to sit between the target and gratitude is gone entirely.
+        // is gone entirely, and gratitude went to Home.
         Volt::test('kid.quests')
             ->assertOk()
             ->assertSeeInOrder([
                 "Today's Target",
-                'Gratitude Quest',
                 'Bonus Wheel',
                 'Side Quests',
                 'Bounty Board',

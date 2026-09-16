@@ -137,6 +137,24 @@ class MealsTest extends TestCase
         $this->assertNotContains('Too far', collect($meals->week($this->household))->map(fn (array $r) => $r['meal']?->name)->all());
     }
 
+    public function test_upcoming_lists_every_set_night_from_tonight_soonest_first(): void
+    {
+        $meals = app(MealService::class);
+
+        $meals->set($this->household, $this->mom, $this->today()->subDay(), 'Yesterday soup');
+        $meals->set($this->household, $this->mom, $this->today()->addDays(9), 'Far off pie');
+        $meals->set($this->household, $this->mom, $this->today(), 'Tacos');
+        $meals->set($this->household, $this->mom, $this->today()->addDays(2), 'Curry');
+
+        $other = Household::factory()->create();
+        $meals->set($other, Profile::factory()->parent()->for($other)->create(), $this->today(), 'Not ours');
+
+        $this->assertSame(
+            ['Tacos', 'Curry', 'Far off pie'],
+            $meals->upcoming($this->household)->pluck('name')->all(),
+        );
+    }
+
     public function test_another_households_dinner_is_never_read(): void
     {
         $other = Household::factory()->create();

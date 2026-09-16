@@ -10,7 +10,7 @@
      It used to be laptop-only, with a one-line summary on the phone that opened
      the lists in a pop-up; once both cards shared a column that summary was a
      second copy of the card sitting right above it, so it went. --}}
-@props(['gratitude' => ['lists' => [], 'withheld' => [], 'total' => 0], 'roster' => 0])
+@props(['gratitude' => ['lists' => [], 'withheld' => [], 'total' => 0], 'roster' => 0, 'viewer' => null])
 
 <div
     class="flex flex-col gap-[9px] rounded-[18px] p-[13px]"
@@ -18,7 +18,23 @@
 >
     <div class="flex items-center justify-between gap-2">
         <span class="font-mono-fq text-[9.5px] tracking-[0.2em] uppercase" style="color: var(--fq-magenta)">Grateful today</span>
-        <span class="font-mono-fq text-[9.5px] text-fq-text-5">{{ $gratitude['total'] }} OF {{ $roster }}</span>
+        <span class="flex items-center gap-2">
+            <span class="font-mono-fq text-[9.5px] text-fq-text-5">{{ $gratitude['total'] }} OF {{ $roster }}</span>
+
+            {{-- Straight to the kid's own entry, the Gratitude row on Home. Kids
+                 only: the grown-ups read this same card and have no list to
+                 write. --}}
+            @if ($viewer && ! $viewer->isParent())
+                <a
+                    href="{{ route('kid.home', ['row' => 'gratitude']) }}"
+                    wire:navigate
+                    title="Write yours"
+                    aria-label="Write what you're grateful for"
+                    class="grid size-6 place-items-center rounded-full text-[12px] transition hover:brightness-125"
+                    style="color: var(--fq-magenta); background: color-mix(in srgb, var(--fq-magenta) 16%, transparent)"
+                ><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a>
+            @endif
+        </span>
     </div>
 
     <div class="flex flex-col gap-[7px] text-[13.5px] leading-[1.4]">

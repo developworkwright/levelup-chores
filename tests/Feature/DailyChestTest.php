@@ -99,11 +99,19 @@ class DailyChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        // Both chests are cards on Home now, one under the other. "Shown" is
-        // about them being openable rather than present, which is what their
-        // headline copy says.
-        Volt::test('kid.home')
-            ->assertSee("Open today's bonus chest")
+        // Both are rows of "Your day" now, and only one panel is open at a
+        // time — so each is checked behind its own row. "Shown" is still about
+        // being openable rather than present, which is what the copy says.
+        Volt::test('kid.home')->call('toggleRow', 'chest')
+            ->assertSee("Open today's bonus chest");
+
+        // Logged in again first: the guard hands back the same profile instance
+        // for the life of a test, where a real second request resolves a fresh
+        // one — so without this the second page reads the row this kid had open
+        // *before* the line above, and toggling shuts it instead.
+        Auth::guard('profile')->login($kid->fresh());
+
+        Volt::test('kid.home')->call('toggleRow', 'streak')
             ->assertSee('Your streak chest is waiting');
     }
 
@@ -198,7 +206,7 @@ class DailyChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.home')
+        Volt::test('kid.home')->call('toggleRow', 'chest')
             ->assertSee("Open today's bonus chest")
             ->call('openDailyChest')
             ->assertSuccessful();
@@ -208,14 +216,13 @@ class DailyChestTest extends TestCase
 
     public function test_the_milestone_track_survives_alongside_the_chest(): void
     {
-        // The chest sits in the tray while the track sits in the streak card —
-        // the track is useful every day, not only when a chest is waiting.
+        // The track is useful every day, not only when a chest is waiting, so
+        // it is drawn behind the streak row whether or not one is pending.
         $kid = $this->kid(['streak' => 1]);
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.home')
-            ->assertSee("Open today's bonus chest")
+        Volt::test('kid.home')->call('toggleRow', 'streak')
             ->assertSee('Day 3')
             ->assertSee('100 pts');
     }
@@ -229,7 +236,7 @@ class DailyChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        $component = Volt::test('kid.home')->call('openDailyChest');
+        $component = Volt::test('kid.home')->call('toggleRow', 'chest')->call('openDailyChest');
 
         $prize = $component->get('dailyChestPrize');
 
@@ -272,7 +279,7 @@ class DailyChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        $component = Volt::test('kid.home')->assertSee("Open today's bonus chest");
+        $component = Volt::test('kid.home')->call('toggleRow', 'chest')->assertSee("Open today's bonus chest");
 
         $kid->update(['pending_streak_chest' => 3]);
 
@@ -292,7 +299,7 @@ class DailyChestTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        $component = Volt::test('kid.home')->assertSee("Open today's bonus chest");
+        $component = Volt::test('kid.home')->call('toggleRow', 'chest')->assertSee("Open today's bonus chest");
 
         // A second tab (or a back-button visit) gets there first.
         $this->chests()->open($kid->refresh());
@@ -315,9 +322,9 @@ class DailyChestTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         // The card is still drawn — <x-chest> keeps both faces in the DOM and
-        // shows one — so what has to change is the status and the reveal.
-        Volt::test('kid.home')
-            ->assertSee('Opened today')
+        // shows one — so what has to change is the row's status and the reveal.
+        Volt::test('kid.home')->call('toggleRow', 'chest')
+            ->assertSee('OPENED')
             ->assertSee("Banked. There's another one tomorrow.", escape: false);
     }
 }

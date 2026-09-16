@@ -247,7 +247,7 @@ class StreakTimerTest extends TestCase
 
         Auth::guard('profile')->login($this->kid);
 
-        Volt::test('kid.home')
+        Volt::test('kid.home')->call('toggleRow', 'streak')
             ->assertSee('Keep your 6-day streak')
             ->assertSee('Get any chore signed off before bedtime at 9:00 PM and today counts towards your run.')
             ->assertSee('Until bedtime');
@@ -259,7 +259,7 @@ class StreakTimerTest extends TestCase
 
         Auth::guard('profile')->login($this->kid);
 
-        Volt::test('kid.home')
+        Volt::test('kid.home')->call('toggleRow', 'streak')
             ->assertSee('Start a streak today')
             ->assertSee('before bedtime at 9:00 PM')
             ->assertDontSee('Keep your 0-day streak');
@@ -272,7 +272,7 @@ class StreakTimerTest extends TestCase
 
         Auth::guard('profile')->login($this->kid);
 
-        Volt::test('kid.home')
+        Volt::test('kid.home')->call('toggleRow', 'streak')
             ->assertSee('Last chance for your 6-day streak')
             // Unescaped: this sentence is literal template text rather than an
             // interpolated string, so its apostrophes reach the page as typed.
@@ -294,7 +294,7 @@ class StreakTimerTest extends TestCase
 
         // No timer over a day that is already won — the number would only be
         // something left to worry about.
-        Volt::test('kid.home')
+        Volt::test('kid.home')->call('toggleRow', 'streak')
             ->assertSee("Today's in the bag")
             ->assertDontSee('Until bedtime')
             ->assertDontSee('Before it resets');

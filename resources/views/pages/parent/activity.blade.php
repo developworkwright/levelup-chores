@@ -183,7 +183,7 @@ new class extends Component
             @empty
                 <p class="py-2 text-sm text-fq-text-5">
                     Nothing yet. Kids bank {{ \App\Services\GratitudeService::TICKETS }} tickets for naming three
-                    things they're grateful for, once a day, from the Quests page.
+                    things they're grateful for, once a day, from Home.
                 </p>
             @endforelse
         </div>

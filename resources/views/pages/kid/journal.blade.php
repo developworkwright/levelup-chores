@@ -138,7 +138,7 @@ new class extends Component
 
             @if (! $onQuotes && ! $writtenToday)
                 <a
-                    href="{{ route('kid.quests') }}"
+                    href="{{ route('kid.home', ['row' => 'gratitude']) }}"
                     wire:navigate
                     class="mt-4 inline-flex items-center gap-2 rounded-[14px] px-[18px] py-[11px] font-baloo text-[15px] font-bold transition hover:brightness-110"
                     style="background: var(--fq-cyan); color: var(--fq-ink)"
@@ -215,14 +215,14 @@ new class extends Component
                         <div class="rounded-[18px] border border-dashed border-fq-line-3 p-8 text-center">
                             <p class="font-baloo text-lg font-bold">Nothing written down yet</p>
                             <p class="mt-1 text-sm text-fq-text-5">
-                                Name three things you're grateful for on the Quests page — it's worth
+                                Name three things you're grateful for on Home — it's worth
                                 {{ \App\Services\GratitudeService::TICKETS }} tickets, once a day.
                             </p>
                             <a
-                                href="{{ route('kid.quests') }}"
+                                href="{{ route('kid.home', ['row' => 'gratitude']) }}"
                                 wire:navigate
                                 class="mt-4 inline-block rounded-[12px] border border-fq-line-3 bg-fq-sunk px-[14px] py-[9px] text-[13px] text-fq-text-2-b transition hover:border-fq-line-4 hover:text-fq-text"
-                            >Go to Quests &rarr;</a>
+                            >Go to Home &rarr;</a>
                         </div>
                     @endforelse
 

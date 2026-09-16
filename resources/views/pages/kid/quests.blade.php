@@ -21,7 +21,6 @@ use App\Services\BadgeService;
 use App\Services\BonusShopService;
 use App\Services\BountyService;
 use App\Services\ChoreService;
-use App\Services\GratitudeService;
 use App\Services\HouseholdClock;
 use App\Services\MonsterService;
 use App\Services\PerkInventoryService;
@@ -38,8 +37,8 @@ use Livewire\Volt\Component;
  * the boss all sat on it too, which made it a long page a kid had to already
  * know their way around. Those moved to Home, which is organised by *when*
  * rather than by what kind of thing something is. What's left here is the work:
- * the bonus wheel, the board, the gratitude quest, the bounty board and the
- * mystery chore.
+ * the bonus wheel, the board, the bounty board and the mystery chore. The
+ * gratitude quest went to Home too, as a row of "Your day".
  *
  * The main quest used to sit at the top of it, and is gone. It was a second
  * board on top of this one: a chest, a hand of three cards, and — while the kid
@@ -375,26 +374,6 @@ new class extends Component
             : 'Those two just went — swapped in another pair.';
     }
 
-    /**
-     * The three boxes of the gratitude quest. Deferred rather than live —
-     * nothing on the page reacts to a half-typed answer, so there's no reason
-     * to spend a round trip per keystroke.
-     *
-     * @var array<int, string>
-     */
-    public array $gratitude = ['', '', ''];
-
-    /**
-     * Whether today's list goes up on the family feed's Grateful today card.
-     *
-     * On by default, and a box rather than a setting: a kid who has to go and
-     * find a preference in order to keep one line to themselves will never keep
-     * anything to themselves. See the `shared` column's migration.
-     */
-    public bool $gratitudeShared = true;
-
-    public ?string $gratitudeMessage = null;
-
     public function clearSearch(): void
     {
         $this->search = '';
@@ -486,11 +465,6 @@ new class extends Component
         }
     }
 
-        /**
-     * The gratitude quest. Both refusals are worth their own wording: one is
-     * "you missed a box", the other is "you already did this today", and a
-     * button that silently does nothing explains neither.
-     */
     /**
      * Answer last night's own-bed card.
      *
@@ -593,33 +567,6 @@ new class extends Component
         );
     }
 
-    public function logGratitude(): void
-    {
-        $service = app(GratitudeService::class);
-
-        if ($service->record($this->profile, $this->gratitude, $this->gratitudeShared)) {
-            $this->gratitude = ['', '', ''];
-            $this->gratitudeShared = true;
-            $this->gratitudeMessage = null;
-
-            // Hearts, not coins — this is the one quest that isn't about
-            // earning anything, and the tickets are a thank-you rather than
-            // the point of it.
-            $this->dispatch(
-                'celebrate',
-                message: 'Gratitude logged! +'.GratitudeService::TICKETS.' tickets.',
-                style: 'heart',
-                motion: 'burst',
-                origin: 'tap',
-            );
-
-            return;
-        }
-
-        $this->gratitudeMessage = $service->isAvailable($this->profile)
-            ? 'Fill in all three before you hand it in.'
-            : "Today's gratitude quest is already done — back tomorrow!";
-    }
     /**
      * Every perk with a button on this page: the quest charm and the mystery
      * hint on the board, and the wheel respin beside the spin.
@@ -1053,8 +1000,6 @@ new class extends Component
         $mysteryToday = $service->mysteryTodayFor($household);
         $mysteryFinder = $mysteryToday?->foundBy;
 
-        $gratitude = app(GratitudeService::class);
-
         $earnedToday = $service->pointsEarnedToday($this->profile);
 
         // --- The side-quest board: price bands, chips and the adding-up card.
@@ -1208,9 +1153,6 @@ new class extends Component
             // rather than as a state the page has always been in.
             'mysteryFoundAt' => $mysteryToday?->found_at,
             'mysteryHint' => $service->mysteryHintFor($this->profile),
-            // Today's only. Everything older lives on the Journal tab — this
-            // page is about the day in front of you.
-            'gratitudeToday' => $gratitude->todayFor($this->profile),
             // Null unless both the household and this kid have it switched on,
             // which is what keeps the card off every other kid's page.
             'sleepCard' => app(SleepService::class)->cardFor($this->profile),
@@ -1325,7 +1267,7 @@ new class extends Component
             </div>
         @endif
 
-        {{-- The own-bed card, above gratitude because it asks about last night
+        {{-- The own-bed card, near the top because it asks about last night
              and the morning is when it makes sense to answer. Absent entirely
              unless a parent has switched it on for this kid.
 
@@ -1343,94 +1285,6 @@ new class extends Component
                 <x-sleep-card :card="$sleepCard" />
             @endif
         @endif
-
-        {{-- 3. Gratitude quest. The one quest that isn't work — nothing for a
-             parent to approve, so the tickets land on hand-in. --}}
-        <div
-            wire:key="gratitude-quest"
-            class="rounded-[20px] border p-4"
-            style="background: var(--fq-wash-cleared); border-color: color-mix(in srgb, var(--fq-magenta) 40%, transparent)"
-        >
-            <div class="flex flex-wrap items-baseline justify-between gap-2">
-                <p class="font-mono-fq text-[10px] tracking-[0.24em] uppercase" style="color: var(--fq-magenta)">Gratitude Quest</p>
-                <span class="inline-flex items-center gap-2 whitespace-nowrap">
-                    <span
-                        class="rounded-full border border-fq-ticket-line px-[10px] py-1 font-mono-fq text-[10px] text-fq-lime"
-                        style="background: var(--fq-ticket-bg)"
-                    >+{{ \App\Services\GratitudeService::TICKETS }} TICKETS</span>
-                    <span class="font-mono-fq text-[10px] text-fq-text-4 uppercase">{{ $gratitudeToday ? 'Done today' : 'Not done today' }}</span>
-                </span>
-            </div>
-
-            <h2 class="mt-[6px] font-baloo text-xl font-bold">Today you were grateful for&hellip;</h2>
-
-            @if ($gratitudeToday)
-                <div class="mt-3 flex flex-wrap gap-2">
-                    @foreach ($gratitudeToday->items as $index => $item)
-                        <div class="min-w-[150px] flex-1 rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[13px] py-[11px]">
-                            <span class="font-baloo text-[13px] font-extrabold" style="color: var(--fq-magenta)">{{ $index + 1 }}</span>
-                            <span class="ml-2 text-sm text-fq-text-2">{{ $item }}</span>
-                        </div>
-                    @endforeach
-                </div>
-
-                <p class="mt-3 text-[13px] text-fq-text-5">
-                    {{ $gratitudeToday->shared
-                        ? 'The house can read this one on the Family page.'
-                        : 'You kept this one to yourself.' }}
-                    A new one opens up tomorrow. Everything you've written is kept in your
-                    <a href="{{ route('kid.journal') }}" wire:navigate class="font-semibold underline" style="color: var(--fq-magenta)">Journal</a>.
-                </p>
-            @else
-                @php $slotHints = ['1 · something', '2 · someone', '3 · anything']; @endphp
-
-                <div class="mt-3 flex flex-wrap gap-2">
-                    @foreach (range(0, \App\Services\GratitudeService::ITEMS - 1) as $index)
-                        <input
-                            type="text"
-                            wire:model="gratitude.{{ $index }}"
-                            wire:keydown.enter="logGratitude"
-                            maxlength="{{ \App\Services\GratitudeService::MAX_LENGTH }}"
-                            placeholder="{{ $slotHints[$index] ?? 'Something good…' }}"
-                            aria-label="Grateful for, number {{ $index + 1 }}"
-                            class="min-w-[150px] flex-1 rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[13px] py-[11px] text-sm outline-none focus:border-fq-magenta"
-                        >
-                    @endforeach
-                </div>
-
-                {{-- The opt-out. In front of them at the moment they are
-                     deciding, because a kid who has to go and find a setting to
-                     be private will never be private — the same reasoning the
-                     FeelingVisibility docblock gives, pointed the other way:
-                     this one is shared unless you say otherwise, since a
-                     grateful line is almost always about somebody in this house
-                     and its whole value is that they hear it. --}}
-                <label class="mt-3 flex min-h-[44px] cursor-pointer items-center gap-[10px] rounded-[12px] border border-fq-line-2 bg-fq-sunk px-[13px] py-2">
-                    <input
-                        type="checkbox"
-                        wire:model="gratitudeShared"
-                        class="size-[18px] shrink-0 accent-fq-magenta"
-                    >
-                    <span class="text-[13px] text-fq-text-3">
-                        Let the house read this one
-                        <span class="text-fq-text-5">— it shows up on the Family page</span>
-                    </span>
-                </label>
-
-                <button
-                    type="button"
-                    wire:click="logGratitude"
-                    wire:loading.attr="disabled"
-                    wire:target="logGratitude"
-                    class="mt-3 rounded-[14px] px-5 py-[11px] font-baloo text-[15px] font-bold transition hover:brightness-110 disabled:opacity-60"
-                    style="background: var(--fq-magenta); color: var(--fq-ink)"
-                >Hand it in</button>
-            @endif
-
-            @if ($gratitudeMessage)
-                <p class="mt-3 text-[13px]" style="color: var(--fq-gold)">{{ $gratitudeMessage }}</p>
-            @endif
-        </div>
 
         {{-- 4. Bonus Wheel. It was a section on Home, and the kids kept coming
              here to look for it — which is the right instinct. The wheel lands
