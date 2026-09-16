@@ -11,7 +11,6 @@ use App\Enums\TradeAsset;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyChest;
-use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\LedgerEntry;
 use App\Models\OwnedPerk;
@@ -99,26 +98,11 @@ class BadgeMilestoneTest extends TestCase
         $this->assertNotEarned('chores_100');
     }
 
-    public function test_quest_volume_badges_count_only_cleared_quests(): void
-    {
-        $chore = Chore::factory()->for($this->household)->create();
-
-        foreach (range(1, 12) as $daysAgo) {
-            DailyQuest::create([
-                'household_id' => $this->household->id,
-                'profile_id' => $this->kid->id,
-                'chore_id' => $chore->id,
-                'quest_date' => now()->subDays($daysAgo)->toDateString(),
-                // Two of the twelve were handed out and never cleared.
-                'completed_at' => $daysAgo <= 10 ? now()->subDays($daysAgo) : null,
-            ]);
-        }
-
-        $this->evaluate();
-
-        $this->assertEarned('quest_10');
-        $this->assertNotEarned('quest_50');
-    }
+    // `quest_10` and `quest_50` were tested here. They counted cleared daily
+    // quests and are retired with the quest itself — see
+    // BadgeService::evaluate(). Lifetime volume is still measured, by the chore
+    // milestones above: they count the same work without needing a quest row to
+    // have been dealt for it.
 
     public function test_earning_badges_read_the_earn_ledger_only(): void
     {

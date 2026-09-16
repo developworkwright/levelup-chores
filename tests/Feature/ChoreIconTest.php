@@ -6,7 +6,6 @@ use App\Enums\ChoreIcon;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\Profile;
-use App\Services\ChoreService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Volt;
@@ -14,7 +13,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
- * The face a quest card wears, for the kids who can't read the name.
+ * The face a chore wears on the board, for the kids who can't read the name.
  *
  * @see ChoreIcon
  */
@@ -291,53 +290,17 @@ class ChoreIconTest extends TestCase
         $this->assertNull($chore->fresh()->icon);
     }
 
-    public function test_the_quest_card_draws_the_icon_when_a_chore_has_one(): void
-    {
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create(['age' => 10]);
-
-        Chore::factory()->for($household)->create([
-            'name' => 'Mow the lawn',
-            'icon' => ChoreIcon::Lawn->faClass(),
-            'points' => 300,
-            'min_age' => null,
-            'quest_eligible' => true,
-        ]);
-
-        Auth::guard('profile')->login($kid);
-
-        $html = Volt::test('kid.quests')->assertOk()->html();
-
-        $this->assertStringContainsString('fq-card-glyph', $html);
-        $this->assertStringContainsString(ChoreIcon::Lawn->faClass(), $html);
-        // The suit corners carry the ladder the row is sorted by.
-        $this->assertStringContainsString('♦', $html);
-    }
-
-    public function test_the_side_quest_board_wears_the_same_faces_as_the_cards(): void
+    public function test_the_board_wears_the_chores_face(): void
     {
         // A board of identical text rows is unusable to a kid who can't read
-        // them; the picture is the only thing that makes it scannable, and it
-        // used to stop existing the moment the hand burned.
+        // them; the picture is the only thing that makes it scannable.
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['age' => 10]);
-
-        // Three faceless chores to fill the hand, so the only icon anywhere on
-        // the page has to be the one drawn on the board below it.
-        foreach (range(1, 3) as $i) {
-            Chore::factory()->for($household)->create([
-                'name' => "Faceless chore {$i}",
-                'icon' => null,
-                'min_age' => null,
-                'quest_eligible' => true,
-            ]);
-        }
 
         Chore::factory()->for($household)->create([
             'name' => 'Feed the dog',
             'icon' => ChoreIcon::Pet->faClass(),
             'min_age' => null,
-            'quest_eligible' => false,
         ]);
 
         Auth::guard('profile')->login($kid);
@@ -345,81 +308,12 @@ class ChoreIconTest extends TestCase
         $html = Volt::test('kid.quests')->assertOk()->html();
 
         $this->assertStringContainsString(ChoreIcon::Pet->faClass(), $html);
-        // Drawn on the board, not on a card — the hand is all faceless.
-        $this->assertStringNotContainsString('fq-card-glyph', $html);
     }
 
-    public function test_the_main_quest_keeps_the_face_its_card_was_picked_by(): void
-    {
-        // The hand burns after the pick. Without the face on the quest itself
-        // the picture a pre-reader actually chose from is simply gone.
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create(['age' => 10]);
-
-        $chore = Chore::factory()->for($household)->create([
-            'name' => 'Mow the lawn',
-            'icon' => ChoreIcon::Lawn->faClass(),
-            'min_age' => null,
-            'quest_eligible' => true,
-        ]);
-
-        Auth::guard('profile')->login($kid);
-
-        $html = Volt::test('kid.quests')
-            ->call('chooseQuest', $chore->id)
-            ->assertOk()
-            ->html();
-
-        $this->assertStringContainsString(ChoreIcon::Lawn->faClass(), $html);
-        // The hero, not a card: the hand is gone by now.
-        $this->assertStringNotContainsString('fq-card-glyph', $html);
-    }
-
-    public function test_a_chore_with_no_icon_falls_back_to_the_typographic_face(): void
-    {
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create(['age' => 10]);
-
-        Chore::factory()->for($household)->create([
-            'name' => 'Practise piano',
-            'icon' => null,
-            'points' => 300,
-            'min_age' => null,
-            'quest_eligible' => true,
-        ]);
-
-        Auth::guard('profile')->login($kid);
-
-        $html = Volt::test('kid.quests')->assertOk()->html();
-
-        // No card is ever blank: with no picture, the points become the face.
-        $this->assertStringContainsString('fq-card-facenum', $html);
-        $this->assertStringNotContainsString('fq-card-glyph', $html);
-    }
-
-    public function test_the_hand_is_a_row_of_fixed_cards_not_a_stretched_grid(): void
-    {
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create(['age' => 10]);
-
-        foreach ([50, 150, 400] as $points) {
-            Chore::factory()->for($household)->create([
-                'points' => $points,
-                'min_age' => null,
-                'quest_eligible' => true,
-            ]);
-        }
-
-        Auth::guard('profile')->login($kid);
-
-        $html = Volt::test('kid.quests')->assertOk()->html();
-
-        $this->assertStringContainsString('fq-hand', $html);
-        // The row is the choice — it scales on a phone, it never reflows into
-        // a column, so there is no grid class left to stretch it.
-        $this->assertStringNotContainsString('grid-cols-3 gap-2', $html);
-
-        $service = app(ChoreService::class);
-        $this->assertCount(3, $service->offeredChoresFor($kid->refresh()));
-    }
+    /**
+     * Four tests here drew the quest hand: the card's glyph, its typographic
+     * fallback, the face carried onto the picked quest, and the row of fixed
+     * cards. All four went with the hand. The board's own face, above, is the
+     * half of this that was always the point.
+     */
 }

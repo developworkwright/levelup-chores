@@ -2,6 +2,8 @@
 
 namespace App\Enums;
 
+use App\Services\ChoreService;
+
 /**
  * The set of perk behaviours that actually exist in code. A bonus_perks row
  * points at one of these; everything else about a perk — its price, name and
@@ -12,7 +14,6 @@ namespace App\Enums;
 enum PerkEffect: string
 {
     case WheelRespin = 'wheel_respin';
-    case QuestReroll = 'quest_reroll';
     case StreakRestore = 'streak_restore';
     case MysteryHint = 'mystery_hint';
     case NameMonster = 'name_monster';
@@ -37,9 +38,10 @@ enum PerkEffect: string
             self::StreakRestore, self::NightSaver => 'heart',
             // A clue is a small bright thing, not a party.
             self::MysteryHint => 'star',
-            // Both are cast now and land later — the charm when the chest
-            // opens, the OP charge when the wheel stops — so this is the
-            // sparkle of one taking hold rather than the payoff.
+            // Both are cast now and land later — the charm when one of the
+            // chores it lit up is handed in, the OP charge when the wheel
+            // stops — so this is the sparkle of one taking hold rather than
+            // the payoff.
             self::QuestCharm, self::OpSpin => 'star',
             default => 'confetti',
         };
@@ -59,12 +61,6 @@ enum PerkEffect: string
                 'description' => "Clear today's spin and take another turn on the Bonus Wheel.",
                 'cost' => 3,
                 'glyph' => '↻',
-            ],
-            self::QuestReroll => [
-                'name' => 'Quest Reroll',
-                'description' => "Swap today's main quest for a different chore.",
-                'cost' => 3,
-                'glyph' => '⇄',
             ],
             self::StreakRestore => [
                 'name' => 'Streak Restore',
@@ -94,13 +90,13 @@ enum PerkEffect: string
                 'cost' => 2,
                 'glyph' => '☾',
             ],
-            // Priced with Wheel Respin and Quest Reroll rather than with the
-            // rescues above it: like them it is a good day made better, not a
-            // bad one bought back, and a kid should be able to afford one most
-            // days they feel like a gamble.
+            // Priced with Wheel Respin rather than with the rescues above it:
+            // like it, this is a good day made better rather than a bad one
+            // bought back, and a kid should be able to afford one most days
+            // they feel like a gamble.
             self::QuestCharm => [
                 'name' => 'Quest Charm',
-                'description' => 'Charm the quest chest before you open it. More cards go bold, or the bold bonus grows — and if nothing shows on the cards, the charm pays out when you hand the quest in.',
+                'description' => 'Cast it over the board and '.ChoreService::CHARM_CHORES.' random chores pay you half again for the rest of the day. You do not get to pick which ones.',
                 'cost' => 3,
                 'glyph' => '✧',
             ],

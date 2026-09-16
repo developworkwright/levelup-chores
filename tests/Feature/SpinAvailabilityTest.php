@@ -34,11 +34,9 @@ class SpinAvailabilityTest extends TestCase
         return app(ChoreService::class);
     }
 
-    /** One quest-eligible chore absorbs the daily quest, which the wheel always excludes. */
     private function household(): Household
     {
         $household = Household::factory()->create();
-        Chore::factory()->for($household)->create(['name' => 'The quest', 'quest_eligible' => true]);
 
         return $household;
     }
@@ -49,8 +47,8 @@ class SpinAvailabilityTest extends TestCase
         $kid = Profile::factory()->for($household)->create();
         $sibling = Profile::factory()->for($household)->create();
 
-        $taken = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
-        $free = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
+        $taken = Chore::factory()->for($household)->create(['cadence' => 'daily']);
+        $free = Chore::factory()->for($household)->create(['cadence' => 'daily']);
 
         $this->chores()->claim($sibling, $taken);
 
@@ -65,8 +63,8 @@ class SpinAvailabilityTest extends TestCase
         $household = $this->household();
         $kid = Profile::factory()->for($household)->create();
 
-        $done = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
-        Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
+        $done = Chore::factory()->for($household)->create(['cadence' => 'daily']);
+        Chore::factory()->for($household)->create(['cadence' => 'daily']);
 
         $this->chores()->claim($kid, $done);
 
@@ -80,7 +78,7 @@ class SpinAvailabilityTest extends TestCase
         $kid = Profile::factory()->for($household)->create();
         $sibling = Profile::factory()->for($household)->create();
 
-        $shared = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'unlimited']);
+        $shared = Chore::factory()->for($household)->create(['cadence' => 'unlimited']);
 
         $this->chores()->claim($sibling, $shared);
 
@@ -95,7 +93,7 @@ class SpinAvailabilityTest extends TestCase
         $kid = Profile::factory()->for($household)->create();
         $sibling = Profile::factory()->for($household)->create();
 
-        $chore = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
+        $chore = Chore::factory()->for($household)->create(['cadence' => 'daily']);
 
         $completion = $this->chores()->claim($sibling, $chore);
         $this->assertNotContains($chore->id, $this->spins()->eligibleChoresFor($kid)->pluck('id'));
@@ -110,8 +108,8 @@ class SpinAvailabilityTest extends TestCase
         $household = $this->household();
         $sibling = Profile::factory()->for($household)->create();
 
-        $taken = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
-        $free = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
+        $taken = Chore::factory()->for($household)->create(['cadence' => 'daily']);
+        $free = Chore::factory()->for($household)->create(['cadence' => 'daily']);
 
         $this->chores()->claim($sibling, $taken);
 
@@ -128,8 +126,8 @@ class SpinAvailabilityTest extends TestCase
         $household = $this->household();
         $kid = Profile::factory()->for($household)->create();
 
-        $chore = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
-        Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
+        $chore = Chore::factory()->for($household)->create(['cadence' => 'daily']);
+        Chore::factory()->for($household)->create(['cadence' => 'daily']);
 
         $spin = $this->spins()->spin($kid);
 
@@ -145,7 +143,7 @@ class SpinAvailabilityTest extends TestCase
         $household = $this->household();
         $kid = Profile::factory()->for($household)->create();
 
-        $chore = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
+        $chore = Chore::factory()->for($household)->create(['cadence' => 'daily']);
         // Dated off the household clock, not now()->toDateString(): the app
         // timezone is UTC but the household's day rolls at 4am Chicago, so a
         // plain UTC date puts this row on a different day than the service
@@ -166,7 +164,7 @@ class SpinAvailabilityTest extends TestCase
         $kid = Profile::factory()->for($household)->create();
         $sibling = Profile::factory()->for($household)->create();
 
-        $only = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
+        $only = Chore::factory()->for($household)->create(['cadence' => 'daily']);
         $this->chores()->claim($sibling, $only);
 
         $this->expectException(RuntimeException::class);
@@ -180,7 +178,7 @@ class SpinAvailabilityTest extends TestCase
         $kid = Profile::factory()->for($household)->create();
         $sibling = Profile::factory()->for($household)->create();
 
-        $only = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
+        $only = Chore::factory()->for($household)->create(['cadence' => 'daily']);
         $this->chores()->claim($sibling, $only);
 
         Auth::guard('profile')->login($kid);
@@ -199,10 +197,9 @@ class SpinAvailabilityTest extends TestCase
 
         $barred = Chore::factory()->for($household)->create([
             'name' => 'Put the groceries away',
-            'quest_eligible' => false,
             'wheel_eligible' => false,
         ]);
-        $free = Chore::factory()->for($household)->create(['quest_eligible' => false]);
+        $free = Chore::factory()->for($household)->create();
 
         $ids = $this->spins()->eligibleChoresFor($kid)->pluck('id');
 
@@ -230,8 +227,8 @@ class SpinAvailabilityTest extends TestCase
         $household = $this->household();
         $kid = Profile::factory()->for($household)->create();
 
-        Chore::factory()->for($household)->create(['quest_eligible' => false]);
-        Chore::factory()->for($household)->create(['quest_eligible' => false]);
+        Chore::factory()->for($household)->create();
+        Chore::factory()->for($household)->create();
 
         $spin = $this->spins()->spin($kid);
 
@@ -247,7 +244,7 @@ class SpinAvailabilityTest extends TestCase
         $household = $this->household();
         $kid = Profile::factory()->for($household)->create();
 
-        Chore::factory()->for($household)->create(['quest_eligible' => false, 'wheel_eligible' => false]);
+        Chore::factory()->for($household)->create(['wheel_eligible' => false]);
 
         $this->expectException(RuntimeException::class);
 

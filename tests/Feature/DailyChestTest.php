@@ -107,20 +107,20 @@ class DailyChestTest extends TestCase
             ->assertSee('Your streak chest is waiting');
     }
 
-    public function test_the_chest_records_whether_the_quest_was_done(): void
+    public function test_the_chest_records_whether_a_chore_was_done(): void
     {
         $household = Household::factory()->create();
         Chore::factory()->for($household)->count(3)->create();
         $kid = Profile::factory()->for($household)->create();
 
-        app(ChoreService::class)->claimQuest($kid);
+        app(ChoreService::class)->claim($kid, $household->chores->first());
 
         // Doing the work doesn't unlock the chest, it improves the roll — so
         // the flag has to be captured to make that auditable.
         $this->assertTrue($this->chests()->open($kid)->quest_was_done);
     }
 
-    public function test_a_side_quest_boosts_the_chest_just_like_the_main_one(): void
+    public function test_any_chore_off_the_board_boosts_the_chest(): void
     {
         $household = Household::factory()->create();
         $chores = Chore::factory()->for($household)->count(3)->create();
@@ -128,9 +128,8 @@ class DailyChestTest extends TestCase
 
         $this->assertFalse($this->chests()->isBoosted($kid));
 
-        // A chore off the board, with the quest card left untouched. It is
-        // still work done today, so it still moves the chest onto the good
-        // table — the main quest has no special standing here.
+        // Whichever chore they happened to pick. No chore has special standing
+        // here — it is work done today, so the chest moves onto the good table.
         app(ChoreService::class)->claim($kid, $chores->last());
 
         $this->assertTrue($this->chests()->isBoosted($kid));

@@ -15,11 +15,28 @@ new class extends Component
         abort_unless($this->profile->isKid(), 403);
     }
 
+    /**
+     * Badges that can no longer be earned, because the daily quest they counted
+     * is gone — see the retire_the_daily_quest migration.
+     *
+     * They stay in the table and on the shelf of anyone who won one; what they
+     * must not do is sit on this page as four permanently locked cards, since
+     * this page's promise is "every badge you can earn, and exactly how". A kid
+     * who holds one still sees it, described exactly as it always was.
+     *
+     * @var array<int, string>
+     */
+    private const RETIRED = ['first_quest', 'quest_10', 'quest_50', 'speed_runner'];
+
     public function with(): array
     {
         $earned = $this->profile->badges->keyBy('key');
 
-        $badges = Badge::orderBy('id')->get()->map(fn (Badge $badge) => [
+        $badges = Badge::orderBy('id')
+            ->get()
+            ->reject(fn (Badge $badge) => in_array($badge->key, self::RETIRED, true) && ! $earned->has($badge->key))
+            ->values()
+            ->map(fn (Badge $badge) => [
             'badge' => $badge,
             'earned' => $earned->has($badge->key),
             'earnedAt' => $earned->get($badge->key)?->pivot->earned_at,

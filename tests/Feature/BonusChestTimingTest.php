@@ -16,13 +16,13 @@ use Livewire\Volt\Volt;
 use Tests\TestCase;
 
 /**
- * The bonus chest rolls on a better table once a quest is done, and nothing
+ * The bonus chest rolls on a better table once a chore is done, and nothing
  * used to say so — so it was opened first thing every morning and the boost
  * went permanently unclaimed.
  *
- * Any quest earns it, the main one or a side quest off the board; the tests
- * here mostly drive the main one because that is the card sitting next to the
- * chest. {@see DailyChestTest} covers the side-quest path.
+ * Any chore earns it. The column recording it is still called
+ * `quest_was_done`, from when the daily quest was the only thing that counted;
+ * the rule it stores is {@see ChestService::isBoosted()}.
  *
  * @see ChestService::BOOSTED_TABLE
  */
@@ -45,17 +45,18 @@ class BonusChestTimingTest extends TestCase
 
         Chore::factory()->for($this->household)->count(4)->create([
             'min_age' => null,
-            'quest_eligible' => true,
         ]);
 
         Auth::guard('profile')->login($this->kid);
     }
 
-    private function clearQuest(): void
+    /** Puts one chore in for the day, which is what powers the chest up. */
+    private function doAChore(): void
     {
-        $chores = app(ChoreService::class);
-        $chores->revealQuest($this->kid);
-        $chores->claimQuest($this->kid);
+        app(ChoreService::class)->claim(
+            $this->kid,
+            Chore::where('household_id', $this->household->id)->first(),
+        );
     }
 
     public function test_an_unearned_chest_stops_to_explain_what_waiting_is_worth(): void
@@ -64,14 +65,14 @@ class BonusChestTimingTest extends TestCase
             ->assertSee('Ready to open')
             // The prompt is on the page, hidden until the chest is tapped.
             ->assertSee('Hold on', escape: false)
-            ->assertSee('Do a quest first')
+            ->assertSee('Do a chore first')
             // "Open now anyway", not "Open it now anyway" — the sleep chest's
             // own CTA is "Open it", and SleepCardPagesTest asserts that string
             // is gone once it has been opened.
             ->assertSee('Open now anyway');
     }
 
-    public function test_the_chest_asks_before_opening_only_while_the_quest_is_open(): void
+    public function test_the_chest_asks_before_opening_only_while_nothing_is_in(): void
     {
         // The stop is <x-chest>'s own 'confirming' phase now that the chest is
         // a card on Home rather than a tile in the Quests tray — a tile was too
@@ -83,40 +84,41 @@ class BonusChestTimingTest extends TestCase
         $html = Volt::test('kid.home')->html();
         $this->assertStringContainsString('data-fq-confirm="1"', $html);
 
-        $this->clearQuest();
+        $this->doAChore();
 
         // Nothing left to ask: the chest is already on the good table.
         $cleared = Volt::test('kid.home')->html();
         $this->assertStringNotContainsString('data-fq-confirm="1"', $cleared);
     }
 
-    public function test_the_chest_survives_the_quest_being_cleared_underneath_it(): void
+    public function test_the_chest_survives_a_chore_going_in_underneath_it(): void
     {
-        // The dead end: tap the chest, get told to do the quest first, then go
-        // and do exactly that on the card directly above it — and come back to
-        // a chest with no button on it. The panel that answers the question is
-        // rendered by the page and disappears along with the question, which
-        // left the chest stuck in a 'confirming' phase it could not leave.
+        // The dead end: tap the chest, get told to do a chore first, then go
+        // and do exactly that — and come back to a chest with no button on it.
+        // The panel that answers the question is rendered by the page and
+        // disappears along with the question, which left the chest stuck in a
+        // 'confirming' phase it could not leave.
         //
-        // Nothing here is a page load, so the client cannot re-read the markup
-        // it was built from; the question stopping has to reach it as an
-        // attribute change on the same element.
-        $page = Volt::test('kid.home')
+        // The work is done on the Quests page now rather than on a card
+        // directly above this one, but the re-render is the same and so is the
+        // trap: the question stopping has to reach the client as an attribute
+        // change on the same element.
+        Volt::test('kid.home')
             ->assertSee('data-fq-confirm="1"', escape: false)
-            ->assertSee('Hold on')
-            ->call('dealHand');
+            ->assertSee('Hold on');
 
-        $page->call('chooseQuest', app(ChoreService::class)->offeredChoresFor($this->kid)->first()->id)
-            ->call('claimQuest')
+        $this->doAChore();
+
+        Volt::test('kid.home')
             ->assertOk()
             ->assertSee('Your chest is OP today')
             ->assertDontSee('Hold on')
             ->assertDontSee('data-fq-confirm="1"', escape: false);
     }
 
-    public function test_a_cleared_quest_flags_the_chest_as_op_on_the_shut_tile(): void
+    public function test_a_chore_flags_the_chest_as_op_on_the_shut_tile(): void
     {
-        $this->clearQuest();
+        $this->doAChore();
 
         // Has to be visible *before* it is opened — a boost discovered
         // afterwards changes nobody's behaviour tomorrow.
@@ -126,15 +128,13 @@ class BonusChestTimingTest extends TestCase
             ->assertSee('Your chest is OP today');
     }
 
-    public function test_a_side_quest_flags_the_chest_as_op_as_well(): void
+    public function test_a_claim_still_waiting_on_a_parent_flags_the_chest_as_op(): void
     {
-        // The quest card is untouched here — this is a chore taken off the
-        // board. The kid did the work, so the chest says so and the stop that
-        // asks them to go and do some first has nothing left to ask.
-        app(ChoreService::class)->claim(
-            $this->kid,
-            Chore::where('household_id', $this->household->id)->first(),
-        );
+        // Claimed, not approved. The kid did the work, so the chest says so and
+        // the stop that asks them to go and do some first has nothing left to
+        // ask — a chest that rolled worse because a parent hadn't got to the
+        // queue would be blaming the kid for somebody else's inbox.
+        $this->doAChore();
 
         $page = Volt::test('kid.home')
             ->assertSee('Ready · OP', escape: false)
@@ -143,7 +143,7 @@ class BonusChestTimingTest extends TestCase
         $this->assertStringNotContainsString('data-fq-confirm="1"', $page->html());
     }
 
-    public function test_the_op_flag_is_absent_while_the_quest_is_still_open(): void
+    public function test_the_op_flag_is_absent_while_nothing_has_been_done(): void
     {
         Volt::test('kid.home')
             ->assertSee('Ready to open')
@@ -158,13 +158,13 @@ class BonusChestTimingTest extends TestCase
 
         $this->assertNotNull(
             app(\App\Services\ChestService::class)->openedToday($this->kid),
-            'The chest must still be openable before the quest is cleared.',
+            'The chest must still be openable before any chore is done.',
         );
     }
 
-    public function test_a_chest_opened_after_the_quest_records_that_it_was_boosted(): void
+    public function test_a_chest_opened_after_a_chore_records_that_it_was_boosted(): void
     {
-        $this->clearQuest();
+        $this->doAChore();
 
         Volt::test('kid.home')->call('openDailyChest');
 
@@ -174,7 +174,7 @@ class BonusChestTimingTest extends TestCase
         $this->assertTrue((bool) $chest->quest_was_done);
     }
 
-    public function test_a_chest_opened_before_the_quest_records_that_it_was_not(): void
+    public function test_a_chest_opened_before_any_chore_records_that_it_was_not(): void
     {
         Volt::test('kid.home')->call('openDailyChest');
 

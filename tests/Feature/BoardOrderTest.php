@@ -32,19 +32,14 @@ class BoardOrderTest extends TestCase
     }
 
     /**
-     * Boards exclude whichever chore became today's quest, so fixtures need one
-     * quest-eligible chore to absorb the assignment.
+     * Nothing is held back from the board any more. This used to create a
+     * decoy chore to absorb the day's quest deal, since the board excluded
+     * every card in the hand. With the quest gone, a decoy would just be an
+     * extra row in the order under test.
      */
     private function household(): Household
     {
-        $household = Household::factory()->create();
-
-        Chore::factory()->for($household)->create([
-            'name' => 'The quest',
-            'quest_eligible' => true,
-        ]);
-
-        return $household;
+        return Household::factory()->create();
     }
 
     private function chore(Household $household, string $name, int $points, array $attributes = []): Chore
@@ -52,7 +47,6 @@ class BoardOrderTest extends TestCase
         return Chore::factory()->for($household)->create($attributes + [
             'name' => $name,
             'points' => $points,
-            'quest_eligible' => false,
         ]);
     }
 

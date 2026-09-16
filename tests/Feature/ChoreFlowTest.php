@@ -6,13 +6,11 @@ use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
-use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\LedgerEntry;
 use App\Models\Profile;
 use App\Notifications\ParentApprovalNeeded;
 use App\Services\ChoreService;
-use App\Services\HouseholdClock;
 use App\Services\MonsterService;
 use App\Services\StreakService;
 use Illuminate\Database\Eloquent\Builder;
@@ -32,49 +30,45 @@ class ChoreFlowTest extends TestCase
     }
 
     /**
-     * The full daily loop: the kid claims the day's quest and the parent
-     * approves it. Since the streak now moves on approval, streak tests have
-     * to run both halves, not just the claim.
+     * The full daily loop: the kid does a chore and the parent approves it.
+     * Since the streak moves on approval, streak tests have to run both
+     * halves, not just the claim.
      */
-    private function clearQuest(Profile $kid, Profile $parent): void
+    private function earnTheDay(Profile $kid, Profile $parent): void
     {
-        $quest = $this->service()->claimQuest($kid);
+        $chore = $kid->household->chores()->first();
 
-        $completion = ChoreCompletion::where('profile_id', $kid->id)
-            ->where('chore_id', $quest->chore_id)
-            ->where('status', CompletionStatus::Pending)
-            ->latest('id')
-            ->firstOrFail();
-
-        $this->service()->approve($completion, $parent);
+        $this->service()->approve($this->service()->claim($kid, $chore), $parent);
     }
 
-    public function test_the_board_is_open_with_the_quest_still_undone(): void
+    public function test_the_whole_board_is_on_the_board(): void
     {
-        // The board used to come back entirely `'locked'` here. The gate is
-        // gone: a kid can work the board in whatever order they like, and
-        // clearing the quest is only what feeds the streak.
+        // It used to come back entirely `'locked'`, and after that it still had
+        // the day's quest hand cut out of it. Both are gone: every chore a kid
+        // could do is a row they can see.
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->count(ChoreService::HAND_SIZE + 3)->create(['points' => 100]);
+        Chore::factory()->for($household)->count(6)->create(['points' => 100]);
 
         $board = $this->service()->boardFor($kid);
 
-        $this->assertCount(3, $board);
+        $this->assertCount(6, $board);
         $this->assertTrue($board->every(fn ($entry) => $entry['state'] === 'ready'));
     }
 
-    public function test_the_board_stays_open_once_the_quest_is_claimed(): void
+    public function test_the_board_stays_open_once_a_chore_is_claimed(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->count(ChoreService::HAND_SIZE + 3)->create(['points' => 100]);
+        Chore::factory()->for($household)->count(6)->create(['points' => 100]);
 
-        $this->service()->claimQuest($kid);
+        $this->service()->claim($kid, $household->chores->first());
 
         $board = $this->service()->boardFor($kid);
 
-        $this->assertTrue($board->every(fn ($entry) => $entry['state'] === 'ready'));
+        // Their own claim reads as pending; nothing else is touched.
+        $this->assertSame(1, $board->where('state', 'pending')->count());
+        $this->assertSame(5, $board->where('state', 'ready')->count());
     }
 
     public function test_approving_a_completion_credits_points_xp_and_family_goal(): void
@@ -175,46 +169,43 @@ class ChoreFlowTest extends TestCase
         Chore::factory()->for($household)->create();
 
         // Day 1.
-        $this->clearQuest($kid, $parent);
+        $this->earnTheDay($kid, $parent);
         $this->assertSame(1, $kid->refresh()->streak);
 
         // Day 2, consecutive.
         Carbon::setTestNow(now()->addDay());
-        $this->clearQuest($kid, $parent);
+        $this->earnTheDay($kid, $parent);
         $this->assertSame(2, $kid->refresh()->streak);
 
         // Day 4, gap — resets to 1.
         Carbon::setTestNow(now()->addDays(2));
-        $this->clearQuest($kid, $parent);
+        $this->earnTheDay($kid, $parent);
         $this->assertSame(1, $kid->refresh()->streak);
 
         Carbon::setTestNow();
     }
 
-    public function test_claiming_the_quest_alone_does_not_move_the_streak(): void
+    public function test_claiming_alone_does_not_move_the_streak(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->create();
+        $chore = Chore::factory()->for($household)->create();
 
-        $this->service()->claimQuest($kid);
+        $this->service()->claim($kid, $chore);
 
-        // The board unlocks on the claim, but the streak waits for a parent.
+        // The work is in, but the streak waits for a parent.
         $this->assertSame(0, $kid->refresh()->streak);
         $this->assertNull($kid->pending_streak_chest);
     }
 
-    public function test_a_rejected_quest_does_not_count_toward_the_streak(): void
+    public function test_a_rejected_chore_does_not_count_toward_the_streak(): void
     {
         $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->create();
+        $chore = Chore::factory()->for($household)->create();
 
-        $quest = $this->service()->claimQuest($kid);
-        $completion = ChoreCompletion::where('profile_id', $kid->id)
-            ->where('chore_id', $quest->chore_id)
-            ->firstOrFail();
+        $completion = $this->service()->claim($kid, $chore);
 
         $this->service()->sendBack($completion, $parent);
 
@@ -235,12 +226,7 @@ class ChoreFlowTest extends TestCase
                 Carbon::setTestNow(now()->addDay());
             }
 
-            $quest = $this->service()->claimQuest($kid);
-            $completions[] = ChoreCompletion::where('profile_id', $kid->id)
-                ->where('chore_id', $quest->chore_id)
-                ->where('status', CompletionStatus::Pending)
-                ->latest('id')
-                ->firstOrFail();
+            $completions[] = $this->service()->claim($kid, $household->chores->first());
         }
 
         $this->assertSame(0, $kid->refresh()->streak);
@@ -265,11 +251,11 @@ class ChoreFlowTest extends TestCase
         // points nor a mystery bonus — the balance is pure streak money.
         Chore::factory()->for($household)->create(['points' => 0, 'min_age' => 1]);
 
-        $this->clearQuest($kid, $parent); // Day 1.
+        $this->earnTheDay($kid, $parent); // Day 1.
         Carbon::setTestNow(now()->addDay());
-        $this->clearQuest($kid, $parent); // Day 2.
+        $this->earnTheDay($kid, $parent); // Day 2.
         Carbon::setTestNow(now()->addDay());
-        $this->clearQuest($kid, $parent); // Day 3 — hits the $1 milestone.
+        $this->earnTheDay($kid, $parent); // Day 3 — hits the $1 milestone.
         Carbon::setTestNow();
 
         $kid->refresh();
@@ -314,11 +300,11 @@ class ChoreFlowTest extends TestCase
         $kid = Profile::factory()->for($household)->create();
         Chore::factory()->for($household)->create(['points' => 0, 'min_age' => 1]);
 
-        $this->clearQuest($kid, $parent);
+        $this->earnTheDay($kid, $parent);
         Carbon::setTestNow(now()->addDay());
-        $this->clearQuest($kid, $parent);
+        $this->earnTheDay($kid, $parent);
         Carbon::setTestNow(now()->addDay());
-        $this->clearQuest($kid, $parent); // Day 3 milestone.
+        $this->earnTheDay($kid, $parent); // Day 3 milestone.
         Carbon::setTestNow();
 
         $result = app(StreakService::class)->openStreakChest($kid->refresh());
@@ -354,7 +340,7 @@ class ChoreFlowTest extends TestCase
             if ($day > 1) {
                 Carbon::setTestNow(now()->addDay());
             }
-            $this->clearQuest($kid, $parent);
+            $this->earnTheDay($kid, $parent);
         }
 
         Carbon::setTestNow();
@@ -387,9 +373,9 @@ class ChoreFlowTest extends TestCase
         $kid = Profile::factory()->for($household)->create();
         Chore::factory()->for($household)->create(['points' => 0, 'min_age' => 1]);
 
-        $this->clearQuest($kid, $parent); // Day 1.
+        $this->earnTheDay($kid, $parent); // Day 1.
         Carbon::setTestNow(now()->addDay());
-        $this->clearQuest($kid, $parent); // Day 2 — not a milestone.
+        $this->earnTheDay($kid, $parent); // Day 2 — not a milestone.
         Carbon::setTestNow();
 
         $this->assertSame(2, $kid->refresh()->streak);
@@ -400,64 +386,20 @@ class ChoreFlowTest extends TestCase
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['age' => 6]);
-        // One more age-open chore than the quest hand can hold, so exactly one
-        // is left on the board to assert against — the whole hand comes off it,
-        // not just the card the quest row happens to point at.
-        foreach (range(1, ChoreService::HAND_SIZE + 1) as $i) {
-            Chore::factory()->for($household)->create(['name' => "Open to everyone {$i}", 'min_age' => null]);
-        }
-
+        Chore::factory()->for($household)->create(['name' => 'Open to everyone', 'min_age' => null]);
         Chore::factory()->for($household)->create(['name' => 'Too old for this one', 'min_age' => 10]);
 
         $board = $this->service()->boardFor($kid);
 
         $this->assertCount(1, $board);
-        $this->assertNotSame('Too old for this one', $board->first()['chore']->name);
-    }
-
-    public function test_the_daily_quest_never_assigns_an_age_restricted_chore_to_a_too_young_kid(): void
-    {
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create(['age' => 6]);
-        $tooOld = Chore::factory()->for($household)->create(['min_age' => 10]);
-        Chore::factory()->for($household)->create(['min_age' => null]);
-
-        $quest = $this->service()->questFor($kid);
-
-        $this->assertNotSame($tooOld->id, $quest->chore_id);
-    }
-
-    public function test_a_quest_ineligible_chore_is_never_assigned_as_the_daily_quest(): void
-    {
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->create(['name' => 'Mop the kitchen', 'quest_eligible' => false]);
-        $onlyEligible = Chore::factory()->for($household)->create(['name' => 'Feed animals', 'quest_eligible' => true]);
-
-        $quest = $this->service()->questFor($kid);
-
-        $this->assertSame($onlyEligible->id, $quest->chore_id);
+        $this->assertSame('Open to everyone', $board->first()['chore']->name);
     }
 
     public function test_a_kid_old_enough_can_see_an_age_restricted_chore(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['age' => 12]);
-        $filler = Chore::factory()->for($household)->create(['name' => 'Filler quest chore']);
         $restricted = Chore::factory()->for($household)->create(['name' => 'For older kids', 'min_age' => 10]);
-
-        // Pin the quest to the filler chore so the restricted one is guaranteed
-        // to still be sitting on the board, regardless of what gets dealt. The
-        // hand is pinned along with it: a row with no hand is one questFor()
-        // deals into, which would take the restricted chore off the board as a
-        // card and undo the pin.
-        DailyQuest::create([
-            'household_id' => $household->id,
-            'profile_id' => $kid->id,
-            'chore_id' => $filler->id,
-            'offered_chore_ids' => [$filler->id],
-            'quest_date' => HouseholdClock::for($household)->today(),
-        ]);
 
         $board = $this->service()->boardFor($kid);
         $entry = $board->first(fn ($e) => $e['chore']->id === $restricted->id);

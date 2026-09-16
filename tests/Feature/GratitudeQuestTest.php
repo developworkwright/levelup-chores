@@ -47,7 +47,7 @@ class GratitudeQuestTest extends TestCase
     private function kid(array $attributes = []): Profile
     {
         $household = Household::factory()->create();
-        Chore::factory()->for($household)->create(['quest_eligible' => true]);
+        Chore::factory()->for($household)->create();
 
         return Profile::factory()->for($household)->create($attributes);
     }
@@ -114,7 +114,7 @@ class GratitudeQuestTest extends TestCase
         // Written at 1am, which still belongs to the previous household day —
         // so it must not hand over a second lot of tickets for "today".
         $household = Household::factory()->create(['timezone' => 'UTC', 'day_boundary_hour' => 4]);
-        Chore::factory()->for($household)->create(['quest_eligible' => true]);
+        Chore::factory()->for($household)->create();
         $kid = Profile::factory()->for($household)->create(['bonus_tickets' => 0]);
 
         Carbon::setTestNow(Carbon::parse('2026-08-06 22:00:00', 'UTC'));

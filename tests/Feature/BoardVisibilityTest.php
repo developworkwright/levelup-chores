@@ -29,9 +29,7 @@ class BoardVisibilityTest extends TestCase
     }
 
     /**
-     * Boards exclude whichever chore became today's quest, so fixtures need one
-     * quest-eligible chore to absorb the assignment. The hinted decoy absorbs
-     * the mystery draw the same way — hinted chores win it outright, and an
+     * The hinted decoy absorbs the mystery draw — hinted chores win it outright, and an
      * unpinned pick gets named on the page once found, which flakes any
      * assertDontSee on a chore name.
      */
@@ -39,15 +37,9 @@ class BoardVisibilityTest extends TestCase
     {
         $household = Household::factory()->create($attributes);
 
-        Chore::factory()->for($household)->create([
-            'name' => 'The quest',
-            'quest_eligible' => true,
-        ]);
-
         if ($withDecoy) {
             Chore::factory()->for($household)->create([
                 'name' => 'The decoy',
-                'quest_eligible' => false,
                 'hint' => 'Somewhere warm',
             ]);
         }
@@ -59,7 +51,6 @@ class BoardVisibilityTest extends TestCase
     {
         return Chore::factory()->for($household)->create($attributes + [
             'name' => $name,
-            'quest_eligible' => false,
         ]);
     }
 

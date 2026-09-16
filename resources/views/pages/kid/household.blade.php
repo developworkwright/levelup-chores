@@ -21,9 +21,9 @@ use Livewire\Volt\Component;
  * because "Nova's nine nights die at 4am" is news and "your board" is not.
  *
  * The one rule the whole page hangs off: **nothing expires at bedtime.** The
- * household day rolls at `day_boundary_hour` (4am by default) and a quest open
- * at 9pm is not late. `evening_watch_hour` is a *display* threshold — past it
- * an open quest reads as at risk and the urgency ramps — and no copy anywhere
+ * household day rolls at `day_boundary_hour` (4am by default) and an empty
+ * board at 9pm is not late. `evening_watch_hour` is a *display* threshold —
+ * past it a kid with nothing in reads as at risk and the urgency ramps — and no copy anywhere
  * on this page may count down to a lights-out that doesn't exist.
  */
 new class extends Component
@@ -127,9 +127,9 @@ new class extends Component
      *
      * The role filter is load-bearing, not decoration. nudge() and rescue()
      * are public Livewire methods and take whatever id they are handed, and a
-     * parent's id reaching questFor() would create a daily quest for a parent
-     * profile — or throw, if no chore is age-appropriate for them. Matches
-     * ownedKid() on the parent console, which scopes the same way.
+     * parent's id reaching either would be a grown-up nudged or rescued over a
+     * board they don't have. Matches ownedKid() on the parent console, which
+     * scopes the same way.
      */
     private function sibling(int $profileId): ?Profile
     {
@@ -190,8 +190,8 @@ new class extends Component
     {{-- 1. Tonight. The top of the page and the reason it exists. --}}
     @php
         $count = $atRisk->count();
-        // Anything that isn't cleared. A broken run still has tonight's quest
-        // to do, so it counts here as much as an ordinary open one.
+        // Anything that isn't safe. A broken run still has tonight to save, so
+        // it counts here as much as an ordinary open one.
         $stillOpen = $lanes->where('state', '!==', HouseholdService::STATE_SAFE)->count();
         // Only the scale steps as more kids are at risk — never the content.
         // Three at risk must not degrade into chips: a kid whose run is on the
@@ -317,8 +317,8 @@ new class extends Component
                                 {{-- States what is true — nothing is in yet, and
                                      how far past the watch hour it is. Never a
                                      countdown to a deadline that doesn't exist.
-                                     Any chore closes this, so it can't name the
-                                     quest as the thing that's missing. --}}
+                                     Any chore closes it, so it never names one
+                                     job as the thing that's missing. --}}
                                 <span class="font-mono-fq text-[11px] leading-[1.5]" style="color: #f7c8d4; text-wrap: pretty">
                                     Nothing signed off yet,
                                     {{ $kid['watchAt']->diffForHumans(null, true, true) }} past {{ $watchLabel }}
@@ -389,7 +389,7 @@ new class extends Component
                 <span class="font-baloo text-[30px] leading-[1.05] font-extrabold">Nights in a row</span>
             </div>
             <span class="font-mono-fq text-[11px] tracking-[0.14em] text-fq-text-4">
-                EVERY CLEARED QUEST IS A NIGHT &middot; MISS ONE AND THE RUN RESETS
+                EVERY DAY WITH A CHORE IN IS A NIGHT &middot; MISS ONE AND THE RUN RESETS
             </span>
         </div>
 
@@ -425,15 +425,15 @@ new class extends Component
                     };
 
                     $subLabel = match (true) {
-                        // A night is safe on any chore now, so `clearedAt` —
-                        // the quest's own stamp — is null for plenty of safe
-                        // kids. Saying "Quest cleared" over one of them credits
-                        // work they didn't do and hides work they did.
+                        // `clearedAt` is when the first chore of the day was
+                        // handed in — any chore makes the night safe, so that
+                        // is the moment worth naming rather than a stamp on one
+                        // particular job.
                         $lane['state'] === HouseholdService::STATE_SAFE => $lane['clearedAt']
-                            ? 'Quest cleared '.$lane['clearedAt']->timezone($household->timezone)->format('g:ia')
+                            ? 'Work in '.$lane['clearedAt']->timezone($household->timezone)->format('g:ia')
                             : 'Work in — night safe',
                         $lane['state'] === HouseholdService::STATE_BROKEN => 'Run of '.$lane['brokenFrom'].' ended at '.$rollLabel,
-                        default => $lane['quest'],
+                        default => $lane['note'],
                     };
                 @endphp
 

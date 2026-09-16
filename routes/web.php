@@ -14,7 +14,7 @@ Route::get('/manifest.webmanifest', function () {
     return response()->json([
         'name' => config('app.name'),
         'short_name' => config('app.name'),
-        'description' => 'Clear your daily quest, stack points, cash out for loot.',
+        'description' => 'Work the board, stack points, cash out for loot.',
         'start_url' => '/',
         'scope' => '/',
         'display' => 'standalone',
@@ -48,8 +48,8 @@ Route::middleware('auth:profile')->group(function () {
 });
 
 Route::middleware(['auth:profile', 'role:kid', 'sync-streak', 'arcade-last-call'])->prefix('kid')->group(function () {
-    // Home: the day laid out in the order it should be done in — quest, chest,
-    // spin, standings. Household held this slot and the news on it is still the
+    // Home: the day laid out in the order it should be done in — the board,
+    // the chests, the week. Household held this slot and the news on it is still the
     // best news in the app, but a landing page has to answer "what do I do now"
     // before it answers "what is happening", and a kid who couldn't work out
     // where to go next is the whole reason this page exists.

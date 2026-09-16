@@ -9,7 +9,6 @@ use App\Enums\SiblingOfferStatus;
 use App\Models\Badge;
 use App\Models\ChoreCompletion;
 use App\Models\DailyChest;
-use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\Monster;
 use App\Models\OwnedPerk;
@@ -37,7 +36,7 @@ class BadgeService
     ];
 
     /**
-     * Consecutive days the daily quest has been cleared.
+     * Consecutive days a chore has been signed off.
      *
      * @var array<string, int>
      */
@@ -46,16 +45,6 @@ class BadgeService
         'streak_7' => 7,
         'streak_14' => 14,
         'streak_30' => 30,
-    ];
-
-    /**
-     * Daily quests cleared, all time.
-     *
-     * @var array<string, int>
-     */
-    private const QUEST_MILESTONES = [
-        'quest_10' => 10,
-        'quest_50' => 50,
     ];
 
     /**
@@ -137,9 +126,6 @@ class BadgeService
     /** Household-local hour at/after which a claim counts as "Night Owl". */
     private const NIGHT_OWL_HOUR = 22;
 
-    /** How quickly the main quest must be claimed after reveal to earn "Speed Runner". */
-    private const SPEED_RUNNER_SECONDS = 300;
-
     /** 3x spins landed to earn "Triple Threat". */
     private const TRIPLE_THREAT_SPINS = 3;
 
@@ -154,9 +140,17 @@ class BadgeService
 
     public function __construct(private TicketService $tickets) {}
 
+    /**
+     * Four badges are deliberately absent from every pass below, and stay
+     * absent: `first_quest`, `quest_10`, `quest_50` and `speed_runner`. All
+     * four counted daily quests, and there is no daily quest — see the
+     * retire_the_daily_quest migration. The rows and the kids who earned them
+     * are left alone; what a kid won is theirs, and deleting the badge would
+     * take a trophy back off a shelf to tidy up a table.
+     */
     public function evaluate(Profile $profile): void
     {
-        $this->evaluateQuestBadges($profile);
+        $this->evaluateBoardBadges($profile);
         $this->evaluateChoreBadges($profile);
         $this->evaluatePointBadges($profile);
         $this->evaluateProgressBadges($profile);
@@ -186,29 +180,9 @@ class BadgeService
             ->each(fn (Profile $kid) => $this->maybeAward($kid, 'team_effort', fn () => true));
     }
 
-    private function evaluateQuestBadges(Profile $profile): void
+    private function evaluateBoardBadges(Profile $profile): void
     {
-        $this->maybeAward($profile, 'first_quest', fn () => DailyQuest::where('profile_id', $profile->id)
-            ->whereNotNull('completed_at')
-            ->exists());
-
-        $this->awardMilestones($profile, self::QUEST_MILESTONES, fn () => DailyQuest::where('profile_id', $profile->id)
-            ->whereNotNull('completed_at')
-            ->count());
-
         $this->maybeAward($profile, 'perfect_board', fn () => $this->clearedWholeBoardToday($profile));
-
-        $this->maybeAward($profile, 'speed_runner', function () use ($profile) {
-            $clock = HouseholdClock::for($profile->household);
-            $quest = DailyQuest::where('profile_id', $profile->id)
-                ->whereDate('quest_date', $clock->today())
-                ->first();
-
-            return $quest
-                && $quest->revealed_at
-                && $quest->completed_at
-                && $quest->revealed_at->diffInSeconds($quest->completed_at) <= self::SPEED_RUNNER_SECONDS;
-        });
     }
 
     private function evaluateChoreBadges(Profile $profile): void
@@ -419,20 +393,19 @@ class BadgeService
         return $board->diff($done)->isEmpty();
     }
 
+    /**
+     * Every chore on this kid's board signed off today.
+     *
+     * It used to require the day's quest on top of the rest of the board, and
+     * counted the other chores by excluding the quest's own. With the quest
+     * gone the board is simply the board, and the badge is the plain reading of
+     * its name: everything that was there, done.
+     */
     private function clearedWholeBoardToday(Profile $profile): bool
     {
         $household = $profile->household;
         $clock = HouseholdClock::for($household);
-        $today = $clock->today();
-        $startOfToday = $clock->startOf($today);
-
-        $quest = DailyQuest::where('profile_id', $profile->id)
-            ->whereDate('quest_date', $today)
-            ->first();
-
-        if (! $quest || $quest->completed_at === null) {
-            return false;
-        }
+        $startOfToday = $clock->startOf($clock->today());
 
         // A one-time chore a sibling already took isn't on this kid's board to
         // clear, so counting it would make a perfect board unwinnable. Same for
@@ -443,18 +416,20 @@ class BadgeService
             ->notExpiredAt(now(), $startOfToday)
             ->count();
 
-        if ($totalChores <= 1) {
+        // A board of one is a chore, not a board. Two is the floor a "perfect
+        // board" can mean anything at, and it is the floor the badge has always
+        // had — it was `<= 1` when the quest was one of the two.
+        if ($totalChores < 2) {
             return false;
         }
 
-        $approvedOtherChoresToday = ChoreCompletion::where('profile_id', $profile->id)
+        $approvedToday = ChoreCompletion::where('profile_id', $profile->id)
             ->where('status', CompletionStatus::Approved)
             ->where('decided_at', '>=', $startOfToday)
-            ->where('chore_id', '!=', $quest->chore_id)
             ->distinct('chore_id')
             ->count('chore_id');
 
-        return $approvedOtherChoresToday >= ($totalChores - 1);
+        return $approvedToday >= $totalChores;
     }
 
     /**

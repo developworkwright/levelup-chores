@@ -48,14 +48,6 @@ class ChoreStreakTest extends TestCase
         $this->parent = Profile::factory()->parent()->for($this->household)->create();
         $this->kid = Profile::factory()->for($this->household)->create();
 
-        // One quest-eligible chore to absorb the whole hand, so every chore
-        // made by sideChore() below is guaranteed to be a *side* quest rather
-        // than a card the deal might have taken. See HAND_SIZE.
-        Chore::factory()->for($this->household)->create([
-            'name' => 'The main quest chore',
-            'quest_eligible' => true,
-            'min_age' => 1,
-        ]);
     }
 
     private function service(): ChoreService
@@ -80,7 +72,6 @@ class ChoreStreakTest extends TestCase
         return Chore::factory()->for($this->household)->create([
             'name' => $name,
             'points' => 100,
-            'quest_eligible' => false,
             'min_age' => 1,
         ]);
     }
@@ -93,14 +84,13 @@ class ChoreStreakTest extends TestCase
         $this->service()->approve($completion, $this->parent);
     }
 
-    public function test_an_approved_side_quest_earns_the_streak_day(): void
+    public function test_an_approved_chore_earns_the_streak_day(): void
     {
         $this->clearSideChore();
 
-        // The point of the whole change: the chest was never opened, and the
-        // day still counts.
+        // The point of the whole change: no particular chore was required, and
+        // the day still counts.
         $this->assertSame(1, $this->kid->refresh()->streak);
-        $this->assertFalse($this->service()->isQuestDoneToday($this->kid));
     }
 
     public function test_a_run_can_be_built_entirely_from_side_quests(): void
@@ -299,24 +289,6 @@ class ChoreStreakTest extends TestCase
         $this->clearSideChore($this->sideChore('Today'));
 
         $this->assertNull($this->streaks()->repairableStreakDate($this->kid->refresh()));
-    }
-
-    public function test_the_quest_still_earns_the_day_on_its_own(): void
-    {
-        // The rule got wider, not different — the old path has to keep working.
-        $this->service()->claimQuest($this->kid);
-
-        $quest = $this->service()->questFor($this->kid);
-
-        $completion = ChoreCompletion::where('profile_id', $this->kid->id)
-            ->where('chore_id', $quest->chore_id)
-            ->where('status', CompletionStatus::Pending)
-            ->latest('id')
-            ->firstOrFail();
-
-        $this->service()->approve($completion, $this->parent);
-
-        $this->assertSame(1, $this->kid->refresh()->streak);
     }
 
     /** A run of $days days ending yesterday, built without touching a quest. */

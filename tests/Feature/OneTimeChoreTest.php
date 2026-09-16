@@ -33,20 +33,10 @@ class OneTimeChoreTest extends TestCase
         return app(ChoreService::class);
     }
 
-    /**
-     * Boards exclude whichever chore became today's quest, so fixtures need one
-     * quest-eligible chore to absorb the assignment.
-     */
+    /** An empty board — every chore under test is added by hand. */
     private function household(): Household
     {
-        $household = Household::factory()->create();
-
-        Chore::factory()->for($household)->create([
-            'name' => 'The quest',
-            'quest_eligible' => true,
-        ]);
-
-        return $household;
+        return Household::factory()->create();
     }
 
     private function oneTimeChore(Household $household, string $name = 'Rake the leaves'): Chore
@@ -54,7 +44,6 @@ class OneTimeChoreTest extends TestCase
         return Chore::factory()->for($household)->create([
             'name' => $name,
             'cadence' => ChoreCadence::Once,
-            'quest_eligible' => false,
         ]);
     }
 
@@ -137,7 +126,7 @@ class OneTimeChoreTest extends TestCase
         $this->assertNotNull($this->service()->boardFor($sibling)->firstWhere('chore.id', $chore->id));
     }
 
-    public function test_sending_back_a_one_time_quest_lets_the_kid_redo_it(): void
+    public function test_sending_back_a_one_time_chore_lets_the_kid_redo_it(): void
     {
         $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
@@ -146,21 +135,17 @@ class OneTimeChoreTest extends TestCase
         $chore = Chore::factory()->for($household)->create([
             'name' => 'Rake the leaves',
             'cadence' => ChoreCadence::Once,
-            'quest_eligible' => true,
         ]);
 
-        $this->service()->revealQuest($kid);
-        $this->service()->claimQuest($kid);
-
-        $completion = $chore->completions()->firstOrFail();
+        $completion = $this->service()->claim($kid, $chore);
         $this->service()->sendBack($completion, $parent);
 
-        // Both stamps have to lift together: the chore is spent *and* the quest
-        // reads as done, so clearing either one alone still dead-ends the kid.
+        // The spent stamp has to lift, or redoing the work is impossible: a
+        // one-time chore has no cadence to bring it back on its own.
         $this->assertNull($chore->refresh()->used_at);
-        $this->assertNull($this->service()->questFor($kid->fresh())->completed_at);
 
-        $this->service()->claimQuest($kid->fresh());
+        // And it can actually be taken again.
+        $this->service()->claim($kid->fresh(), $chore->refresh());
 
         $this->assertSame(2, $chore->completions()->count());
     }
@@ -197,33 +182,13 @@ class OneTimeChoreTest extends TestCase
         $household = $this->household();
         $kid = Profile::factory()->for($household)->create();
 
-        Chore::factory()->for($household)->create(['name' => 'Daily one', 'quest_eligible' => false]);
+        Chore::factory()->for($household)->create(['name' => 'Daily one']);
         $once = $this->oneTimeChore($household);
-        Chore::factory()->for($household)->create(['name' => 'Daily two', 'quest_eligible' => false]);
+        Chore::factory()->for($household)->create(['name' => 'Daily two']);
 
         $board = $this->service()->boardFor($kid);
 
         $this->assertSame($once->id, $board->first()['chore']->id);
-    }
-
-    public function test_a_spent_one_time_chore_is_never_handed_out_as_a_quest(): void
-    {
-        $household = Household::factory()->create();
-        $doer = Profile::factory()->for($household)->create();
-        $seeker = Profile::factory()->for($household)->create();
-
-        $safe = Chore::factory()->for($household)->create(['name' => 'Safe quest', 'quest_eligible' => true]);
-        $once = Chore::factory()->for($household)->create([
-            'name' => 'Rake the leaves',
-            'cadence' => ChoreCadence::Once,
-            'quest_eligible' => true,
-        ]);
-
-        $this->service()->claim($doer, $once);
-
-        // A blocked daily quest unblocks tomorrow; a spent one-time quest never
-        // would, so it must not be assignable even as the fallback pick.
-        $this->assertSame($safe->id, $this->service()->questFor($seeker)->chore_id);
     }
 
     public function test_a_spent_one_time_chore_is_never_the_mystery_chore(): void
@@ -257,7 +222,6 @@ class OneTimeChoreTest extends TestCase
         // chore wins the draw outright, so this pins it somewhere harmless.
         Chore::factory()->for($household)->create([
             'name' => 'Mystery decoy',
-            'quest_eligible' => false,
             'hint' => 'A clue',
         ]);
 

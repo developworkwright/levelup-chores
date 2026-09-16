@@ -94,7 +94,7 @@ class BonusPerkCatalogTest extends TestCase
         $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create(['bonus_tickets' => 20]);
-        $perk = $this->perk($household, PerkEffect::QuestReroll);
+        $perk = $this->perk($household, PerkEffect::QuestCharm);
 
         Auth::guard('profile')->login($parent);
         Volt::test('parent.loot')->call('togglePerk', $perk->id);
@@ -104,14 +104,14 @@ class BonusPerkCatalogTest extends TestCase
         $offered = app(BonusShopService::class)->catalogFor($kid)
             ->map(fn ($entry) => $entry['perk']->effect);
 
-        $this->assertFalse($offered->contains(PerkEffect::QuestReroll));
+        $this->assertFalse($offered->contains(PerkEffect::QuestCharm));
     }
 
     public function test_a_disabled_perk_cannot_be_bought_directly(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['bonus_tickets' => 20]);
-        $perk = $this->perk($household, PerkEffect::QuestReroll);
+        $perk = $this->perk($household, PerkEffect::QuestCharm);
 
         $perk->update(['enabled' => false]);
 
@@ -129,7 +129,7 @@ class BonusPerkCatalogTest extends TestCase
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['bonus_tickets' => 20]);
 
-        $foreign = $this->perk(Household::factory()->create(), PerkEffect::QuestReroll);
+        $foreign = $this->perk(Household::factory()->create(), PerkEffect::QuestCharm);
 
         $this->expectException(PerkUnavailableException::class);
 

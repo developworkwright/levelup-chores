@@ -41,18 +41,10 @@ class HelpWantedChoreTest extends TestCase
         return app(ChoreService::class);
     }
 
-    /**
-     * Boards exclude whichever chores make up today's quest hand, so fixtures
-     * need a quest-eligible chore to absorb the deal.
-     */
+    /** Nothing is held back from the board, so this is just a household. */
     private function household(): Household
     {
         $household = Household::factory()->create();
-
-        Chore::factory()->for($household)->create([
-            'name' => 'The quest',
-            'quest_eligible' => true,
-        ]);
 
         return $household;
     }
@@ -62,7 +54,6 @@ class HelpWantedChoreTest extends TestCase
     {
         return Chore::factory()->for($household)->create([
             'name' => $name,
-            'quest_eligible' => false,
             ...$attributes,
         ]);
     }

@@ -456,7 +456,6 @@ class BountyService
                 'name' => $bounty->description,
                 'points' => $price,
                 'cadence' => ChoreCadence::Once,
-                'quest_eligible' => false,
                 'wheel_eligible' => false,
                 // Spent on creation: this job belongs to the kid who offered
                 // it, and a live one-time chore is on everybody's board.

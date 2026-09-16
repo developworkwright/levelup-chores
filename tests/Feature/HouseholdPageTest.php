@@ -6,14 +6,13 @@ use App\Enums\CompletionStatus;
 use App\Exceptions\InsufficientTicketsException;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
-use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\Nudge;
 use App\Models\Profile;
 use App\Models\StreakRescue;
-use App\Services\HouseholdService;
 use App\Services\ChoreService;
 use App\Services\HouseholdClock;
+use App\Services\HouseholdService;
 use App\Services\StreakService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -61,7 +60,6 @@ class HouseholdPageTest extends TestCase
     {
         Chore::factory()->for($this->household)->count($count)->create([
             'min_age' => null,
-            'quest_eligible' => true,
         ]);
     }
 
@@ -157,9 +155,7 @@ class HouseholdPageTest extends TestCase
         $kid = $this->kid('Nova');
         $this->chores();
 
-        $chores = app(ChoreService::class);
-        $chores->revealQuest($kid);
-        $chores->claimQuest($kid);
+        app(ChoreService::class)->claim($kid, $this->household->chores->first());
 
         Auth::guard('profile')->login($kid);
 
@@ -168,14 +164,14 @@ class HouseholdPageTest extends TestCase
             ->assertDontSee('still open.');
     }
 
-    public function test_a_broken_run_still_counts_as_a_quest_to_do(): void
+    public function test_a_broken_run_still_counts_as_a_night_to_save(): void
     {
         $kid = $this->kid('Nova', 0);
         $this->chores();
 
-        // A run that died overnight leaves tonight's quest just as undone as
-        // anyone else's, so it must not be filed under "cleared".
-        $this->approveQuestOn($kid, HouseholdClock::for($this->household)->today()->subDays(2));
+        // A run that died overnight leaves tonight just as unearned as anyone
+        // else's, so it must not be filed under "cleared".
+        $this->earnedDayOn($kid, HouseholdClock::for($this->household)->today()->subDays(2));
 
         Auth::guard('profile')->login($kid);
 
@@ -184,7 +180,7 @@ class HouseholdPageTest extends TestCase
             ->assertDontSee('Every run is safe.');
     }
 
-    public function test_the_same_quest_reads_as_at_risk_once_the_watch_hour_passes(): void
+    public function test_an_empty_board_reads_as_at_risk_once_the_watch_hour_passes(): void
     {
         $kid = $this->kid('Nova', 6);
         $this->chores();
@@ -193,7 +189,7 @@ class HouseholdPageTest extends TestCase
         // streak on load — `profiles.streak` is a cache and this is the one
         // page that shows kids who haven't opened the app since theirs died —
         // so a bare `streak => 6` on the factory is zeroed before it renders.
-        $this->approveQuestOn($kid, HouseholdClock::for($this->household)->today()->subDay());
+        $this->earnedDayOn($kid, HouseholdClock::for($this->household)->today()->subDay());
 
         $this->travelTo(Carbon::parse('2026-05-04 19:30', 'UTC'));
 
@@ -268,7 +264,7 @@ class HouseholdPageTest extends TestCase
 
         // Signed off two days ago, nothing yesterday: the shape of a run that
         // ended at the last rollover.
-        $this->approveQuestOn($kid, HouseholdClock::for($this->household)->today()->subDays(2));
+        $this->earnedDayOn($kid, HouseholdClock::for($this->household)->today()->subDays(2));
 
         $this->assertTrue($this->house()->brokeAtLastRollover($kid->refresh()));
         $this->assertSame(HouseholdService::STATE_BROKEN, $this->house()->stateFor($kid->refresh(), false));
@@ -278,21 +274,10 @@ class HouseholdPageTest extends TestCase
         Volt::test('kid.household')->assertSee('Back to zero');
     }
 
-    /** Stamps an approved quest on a past household day, the shortest way. */
-    private function approveQuestOn(Profile $kid, Carbon $day): void
+    /** Stamps an approved chore on a past household day, the shortest way. */
+    private function earnedDayOn(Profile $kid, Carbon $day): void
     {
         $chore = $this->household->chores->first();
-
-        DailyQuest::create([
-            'household_id' => $this->household->id,
-            'profile_id' => $kid->id,
-            'chore_id' => $chore->id,
-            'offered_chore_ids' => [$chore->id],
-            'quest_date' => $day->toDateString(),
-            'dealt_at' => $day,
-            'revealed_at' => $day,
-            'completed_at' => $day,
-        ]);
 
         ChoreCompletion::create([
             'chore_id' => $chore->id,
@@ -338,7 +323,7 @@ class HouseholdPageTest extends TestCase
         $rex = $this->kid('Rex');
         $this->chores();
 
-        $this->approveQuestOn($rex, HouseholdClock::for($this->household)->today()->subDay());
+        $this->earnedDayOn($rex, HouseholdClock::for($this->household)->today()->subDay());
         $rex->update(['streak' => 4]);
 
         $this->house()->nudge($nova, $rex);
@@ -356,7 +341,7 @@ class HouseholdPageTest extends TestCase
         $rex = $this->kid('Rex');
         $this->chores();
 
-        $this->approveQuestOn($rex, HouseholdClock::for($this->household)->today()->subDay());
+        $this->earnedDayOn($rex, HouseholdClock::for($this->household)->today()->subDay());
         $rex->update(['streak' => 4]);
         $nova->update(['bonus_tickets' => 10]);
 
@@ -375,7 +360,7 @@ class HouseholdPageTest extends TestCase
         $nova = $this->kid('Nova');
         $this->chores();
 
-        $this->approveQuestOn($nova, HouseholdClock::for($this->household)->today()->subDay());
+        $this->earnedDayOn($nova, HouseholdClock::for($this->household)->today()->subDay());
         $nova->update(['streak' => 4]);
 
         $this->travelTo(Carbon::parse('2026-05-04 19:30', 'UTC'));
@@ -395,7 +380,7 @@ class HouseholdPageTest extends TestCase
         $this->chores();
 
         $today = HouseholdClock::for($this->household)->today();
-        $this->approveQuestOn($rex, $today->copy()->subDay());
+        $this->earnedDayOn($rex, $today->copy()->subDay());
         $rex->update(['streak' => 4]);
         $nova->update(['bonus_tickets' => 5]);
 
@@ -416,8 +401,8 @@ class HouseholdPageTest extends TestCase
 
         // Two earned nights behind them, so a third would cross the day-3
         // milestone if the rescued night counted toward the ladder.
-        $this->approveQuestOn($rex, $today->copy()->subDays(2));
-        $this->approveQuestOn($rex, $today->copy()->subDay());
+        $this->earnedDayOn($rex, $today->copy()->subDays(2));
+        $this->earnedDayOn($rex, $today->copy()->subDay());
         $rex->update(['streak' => 2]);
 
         $nova->update(['bonus_tickets' => 5]);
@@ -457,7 +442,7 @@ class HouseholdPageTest extends TestCase
         $ziggy = $this->kid('Ziggy');
         $this->chores();
 
-        $this->approveQuestOn($rex, HouseholdClock::for($this->household)->today()->subDay());
+        $this->earnedDayOn($rex, HouseholdClock::for($this->household)->today()->subDay());
         $rex->update(['streak' => 4]);
         $nova->update(['bonus_tickets' => 5]);
         $ziggy->update(['bonus_tickets' => 5]);
@@ -474,7 +459,7 @@ class HouseholdPageTest extends TestCase
         $rex = $this->kid('Rex');
         $this->chores();
 
-        $this->approveQuestOn($rex, HouseholdClock::for($this->household)->today()->subDay());
+        $this->earnedDayOn($rex, HouseholdClock::for($this->household)->today()->subDay());
         $rex->update(['streak' => 4]);
         $nova->update(['bonus_tickets' => HouseholdService::RESCUE_COST - 1]);
 
@@ -506,7 +491,6 @@ class HouseholdPageTest extends TestCase
             'name' => "Job {$points}",
             'points' => $points,
             'min_age' => null,
-            'quest_eligible' => false,
         ]);
 
         return ChoreCompletion::create([
@@ -595,9 +579,7 @@ class HouseholdPageTest extends TestCase
         $rex = $this->kid('Rex');
         $this->chores();
 
-        $chores = app(ChoreService::class);
-        $chores->revealQuest($nova);
-        $chores->claimQuest($nova);
+        app(ChoreService::class)->claim($nova, $this->household->chores->first());
 
         $lines = $this->house()->superlatives($this->household);
 
@@ -644,7 +626,7 @@ class HouseholdPageTest extends TestCase
         // Rex has the longer run; Nova has done more this week. The prize is
         // the house target's reward, so the standing follows the bar next to
         // it — ranking on nights made these two cards two competitions.
-        $this->approveQuestOn($rex, HouseholdClock::for($this->household)->today()->subDay());
+        $this->earnedDayOn($rex, HouseholdClock::for($this->household)->today()->subDay());
         $rex->update(['streak' => 5]);
         $this->approveChore($nova, 100);
         $this->approveChore($nova, 100);
@@ -753,7 +735,7 @@ class HouseholdPageTest extends TestCase
         $rex = $this->kid('Rex');
         $this->chores();
 
-        $this->approveQuestOn($rex, HouseholdClock::for($this->household)->today()->subDay());
+        $this->earnedDayOn($rex, HouseholdClock::for($this->household)->today()->subDay());
         $rex->update(['streak' => 3]);
         $nova->update(['bonus_tickets' => 5]);
 
@@ -781,22 +763,21 @@ class HouseholdPageTest extends TestCase
         $this->assertSame("kept Rex's run alive", $rescue['what']);
     }
 
-    public function test_clearing_the_quest_is_a_different_ticker_row_from_a_chore(): void
+    public function test_the_chore_that_earns_the_day_is_a_different_ticker_row(): void
     {
         $kid = $this->kid('Nova');
         $this->chores();
 
-        $chores = app(ChoreService::class);
-        $chores->revealQuest($kid);
-        $chores->claimQuest($kid);
+        app(ChoreService::class)->claim($kid, $this->household->chores->first());
 
         $completion = ChoreCompletion::where('profile_id', $kid->id)->latest('id')->first();
         $completion->update(['status' => CompletionStatus::Approved, 'decided_at' => now()]);
 
         $events = $this->house()->ticker($this->household);
 
-        // One database row covers both, but clearing the day is not the same
-        // event as doing a chore and must not wear the same tick.
+        // One database row covers both, but banking the night is not the same
+        // event as doing a chore and must not wear the same tick. It is the
+        // first chore signed off in the day that earns it.
         $this->assertNotNull($events->firstWhere('glyph', '🔥'));
         $this->assertNull($events->firstWhere('glyph', '✓'));
     }
@@ -983,8 +964,8 @@ class HouseholdPageTest extends TestCase
         $this->chores();
         $kid->update(['bonus_tickets' => 10]);
 
-        // Reachable by id from a public Livewire method. questFor() would
-        // otherwise build a daily quest for a grown-up.
+        // Reachable by id from a public Livewire method, and a grown-up has no
+        // board to be nudged or rescued over.
         $this->assertFalse($this->house()->nudge($kid, $parent));
         $this->assertFalse($this->house()->rescue($kid, $parent));
 
@@ -992,7 +973,6 @@ class HouseholdPageTest extends TestCase
         Volt::test('kid.household')->call('nudge', $parent->id)->call('rescue', $parent->id);
 
         $this->assertSame(0, Nudge::where('to_profile_id', $parent->id)->count());
-        $this->assertNull(DailyQuest::where('profile_id', $parent->id)->first());
         $this->assertSame(10, $kid->refresh()->bonus_tickets);
     }
 
@@ -1004,7 +984,7 @@ class HouseholdPageTest extends TestCase
         $this->chores();
 
         $today = HouseholdClock::for($this->household)->today();
-        $this->approveQuestOn($rex, $today->copy()->subDay());
+        $this->earnedDayOn($rex, $today->copy()->subDay());
         $rex->update(['streak' => 4]);
         $nova->update(['bonus_tickets' => 5]);
         $ziggy->update(['bonus_tickets' => 5]);
@@ -1056,7 +1036,7 @@ class HouseholdPageTest extends TestCase
 
         // Cleared two days ago, missed yesterday: the run is dead now, but
         // that day's row still has to say what was true then.
-        $this->approveQuestOn($kid, $today->copy()->subDays(2));
+        $this->earnedDayOn($kid, $today->copy()->subDays(2));
         app(StreakService::class)->syncStreak($kid);
 
         $this->assertSame(0, $kid->refresh()->streak);

@@ -191,19 +191,18 @@ class ChoreSearchTest extends TestCase
     }
 
     /**
-     * A household whose board is predictable: one quest-eligible chore to
-     * soak up the daily assignment, and the rest excluded from that draw so
-     * they always stay on the board. Without this, whichever chore became the
-     * quest would vanish from the board at random and flake the assertions.
+     * A household whose board is exactly the names asked for.
+     *
+     * It used to need a decoy chore to soak up the daily quest, which would
+     * otherwise take one of these off the board at random and flake the
+     * assertions. Nothing is held back from the board now.
      */
     private function householdWithBoard(array $names): Household
     {
         $household = Household::factory()->create();
 
-        Chore::factory()->for($household)->create(['name' => 'The daily quest', 'quest_eligible' => true]);
-
         foreach ($names as $name) {
-            Chore::factory()->for($household)->create(['name' => $name, 'quest_eligible' => false]);
+            Chore::factory()->for($household)->create(['name' => $name]);
         }
 
         return $household;
@@ -267,7 +266,6 @@ class ChoreSearchTest extends TestCase
         Chore::factory()->for($household)->create([
             'name' => 'Open to older kids',
             'min_age' => 15,
-            'quest_eligible' => false,
         ]);
 
         Auth::guard('profile')->login(Profile::factory()->for($household)->create(['age' => 6]));

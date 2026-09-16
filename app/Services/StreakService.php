@@ -17,9 +17,9 @@ use Illuminate\Support\Collection;
  * This lived on {@see ChoreService} for as long as the streak was a property of
  * the daily quest — the justification being that it "only ever fires from the
  * quest flow". That stopped being true when any approved chore started earning
- * the day, and the code went with it: nothing in here reaches back into chores,
- * quests or the board. It needs the household clock, three tables and the
- * ledger, and that is all.
+ * the day, and the code went with it: nothing in here reaches back into chores
+ * or the board. It needs the household clock, three tables and the ledger, and
+ * that is all.
  *
  * The dependency runs one way — ChoreService calls this on approval, never the
  * reverse — so there is no cycle to be careful about.
@@ -419,12 +419,11 @@ class StreakService
     /**
      * Whether a given household day counts toward the run.
      *
-     * **Any approved chore earns the day** — the main quest has no special
-     * standing here. Gating the run on the quest alone meant a kid could clear
-     * six side quests and still watch their streak die overnight, which taught
-     * exactly the wrong lesson about doing the work. The quest keeps its own
-     * pull through the chest, the bold card and the charm; it no longer needs
-     * to hold the streak hostage as well.
+     * **Any approved chore earns the day.** The run was once gated on the daily
+     * quest alone, which meant a kid could clear six other chores and still
+     * watch their streak die overnight — exactly the wrong lesson about doing
+     * the work. Nothing on the board holds the streak hostage now; one chore
+     * signed off is a night.
      *
      * Keyed on `submitted_at`, not `decided_at`: the day belongs to the kid who
      * did the work, not to the evening a parent got round to signing it off.
@@ -582,9 +581,9 @@ class StreakService
      * still waiting on a grown-up.
      *
      * The generalised form of {@see streakDaySecuredToday()} — same rule, any
-     * day — because the day's extras are not all asked about today. The bigger
-     * quest hand is earned by yesterday's work and spent on this morning's
-     * cards, so it has to be able to ask about a day that is already over.
+     * day — because the day's extras are not all asked about today: something
+     * earned by yesterday's work has to be able to ask about a day that is
+     * already over.
      */
     public function workedOn(Profile $profile, Carbon $day): bool
     {
@@ -712,7 +711,7 @@ class StreakService
      *
      * `refreshStreak()` is a day-by-day walk — several hundred queries on a
      * long run, twice over, since `rescuedNightsInRun()` walks it again — and
-     * it fires from every approval now rather than once on the quest's. When
+     * it fires from every approval rather than once a day. When
      * the completion's day was *already* earned without it, the walk is
      * guaranteed to land on the number already stored, so it can be skipped
      * outright. A parent working through a morning's backlog then pays for the

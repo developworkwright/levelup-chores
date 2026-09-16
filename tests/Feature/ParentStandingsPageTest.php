@@ -5,12 +5,10 @@ namespace Tests\Feature;
 use App\Enums\CompletionStatus;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
-use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Models\StoreItem;
 use App\Services\ChoreService;
-use App\Services\HouseholdClock;
 use App\Services\MonsterService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -63,22 +61,13 @@ class ParentStandingsPageTest extends TestCase
     }
 
     /**
-     * A cleared and approved quest today, so the page's streak sync reads the
-     * cached number as live and leaves it alone. Without it a hand-set streak
-     * is exactly the stale figure the sync exists to throw away.
+     * An approved chore today, so the page's streak sync reads the cached
+     * number as live and leaves it alone. Without it a hand-set streak is
+     * exactly the stale figure the sync exists to throw away.
      */
-    private function clearTodaysQuest(Profile $kid): void
+    private function workedToday(Profile $kid): void
     {
         $chore = Chore::factory()->for($kid->household)->create();
-
-        DailyQuest::create([
-            'household_id' => $kid->household_id,
-            'profile_id' => $kid->id,
-            'chore_id' => $chore->id,
-            'quest_date' => HouseholdClock::for($kid->household)->today(),
-            'revealed_at' => now(),
-            'completed_at' => now(),
-        ]);
 
         ChoreCompletion::create([
             'chore_id' => $chore->id,
@@ -97,8 +86,8 @@ class ParentStandingsPageTest extends TestCase
         $nova = Profile::factory()->for($household)->create(['name' => 'Nova', 'streak' => 4]);
         $rue = Profile::factory()->for($household)->create(['name' => 'Rue', 'streak' => 4]);
 
-        $this->clearTodaysQuest($nova);
-        $this->clearTodaysQuest($rue);
+        $this->workedToday($nova);
+        $this->workedToday($rue);
 
         Auth::guard('profile')->login($parent);
 

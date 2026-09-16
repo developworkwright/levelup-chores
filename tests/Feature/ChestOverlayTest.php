@@ -5,7 +5,7 @@ namespace Tests\Feature;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\Profile;
-use App\Services\ChoreService;
+use App\Services\ChestService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Volt;
@@ -43,9 +43,11 @@ class ChestOverlayTest extends TestCase
     {
         $kid = $this->kidWithChores();
 
-        // Reveal the quest so its chest loads in the 'revealed' phase — the
-        // exact state that used to trigger the overlay on arrival.
-        app(ChoreService::class)->revealQuest($kid);
+        // Open the bonus chest so it loads in the 'revealed' phase — the exact
+        // state that used to trigger the overlay on arrival. It used to be the
+        // quest chest that was put in that state here; that one is gone, and
+        // the rule belongs to <x-chest> rather than to any one chest.
+        app(ChestService::class)->open($kid);
 
         Auth::guard('profile')->login($kid);
 
@@ -107,17 +109,17 @@ class ChestOverlayTest extends TestCase
             ->assertSee('show = false, 2200', false);
     }
 
-    public function test_an_already_revealed_quest_still_renders_its_chest_open(): void
+    public function test_an_already_opened_chest_still_renders_open(): void
     {
         $kid = $this->kidWithChores();
 
-        app(ChoreService::class)->revealQuest($kid);
+        app(ChestService::class)->open($kid);
 
         Auth::guard('profile')->login($kid);
 
         // Suppressing the overlay must not also hide the revealed content.
         Volt::test('kid.home')
             ->assertSee("phase: 'revealed'", false)
-            ->assertSee(app(ChoreService::class)->questFor($kid)->chore->name);
+            ->assertSee('Banked');
     }
 }

@@ -6,7 +6,6 @@ use App\Enums\ChoreCadence;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyMystery;
-use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Services\ChoreService;
@@ -52,24 +51,15 @@ class MonsterPickerTest extends TestCase
         $decoy = $this->decoy = $this->makeChore('Decoy');
         $today = HouseholdClock::for($this->household)->today();
 
-        // Both of the day's draws are parked on a chore no test claims. Left to
-        // themselves either one could land on the chore under test — the
-        // mystery would add its 500-point bonus to every number here, and the
-        // daily quest would make the chore unclaimable from the board, since a
-        // quest chore goes through its own path.
+        // The day's mystery draw is parked on a chore no test claims. Left to
+        // itself it could land on the chore under test and add its 500-point
+        // bonus to every number here.
         DailyMystery::create([
             'household_id' => $this->household->id,
             'mystery_date' => $today,
             'chore_id' => $decoy->id,
         ]);
 
-        DailyQuest::create([
-            'household_id' => $this->household->id,
-            'profile_id' => $this->kid->id,
-            'chore_id' => $decoy->id,
-            'quest_date' => $today->toDateString(),
-            'revealed_at' => now(),
-        ]);
     }
 
     private function makeChore(string $name): Chore

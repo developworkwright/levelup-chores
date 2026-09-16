@@ -4,7 +4,7 @@
 
 **Turn the family chore list into a game worth showing up for.**
 
-A self-hosted, gamified chore and allowance tracker for households — daily quests, a hidden bonus chore, a bonus wheel, streak rewards, and a loot shop kids actually cash out at.
+A self-hosted, gamified chore and allowance tracker for households — a chore board worth browsing, a hidden bonus chore, a bonus wheel, streak rewards, and a loot shop kids actually cash out at.
 
 [![PHP](https://img.shields.io/badge/PHP-8.4+-777BB4?logo=php&logoColor=white)](https://php.net)
 [![Laravel](https://img.shields.io/badge/Laravel-13-FF2D20?logo=laravel&logoColor=white)](https://laravel.com)
@@ -58,7 +58,7 @@ flowchart LR
     style H fill:#4d1f2a,stroke:#ec4899,color:#fff
 ```
 
-**Nothing on the board waits on the main quest, and nothing about the streak does either.** Side quests are claimable from the moment a kid opens the app, and any one of them approved keeps the run alive. The quest chest earns its place by paying better — bold cards, charms, the wheel — rather than by holding anything hostage.
+**There is no "main quest" any more, and nothing about the streak waits on one.** Every chore is claimable from the moment a kid opens the app, and any one of them approved keeps the run alive. The daily quest — a chest, a hand of three cards, one chore that mattered more than the others — was removed: it hid part of the board behind itself, and everything it paid for is paid by the board. What survived it is the **Quest Charm**, which now lights up five random chores at +50% for the kid who cast it.
 
 The board also **moves on the claim, not the approval** — a chore locks for the whole household the second someone taps it, so nobody is blocked waiting on a parent to check their phone. Points, streaks and monster damage, however, only land once a parent signs off.
 
@@ -70,14 +70,14 @@ The board also **moves on the claim, not the approval** — a chore locks for th
 
 | | Feature | How it works |
 |---|---|---|
-| 🎁 | **Daily Quest** | A hand of chores per kid per day, hidden inside a chest. Opening it is the reveal moment. It's the best-paying card on the board — bold-card bonus, charms, the wheel — but nothing waits on it. |
+| ✧ | **Quest Charm** | A ticket buys one. Cast it over the board and **five random chores** pay you half again for the rest of the day — for you only, and you don't get to pick which five. |
 | 🕵️ | **Mystery Chore** | Each day one chore is secretly worth **+500 points**. Nobody knows which. The first kid in the household to finish it wins — then everyone sees who got it. |
 | 🙋 | **Help Wanted** | A parent flags the one job that actually needs doing. It jumps to the top of the board in its own colour, and whoever finishes it earns a **bonus ticket**. The flag clears itself overnight. |
 | 🎡 | **Bonus Wheel** | One spin a day. Lands on a chore and multiplies it **2×**, or **3×** on a 35% roll. |
 | 🔥 | **Streak Chest** | Consecutive days with **any** approved chore build a streak. Milestones pay real money and unlock a chest with a reveal animation. |
 | 🛒 | **Loot Shop** | Spend points on rewards the parent defines — screen time, Robux, dessert pick, a family outing. |
 | 🏅 | **Badges** | 13 achievements on their own tab, each with what unlocks it and the XP it pays. 5 are secret — name and description stay hidden until earned. |
-| 🎟️ | **Bonus Shop** | Levelling up, earning badges and beating monsters mint **tickets**. Spend them on wheel respins, quest rerolls, streak repairs, Mystery Chore hints, quest charms, or the right to name a monster. Spending never costs XP — your level is permanent. |
+| 🎟️ | **Bonus Shop** | Levelling up, earning badges and beating monsters mint **tickets**. Spend them on wheel respins, quest charms, streak repairs, Mystery Chore hints, OP spins, or the right to name a monster. Spending never costs XP — your level is permanent. |
 | 👹 | **The Arena** | The family goal, standing as a monster. Every chore you finish is damage; beat it and the household gets what it was guarding. |
 
 ### For parents
@@ -165,7 +165,7 @@ Kids get a push the moment you flag something, so the ask reaches them rather th
 
 <br>
 
-**Any approved chore earns the day** — the main quest has no special standing. A kid who works the board and never opens the chest keeps their run. What a day needs is one chore a parent actually signed off: a claim sitting in the approvals queue keeps the kid off the Arena's at-risk lane, but it doesn't bank the day until it's approved.
+**Any approved chore earns the day** — no chore has special standing. A kid who does one small job keeps their run. What a day needs is one chore a parent actually signed off: a claim sitting in the approvals queue keeps the kid off the Arena's at-risk lane, but it doesn't bank the day until it's approved.
 
 The streak is *recomputed* by walking back over earned days rather than incremented — so a parent clearing several days of backlog can approve them in any order and still land on the right number.
 

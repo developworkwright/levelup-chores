@@ -4,8 +4,8 @@ namespace App\Console\Commands;
 
 use App\Enums\CompletionStatus;
 use App\Enums\ProfileRole;
+use App\Models\CharmedChore;
 use App\Models\ChoreCompletion;
-use App\Models\DailyQuest;
 use App\Models\LedgerEntry;
 use App\Models\MonsterHit;
 use App\Models\Profile;
@@ -22,7 +22,7 @@ class ResetTodayCommand extends Command
         {--kid= : Only reset one kid, by name}
         {--dry-run : Show what would change without saving anything}';
 
-    protected $description = "Undo today's quest/spin/chore/loot-shop activity for testing — leaves accounts, chores, store items, PINs, the family goal target, and everything from prior days untouched.";
+    protected $description = "Undo today's chore/spin/charm/loot-shop activity for testing — leaves accounts, chores, store items, PINs, the family goal target, and everything from prior days untouched.";
 
     public function handle(): int
     {
@@ -45,7 +45,7 @@ class ResetTodayCommand extends Command
             $rows[] = $this->resetKid($kid, $dryRun);
         }
 
-        $this->table(['Kid', 'Points', 'XP', 'Streak', 'Quest cleared', 'Spin cleared', 'Completions removed', 'Redemptions refunded', 'Badges cleared'], $rows);
+        $this->table(['Kid', 'Points', 'XP', 'Streak', 'Charms cleared', 'Spin cleared', 'Completions removed', 'Redemptions refunded', 'Badges cleared'], $rows);
         $this->info($dryRun ? 'Dry run — nothing was actually changed.' : "Done. Today's testing state is cleared.");
 
         return self::SUCCESS;
@@ -64,9 +64,13 @@ class ResetTodayCommand extends Command
         DB::beginTransaction();
 
         try {
-            $quest = DailyQuest::where('profile_id', $kid->id)
-                ->whereDate('quest_date', $clock->today())
-                ->first();
+            // Cleared along with the day, so a reset board pays what it says.
+            // The perk that bought them is *not* handed back — spending one is
+            // a decision from a prior state, and this command has never
+            // restored anything out of the pocket.
+            $charmsCleared = CharmedChore::where('profile_id', $kid->id)
+                ->whereDate('charm_date', $clock->today())
+                ->count();
 
             $completions = ChoreCompletion::where('profile_id', $kid->id)
                 ->where('submitted_at', '>=', $startOfToday)
@@ -148,7 +152,9 @@ class ResetTodayCommand extends Command
                     ->where('earned_at', '>=', $startOfToday)
                     ->delete();
 
-                $quest?->delete();
+                CharmedChore::where('profile_id', $kid->id)
+                    ->whereDate('charm_date', $clock->today())
+                    ->delete();
 
                 $kid->save();
             }
@@ -168,7 +174,7 @@ class ResetTodayCommand extends Command
             "{$pointsBefore} → ".max(0, $pointsBefore + $pointsDelta),
             "{$xpBefore} → ".max(0, $xpBefore + $xpDelta),
             "{$streakBefore} → ".($dayCountedToday ? max(0, $streakBefore - 1) : $streakBefore),
-            $quest ? 'yes' : 'no',
+            $charmsCleared,
             $spinsCleared > 0 ? 'yes' : 'no',
             $completions->count(),
             $redemptions->count(),

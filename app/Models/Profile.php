@@ -51,6 +51,8 @@ class Profile extends Model implements Authenticatable
         'tickets_granted_through_level',
         'streak',
         'powered_up_on',
+        'home_day_open',
+        'home_day_closed_on',
         'pending_streak_chest',
         'badges_seen_at',
         'loot_seen_at',
@@ -98,6 +100,7 @@ class Profile extends Model implements Authenticatable
             'op_spin_armed_at' => 'datetime',
             'streak_milestone_run_started_on' => 'date',
             'powered_up_on' => 'date',
+            'home_day_closed_on' => 'date',
         ];
     }
 
@@ -115,11 +118,6 @@ class Profile extends Model implements Authenticatable
     public function choreCompletions(): HasMany
     {
         return $this->hasMany(ChoreCompletion::class);
-    }
-
-    public function dailyQuests(): HasMany
-    {
-        return $this->hasMany(DailyQuest::class);
     }
 
     public function spins(): HasMany

@@ -73,7 +73,6 @@ class StreakMilestoneRunTest extends TestCase
         $chore = Chore::factory()->for($this->household)->create([
             'name' => 'Chore for '.now()->toDateString(),
             'points' => 10,
-            'quest_eligible' => false,
             'min_age' => 1,
         ]);
 
@@ -174,7 +173,6 @@ class StreakMilestoneRunTest extends TestCase
         $backlog = Chore::factory()->for($this->household)->create([
             'name' => 'Signed off late',
             'points' => 10,
-            'quest_eligible' => false,
             'min_age' => 1,
         ]);
 

@@ -36,27 +36,16 @@ class ChoreDeadlineTest extends TestCase
         return app(ChoreService::class);
     }
 
-    /**
-     * Boards exclude whichever chore became today's quest, so fixtures need one
-     * quest-eligible chore to absorb the assignment.
-     */
+    /** An empty board — every chore under test is added by hand. */
     private function household(array $attributes = []): Household
     {
-        $household = Household::factory()->create($attributes);
-
-        Chore::factory()->for($household)->create([
-            'name' => 'The quest',
-            'quest_eligible' => true,
-        ]);
-
-        return $household;
+        return Household::factory()->create($attributes);
     }
 
     private function chore(Household $household, ?Carbon $expiresAt, string $name = 'Feed the animals'): Chore
     {
         return Chore::factory()->for($household)->create([
             'name' => $name,
-            'quest_eligible' => false,
             'expires_at' => $expiresAt,
         ]);
     }
@@ -121,7 +110,6 @@ class ChoreDeadlineTest extends TestCase
         $chore = Chore::factory()->for($household)->create([
             'name' => 'Fold laundry',
             'cadence' => ChoreCadence::Unlimited,
-            'quest_eligible' => false,
             'expires_at' => now()->addHour(),
         ]);
 
@@ -131,42 +119,28 @@ class ChoreDeadlineTest extends TestCase
         $this->assertSame('expired', $this->service()->stateFor($kid->fresh(), $chore->refresh()));
     }
 
-    public function test_a_closed_chore_is_never_handed_out_as_a_quest(): void
+    /**
+     * Two tests here used to cover a closed chore never being dealt as the
+     * daily quest, and a quest chore rerolling when its deadline passed. Both
+     * went with the quest. What is left of that rule is below: a charm must not
+     * land on a chore nobody can claim, for the same reason — it would spend a
+     * ticket on a row that cannot be tapped.
+     */
+    public function test_a_closed_chore_is_never_charmed(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
 
-        $safe = Chore::factory()->for($household)->create(['name' => 'Safe quest', 'quest_eligible' => true]);
-        Chore::factory()->for($household)->create([
+        $open = Chore::factory()->for($household)->create(['name' => 'Still open']);
+        $closed = Chore::factory()->for($household)->create([
             'name' => 'Closed already',
-            'quest_eligible' => true,
             'expires_at' => now()->subHour(),
         ]);
 
-        // A quest nobody can clear costs a streak night — the same dead end a
-        // spent one-time chore would create.
-        $this->assertSame($safe->id, $this->service()->questFor($kid)->chore_id);
-    }
+        $charmed = $this->service()->charmBoard($kid);
 
-    public function test_a_quest_chore_that_closes_is_rerolled(): void
-    {
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create();
-
-        $doomed = Chore::factory()->for($household)->create([
-            'name' => 'Closes at five',
-            'quest_eligible' => true,
-        ]);
-
-        $this->assertSame($doomed->id, $this->service()->questFor($kid)->chore_id);
-
-        $spare = Chore::factory()->for($household)->create(['name' => 'Spare quest', 'quest_eligible' => true]);
-
-        $this->service()->setDeadline($doomed, now()->addHour());
-
-        Carbon::setTestNow(now()->addHours(2));
-
-        $this->assertSame($spare->id, $this->service()->questFor($kid->fresh())->chore_id);
+        $this->assertTrue($charmed->contains('id', $open->id));
+        $this->assertFalse($charmed->contains('id', $closed->id));
     }
 
     public function test_a_closed_chore_is_never_the_mystery_chore(): void

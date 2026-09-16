@@ -6,7 +6,6 @@ use App\Enums\CompletionStatus;
 use App\Enums\PerkEffect;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
-use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\OwnedPerk;
 use App\Models\Profile;
@@ -42,18 +41,10 @@ class StreakRestoreOfferTest extends TestCase
         Auth::guard('profile')->login($this->kid);
     }
 
-    private function clearQuestOn(string $date): void
+    /** An approved chore on the given household day, which earns it. */
+    private function earnDay(string $date): void
     {
         $at = Carbon::parse("{$date} 12:00", $this->household->timezone);
-
-        DailyQuest::create([
-            'household_id' => $this->household->id,
-            'profile_id' => $this->kid->id,
-            'chore_id' => $this->chore->id,
-            'quest_date' => $date,
-            'revealed_at' => $at,
-            'completed_at' => $at,
-        ]);
 
         ChoreCompletion::create([
             'chore_id' => $this->chore->id,
@@ -81,8 +72,8 @@ class StreakRestoreOfferTest extends TestCase
     {
         // Yesterday counted, so the chain is intact — today's quest simply
         // hasn't been done yet, which is not a break.
-        $this->clearQuestOn('2026-03-03');
-        $this->clearQuestOn('2026-03-04');
+        $this->earnDay('2026-03-03');
+        $this->earnDay('2026-03-04');
         $this->kid->update(['streak' => 2]);
 
         $this->travelTo(Carbon::parse('2026-03-05 09:00', $this->household->timezone));
@@ -102,9 +93,9 @@ class StreakRestoreOfferTest extends TestCase
 
     public function test_a_broken_streak_swaps_the_note_for_the_rescue_card(): void
     {
-        $this->clearQuestOn('2026-03-01');
-        $this->clearQuestOn('2026-03-02');
-        $this->clearQuestOn('2026-03-03');
+        $this->earnDay('2026-03-01');
+        $this->earnDay('2026-03-02');
+        $this->earnDay('2026-03-03');
         $this->kid->update(['streak' => 3]);
 
         // Missed the 4th; standing on the 5th with today's quest untouched.
@@ -120,7 +111,7 @@ class StreakRestoreOfferTest extends TestCase
 
     public function test_the_note_counts_the_restores_being_held(): void
     {
-        $this->clearQuestOn('2026-03-04');
+        $this->earnDay('2026-03-04');
         $this->kid->update(['streak' => 1]);
 
         $this->travelTo(Carbon::parse('2026-03-05 09:00', $this->household->timezone));
@@ -133,7 +124,7 @@ class StreakRestoreOfferTest extends TestCase
 
     public function test_a_kid_holding_nothing_sees_no_note_at_all(): void
     {
-        $this->clearQuestOn('2026-03-04');
+        $this->earnDay('2026-03-04');
         $this->kid->update(['streak' => 1]);
 
         $this->travelTo(Carbon::parse('2026-03-05 09:00', $this->household->timezone));

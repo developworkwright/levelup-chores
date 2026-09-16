@@ -25,8 +25,8 @@ use Tests\TestCase;
 /**
  * The Quests page — the board, once the daily loop moved to Home.
  *
- * The pieces themselves are covered by the suites that own them: the quest
- * chest by QuestChestTest, the mystery chore by MysteryChoreTest, the bounty
+ * The pieces themselves are covered by the suites that own them: the mystery
+ * chore by MysteryChoreTest, the bounty
  * board by BountyBoardTest, the spin itself by SpinFlowTest and WheelClaimTest.
  * What is tested here is the arrangement — that the sections come in the order
  * they should, that the chests and the boss are no longer among them, that the
@@ -59,65 +59,23 @@ class QuestPageLayoutTest extends TestCase
         Auth::guard('profile')->login($this->kid);
     }
 
-    public function test_the_quest_chest_graphic_keeps_its_body_colour(): void
-    {
-        // Regression. The jiggle used to ride on an Alpine :style binding, and
-        // a style binding owns the whole attribute — which is where the flat
-        // chest keeps its body colour. On every frame the binding evaluated to
-        // "not opening" the chest rendered as an empty box, band and lock
-        // floating on nothing.
-        Volt::test('kid.quests')
-            ->assertOk()
-            ->assertSee('background: linear-gradient(180deg, #ffe98a, #e0b312)', escape: false)
-            ->assertDontSee('x-bind:style', escape: false)
-            ->assertDontSee(':style="phase', escape: false);
-    }
-
-    public function test_the_opening_glow_is_anchored_to_the_middle_of_its_chest(): void
-    {
-        // Regression, three times over now.
-        //
-        // The first two attempts centred the glow with percentage offsets and
-        // let the keyframe's transform supply the pull-back, and both landed it
-        // somewhere off the chest. The third centred it with `inset: 0;
-        // margin: auto`, which is correct only while the glow is smaller than
-        // the thing it lights — and it never is. CSS 2.1 §10.3.7 abandons the
-        // equal-margins rule the moment those margins would go negative, pins
-        // margin-left to 0 instead, and lets the rest hang off to the right. It
-        // measured 22px out on this page.
-        //
-        // So the size travels as --fq-glow-size and .fq-glow centres off half
-        // of it. Sizing the halo with a width utility instead leaves that
-        // calc() with nothing to work from.
-        Volt::test('kid.quests')
-            ->assertOk()
-            ->assertSee('--fq-glow-size: 120px', escape: false)
-            ->assertDontSee('fq-glow h-[', escape: false)
-            ->assertDontSee('margin:auto', escape: false)
-            // The chest's keyframe only ever scales, so nothing about where the
-            // halo sits depends on the animation running.
-            ->assertDontSee('animation: fq-glow-pulse 1s', escape: false);
-    }
-
     public function test_the_sections_come_in_the_order_the_handoff_fixes(): void
     {
         // The chests and the boss moved to Home. The wheel went with them and
-        // came back, because it lands on a side quest and every one of those
-        // rows is on this page — so it sits directly above the board.
+        // came back, because it lands on a chore and every one of those rows is
+        // on this page — so it sits directly above the board. The quest chest
+        // that used to sit between the target and gratitude is gone entirely.
         Volt::test('kid.quests')
             ->assertOk()
             ->assertSeeInOrder([
                 "Today's Target",
-                // The chest deals three cards rather than revealing one chore,
-                // so the hero slot is a prompt to choose. A household down to a
-                // single eligible chore still gets the old "is inside" wording,
-                // which is why this asserts the three-card copy specifically.
-                'Choose your quest',
                 'Gratitude Quest',
                 'Bonus Wheel',
                 'Side Quests',
                 'Bounty Board',
-            ], escape: false);
+            ], escape: false)
+            ->assertDontSee('Quest Chest')
+            ->assertDontSee('Choose your quest');
     }
 
     public function test_the_extras_left_the_board_for_home(): void

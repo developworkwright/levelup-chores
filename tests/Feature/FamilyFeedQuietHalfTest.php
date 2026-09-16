@@ -15,6 +15,7 @@ use App\Services\FeedService;
 use App\Services\FeelingService;
 use App\Services\GratitudeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
@@ -50,6 +51,14 @@ class FamilyFeedQuietHalfTest extends TestCase
         parent::setUp();
 
         $this->household = Household::factory()->create();
+
+        // Pinned to the middle of a household day. The house rolls at 4am in
+        // its own timezone while `daysAgo()` counts back in the app's, so
+        // between UTC midnight and that boundary "yesterday" and "today" are
+        // the same household day and these assertions fail on the clock rather
+        // than on anything they test.
+        $this->travelTo(Carbon::parse('2026-05-04 12:00', $this->household->timezone));
+
         $this->raylan = Profile::factory()->for($this->household)->create(['name' => 'Raylan']);
         $this->westin = Profile::factory()->for($this->household)->create(['name' => 'Westin']);
         $this->mom = Profile::factory()->parent()->for($this->household)->create(['name' => 'Mom']);

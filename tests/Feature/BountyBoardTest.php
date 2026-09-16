@@ -421,9 +421,8 @@ class BountyBoardTest extends TestCase
         $this->assertSame('Wash the car', $chore->name);
         $this->assertSame(200, $chore->points);
         $this->assertSame(ChoreCadence::Once, $chore->cadence);
-        // A deal struck with one kid must not land on everybody's board, and
-        // must never be handed out as somebody else's quest.
-        $this->assertFalse((bool) $chore->quest_eligible);
+        // A deal struck with one kid must not land on everybody's board, or on
+        // somebody else's wheel.
         $this->assertFalse((bool) $chore->wheel_eligible);
         $this->assertNotNull($chore->used_at);
 

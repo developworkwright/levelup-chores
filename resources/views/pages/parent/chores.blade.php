@@ -187,20 +187,10 @@ new class extends Component
         $service->flagHelpWanted($chore);
     }
 
-    public function toggleQuestEligible(int $choreId): void
-    {
-        $chore = $this->ownedChore($choreId);
-
-        if ($chore) {
-            $chore->quest_eligible = ! $chore->quest_eligible;
-            $chore->save();
-        }
-    }
-
     /**
-     * Independent of the quest toggle: a chore can be a perfectly good assigned
-     * quest and still be a bad bet on the wheel, which is the case for anything
-     * opportunistic — the groceries only need putting away on shopping day.
+     * A chore can be a perfectly good job and still be a bad bet on the wheel,
+     * which is the case for anything opportunistic — the groceries only need
+     * putting away on shopping day.
      */
     public function toggleWheelEligible(int $choreId): void
     {
@@ -587,9 +577,6 @@ new class extends Component
                         <p class="font-mono-fq text-[10px] text-fq-text-4 uppercase">
                             {{ $chore->cadence->summary() }}
                             · {{ $chore->min_age ? "Age {$chore->min_age}+" : 'Any age' }}
-                            @unless ($chore->quest_eligible)
-                                · <span class="text-fq-coral">Excluded from quest</span>
-                            @endunless
                             @unless ($chore->wheel_eligible)
                                 · <span class="text-fq-coral">Excluded from wheel</span>
                             @endunless
@@ -726,14 +713,6 @@ new class extends Component
                             style="background: var(--fq-gold); border-color: var(--fq-gold)"
                         >{{ $chore->isOneTime() ? 'Put back on the board' : 'Make available now' }}</button>
                     @endunless
-
-                    <button
-                        type="button"
-                        wire:click="toggleQuestEligible({{ $chore->id }})"
-                        class="rounded-[12px] border px-3 py-2 text-xs {{ $chore->quest_eligible ? 'border-fq-line-3 bg-fq-sunk text-fq-text-3' : 'border-fq-coral bg-fq-sunk text-fq-coral' }}"
-                    >
-                        {{ $chore->quest_eligible ? 'Exclude from quest' : 'Allow as quest' }}
-                    </button>
 
                     {{-- Which chip this browses under on the kids' board.
 

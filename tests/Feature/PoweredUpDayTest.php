@@ -82,56 +82,18 @@ class PoweredUpDayTest extends TestCase
         $this->assertTrue($this->streaks()->hasWorkedToday($parent));
     }
 
-    public function test_yesterdays_work_buys_a_bigger_hand_today(): void
-    {
-        $kid = Profile::factory()->create();
-
-        $this->assertSame(ChoreService::HAND_SIZE, $this->chores()->handSizeFor($kid));
-
-        $this->submitChore($kid, now()->subDay());
-
-        $this->assertSame(
-            ChoreService::HAND_SIZE + ChoreService::HAND_BONUS_CARDS,
-            $this->chores()->handSizeFor($kid),
-        );
-    }
-
     /**
-     * The hand is dealt in the morning, before today's work exists — so today's
-     * chore must not be what pays for today's cards, or the reward would be
-     * unreachable on the day it is offered.
+     * Powered Up used to buy two extra quest cards the following morning as
+     * well as the better chest. The cards went with the quest, so the chest is
+     * the whole of it — which is why yesterday's work buys nothing today.
      */
-    public function test_todays_work_does_not_change_todays_hand(): void
+    public function test_yesterdays_work_does_not_power_up_today(): void
     {
         $kid = Profile::factory()->create();
 
-        $this->submitChore($kid);
-
-        $this->assertSame(ChoreService::HAND_SIZE, $this->chores()->handSizeFor($kid));
-    }
-
-    public function test_the_bigger_hand_actually_deals_more_cards(): void
-    {
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create(['age' => 12]);
-
-        Chore::factory()->for($household)->count(12)->create(['quest_eligible' => true]);
-
         $this->submitChore($kid, now()->subDay());
 
-        $hand = $this->chores()->offeredChoresFor($kid);
-
-        $this->assertCount(ChoreService::HAND_SIZE + ChoreService::HAND_BONUS_CARDS, $hand);
-    }
-
-    public function test_a_kid_who_did_nothing_yesterday_gets_the_normal_hand(): void
-    {
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create(['age' => 12]);
-
-        Chore::factory()->for($household)->count(12)->create(['quest_eligible' => true]);
-
-        $this->assertCount(ChoreService::HAND_SIZE, $this->chores()->offeredChoresFor($kid));
+        $this->assertFalse($this->streaks()->hasWorkedToday($kid->refresh()));
     }
 
     /**
@@ -184,6 +146,13 @@ class PoweredUpDayTest extends TestCase
      */
     public function test_the_days_first_chore_announces_itself(): void
     {
+        // Pinned to the middle of a household day. `powered_up_on` is stamped
+        // with HouseholdClock::today() and read back with isToday(), which is
+        // the app timezone — so between UTC midnight and the household's 4am
+        // boundary the two genuinely disagree and this failed on the clock
+        // rather than on anything it tests.
+        $this->travelTo(Carbon::parse('2026-05-04 12:00', 'America/Chicago'));
+
         $kid = Profile::factory()->create();
 
         $this->submitChore($kid);
@@ -212,6 +181,9 @@ class PoweredUpDayTest extends TestCase
 
     public function test_it_announces_again_the_next_day(): void
     {
+        // Pinned for the same reason as above.
+        $this->travelTo(Carbon::parse('2026-05-04 12:00', 'America/Chicago'));
+
         $kid = Profile::factory()->create();
 
         $this->submitChore($kid, now()->subDay());

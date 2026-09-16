@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Models\Chore;
-use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Models\Spin;
@@ -11,7 +10,6 @@ use App\Services\BadgeService;
 use App\Services\ChoreService;
 use App\Services\MonsterService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 class BadgeTest extends TestCase
@@ -133,61 +131,22 @@ class BadgeTest extends TestCase
         $this->assertTrue($kidB->badges()->where('key', 'team_effort')->exists());
     }
 
-    public function test_speed_runner_awarded_when_quest_claimed_quickly_after_reveal(): void
-    {
-        // Pinned well clear of the household's day-boundary hour (default
-        // 4am) — near midnight UTC, raw now() and HouseholdClock::today()
-        // land on different calendar dates, which broke this test purely
-        // on wall-clock timing rather than anything about the badge logic.
-        Carbon::setTestNow(Carbon::parse('2026-01-01 12:00:00', 'UTC'));
-
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create();
-        $chore = Chore::factory()->for($household)->create();
-
-        DailyQuest::create([
-            'household_id' => $household->id,
-            'profile_id' => $kid->id,
-            'chore_id' => $chore->id,
-            'quest_date' => now(),
-            'revealed_at' => now()->subMinute(),
-            'completed_at' => now(),
-        ]);
-
-        app(BadgeService::class)->evaluate($kid);
-
-        $this->assertTrue($kid->badges()->where('key', 'speed_runner')->exists());
-
-        Carbon::setTestNow();
-    }
-
-    public function test_speed_runner_not_awarded_when_quest_claimed_slowly(): void
+    /**
+     * `speed_runner` used to live here: it measured the gap between opening the
+     * quest chest and claiming the card. There is no chest, so there is nothing
+     * to time from, and the badge is retired rather than rewritten — see
+     * BadgeService::evaluate(). Kids who won it keep it.
+     */
+    public function test_perfect_board_not_awarded_with_the_board_half_done(): void
     {
         $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create();
-        $chore = Chore::factory()->for($household)->create();
-
-        DailyQuest::create([
-            'household_id' => $household->id,
-            'profile_id' => $kid->id,
-            'chore_id' => $chore->id,
-            'quest_date' => now(),
-            'revealed_at' => now()->subHour(),
-            'completed_at' => now(),
-        ]);
-
-        app(BadgeService::class)->evaluate($kid);
-
-        $this->assertFalse($kid->badges()->where('key', 'speed_runner')->exists());
-    }
-
-    public function test_perfect_board_not_awarded_with_only_the_main_quest_done(): void
-    {
-        $household = Household::factory()->create();
+        $parent = Profile::factory()->parent()->for($household)->create();
         $kid = Profile::factory()->for($household)->create();
         Chore::factory()->for($household)->count(3)->create();
 
-        app(ChoreService::class)->claimQuest($kid);
+        $service = app(ChoreService::class);
+        $service->approve($service->claim($kid, $household->chores->first()), $parent);
+
         app(BadgeService::class)->evaluate($kid);
 
         $this->assertFalse($kid->badges()->where('key', 'perfect_board')->exists());
@@ -201,13 +160,8 @@ class BadgeTest extends TestCase
         Chore::factory()->for($household)->count(3)->create();
 
         $service = app(ChoreService::class);
-        $quest = $service->claimQuest($kid);
 
         foreach ($household->chores as $chore) {
-            if ($chore->id === $quest->chore_id) {
-                continue;
-            }
-
             $completion = $service->claim($kid, $chore);
             $service->approve($completion, $parent);
         }

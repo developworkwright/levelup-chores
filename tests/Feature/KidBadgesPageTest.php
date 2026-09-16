@@ -29,8 +29,6 @@ class KidBadgesPageTest extends TestCase
         $this->loginKid();
 
         Volt::test('kid.badges')
-            ->assertSee('First Quest')
-            ->assertSee('Clear your very first daily quest.')
             ->assertSee('Wheel Winner')
             ->assertSee('Land a 3x multiplier on the Bonus Wheel.')
             ->assertSee('Busy Bee')
@@ -67,7 +65,10 @@ class KidBadgesPageTest extends TestCase
     {
         $kid = $this->loginKid();
 
-        $total = Badge::count();
+        // Retired badges are not on the shelf unless this kid holds one, so
+        // the denominator is what they can actually still earn — see the page's
+        // RETIRED list.
+        $total = Badge::whereNotIn('key', ['first_quest', 'quest_10', 'quest_50', 'speed_runner'])->count();
         $kid->badges()->attach(Badge::where('key', 'wheel_winner')->firstOrFail()->id, ['earned_at' => now()]);
 
         Volt::test('kid.badges')

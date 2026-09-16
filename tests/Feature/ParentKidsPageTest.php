@@ -6,7 +6,6 @@ use App\Enums\PerkEffect;
 use App\Enums\TicketKind;
 use App\Models\BonusTicketEntry;
 use App\Models\Chore;
-use App\Models\ChoreCompletion;
 use App\Models\DailyChest;
 use App\Models\DailyMystery;
 use App\Models\Household;
@@ -302,157 +301,53 @@ class ParentKidsPageTest extends TestCase
         $this->assertContains($after->id, [$before->id, $eligible->id]);
     }
 
-    public function test_an_unopened_quest_chest_reads_as_unopened(): void
+    /**
+     * The card on each kid used to report the daily quest: which card was
+     * dealt, whether the chest was open, and a button to re-deal the hand. All
+     * of it went with the quest. What a parent needs answering is the same
+     * question underneath it — has this kid done anything today — so the card
+     * reports the day.
+     */
+    public function test_the_day_card_says_nothing_is_in_yet(): void
     {
         $household = Household::factory()->create();
         Profile::factory()->for($household)->create();
         Chore::factory()->for($household)->create();
         $this->actingAsParent($household);
 
-        Volt::test('parent.kids')->assertSee('Chest not opened');
+        Volt::test('parent.kids')
+            ->assertSee('Nothing handed in')
+            ->assertSee('0 signed off');
     }
 
-    public function test_a_quest_nobody_has_picked_yet_names_the_hand_and_not_a_chore(): void
+    public function test_the_day_card_names_the_last_chore_and_what_it_waits_on(): void
     {
-        // The row's chore_id is a placeholder until a card is taken, and the
-        // console used to print it under "Today's Quest" — telling a parent
-        // their kid had been given a chore nobody had chosen, and which they
-        // might well not choose.
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
-
-        foreach (['Sweep the porch', 'Fold the towels', 'Scrub the bins'] as $name) {
-            Chore::factory()->for($household)->create(['name' => $name, 'quest_eligible' => true]);
-        }
-
+        $chore = Chore::factory()->for($household)->create(['name' => 'Sweep the porch']);
         $this->actingAsParent($household);
 
-        app(ChoreService::class)->dealQuestHand($kid);
+        app(ChoreService::class)->claim($kid, $chore);
 
         Volt::test('parent.kids')
-            ->assertSee('Choosing a card')
-            ->assertSee('3 cards dealt')
-            // The whole hand, so a parent can see what a re-deal would cost.
             ->assertSee('Sweep the porch')
-            ->assertSee('Fold the towels')
-            ->assertSee('Scrub the bins')
-            ->assertSee('Deal a new hand')
-            ->assertDontSee('Opened, not done');
+            ->assertSee('1 waiting on you')
+            ->assertDontSee('Nothing handed in');
     }
 
-    public function test_a_picked_quest_names_the_chore_and_drops_the_hand(): void
+    public function test_the_day_card_counts_what_has_been_signed_off(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
-
-        foreach (['Sweep the porch', 'Fold the towels', 'Scrub the bins'] as $name) {
-            Chore::factory()->for($household)->create(['name' => $name, 'quest_eligible' => true]);
-        }
-
-        $this->actingAsParent($household);
-
-        $chores = app(ChoreService::class);
-        $chores->dealQuestHand($kid);
-        $taken = $chores->offeredChoresFor($kid)->first();
-        $chores->chooseQuest($kid, $taken->id);
-
-        Volt::test('parent.kids')
-            ->assertSee($taken->name)
-            ->assertSee('Opened, not done')
-            ->assertSee('Swap for new cards')
-            ->assertDontSee('cards dealt');
-    }
-
-    public function test_swapping_a_quest_deals_a_new_hand_rather_than_naming_one_chore(): void
-    {
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->count(8)->create(['quest_eligible' => true]);
-        $this->actingAsParent($household);
-
-        $chores = app(ChoreService::class);
-        $before = $chores->questFor($kid)->offeredChoreIds();
-
-        Volt::test('parent.kids')
-            ->call('rerollQuest', $kid->id)
-            // Never "Swapped to X" any more: X would be a placeholder card.
-            ->assertSee('Dealt a new hand');
-
-        $after = $chores->questFor($kid)->offeredChoreIds();
-
-        $this->assertNotSame($before, $after);
-        $this->assertNull($chores->questFor($kid)->dealt_at);
-    }
-
-    public function test_an_opened_quest_chest_stops_reading_as_unopened(): void
-    {
-        // The chest is `revealed_at`; the quest being done is `completed_at`.
-        // Reading only the second one left the parent console insisting the
-        // chest was shut for the whole stretch between opening it and clearing
-        // the chore.
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->create();
-        $this->actingAsParent($household);
-
-        app(ChoreService::class)->revealQuest($kid);
-
-        Volt::test('parent.kids')
-            ->assertSee('Opened, not done')
-            ->assertDontSee('Not opened yet');
-    }
-
-    public function test_a_sent_back_quest_reads_as_sent_back_rather_than_unopened(): void
-    {
-        // sendBack() clears completed_at so the kid can have another go, which
-        // used to drop the parent's view all the way back to "not opened".
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->create();
+        $chore = Chore::factory()->for($household)->create();
         $parent = $this->actingAsParent($household);
 
         $chores = app(ChoreService::class);
-        $chores->revealQuest($kid);
-        $quest = $chores->claimQuest($kid);
-        $chores->sendBack(
-            ChoreCompletion::where('profile_id', $kid->id)->where('chore_id', $quest->chore_id)->latest('submitted_at')->firstOrFail(),
-            $parent,
-        );
+        $chores->approve($chores->claim($kid, $chore), $parent);
 
         Volt::test('parent.kids')
-            ->assertSee('Sent back')
-            ->assertDontSee('Not opened yet');
-    }
-
-    public function test_a_claimed_quest_waits_on_the_parent(): void
-    {
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->create();
-        $this->actingAsParent($household);
-
-        app(ChoreService::class)->claimQuest($kid);
-
-        Volt::test('parent.kids')
-            ->assertSee('Waiting on you')
-            ->assertDontSee('Not opened yet');
-    }
-
-    public function test_an_opened_quest_can_still_be_swapped(): void
-    {
-        // Opening the chest doesn't commit the kid to anything, so the parent's
-        // override has to survive it.
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->count(4)->create();
-        $this->actingAsParent($household);
-
-        app(ChoreService::class)->revealQuest($kid);
-        $before = app(ChoreService::class)->questFor($kid)->chore_id;
-
-        Volt::test('parent.kids')->call('rerollQuest', $kid->id);
-
-        $this->assertNotSame($before, app(ChoreService::class)->questFor($kid->refresh())->chore_id);
+            ->assertSee('All signed off')
+            ->assertSee('1 signed off');
     }
 
     public function test_an_unopened_daily_chest_says_so(): void
@@ -487,7 +382,7 @@ class ParentKidsPageTest extends TestCase
 
         Volt::test('parent.kids')
             ->assertSee(app(ChestService::class)->describe($chest))
-            ->assertSee('a quest was done first')
+            ->assertSee('a chore was done first')
             ->assertSee('CLAIMED')
             ->assertDontSee('Not opened today');
     }
@@ -529,58 +424,6 @@ class ParentKidsPageTest extends TestCase
         Volt::test('parent.kids')->assertSee('Not opened today');
     }
 
-    public function test_a_parent_can_swap_a_kids_quest_for_free(): void
-    {
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create(['bonus_tickets' => 4]);
-        Chore::factory()->for($household)->count(4)->create();
-        $this->actingAsParent($household);
-
-        $before = app(ChoreService::class)->questFor($kid)->chore_id;
-
-        Volt::test('parent.kids')->call('rerollQuest', $kid->id);
-
-        $after = app(ChoreService::class)->questFor($kid->refresh())->chore_id;
-
-        $this->assertNotSame($before, $after);
-        // Same logic the kid's perk uses, but the parent isn't charged for it.
-        $this->assertSame(4, $kid->bonus_tickets);
-    }
-
-    public function test_swapping_an_already_cleared_quest_reports_back(): void
-    {
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create();
-        Chore::factory()->for($household)->count(3)->create();
-        $this->actingAsParent($household);
-
-        app(ChoreService::class)->claimQuest($kid);
-        $before = app(ChoreService::class)->questFor($kid)->chore_id;
-
-        Volt::test('parent.kids')
-            ->call('rerollQuest', $kid->id)
-            ->assertSee('Nothing to swap');
-
-        $this->assertSame($before, app(ChoreService::class)->questFor($kid->refresh())->chore_id);
-    }
-
-    public function test_a_parent_cannot_swap_another_households_quest(): void
-    {
-        $household = Household::factory()->create();
-        Chore::factory()->for($household)->create();
-
-        $otherHousehold = Household::factory()->create();
-        $foreign = Profile::factory()->for($otherHousehold)->create();
-        Chore::factory()->for($otherHousehold)->count(3)->create();
-
-        $before = app(ChoreService::class)->questFor($foreign)->chore_id;
-
-        $this->actingAsParent($household);
-        Volt::test('parent.kids')->call('rerollQuest', $foreign->id);
-
-        $this->assertSame($before, app(ChoreService::class)->questFor($foreign->refresh())->chore_id);
-    }
-
     public function test_a_parent_can_hand_a_kid_a_quest_charm(): void
     {
         $household = Household::factory()->create();
@@ -590,38 +433,19 @@ class ParentKidsPageTest extends TestCase
 
         Volt::test('parent.kids')
             ->call('giveQuestCharm', $kid->id)
-            ->assertSee('Nova is holding 1 charm')
-            ->assertSee('chest can still take one');
+            ->assertSee('Nova is holding 1 charm');
 
         $perk = OwnedPerk::where('profile_id', $kid->id)->sole();
 
         $this->assertSame(PerkEffect::QuestCharm, $perk->effect);
         $this->assertSame(OwnedPerk::SOURCE_GIFT, $perk->source);
-        // A gift, like the free reroll beside it — the kid pays nothing.
+        // A gift: the kid pays nothing for it.
         $this->assertSame(0, $kid->refresh()->bonus_tickets);
     }
 
-    public function test_a_charm_given_after_the_chest_is_open_is_kept_for_a_later_quest(): void
+    public function test_the_day_card_counts_charms_still_in_the_pocket(): void
     {
-        // The charm can't go on a hand the kid has already read, so the parent
-        // is told the gift is for another morning rather than left thinking
-        // they have improved today.
-        $household = Household::factory()->create();
-        $kid = Profile::factory()->for($household)->create(['name' => 'Nova']);
-        Chore::factory()->for($household)->count(3)->create();
-        $this->actingAsParent($household);
-
-        app(ChoreService::class)->dealQuestHand($kid);
-
-        Volt::test('parent.kids')
-            ->call('giveQuestCharm', $kid->id)
-            ->assertSee('keeps for a future quest');
-
-        $this->assertSame(1, OwnedPerk::where('profile_id', $kid->id)->count());
-    }
-
-    public function test_the_quest_tile_shows_a_charmed_chest_and_charms_still_in_the_pocket(): void
-    {
+        // What a parent needs before handing another one over.
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
         Chore::factory()->for($household)->count(3)->create();
@@ -630,11 +454,8 @@ class ParentKidsPageTest extends TestCase
         $perks = app(PerkInventoryService::class);
         $perks->grant($kid, PerkEffect::QuestCharm, OwnedPerk::SOURCE_GIFT);
         $perks->grant($kid, PerkEffect::QuestCharm, OwnedPerk::SOURCE_GIFT);
-        app(ChoreService::class)->charmQuest($kid);
 
-        Volt::test('parent.kids')
-            ->assertSee('Chest is charmed')
-            ->assertSee('2 charms in pocket');
+        Volt::test('parent.kids')->assertSee('2 charms in pocket');
     }
 
     public function test_a_parent_cannot_hand_a_charm_to_another_households_kid(): void

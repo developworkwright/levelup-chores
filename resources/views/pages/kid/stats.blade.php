@@ -8,8 +8,8 @@ use App\Enums\SiblingOfferStatus;
 use App\Models\Badge;
 use App\Models\BonusTicketEntry;
 use App\Models\ChoreCompletion;
+use App\Models\CharmedChore;
 use App\Models\DailyChest;
-use App\Models\DailyQuest;
 use App\Models\LedgerEntry;
 use App\Models\OwnedPerk;
 use App\Models\Profile;
@@ -173,17 +173,26 @@ new class extends Component
     }
 
     /**
-     * The longest run of consecutive days the daily quest was cleared, counted
-     * the way ChoreService walks the current streak — a day bought back with a
-     * streak repair keeps the run alive. Floored at the streak the profile is
-     * carrying now, which is the one number a kid can already see, so the
-     * record can never read lower than it.
+     * The longest run of consecutive days this kid earned, counted the way
+     * StreakService walks the current streak — any approved chore earns a day,
+     * and a day bought back with a streak repair keeps the run alive. Floored
+     * at the streak the profile is carrying now, which is the one number a kid
+     * can already see, so the record can never read lower than it.
+     *
+     * Walked off `chore_completions` rather than off cleared quests, which is
+     * what it used to read: the quest is gone, and the completions table was
+     * always the honest version of this figure anyway — a kid who worked the
+     * board every day and never opened the chest used to have a record of
+     * nothing.
      */
     private function longestStreak(): int
     {
-        $days = DailyQuest::where('profile_id', $this->profile->id)
-            ->whereNotNull('completed_at')
-            ->pluck('quest_date')
+        $clock = HouseholdClock::for($this->profile->household);
+
+        $days = ChoreCompletion::where('profile_id', $this->profile->id)
+            ->where('status', CompletionStatus::Approved)
+            ->pluck('submitted_at')
+            ->map(fn (Carbon $moment) => $clock->dayFor($moment))
             ->merge(StreakRepair::where('profile_id', $this->profile->id)->pluck('repaired_date'))
             ->map(fn (Carbon $date) => $date->toDateString())
             ->unique()
@@ -411,10 +420,9 @@ new class extends Component
         $dayCounts = $byDay->map(fn (Collection $day) => $day->count());
         $bestDayCount = (int) $dayCounts->max();
 
-        $questsAssigned = DailyQuest::where('profile_id', $this->profile->id)->count();
-        $questsCleared = DailyQuest::where('profile_id', $this->profile->id)
-            ->whereNotNull('completed_at')
-            ->count();
+        // Rows, not casts: one charm lights five chores, and this is the count
+        // of chores it has ever lit. Named for what it counts.
+        $choresCharmed = CharmedChore::where('profile_id', $this->profile->id)->count();
 
         $flows = $this->ledgerFlows();
         $earned = (int) $flows->sum('in');
@@ -440,8 +448,8 @@ new class extends Component
         $spins = Spin::where('profile_id', $this->profile->id)->count();
         $tripleSpins = Spin::where('profile_id', $this->profile->id)->where('multiplier', '>=', 3)->count();
 
-        $rerolls = OwnedPerk::where('profile_id', $this->profile->id)
-            ->where('effect', PerkEffect::QuestReroll)
+        $charmsCast = OwnedPerk::where('profile_id', $this->profile->id)
+            ->where('effect', PerkEffect::QuestCharm)
             ->whereNotNull('consumed_at')
             ->count();
 
@@ -552,9 +560,11 @@ new class extends Component
                     'color' => 'var(--fq-coral)',
                 ],
                 [
-                    'label' => 'Quests cleared',
-                    'value' => number_format($questsCleared),
-                    'suffix' => $questsAssigned > 0 ? 'of '.$questsAssigned.' handed out' : 'none handed out yet',
+                    'label' => 'Charms cast',
+                    'value' => number_format($charmsCast),
+                    'suffix' => $choresCharmed > 0
+                        ? number_format($choresCharmed).' chores lit up'
+                        : 'none cast yet',
                     'color' => 'var(--fq-violet)',
                 ],
                 [
@@ -606,12 +616,6 @@ new class extends Component
                     'value' => (string) $spins,
                     'suffix' => $tripleSpins.' landed 3× or better',
                     'color' => 'var(--fq-lime)',
-                ],
-                [
-                    'label' => 'Quest rerolls',
-                    'value' => (string) $rerolls,
-                    'suffix' => 'used',
-                    'color' => 'var(--fq-cyan)',
                 ],
                 [
                     'label' => 'Trades done',

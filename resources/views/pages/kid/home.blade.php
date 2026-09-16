@@ -4,21 +4,14 @@ use App\Enums\CompletionStatus;
 use App\Enums\Feeling;
 use App\Enums\FeelingVisibility;
 use App\Enums\PerkEffect;
-use App\Exceptions\InsufficientTicketsException;
 use App\Exceptions\PerkUnavailableException;
-use App\Models\BonusPerk;
-use App\Models\Chore;
 use App\Models\ChoreCompletion;
-use App\Models\DailyQuest;
 use App\Models\Profile;
-use App\Services\HouseholdService;
-use App\Services\BonusShopService;
 use App\Services\CelebrationService;
 use App\Services\ChestService;
-use App\Services\ChoreService;
 use App\Services\FeedService;
 use App\Services\FeelingService;
-use App\Services\HouseholdClock;
+use App\Services\HouseholdService;
 use App\Services\LuckyBlockService;
 use App\Services\MonsterService;
 use App\Services\PerkInventoryService;
@@ -30,11 +23,11 @@ use Livewire\Volt\Component;
 /**
  * Home — the day, in the order it usually goes.
  *
- * The daily quest, the bonus chest and the streak chest — the three a kid does
- * themselves — then the two the house does together: the weekly prize and the
- * boss fight. Every other kid page is organised by *what kind of thing* it
- * holds, which works fine once you know what you're looking for and is no help
- * at all to a kid asking "what now?" — this one is organised by when.
+ * The bonus chest and the streak chest — the two a kid opens themselves — then
+ * the two the house does together: the weekly prize and the boss fight. Every
+ * other kid page is organised by *what kind of thing* it holds, which works
+ * fine once you know what you're looking for and is no help at all to a kid
+ * asking "what now?" — this one is organised by when.
  *
  * Three things have left it, all for the same reason: a page that answers
  * "what do I do now" should hold nothing that only answers "what happened".
@@ -47,15 +40,16 @@ use Livewire\Volt\Component;
  * gated on anything above it, and a kid who wants to open the second chest
  * first is not doing it wrong.
  *
- * Everything acts in place. The quest chest deals, the cards are picked and the
- * quest is claimed from here exactly as they are from the Quests page, because
- * a landing page that can only point at things is a menu rather than a start.
- * The hero itself is <x-quest-hero>, shared with Quests rather than copied —
- * the charm can only be cast on a shut chest, and a second copy that quietly
- * dropped the charm buttons would cost a kid a ticket they had already spent.
+ * Everything acts in place — a landing page that can only point at things is a
+ * menu rather than a start. The one exception is the work itself: the daily
+ * quest used to sit at the top of this page as a chest to open, and with it
+ * gone there is no chore on Home at all. That is deliberate rather than an
+ * omission. A single card saying "here is today's chore" was the whole of the
+ * mechanic being removed; what replaced it is a board with everything on it,
+ * and a board belongs on Quests.
  *
- * Quests keeps what this page doesn't: the bonus wheel, the rest of the board,
- * the mystery chore, the bounty board, gratitude, the sleep card.
+ * Quests keeps what this page doesn't: the bonus wheel, the board and its
+ * charms, the mystery chore, the bounty board, gratitude, the sleep card.
  */
 new class extends Component
 {
@@ -82,30 +76,12 @@ new class extends Component
 
     public ?int $pendingChestPoints = null;
 
-    /**
-     * Why a card couldn't be taken. The hand is dealt from chores the whole
-     * household shares, so a sibling can claim one out from under a kid who is
-     * still deciding, and a tap that silently does nothing explains none of it.
-     */
-    public ?string $questCardMessage = null;
-
-    /**
-     * Snapshotted at mount, like the chest. Arriving with the quest already
-     * cleared collapses the hero to a line so the rest of the day isn't pushed
-     * down the page — but clearing it *during* this visit keeps the full card
-     * on screen, so the moment still gets its celebration.
-     */
-    public bool $questDoneOnArrival = false;
-
     public function mount(): void
     {
         $this->profile = Auth::guard('profile')->user();
 
         abort_unless($this->profile->isKid(), 403);
 
-        // Through questOrNull() rather than isQuestDoneToday(), which asks for a
-        // quest and throws when the household has nothing to draw one from.
-        $this->questDoneOnArrival = $this->questOrNull()?->completed_at !== null;
         $this->feelingsAnsweredOnArrival = app(FeelingService::class)->hasAnswered($this->profile);
 
         $chests = app(ChestService::class);
@@ -266,7 +242,7 @@ new class extends Component
     /**
      * Whether today was already answered when this visit started.
      *
-     * Snapshotted at mount for the same reason `questDoneOnArrival` is:
+     * Snapshotted at mount for the same reason the chest's `chestOpened` is:
      * answering *during* this visit must not fold the card out from under the
      * moment. The house opening up underneath is the whole reward for pressing
      * the button, and locking the reason is reached from the card too — both
@@ -301,140 +277,9 @@ new class extends Component
     }
 
     /**
-     * Opens the quest chest, putting the hand on the table.
-     *
-     * No celebration: the chest deals rather than reveals, and the card that
-     * gets announced is the one they choose.
-     */
-    public function dealHand(): void
-    {
-        app(ChoreService::class)->dealQuestHand($this->profile);
-    }
-
-    /**
-     * Takes one of today's cards. The others have already burned client-side by
-     * the time this runs — see <x-quest-cards>.
-     */
-    public function chooseQuest(int $choreId): void
-    {
-        $this->questCardMessage = null;
-
-        $service = app(ChoreService::class);
-        $quest = $service->chooseQuest($this->profile, $choreId);
-
-        if (! $quest) {
-            // Almost always a sibling getting there first. The cards re-render
-            // with the claimant named on whichever one went, so the message
-            // only has to explain why the tap bounced.
-            $this->questCardMessage = 'That one just went — pick another card.';
-
-            return;
-        }
-
-        // The charm's hand-in roll is deliberately not part of this number: it
-        // hasn't happened yet, and quoting a total that later grows is a better
-        // surprise than one that appears to shrink.
-        $bonus = $service->cardBonusesFor($this->profile)[$quest->chore_id] ?? 0;
-        $points = $quest->chore->points * app(SpinService::class)->multiplierFor($this->profile, $quest->chore) + $bonus;
-
-        // Dispatched from the server rather than from the card, so it can only
-        // fire on a pick that actually landed.
-        $this->dispatch(
-            'celebrate',
-            style: 'confetti',
-            motion: 'burst',
-            origin: 'tap',
-            tier: 'big',
-            hold: 2600,
-            card: [
-                'accent' => $bonus > 0 ? 'var(--fq-gold)' : 'var(--fq-lime)',
-                'sub' => $bonus > 0 ? 'Bold Quest Taken' : "Today's Quest",
-                'label' => $quest->chore->name,
-                'note' => '+'.number_format($points).' PTS',
-            ],
-        );
-    }
-
-    public function claimQuest(): void
-    {
-        $service = app(ChoreService::class);
-
-        // The chest has to be opened before the quest can be claimed.
-        if (! $service->isQuestRevealedToday($this->profile)) {
-            return;
-        }
-
-        $quest = $service->questFor($this->profile);
-        $wasDone = $service->isQuestDoneToday($this->profile);
-        $boosted = app(SpinService::class)->multiplierFor($this->profile, $quest->chore) > 1;
-
-        $service->claimQuest($this->profile);
-
-        // Read after the claim, which is what settles it. This is the charm's
-        // second chance and the reason it can't really be wasted — a hand that
-        // looked ordinary can still pay here.
-        $charmPayout = $service->charmPayoutFor($this->profile);
-
-        // The streak (and any milestone bonus) moves on a parent's approval, so
-        // don't quote a day count here that hasn't been earned yet.
-        if ($wasDone) {
-            return;
-        }
-
-        if ($boosted) {
-            $this->dispatch('celebrate', message: 'Quest cleared! Bonus wheel treat earned.', treat: 'cookie', motion: 'burst', origin: 'tap');
-        } else {
-            $this->dispatch('celebrate', message: 'Quest cleared! Your streak grows once a parent approves.', motion: 'burst', origin: 'tap');
-        }
-
-        // Queued behind the clear rather than folded into it: it's a second
-        // piece of news, and it is the whole reason the charm was bought.
-        if ($charmPayout > 0) {
-            $this->dispatch(
-                'celebrate',
-                message: 'The charm paid out — +'.number_format($charmPayout).' bonus points!',
-                style: 'star',
-                motion: 'burst',
-                origin: 'tap',
-            );
-        }
-    }
-
-    /**
-     * Sold from the hero rather than only from the shop because the window to
-     * use a charm closes the moment the chest opens — and this page is where
-     * the chest is.
-     */
-    public function buyQuestCharm(): void
-    {
-        $this->buyPerk(PerkEffect::QuestCharm, 'cast it before you open the chest!');
-    }
-
-    private function buyPerk(PerkEffect $effect, string $suffix): void
-    {
-        $perk = BonusPerk::where('household_id', $this->profile->household_id)
-            ->enabled()
-            ->where('effect', $effect)
-            ->first();
-
-        // A parent can switch a perk off from the console, in which case the
-        // button isn't rendered and this is a stale tab.
-        if (! $perk) {
-            return;
-        }
-
-        try {
-            app(BonusShopService::class)->purchase($this->profile, $perk);
-            $this->perkMessage = null;
-            $this->dispatch('celebrate', message: "{$perk->name} bought — {$suffix}", style: 'ticket', motion: 'burst', origin: 'tap');
-        } catch (InsufficientTicketsException|PerkUnavailableException $e) {
-            $this->perkMessage = $e->getMessage();
-        }
-    }
-
-    /**
-     * Every perk with a button on this page: the quest charm and the reroll,
-     * both on the hero. The wheel respin moved to Quests with the wheel.
+     * The one perk with a button on this page: the Streak Restore on the rescue
+     * card. The charm is cast over the board, so it is bought and spent on
+     * Quests, where the board is.
      */
     public function usePerk(string $effect): void
     {
@@ -459,20 +304,6 @@ new class extends Component
         $this->dispatch('celebrate', message: $outcome, style: $case->celebrationStyle(), motion: 'burst', origin: 'tap');
     }
 
-    /**
-     * Today's quest, or null when the household has nothing eligible to draw
-     * one from. Home has to render either way — it is the page a kid lands on,
-     * so it is the one page that must never be the thing that breaks.
-     */
-    private function questOrNull(): ?DailyQuest
-    {
-        try {
-            return app(ChoreService::class)->questFor($this->profile);
-        } catch (\RuntimeException) {
-            return null;
-        }
-    }
-
     /** The monster standing, as the boss strip and the watcher want it. */
     private function monsterState(): ?array
     {
@@ -484,7 +315,6 @@ new class extends Component
 
     public function with(): array
     {
-        $service = app(ChoreService::class);
         $streaks = app(StreakService::class);
         $spins = app(SpinService::class);
         $inventory = app(PerkInventoryService::class);
@@ -494,121 +324,43 @@ new class extends Component
         // the household rollover.
         app(StreakService::class)->syncStreak($this->profile);
 
-        $quest = $this->questOrNull();
         $boost = $spins->today($this->profile);
-
-        // Claiming sets completed_at immediately, but the points don't land
-        // until a parent approves — so "done" and "waiting" are different
-        // things and the step has to say which. Scoped to today's household day
-        // rather than to completed_at, because a sent-back quest clears that
-        // stamp and the attempt still has to be findable.
-        $clock = HouseholdClock::for($this->profile->household);
-
-        $completion = $quest
-            ? ChoreCompletion::where('profile_id', $this->profile->id)
-                ->where('chore_id', $quest->chore_id)
-                ->where('submitted_at', '>=', $clock->startOf($clock->today()))
-                ->latest('submitted_at')
-                ->first()
-            : null;
-
-        $questBoosted = $quest && $boost && $boost->chore_id === $quest->chore_id;
-
-        // The hand, and what each card is worth. Built here rather than in the
-        // component so a card can name the sibling who took it.
-        $cardBonuses = $quest ? $service->cardBonusesFor($this->profile) : [];
-
-        $questCards = $quest
-            ? $service->offeredChoresFor($this->profile)->map(fn (Chore $chore) => [
-                'chore' => $chore,
-                'points' => $chore->points,
-                'bonus' => $cardBonuses[$chore->id] ?? 0,
-                'bold' => isset($cardBonuses[$chore->id]),
-                'takenBy' => $service->claimantOtherThan($chore, $this->profile)?->profile,
-                'expired' => $service->isExpired($chore),
-            ])
-            : collect();
 
         $household = $this->profile->household;
 
         return [
             'household' => $household,
-            'quest' => $quest,
-            'questRevealed' => $quest?->revealed_at !== null,
-            // The chest and the pick are separate stamps: the chest stays open
-            // across a refresh while the kid is still deciding, which is what
-            // stops the 2.6s rattle replaying every time they look at the page.
-            'handDealt' => $quest?->dealt_at !== null,
-            'questCards' => $questCards,
-            'questBoldBonus' => $quest ? ($cardBonuses[$quest->chore_id] ?? 0) : 0,
-            // Null until the charm is cast, and its effect stays null until the
-            // chest is opened — the two together are what the cards' charm
-            // strip reads.
-            'questCharm' => $quest?->isCharmed() ? $quest->charm_effect : null,
-            'questCharmed' => (bool) $quest?->isCharmed(),
-            'questCharmPayout' => $quest ? $service->charmPayoutFor($this->profile) : 0,
-            'questClosesAt' => $quest ? $service->deadlineFor($quest->chore) : null,
-            'questDone' => $quest?->completed_at !== null,
-            // Distinct from questDone: the streak card asks whether *tonight*
-            // is in the bag, which any chore now settles. Guarded on $quest for
-            // the same reason as everything else here — a household with
-            // nothing to draw one from makes questFor() throw.
-            'daySecured' => $quest ? $streaks->streakDaySecuredToday($this->profile) : false,
-            // Unguarded, unlike everything else on the run: the deadline is the
-            // household rollover and any chore closes it, so a house with
-            // nothing quest-eligible still has a day that ends tonight.
+            // Whether tonight is in the bag. Nothing on this page is guarded on
+            // a quest existing any more — every one of these used to be, because
+            // asking for a quest in a household with nothing eligible threw.
+            'daySecured' => $streaks->streakDaySecuredToday($this->profile),
             'streakWindow' => $streaks->streakWindowFor($this->profile),
-            'questApproved' => $completion?->status === CompletionStatus::Approved,
-            'questPending' => $completion?->status === CompletionStatus::Pending,
-            'questSentBack' => $completion?->status === CompletionStatus::Rejected,
-            'questBoosted' => $questBoosted,
-            // The bold card's bonus rides on top of any wheel multiplier rather
-            // than being multiplied by it — see BOLD_CARD_BONUS_PERCENT.
-            'questPoints' => $quest
-                ? $quest->chore->points * ($questBoosted ? $boost->multiplier : 1)
-                    + ($cardBonuses[$quest->chore_id] ?? 0)
-                    + $service->charmPayoutFor($this->profile)
-                : 0,
-            // Contextual "use it here" buttons for the perks that act on this
-            // page, so a kid doesn't have to go hunting in the shop.
             // The streak chest's own card: the track, the rescue window, and
             // what a milestone is worth. It came off the Quests page with the
             // chest itself — the tray slot there was the only thing that could
             // open one, so leaving the track behind would have split the reward
             // from the explanation of it.
-            'nextMilestone' => $quest ? $streaks->nextStreakMilestone($this->profile) : 0,
-            'streakBonuses' => collect($quest ? $streaks->streakTrackFor($this->profile)['milestones'] : []),
-            'streakLap' => $quest ? $streaks->streakTrackFor($this->profile)['lap'] : 1,
+            'nextMilestone' => $streaks->nextStreakMilestone($this->profile),
+            'streakBonuses' => collect($streaks->streakTrackFor($this->profile)['milestones']),
+            'streakLap' => $streaks->streakTrackFor($this->profile)['lap'],
             // Null unless a broken chain is still savable — which stops being
-            // true the moment today's quest is cleared, so the offer has to be
-            // on the page a kid is looking at when they decide.
-            'streakRepair' => $quest ? $streaks->repairPreview($this->profile) : null,
-            // Only with a quest to act on: a blocked reason is worked out by
-            // asking what today's quest is, which is the call that throws in a
-            // household with nothing to draw one from.
-            'heldPerks' => collect($quest ? [PerkEffect::QuestReroll, PerkEffect::QuestCharm, PerkEffect::StreakRestore] : [])
+            // true the moment anything is signed off today, so the offer has to
+            // be on the page a kid is looking at when they decide.
+            'streakRepair' => $streaks->repairPreview($this->profile),
+            // Just the rescue: it is the only perk with a button on this page.
+            'heldPerks' => collect([PerkEffect::StreakRestore])
                 ->filter(fn (PerkEffect $effect) => $inventory->holds($this->profile, $effect))
                 ->mapWithKeys(fn (PerkEffect $effect) => [$effect->value => [
                     'effect' => $effect,
                     'count' => $inventory->countOf($this->profile, $effect),
                     'blocked' => $inventory->blockedReason($this->profile, $effect),
                 ]]),
-            // The catalogue row, only when they're holding none — that's the
-            // whole condition for offering to sell one. Null when a parent has
-            // switched the charm off, which takes the button with it.
-            'charmForSale' => $inventory->holds($this->profile, PerkEffect::QuestCharm)
-                ? null
-                : BonusPerk::where('household_id', $household->id)
-                    ->enabled()
-                    ->where('effect', PerkEffect::QuestCharm)
-                    ->first(),
             // Recomputed rather than read off the mount snapshot: the snapshot's
             // job is to hold the *animation* still, and this decides whether
             // there is a chest to animate at all.
             'chestAvailable' => app(ChestService::class)->isAvailable($this->profile),
-            // Not $questDone: any chore in for today rolls the chest on the
-            // good table, so the copy has to ask the chest's own question
-            // rather than read the quest card's stamp.
+            // Any chore in for today rolls the chest on the good table, so the
+            // copy asks the chest's own question.
             'chestBoosted' => app(ChestService::class)->isBoosted($this->profile),
             'boost' => $boost,
             // Whether there is a Lucky Block to point at. The strip above the
@@ -695,8 +447,8 @@ new class extends Component
              when you already suspect there is something behind it.
 
              So it is not a link, and it is not underneath the day either. It is
-             the rooms, the messages and the composer, above the quest, where it
-             cannot be scrolled past.
+             the rooms, the messages and the composer, at the top of the day,
+             where it cannot be scrolled past.
 
              The same component the page at /kid/family draws — see
              resources/views/livewire/family-feed.blade.php. `embedded` drops
@@ -715,7 +467,7 @@ new class extends Component
         {{-- Today's feeling, asked only until it is answered.
 
              Above everything that pays — not because it matters more than the
-             quest, but because putting the one card that is worth nothing
+             chores do, but because putting the one card that is worth nothing
              underneath four that are worth something says exactly what it looks
              like it says. It is also the only card here that isn't a task, and
              it reads as one the moment it is filed among them.
@@ -761,74 +513,50 @@ new class extends Component
             <x-feelings-card :card="$feelingsCard" :opened-feeling="$openedFeeling" :lock-message="$feelingLockMessage" />
         @endif
 
-        {{-- The daily quest, opened right here. The hero is the same component
-             the Quests page draws, so the chest, the hand, the charm window and
-             the claim are one implementation rather than two that drift. --}}
-        @php
-            [$questStatus, $questStatusColor] = match (true) {
-                ! $quest => ['Nothing today', 'var(--fq-text-4)'],
-                $questApproved => ['Cleared', 'var(--fq-lime)'],
-                $questPending => ['Waiting on a parent', 'var(--fq-gold)'],
-                $questSentBack => ['Sent back', 'var(--fq-danger)'],
-                ! $questRevealed => ['Not opened yet', 'var(--fq-gold)'],
-                default => ['Still to do', 'var(--fq-gold)'],
-            };
-        @endphp
+        {{-- The work, pointed at rather than done here.
 
-        <div class="flex flex-col gap-3">
-            <x-home-section
-                title="Daily Quest"
-                accent="var(--fq-gold)"
-                :done="$questApproved || $questPending"
-                :status="$questStatus"
-                :status-color="$questStatusColor"
-            />
+             This was the Daily Quest hero: a chest to open, three cards to
+             choose between, and one chore that mattered more than the others.
+             All of that is gone — the board on Quests is the whole of the work
+             now, and it is too long a list to put on a page whose job is "what
+             now?". So this is a strip, like the wheel's below, and it carries
+             the one number that makes it worth tapping: how much is up for
+             grabs. --}}
+        <a
+            href="{{ route('kid.quests') }}"
+            wire:navigate
+            class="flex min-h-[64px] items-center gap-3 rounded-[16px] border px-[14px] py-[13px] transition hover:brightness-110"
+            style="border-color: {{ $daySecured ? 'var(--fq-line-2)' : 'var(--fq-gold)' }};
+                   background: {{ $daySecured ? 'var(--fq-sunk)' : 'var(--fq-wash-gold)' }}"
+        >
+            <span
+                class="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[12px] font-baloo text-[17px] font-extrabold"
+                style="background: var(--fq-panel-alt); color: var(--fq-gold)"
+                aria-hidden="true"
+            >&#10003;</span>
 
-            @if (! $quest)
-                <div
-                    class="rounded-[24px] border p-5"
-                    style="background: var(--fq-wash-gold); border-color: var(--fq-line-3)"
-                >
-                    <h3 class="font-baloo text-[22px] leading-[1.15] font-extrabold">No quest today</h3>
-                    <p class="mt-[6px] text-[13.5px] text-fq-text-2">
-                        There's nothing on the board a parent has set for you yet. Check back later.
-                    </p>
-                </div>
-            @else
-                <x-quest-hero
-                    :profile="$profile"
-                    :household="$household"
-                    :quest="$quest"
-                    :quest-done-on-arrival="$questDoneOnArrival"
-                    :quest-revealed="$questRevealed"
-                    :hand-dealt="$handDealt"
-                    :quest-cards="$questCards"
-                    :quest-charm="$questCharm"
-                    :quest-charmed="$questCharmed"
-                    :quest-charm-payout="$questCharmPayout"
-                    :quest-bold-bonus="$questBoldBonus"
-                    :quest-points="$questPoints"
-                    :quest-closes-at="$questClosesAt"
-                    :quest-done="$questDone"
-                    :quest-approved="$questApproved"
-                    :quest-pending="$questPending"
-                    :quest-sent-back="$questSentBack"
-                    :quest-card-message="$questCardMessage"
-                    :boost="$boost"
-                    :quest-boosted="$questBoosted"
-                    :charm-for-sale="$charmForSale"
-                    :held-perks="$heldPerks"
-                />
-
-                {{-- Straight under the hero, which is the only thing on this
-                     page that raises one. --}}
-                @if ($perkMessage)
-                    <div class="rounded-[16px] border border-fq-line-2 bg-fq-sunk px-4 py-3 text-sm text-fq-text-2">
-                        {{ $perkMessage }}
-                    </div>
+            <span class="min-w-0 flex-1">
+                @if ($daySecured)
+                    <span class="block font-baloo text-base leading-tight font-extrabold" style="color: var(--fq-lime)">
+                        Work's in — tonight counts
+                    </span>
+                    <span class="mt-[2px] block text-xs text-fq-text-4">There's more on the board if you want it.</span>
+                @else
+                    <span class="block font-baloo text-base leading-tight font-extrabold" style="color: var(--fq-gold)">
+                        Nothing in yet today
+                    </span>
+                    <span class="mt-[2px] block text-xs text-fq-text-4">Any chore signed off keeps your run alive.</span>
                 @endif
-            @endif
-        </div>
+            </span>
+
+            <i aria-hidden="true" class="fa-fw fa-solid fa-arrow-right text-[13px]" style="color: var(--fq-gold)"></i>
+        </a>
+
+        @if ($perkMessage)
+            <div class="rounded-[16px] border border-fq-line-2 bg-fq-sunk px-4 py-3 text-sm text-fq-text-2">
+                {{ $perkMessage }}
+            </div>
+        @endif
 
         {{-- The bonus chest. Opens right here — it is one tap and it has no page
              of its own, so sending a kid somewhere to take it would be the
@@ -857,14 +585,14 @@ new class extends Component
                 kicker="Free Every Single Day"
                 :closed-title="$chestBoosted ? 'Your chest is OP today' : 'Open today\'s bonus chest'"
                 :closed-text="$chestBoosted
-                    ? 'You got a quest done, so this one rolls on the good table — more tickets, more perks.'
-                    : 'Tickets, points, or a perk. Do any quest first and it rolls on a much better table.'"
+                    ? 'You got a chore done, so this one rolls on the good table — more tickets, more perks.'
+                    : 'Tickets, points, or a perk. Do any chore first and it rolls on a much better table.'"
                 cta="Open it"
                 :prize-label="$dailyChestPrize ?? 'A prize!'"
                 :prize-sub="$chestBoosted ? 'Bonus Chest · OP' : 'Bonus Chest'"
                 prize-property="dailyChestPrize"
                 {{-- The kids were opening this first thing every morning
-                     and never finding out that doing a quest makes it
+                     and never finding out that doing a chore makes it
                      better. So: stop once and ask. --}}
                 :confirm="$chestAvailable && ! $chestBoosted"
             >
@@ -879,7 +607,7 @@ new class extends Component
                                 wire:navigate
                                 class="rounded-[16px] px-[20px] py-[13px] text-center font-baloo text-[16px] font-extrabold transition hover:brightness-110"
                                 style="background: var(--fq-lime); color: var(--fq-ink)"
-                            >Do a quest first</a>
+                            >Do a chore first</a>
 
                             <button
                                 type="button"
@@ -1038,9 +766,9 @@ new class extends Component
                         @endif
                     </p>
 
-                    {{-- The rescue window, and it really is a window: clearing today's
-                         quest starts a fresh chain and closes it, so the copy has to say
-                         that before a kid taps past it. --}}
+                    {{-- The rescue window, and it really is a window: getting
+                         anything signed off today starts a fresh chain and closes it,
+                         so the copy has to say that before a kid taps past it. --}}
                     @if ($streakRepair)
                         <div
                             wire:key="streak-repair"
@@ -1056,7 +784,7 @@ new class extends Component
                             </p>
 
                             <p class="mt-1 font-mono-fq text-[11px] text-fq-text-4">
-                                Use it before you clear today's quest — after that the day is gone for good.
+                                Use it before anything you do today gets signed off — after that the day is gone for good.
                             </p>
 
                             <div class="mt-3">
@@ -1184,7 +912,7 @@ new class extends Component
 
              It was a full section here and the kids went looking for it on
              Quests anyway — which was them being right. The wheel lands on a
-             side quest and multiplies it, and every one of those rows is over
+             chore and multiplies it, and every one of those rows is over
              there, so that is where the wheel went too.
 
              What's left is a strip rather than a section, for the same reason

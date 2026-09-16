@@ -7,7 +7,6 @@ use App\Enums\ProfileRole;
 use App\Exceptions\InsufficientTicketsException;
 use App\Models\Bounty;
 use App\Models\ChoreCompletion;
-use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\Nudge;
 use App\Models\Profile;
@@ -26,12 +25,10 @@ use Illuminate\Support\Str;
  * land on — whose run is on the line tonight is news, and their own board is
  * one tap away.
  *
- * The run this page is about turns on **any approved chore**, not the quest
- * alone — see {@see StreakService::streakDayEarnedOn()}. That is why the lanes
- * read their state through `streakDaySecuredToday()` rather than off the
- * quest's own `completed_at`: a kid who cleared four side quests and left the
- * chest shut is as safe as one who didn't, and this is the screen the whole
- * house looks at.
+ * The run this page is about turns on **any approved chore** — see
+ * {@see StreakService::streakDayEarnedOn()}. That is why the lanes read their
+ * state through `streakDaySecuredToday()`: whichever chore a kid put in is the
+ * one that made them safe, and this is the screen the whole house looks at.
  */
 class HouseholdService
 {
@@ -39,19 +36,19 @@ class HouseholdService
      * How long the at-risk urgency ramps for before it holds.
      *
      * It holds rather than running to zero because nothing actually expires at
-     * the end of it. The household day rolls at `day_boundary_hour` and a
-     * quest open at 9pm is not late — so a flame that guttered out at 10pm
+     * the end of it. The household day rolls at `day_boundary_hour` and an
+     * empty board at 9pm is not late — so a flame that guttered out at 10pm
      * would be the screen telling a lie the rules don't back up.
      */
     public const RISK_RAMP_HOURS = 3;
 
-    /** Quest cleared today. */
+    /** Work in today — the night is banked. */
     public const STATE_SAFE = 'safe';
 
-    /** Quest still open, and it isn't late enough to say anything about it. */
+    /** Nothing in yet, and it isn't late enough to say anything about it. */
     public const STATE_OPEN = 'open';
 
-    /** Quest still open, past the household's evening watch hour. */
+    /** Nothing in yet, past the household's evening watch hour. */
     public const STATE_AT_RISK = 'at_risk';
 
     /** A run that ended at the last rollover. A morning fact, not a warning. */
@@ -67,9 +64,9 @@ class HouseholdService
      * superlatives(), crown() (through superlatives *and* choresToday),
      * prizeStanding() and the ticker's broken-run rows all want tonightFor().
      * Unmemoised that ran the whole per-kid walk five times on the page every
-     * kid lands on: syncStreak, questFor, two streakDayEarnedOn lookups each
-     * hitting five tables, and a day-by-day run walk, times every kid, times
-     * five.
+     * kid lands on: syncStreak, two streakDayEarnedOn lookups each hitting five
+     * tables, today's first completion, and a day-by-day run walk, times every
+     * kid, times five.
      *
      * Keyed by household id and never cleared, which is safe because the memo
      * lives only as long as the instance: the container hands out a new
@@ -98,7 +95,7 @@ class HouseholdService
     ) {}
 
     /**
-     * Pokes a sibling about tonight's quest.
+     * Pokes a sibling who hasn't got anything in tonight.
      *
      * Free, and capped at one per nudger per target per household night. The
      * cap is what keeps it a poke: three kids each nudging four times is a
@@ -115,8 +112,8 @@ class HouseholdService
 
         $today = HouseholdClock::for($to->household)->today();
 
-        // Nothing on the line: they have work in for today — any chore does it
-        // now, not just the quest — so there is nothing to be poked about.
+        // Nothing on the line: they have work in for today, so there is nothing
+        // to be poked about.
         if ($this->streaks->streakDaySecuredToday($to)) {
             return false;
         }
@@ -146,8 +143,8 @@ class HouseholdService
      *
      * Checked in the service as well as at the caller because nudge() and
      * rescue() are reachable from public Livewire methods that take an id.
-     * Both roles matter: a *parent* on either end is the case that would send
-     * questFor() off to build a daily quest for a grown-up.
+     * Both roles matter: a *parent* on either end is a grown-up being nudged
+     * about a board they don't have.
      */
     private function isPeer(Profile $from, Profile $to): bool
     {
@@ -276,7 +273,7 @@ class HouseholdService
      *     profile: Profile,
      *     state: string,
      *     streak: int,
-     *     quest: string,
+     *     note: string,
      *     clearedAt: ?Carbon,
      *     brokenFrom: int,
      *     risk: float,
@@ -308,21 +305,22 @@ class HouseholdService
                 // haven't opened the app since their run died.
                 $this->streaks->syncStreak($kid);
 
-                $quest = $this->chores->questFor($kid);
-
-                // Any chore in for today makes the night safe, so the lane can
-                // no longer read the quest's own stamp — a kid who cleared four
-                // side quests and left the chest shut is as safe as one who
-                // didn't, and Household is the screen that must not get that
-                // wrong in front of the whole house.
+                // Any chore in for today makes the night safe. The lane used to
+                // read the day's quest as well and led with its name, which was
+                // the screen the whole house looks at describing a kid by the
+                // one chore they happened to be dealt.
                 $state = $this->stateFor($kid, $this->streaks->streakDaySecuredToday($kid));
+
+                $first = $this->firstWorkToday($kid);
 
                 return [
                     'profile' => $kid,
                     'state' => $state,
                     'streak' => $kid->streak,
-                    'quest' => $quest->isPicked() ? $quest->chore->name : 'Not picked yet',
-                    'clearedAt' => $quest->completed_at,
+                    // What the lane says under the name when there is no better
+                    // line — the chore they have in, or that they have none.
+                    'note' => $first?->chore?->name ?? 'Nothing in yet',
+                    'clearedAt' => $first?->submitted_at,
                     'brokenFrom' => $state === self::STATE_BROKEN ? $this->runThatEnded($kid) : 0,
                     // Only an at-risk kid carries a ramp; everyone else is 0 so
                     // nothing downstream has to special-case the state again.
@@ -330,6 +328,27 @@ class HouseholdService
                     'watchAt' => $watch,
                 ];
             });
+    }
+
+    /**
+     * The first chore this kid put in today, approved or still waiting.
+     *
+     * Pending counts, for the same reason the lane's own state does: work
+     * sitting in a parent's queue is work the kid did, and a lane that called
+     * it nothing would be blaming them for somebody else's inbox. Ordered by
+     * submission, so "in at 4:12pm" is when they handed it over rather than
+     * when it got looked at.
+     */
+    private function firstWorkToday(Profile $kid): ?ChoreCompletion
+    {
+        $clock = HouseholdClock::for($kid->household);
+
+        return ChoreCompletion::where('profile_id', $kid->id)
+            ->where('status', '!=', CompletionStatus::Rejected)
+            ->where('submitted_at', '>=', $clock->startOf($clock->today()))
+            ->with('chore')
+            ->oldest('submitted_at')
+            ->first();
     }
 
     /**
@@ -503,8 +522,8 @@ class HouseholdService
         $first = $done->sortBy('submitted_at')->first();
         $biggest = $done->sortByDesc('points_awarded')->first();
 
-        // Whoever still has their quest open. Not a shaming line — it is the
-        // one the nudge buttons above are about.
+        // Whoever still has nothing in. Not a shaming line — it is the one the
+        // nudge buttons above are about.
         //
         // Only meaningful once somebody else has actually finished: "last
         // standing" says the others have fallen, and on a morning when nobody
@@ -528,7 +547,7 @@ class HouseholdService
             ] : null,
             'last' => $stillOpen ? [
                 'profile' => $stillOpen['profile'],
-                'note' => $stillOpen['quest'],
+                'note' => $stillOpen['note'],
             ] : null,
         ];
     }
@@ -745,10 +764,15 @@ class HouseholdService
     }
 
     /**
-     * Approved work. A completion that cleared the day's quest gets the flame
-     * and the run's length instead of the tick and its points — clearing the
-     * quest is a different event from doing a chore, even though one row in
-     * the database covers both.
+     * Approved work. The completion that *earned* a day gets the flame and the
+     * run's length instead of the tick and its points — banking a night is a
+     * different event from doing a chore, even though one row in the database
+     * covers both.
+     *
+     * That used to be "the one that cleared the quest". Any approved chore
+     * earns the day, so it is now the first one signed off in that household
+     * day: the same event, read off the table that decides it rather than off a
+     * quest row that only sometimes agreed with it.
      *
      * @param  Collection<int, int>  $kidIds
      * @return Collection<int, array<string, mixed>>
@@ -766,21 +790,32 @@ class HouseholdService
             ->get()
             ->map(function (ChoreCompletion $done) use ($clock) {
                 $day = $clock->dayFor($done->submitted_at);
-                $quest = DailyQuest::where('profile_id', $done->profile_id)
-                    ->whereDate('quest_date', $day)
-                    ->first();
 
-                $clearedQuest = $quest
-                    && $quest->chore_id === $done->chore_id
-                    && $quest->completed_at !== null;
+                // Measured on submission, like every other day-shaped question
+                // about a chore, but ordered by the approval — the night is
+                // banked at the moment a parent signs something off, and the
+                // first sign-off of the day is the one that did it.
+                // Ordered by id as well as the stamp, because `decided_at` only
+                // carries to the second: a parent working through four of a
+                // kid's chores in one go writes four identical stamps, and
+                // without the tiebreak the flame lands on whichever row the
+                // database felt like returning first — a different one on the
+                // next render of the same page.
+                $earnedTheDay = ChoreCompletion::where('profile_id', $done->profile_id)
+                    ->where('status', CompletionStatus::Approved)
+                    ->where('submitted_at', '>=', $clock->startOf($day))
+                    ->where('submitted_at', '<', $clock->startOf($day->copy()->addDay()))
+                    ->oldest('decided_at')
+                    ->oldest('id')
+                    ->value('id') === $done->id;
 
                 // The run as it stood on the day being described, not the one
                 // standing now. A kid who cleared Monday and missed Tuesday
                 // otherwise reads "cleared the day — 0 nights in a row" on
                 // Wednesday, directly above their own 💀 row.
-                $run = $clearedQuest ? $this->streaks->runLengthOn($done->profile, $day) : 0;
+                $run = $earnedTheDay ? $this->streaks->runLengthOn($done->profile, $day) : 0;
 
-                return $clearedQuest
+                return $earnedTheDay
                     ? [
                         'glyph' => '🔥',
                         'profile' => $done->profile,

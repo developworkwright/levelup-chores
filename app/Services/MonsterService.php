@@ -205,7 +205,7 @@ class MonsterService
      * Draws this week's weak chore if the monster hasn't got one yet, and
      * returns the monster.
      *
-     * Lazy, in the way the daily quest and the mystery chore are lazy: the
+     * Lazy, in the way the mystery chore is lazy: the
      * first person to look on a new week is the one who rolls it, so there is
      * no scheduled job to keep alive and no household that quietly stops
      * rotating because a cron died.

@@ -12,7 +12,6 @@ use App\Models\BonusTicketEntry;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyChest;
-use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\LedgerEntry;
 use App\Models\OwnedPerk;
@@ -22,6 +21,7 @@ use App\Models\Spin;
 use App\Models\StoreItem;
 use App\Models\StreakRepair;
 use App\Services\LedgerService;
+use App\Services\PerkInventoryService;
 use App\Services\StoreService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -404,16 +404,12 @@ class KidStatsPageTest extends TestCase
             $this->approve($kid, $chore, $best);
         }
 
-        // Quests cleared on the 1st–4th, nothing on the 5th, then the 6th —
-        // a four-day run followed by a one-day one.
-        foreach (['03-01', '03-02', '03-03', '03-04', '03-06'] as $day) {
-            DailyQuest::create([
-                'household_id' => $household->id,
-                'profile_id' => $kid->id,
-                'chore_id' => $chore->id,
-                'quest_date' => "2026-{$day}",
-                'completed_at' => now(),
-            ]);
+        // The run is walked off approved chores now rather than cleared quests,
+        // so the two fixture days above are part of it: the 2nd and the 5th
+        // already have work on them. Filling the 3rd and the 4th makes a
+        // four-day run, the 6th and 7th are empty, and the 8th is a run of one.
+        foreach (['03-03', '03-04', '03-08'] as $day) {
+            $this->approve($kid, $chore, Carbon::parse("2026-{$day} 18:00", $household->timezone));
         }
 
         $html = Volt::test('kid.stats')
@@ -437,13 +433,7 @@ class KidStatsPageTest extends TestCase
         $chore = Chore::factory()->for($household)->create();
 
         foreach (['2026-04-01', '2026-04-02', '2026-04-04', '2026-04-05'] as $day) {
-            DailyQuest::create([
-                'household_id' => $household->id,
-                'profile_id' => $kid->id,
-                'chore_id' => $chore->id,
-                'quest_date' => $day,
-                'completed_at' => now(),
-            ]);
+            $this->approve($kid, $chore, Carbon::parse("{$day} 18:00", $household->timezone));
         }
 
         StreakRepair::create(['profile_id' => $kid->id, 'repaired_date' => '2026-04-03']);
@@ -456,26 +446,20 @@ class KidStatsPageTest extends TestCase
         $this->assertMatchesRegularExpression('/Longest streak.*?>\s*5\s*<.*?days/s', $html);
     }
 
-    public function test_it_reports_the_quest_clear_rate(): void
+    public function test_it_reports_charms_cast_and_what_they_lit_up(): void
     {
         $household = Household::factory()->create();
         $kid = $this->loginKid($household);
-        $chore = Chore::factory()->for($household)->create();
+        Chore::factory()->for($household)->count(3)->create();
 
-        foreach (range(1, 4) as $daysAgo) {
-            DailyQuest::create([
-                'household_id' => $household->id,
-                'profile_id' => $kid->id,
-                'chore_id' => $chore->id,
-                'quest_date' => now()->subDays($daysAgo)->toDateString(),
-                'completed_at' => $daysAgo <= 3 ? now()->subDays($daysAgo) : null,
-            ]);
-        }
+        $perks = app(PerkInventoryService::class);
+        $perks->grant($kid, PerkEffect::QuestCharm, OwnedPerk::SOURCE_GIFT);
+        $perks->use($kid, PerkEffect::QuestCharm);
 
         Volt::test('kid.stats')
             ->assertOk()
-            ->assertSee('Quests cleared')
-            ->assertSee('of 4 handed out');
+            ->assertSee('Charms cast')
+            ->assertSee('3 chores lit up');
     }
 
     public function test_it_reports_wheel_spins_badges_and_cash_outs(): void
@@ -519,7 +503,7 @@ class KidStatsPageTest extends TestCase
         Volt::test('kid.stats')
             ->assertOk()
             ->assertSee('Nothing approved yet.')
-            ->assertSee('none handed out yet')
+            ->assertSee('none cast yet')
             ->assertSee('still to come')
             ->assertSee('nothing cashed out yet');
     }
@@ -861,7 +845,7 @@ class KidStatsPageTest extends TestCase
         ]);
         OwnedPerk::create([
             'profile_id' => $kid->id,
-            'effect' => PerkEffect::QuestReroll,
+            'effect' => PerkEffect::QuestCharm,
             'source' => OwnedPerk::SOURCE_CHEST,
             'acquired_at' => now(),
         ]);

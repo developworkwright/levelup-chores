@@ -8,6 +8,7 @@ use App\Services\FeedDrawings;
 use App\Services\FeedPhotos;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -63,7 +64,33 @@ class FeedMediaController extends Controller
             default => [null, null, null],
         };
 
-        abort_unless($path && $disk instanceof Filesystem && $disk->exists($path), 404);
+        /*
+         * A readable message whose file is not on the disk is the one 404 here
+         * that is a fault rather than a refusal, and it used to look identical
+         * to a stranger guessing a URL.
+         *
+         * It has a real cause: the disk moves. A picture written while
+         * `DRAWINGS_DISK` was the local folder is on a container that no longer
+         * exists the moment the app is pointed at a bucket, and the row outlives
+         * the file. So say which path on which disk came up empty — the answer
+         * is either "the bucket never had it" or "the name is wrong", and those
+         * are different bugs.
+         */
+        // Asked once and reused. On a bucket this is a HEAD request, and every
+        // picture in every room pays for it — checking twice to log a failure
+        // would double that for the pictures that are perfectly fine.
+        $readable = $path !== null && $disk instanceof Filesystem && $disk->exists($path);
+
+        if (! $readable && $path !== null && $disk instanceof Filesystem) {
+            Log::warning('Feed picture is missing from the disk it is filed on.', [
+                'message_id' => $message->id,
+                'kind' => $message->kind->value,
+                'path' => $path,
+                'disk' => config('filesystems.drawings_disk'),
+            ]);
+        }
+
+        abort_unless($readable, 404);
 
         return $disk->response($path, null, [
             'Content-Type' => $type,

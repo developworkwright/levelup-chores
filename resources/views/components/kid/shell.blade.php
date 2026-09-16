@@ -376,7 +376,7 @@
                 'accent' => 'var(--fq-lime)',
                 'sub' => 'Powered Up',
                 'label' => 'The day is yours',
-                'note' => 'Better chest · '.App\Services\ChoreService::HAND_BONUS_CARDS.' extra quest cards tomorrow',
+                'note' => 'The bonus chest rolls on the good table',
             ],
         ]);
     }
@@ -568,9 +568,13 @@
                         role="img"
                         data-powered="{{ $poweredUpToday ? 'on' : 'off' }}"
                         aria-label="{{ $poweredUpToday ? 'Powered up today' : 'Not powered up yet' }}"
+                        {{-- One extra now, where there used to be two: the
+                             bigger quest hand went with the quest itself. The
+                             bolt stays — the state is the point, and the chest
+                             is a real upgrade a kid can see. --}}
                         title="{{ $poweredUpToday
-                            ? 'Powered up — the chest rolls on the good table, and '.\App\Services\ChoreService::HAND_BONUS_CARDS.' extra quest cards tomorrow'
-                            : 'Do one chore today to power up: the chest rolls on the good table, and '.\App\Services\ChoreService::HAND_BONUS_CARDS.' extra quest cards tomorrow' }}"
+                            ? 'Powered up — the bonus chest rolls on the good table'
+                            : 'Do one chore today to power up: the bonus chest rolls on the good table' }}"
                     ></i>
                 </div>
                 {{-- The number alone never changed colour, so it never read as

@@ -109,9 +109,6 @@ class PerkInventoryService
             PerkEffect::WheelRespin => $this->spins->hasSpunToday($profile)
                 ? null
                 : 'Spin the wheel first',
-            PerkEffect::QuestReroll => $this->chores->isQuestDoneToday($profile)
-                ? "Today's quest is already cleared"
-                : null,
             PerkEffect::StreakRestore => $this->streakRestoreReason($profile),
             PerkEffect::MysteryHint => $this->mysteryHintReason($profile),
             PerkEffect::NameMonster => $this->monsters->nameable($profile->household) === null
@@ -142,23 +139,23 @@ class PerkInventoryService
     }
 
     /**
-     * A charm has to be cast at a chest that is still shut.
+     * A charm needs chores left to land on.
      *
-     * Charming cards the kid has already read isn't a gamble, it's shopping —
-     * they would only ever buy it on a hand worth improving. The wording says
-     * "before you open it" rather than "too late" because on most days the
-     * refusal is a timing mistake they can avoid tomorrow.
+     * The only way that fails is a board with nothing claimable — everything
+     * taken, closed or already charmed — and on that board the charm would
+     * spend a ticket lighting up rows nobody can tap. Deliberately *not*
+     * blocked once some chores are charmed: a second charm widens the spread,
+     * which is a thing worth being able to buy.
      */
     private function questCharmReason(Profile $profile): ?string
     {
-        $quest = $this->chores->questFor($profile);
+        $charmed = $this->chores->charmedChoreIdsFor($profile);
 
-        return match (true) {
-            $quest->completed_at !== null => "Today's quest is already cleared",
-            $quest->isCharmed() => "Today's quest is already charmed",
-            $quest->dealt_at !== null => 'Charm the chest before you open it',
-            default => null,
-        };
+        $spare = $this->chores->boardFor($profile)
+            ->filter(fn (array $entry) => $entry['state'] === 'ready')
+            ->reject(fn (array $entry) => in_array($entry['chore']->id, $charmed, true));
+
+        return $spare->isEmpty() ? 'Nothing left on the board to charm' : null;
     }
 
     /**
@@ -168,7 +165,6 @@ class PerkInventoryService
     {
         return match ($effect) {
             PerkEffect::WheelRespin => $this->applyWheelRespin($profile),
-            PerkEffect::QuestReroll => $this->applyQuestReroll($profile),
             PerkEffect::StreakRestore => $this->applyStreakRestore($profile),
             PerkEffect::MysteryHint => $this->applyMysteryHint($profile),
             PerkEffect::NameMonster => $this->applyNameMonster($profile, $input),
@@ -192,14 +188,19 @@ class PerkInventoryService
 
     private function applyQuestCharm(Profile $profile): string
     {
-        if (! $this->chores->charmQuest($profile)) {
-            throw new PerkUnavailableException('There is no chest left to charm today.');
+        $charmed = $this->chores->charmBoard($profile);
+
+        if ($charmed->isEmpty()) {
+            throw new PerkUnavailableException('There is nothing left on the board to charm.');
         }
 
-        // Deliberately promises nothing specific. What the charm did isn't
-        // decided until the lid comes up, and naming an outcome here would
-        // spend the reveal a beat before the animation that carries it.
-        return 'The chest is charmed — open it and see.';
+        // Counts them rather than naming them, and that is the point: the
+        // board has just repainted with the charm marks on it, so saying which
+        // chores got lit would be reading out something already on screen —
+        // and on a five-chore list it would be a paragraph.
+        return $charmed->count() === 1
+            ? '1 chore on your board just went charmed — find it!'
+            : $charmed->count().' chores on your board just went charmed — find them!';
     }
 
     private function applyNightSaver(Profile $profile): string
@@ -242,17 +243,6 @@ class PerkInventoryService
         return 'Wheel reset — take another spin!';
     }
 
-    private function applyQuestReroll(Profile $profile): string
-    {
-        $quest = $this->chores->rerollQuest($profile);
-
-        if (! $quest) {
-            throw new PerkUnavailableException('There is no other quest to swap to.');
-        }
-
-        return 'New quest in the chest — open it to see!';
-    }
-
     private function applyStreakRestore(Profile $profile): string
     {
         if (! $this->streaks->repairStreak($profile)) {
@@ -285,9 +275,7 @@ class PerkInventoryService
             return null;
         }
 
-        // Any chore closes the window now, not just the quest — see
-        // repairableStreakDate(). Naming the quest here would refuse a kid over
-        // a rule that isn't the one being applied.
+        // Any chore closes the window — see repairableStreakDate().
         return $this->streaks->streakDaySecuredToday($profile)
             ? 'Too late — today already counts'
             : 'No broken streak to fix';

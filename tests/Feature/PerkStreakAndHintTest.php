@@ -48,18 +48,13 @@ class PerkStreakAndHintTest extends TestCase
         return app(PerkInventoryService::class)->use($kid, $effect);
     }
 
-    /** Clears the day's quest end to end so it counts toward the streak. */
-    private function clearQuest(Profile $kid, Profile $parent): void
+    /** Does a chore end to end so the day counts toward the streak. */
+    private function earnTheDay(Profile $kid, Profile $parent): void
     {
         $chores = app(ChoreService::class);
-        $quest = $chores->claimQuest($kid);
+        $chore = $kid->household->chores()->firstOrFail();
 
-        $completion = $kid->choreCompletions()
-            ->where('chore_id', $quest->chore_id)
-            ->latest('id')
-            ->firstOrFail();
-
-        $chores->approve($completion, $parent);
+        $chores->approve($chores->claim($kid, $chore), $parent);
     }
 
     public function test_restoring_a_streak_buys_back_the_missed_day(): void
@@ -71,9 +66,9 @@ class PerkStreakAndHintTest extends TestCase
 
         // Two days on, one missed, then standing on the next day with today's
         // quest still untouched — the only window a restore is good for.
-        $this->clearQuest($kid, $parent);
+        $this->earnTheDay($kid, $parent);
         Carbon::setTestNow(now()->addDay());
-        $this->clearQuest($kid, $parent);
+        $this->earnTheDay($kid, $parent);
 
         Carbon::setTestNow(now()->addDays(2));
 
@@ -98,11 +93,11 @@ class PerkStreakAndHintTest extends TestCase
         );
 
         // And today's quest lands on top of the rescued chain.
-        $this->clearQuest($kid, $parent);
+        $this->earnTheDay($kid, $parent);
         $this->assertSame(4, $kid->refresh()->streak);
     }
 
-    public function test_a_restore_is_refused_once_todays_quest_is_cleared(): void
+    public function test_a_restore_is_refused_once_today_is_earned(): void
     {
         // The window closes when the new chain starts: buying the broken day
         // back at that point would splice a finished run onto a fresh one.
@@ -111,12 +106,12 @@ class PerkStreakAndHintTest extends TestCase
         $kid = Profile::factory()->for($household)->create(['bonus_tickets' => 10]);
         Chore::factory()->for($household)->create(['points' => 0, 'min_age' => 1]);
 
-        $this->clearQuest($kid, $parent);
+        $this->earnTheDay($kid, $parent);
         Carbon::setTestNow(now()->addDay());
-        $this->clearQuest($kid, $parent);
+        $this->earnTheDay($kid, $parent);
 
         Carbon::setTestNow(now()->addDays(2));
-        $this->clearQuest($kid, $parent);
+        $this->earnTheDay($kid, $parent);
 
         $this->assertSame(1, $kid->refresh()->streak);
 
@@ -133,9 +128,9 @@ class PerkStreakAndHintTest extends TestCase
         $kid = Profile::factory()->for($household)->create(['bonus_tickets' => 10]);
         Chore::factory()->for($household)->create(['points' => 0, 'min_age' => 1]);
 
-        $this->clearQuest($kid, $parent);
+        $this->earnTheDay($kid, $parent);
         Carbon::setTestNow(now()->addDay());
-        $this->clearQuest($kid, $parent);
+        $this->earnTheDay($kid, $parent);
 
         // Buying is always allowed — holding one against a future slip is the
         // point. Using it is what gets refused while nothing is broken.
@@ -163,7 +158,7 @@ class PerkStreakAndHintTest extends TestCase
             if ($day > 0) {
                 Carbon::setTestNow(now()->addDay());
             }
-            $this->clearQuest($kid, $parent);
+            $this->earnTheDay($kid, $parent);
         }
 
         $this->assertSame(3, $kid->refresh()->streak);
@@ -183,7 +178,7 @@ class PerkStreakAndHintTest extends TestCase
         $this->assertSame(0, $kid->refresh()->streak);
 
         $this->buyAndUse($kid, PerkEffect::StreakRestore);
-        $this->clearQuest($kid, $parent);
+        $this->earnTheDay($kid, $parent);
 
         // Three cleared days, the bought-back one, and today.
         $this->assertSame(5, $kid->refresh()->streak);

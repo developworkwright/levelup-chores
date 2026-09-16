@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Enums\CompletionStatus;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
-use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\LedgerEntry;
 use App\Models\Profile;
@@ -50,7 +49,7 @@ class StreakCycleTest extends TestCase
      * page leaves it alone.
      *
      * syncStreak() is O(1) — it only asks whether today or yesterday counts —
-     * so one approved quest behind them is all it takes to keep the cached
+     * so one approved chore behind them is all it takes to keep the cached
      * number. Without it the page zeroes the streak before anything renders.
      */
     private function kidOnStreak(int $streak): Profile
@@ -59,15 +58,6 @@ class StreakCycleTest extends TestCase
         $kid = Profile::factory()->for($this->household)->create(['streak' => $streak]);
 
         $yesterday = now()->copy()->subDay();
-
-        DailyQuest::create([
-            'household_id' => $this->household->id,
-            'profile_id' => $kid->id,
-            'chore_id' => $chore->id,
-            'quest_date' => $yesterday->toDateString(),
-            'revealed_at' => $yesterday,
-            'completed_at' => $yesterday,
-        ]);
 
         ChoreCompletion::create([
             'chore_id' => $chore->id,

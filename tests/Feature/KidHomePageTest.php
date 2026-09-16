@@ -3,12 +3,9 @@
 namespace Tests\Feature;
 
 use App\Enums\CompletionStatus;
-use App\Enums\PerkEffect;
-use App\Models\BonusPerk;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyChest;
-use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Services\ChestService;
@@ -71,7 +68,7 @@ class KidHomePageTest extends TestCase
         Volt::test('kid.home')
             ->assertOk()
             ->assertSeeInOrder([
-                'Daily Quest',
+                'Nothing in yet today',
                 'Bonus Chest',
                 'Streak Chest',
                 // Not a section any more — a strip pointing at the wheel on
@@ -93,78 +90,35 @@ class KidHomePageTest extends TestCase
             ->assertDontSee('Step 2');
     }
 
-    public function test_the_quest_chest_deals_picks_and_claims_without_leaving_home(): void
+    /**
+     * The quest chest used to be the first thing on this page: opened here,
+     * picked here, claimed here. It is gone, and so is the charm button that
+     * only made sense beside it — a charm lands on the board, so it is bought
+     * and cast on Quests.
+     *
+     * What is left is a line saying whether anything is in yet, and a way
+     * through to the board. Home answers "what now?"; the board is the work.
+     */
+    public function test_the_work_is_pointed_at_rather_than_done_here(): void
     {
-        // The whole point of the page: a kid lands here and the first thing
-        // they see is a chest they can actually open.
-        $page = Volt::test('kid.home')
+        Volt::test('kid.home')
             ->assertOk()
-            ->assertSee('Quest Chest', escape: false)
-            ->call('dealHand');
-
-        $hand = app(ChoreService::class)->offeredChoresFor($this->kid);
-
-        $page->call('chooseQuest', $hand->first()->id)
-            ->assertOk()
-            ->assertSee($hand->first()->name)
-            ->assertSee('Mark it done')
-            ->call('claimQuest')
-            ->assertOk();
-
-        $this->assertNotNull(
-            ChoreCompletion::where('profile_id', $this->kid->id)
-                ->where('chore_id', $hand->first()->id)
-                ->first()
-        );
+            ->assertSee('Nothing in yet today')
+            ->assertSee('Any chore signed off keeps your run alive.')
+            ->assertSee(route('kid.quests'), escape: false)
+            // The chest, the hand and the charm all left together.
+            ->assertDontSee('Quest Chest')
+            ->assertDontSee('Buy a Quest Charm');
     }
 
-    public function test_the_charm_can_still_be_bought_and_cast_from_home(): void
+    public function test_work_already_in_reads_as_the_night_being_safe(): void
     {
-        // The charm's window shuts the moment the chest opens, so a copy of the
-        // hero that quietly dropped these buttons would cost a kid a ticket
-        // they had already spent. Home draws the same component Quests does.
-        $charm = BonusPerk::where('household_id', $this->household->id)
-            ->where('effect', PerkEffect::QuestCharm)
-            ->firstOrFail();
-
-        $charm->update(['enabled' => true, 'cost' => 2]);
-
-        $this->kid->update(['bonus_tickets' => 5]);
+        app(ChoreService::class)->claim($this->kid, $this->household->chores->first());
 
         Volt::test('kid.home')
             ->assertOk()
-            ->assertSee('Buy a Quest Charm')
-            ->call('buyQuestCharm')
-            ->assertOk()
-            ->assertSee('Use Quest Charm');
-    }
-
-    public function test_a_quest_waiting_on_a_parent_says_so_rather_than_reading_as_done(): void
-    {
-        $service = app(ChoreService::class);
-        $service->revealQuest($this->kid);
-        $service->claimQuest($this->kid);
-
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('Waiting on parent')
-            ->assertDontSee('Mark it done');
-    }
-
-    public function test_a_sent_back_quest_says_so(): void
-    {
-        $service = app(ChoreService::class);
-        $quest = $service->questFor($this->kid);
-        $service->revealQuest($this->kid);
-        $service->claimQuest($this->kid);
-
-        ChoreCompletion::where('profile_id', $this->kid->id)
-            ->where('chore_id', $quest->chore_id)
-            ->update(['status' => CompletionStatus::Rejected]);
-
-        Volt::test('kid.home')
-            ->assertOk()
-            ->assertSee('Sent back');
+            ->assertSee("Work's in — tonight counts", escape: false)
+            ->assertDontSee('Nothing in yet today');
     }
 
     public function test_the_bonus_chest_opens_in_place(): void
@@ -187,9 +141,7 @@ class KidHomePageTest extends TestCase
             ->assertOk()
             ->assertSee('Hold on');
 
-        $service = app(ChoreService::class);
-        $service->revealQuest($this->kid);
-        $service->claimQuest($this->kid);
+        app(ChoreService::class)->claim($this->kid, $this->household->chores->first());
 
         Volt::test('kid.home')
             ->assertOk()
@@ -239,24 +191,13 @@ class KidHomePageTest extends TestCase
      * A streak that survives being looked at.
      *
      * The standings sync every kid's streak before drawing them — `streak` is a
-     * cache, and a run with no approved quest behind it is expired on sight. So
+     * cache, and a run with no approved chore behind it is expired on sight. So
      * a fixture that only sets the number renders as a house of zeroes.
      */
     private function runOf(Profile $kid, int $nights): void
     {
         $yesterday = Carbon::parse('2026-04-30 12:00', $this->household->timezone);
         $chore = $this->household->chores->first();
-
-        DailyQuest::create([
-            'household_id' => $this->household->id,
-            'profile_id' => $kid->id,
-            'chore_id' => $chore->id,
-            'offered_chore_ids' => [$chore->id],
-            'quest_date' => $yesterday->toDateString(),
-            'dealt_at' => $yesterday,
-            'revealed_at' => $yesterday,
-            'completed_at' => $yesterday,
-        ]);
 
         ChoreCompletion::create([
             'chore_id' => $chore->id,
@@ -381,30 +322,21 @@ class KidHomePageTest extends TestCase
             ->assertSee('Message everyone', escape: false);
     }
 
-    /** Above the quest, because a chest does not mind being opened tomorrow. */
+    /** Above the day, because a chest does not mind being opened tomorrow. */
     public function test_the_feed_sits_above_the_day(): void
     {
         Volt::test('kid.home')
             ->assertOk()
-            ->assertSeeInOrder(['Family', 'Daily Quest', 'Bonus Chest']);
+            ->assertSeeInOrder(['Family', 'Nothing in yet today', 'Bonus Chest']);
     }
 
-    /** A genuine run of cleared quests, so syncStreak() leaves the streak alone. */
+    /** A genuine run of approved chores, so syncStreak() leaves the streak alone. */
     private function giveKidAStreak(int $days): void
     {
         $chore = Chore::where('household_id', $this->household->id)->firstOrFail();
 
         foreach (range(1, $days) as $daysAgo) {
             $at = now()->copy()->subDays($daysAgo);
-
-            DailyQuest::create([
-                'household_id' => $this->household->id,
-                'profile_id' => $this->kid->id,
-                'chore_id' => $chore->id,
-                'quest_date' => $at->toDateString(),
-                'revealed_at' => $at,
-                'completed_at' => $at,
-            ]);
 
             ChoreCompletion::create([
                 'chore_id' => $chore->id,
@@ -508,15 +440,15 @@ class KidHomePageTest extends TestCase
         $this->assertSame($sorted, $widths, 'The chests grow along the track.');
     }
 
-    public function test_the_three_chests_are_not_all_the_same_colour(): void
+    public function test_the_two_chests_are_not_the_same_colour(): void
     {
-        // They stack on one page now. Three identical gold boxes read as one
-        // thing repeated rather than as three different rewards.
+        // They stack on one page. Identical gold boxes read as one thing
+        // repeated rather than as two different rewards. There were three
+        // until the quest chest went.
         $this->kid->update(['streak' => 3, 'pending_streak_chest' => 3]);
 
         Volt::test('kid.home')
             ->assertOk()
-            ->assertSee('background: linear-gradient(180deg, #ffe98a, #e0b312)', escape: false)
             ->assertSee('background: var(--fq-chest-blue-fill)', escape: false)
             ->assertSee('background: var(--fq-chest-streak-fill)', escape: false);
     }
@@ -543,14 +475,16 @@ class KidHomePageTest extends TestCase
             ->assertDontSee('Boss Fight');
     }
 
-    public function test_home_still_renders_when_the_household_has_nothing_to_quest_on(): void
+    public function test_home_still_renders_when_the_household_has_no_chores_at_all(): void
     {
         // Every chore gone. This is the one page a kid always lands on, so it
-        // is the one page that must never be the thing that breaks.
+        // is the one page that must never be the thing that breaks. It used to
+        // be able to: asking for a quest in a household with nothing eligible
+        // threw, and every card on the page was guarded against it.
         Chore::query()->delete();
 
         Volt::test('kid.home')
             ->assertOk()
-            ->assertSee('No quest today');
+            ->assertSee('Bonus Chest');
     }
 }

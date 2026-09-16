@@ -7,12 +7,10 @@ use App\Enums\LedgerKind;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyMystery;
-use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\LedgerEntry;
 use App\Models\Profile;
 use App\Services\ChoreService;
-use App\Services\HouseholdClock;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -397,24 +395,12 @@ class MysteryChoreTest extends TestCase
         );
     }
 
-    public function test_the_mystery_chore_stays_in_the_normal_side_quest_board(): void
+    public function test_the_mystery_chore_stays_in_the_normal_board(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
         $chore = Chore::factory()->for($household)->create(['name' => 'Sweep the porch']);
-        $filler = Chore::factory()->for($household)->create(['name' => 'Filler chore']);
-
-        // Pin today's quest to the filler chore — otherwise the mystery
-        // chore could be dealt as a quest card itself and correctly NOT show
-        // on the side-quest board, which isn't what this checks. The hand is
-        // pinned too: a row with no hand is one questFor() deals into.
-        DailyQuest::create([
-            'household_id' => $household->id,
-            'profile_id' => $kid->id,
-            'chore_id' => $filler->id,
-            'offered_chore_ids' => [$filler->id],
-            'quest_date' => HouseholdClock::for($household)->today(),
-        ]);
+        Chore::factory()->for($household)->create(['name' => 'Filler chore']);
 
         $board = $this->service()->boardFor($kid);
 
@@ -480,18 +466,7 @@ class MysteryChoreTest extends TestCase
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
         Chore::factory()->for($household)->create(['name' => 'Sweep the porch', 'points' => 100]);
-        $filler = Chore::factory()->for($household)->create(['name' => 'Filler quest chore']);
-
-        // Pin today's quest — and its hand — to the filler chore so the
-        // mystery chore is guaranteed to still be sitting on the side-quest
-        // board rather than dealt as a card.
-        DailyQuest::create([
-            'household_id' => $household->id,
-            'profile_id' => $kid->id,
-            'chore_id' => $filler->id,
-            'offered_chore_ids' => [$filler->id],
-            'quest_date' => HouseholdClock::for($household)->today(),
-        ]);
+        Chore::factory()->for($household)->create(['name' => 'Filler chore']);
 
         Auth::guard('profile')->login($kid);
 

@@ -32,32 +32,30 @@ use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
 /**
- * The board: today's target, the main quest, and everything else there is to do.
+ * The board: today's target and everything there is to do.
  *
  * It used to be the kid's whole day — the loot tray, the chests, the spin and
  * the boss all sat on it too, which made it a long page a kid had to already
  * know their way around. Those moved to Home, which is organised by *when*
  * rather than by what kind of thing something is. What's left here is the work:
- * the main quest (<x-quest-hero>, shared with Home so there is one
- * implementation of the chest rather than two), the bonus wheel, the side
- * quests, the gratitude quest, the bounty board and the mystery chore.
+ * the bonus wheel, the board, the gratitude quest, the bounty board and the
+ * mystery chore.
+ *
+ * The main quest used to sit at the top of it, and is gone. It was a second
+ * board on top of this one: a chest, a hand of three cards, and — while the kid
+ * decided — up to five chores cut out of the list below, so the page that shows
+ * a kid what there is to do was hiding some of it. What the quest paid for is
+ * still paid, by the board itself. The Quest Charm is what survived it, and it
+ * now lands here: five random rows, half again each, for this kid only.
  *
  * The wheel is the one that came back. It went to Home with the rest and the
  * kids kept opening this page looking for it, which was them being right: the
- * wheel lands on a side quest and multiplies it, and every one of those rows
- * is on this page. Home keeps a one-line pointer at it.
+ * wheel lands on a chore and multiplies it, and every one of those rows is on
+ * this page. Home keeps a one-line pointer at it.
  */
 new class extends Component
 {
     public Profile $profile;
-
-    /**
-     * Snapshotted at mount. Arriving with the quest already cleared
-     * collapses the hero so the chore board isn't pushed down the page on
-     * every tab switch — but clearing it *during* this visit keeps the full
-     * card on screen, so the moment still gets its celebration.
-     */
-    public bool $questDoneOnArrival = false;
 
     /**
      * Where the wheel is pointing, in degrees. Restored at mount from a spin
@@ -109,13 +107,6 @@ new class extends Component
      * a button that silently does nothing explains none of it.
      */
     public ?string $bountyMessage = null;
-
-    /**
-     * Why a card couldn't be taken. Same reasoning as boardMessage — the hand
-     * is dealt from chores the whole household shares, so a sibling can claim
-     * one out from under a kid who is still deciding.
-     */
-    public ?string $questCardMessage = null;
 
     public string $search = '';
 
@@ -419,6 +410,12 @@ new class extends Component
     {
         $this->boardMessage = null;
         $this->bountyMessage = null;
+
+        // The board is memoised for the life of the request, and this button
+        // exists for the kid who thinks a sibling has just taken something.
+        // Handing them the answer this request already worked out would make
+        // the one control built to defeat staleness the thing that caches it.
+        app(ChoreService::class)->forgetBoards();
     }
 
     /**
@@ -470,8 +467,6 @@ new class extends Component
 
         abort_unless($this->profile->isKid(), 403);
 
-        $this->questDoneOnArrival = app(ChoreService::class)->isQuestDoneToday($this->profile);
-
         // $4 in this household's own money. The bands and the stepper are
         // declared in dollars and resolved against points_per_dollar, so a
         // household that rates a chore differently still gets a "$2–5" button
@@ -488,116 +483,6 @@ new class extends Component
 
             $this->wheelDeg = $this->restingDeg((int) $index, $slice);
             $this->spinRevealed = true;
-        }
-    }
-
-    /**
-     * Opens the quest chest, putting three cards on the table.
-     *
-     * No celebration here: the chest no longer reveals anything, it deals. The
-     * card that gets announced is the one they choose.
-     */
-    public function dealHand(): void
-    {
-        app(ChoreService::class)->dealQuestHand($this->profile);
-    }
-
-    /**
-     * Takes one of today's cards. The other two have already burned client-side
-     * by the time this runs — see <x-quest-cards>.
-     */
-    public function chooseQuest(int $choreId): void
-    {
-        $this->questCardMessage = null;
-
-        $service = app(ChoreService::class);
-        $quest = $service->chooseQuest($this->profile, $choreId);
-
-        if (! $quest) {
-            // Almost always a sibling getting there first. The cards re-render
-            // with the claimant named on whichever one went, so the message
-            // only has to explain why the tap bounced.
-            $this->questCardMessage = "That one just went — pick another card.";
-
-            return;
-        }
-
-        // The charm's hand-in roll is deliberately not part of this number:
-        // it hasn't happened yet, and quoting a total that later grows is a
-        // better surprise than one that appears to shrink.
-        $bonus = $service->cardBonusesFor($this->profile)[$quest->chore_id] ?? 0;
-        $points = $quest->chore->points * app(SpinService::class)->multiplierFor($this->profile, $quest->chore) + $bonus;
-
-        // Dispatched from the server rather than from the card, so it can only
-        // fire on a pick that actually landed.
-        $this->dispatch(
-            'celebrate',
-            style: 'confetti',
-            motion: 'burst',
-            origin: 'tap',
-            tier: 'big',
-            hold: 2600,
-            card: [
-                'accent' => $bonus > 0 ? 'var(--fq-gold)' : 'var(--fq-lime)',
-                'sub' => $bonus > 0 ? 'Bold Quest Taken' : "Today's Quest",
-                'label' => $quest->chore->name,
-                'note' => '+'.number_format($points).' PTS',
-            ],
-        );
-    }
-
-    /**
-     * Kept for the paths that need a quest simply decided rather than chosen —
-     * see ChoreService::revealQuest().
-     */
-    public function revealQuest(): void
-    {
-        app(ChoreService::class)->revealQuest($this->profile);
-    }
-
-    public function claimQuest(): void
-    {
-        $service = app(ChoreService::class);
-
-        // The chest has to be opened before the quest can be claimed.
-        if (! $service->isQuestRevealedToday($this->profile)) {
-            return;
-        }
-
-        $quest = $service->questFor($this->profile);
-        $wasDone = $service->isQuestDoneToday($this->profile);
-        $boosted = app(SpinService::class)->multiplierFor($this->profile, $quest->chore) > 1;
-
-        $service->claimQuest($this->profile);
-
-        // Read after the claim, which is what settles it. This is the charm's
-        // second chance and the reason it can't really be wasted — a hand that
-        // looked ordinary can still pay here.
-        $charmPayout = $service->charmPayoutFor($this->profile);
-
-        // The streak (and any milestone bonus) now moves on a parent's
-        // approval, so don't quote a day count here that hasn't been earned
-        // yet — and when it is earned, the chest still does the reveal. A quest
-        // that happens to be the mystery chore says nothing about it either,
-        // for the same reason claimChore() doesn't.
-        if (! $wasDone) {
-            if ($boosted) {
-                $this->dispatch('celebrate', message: 'Quest cleared! Bonus wheel treat earned.', treat: 'cookie', motion: 'burst', origin: 'tap');
-            } else {
-                $this->dispatch('celebrate', message: 'Quest cleared! Your streak grows once a parent approves.', motion: 'burst', origin: 'tap');
-            }
-
-            // Queued behind the clear rather than folded into it: it's a second
-            // piece of news, and it is the whole reason the charm was bought.
-            if ($charmPayout > 0) {
-                $this->dispatch(
-                    'celebrate',
-                    message: 'The charm paid out — +'.number_format($charmPayout).' bonus points!',
-                    style: 'star',
-                    motion: 'burst',
-                    origin: 'tap',
-                );
-            }
         }
     }
 
@@ -736,8 +621,8 @@ new class extends Component
             : "Today's gratitude quest is already done — back tomorrow!";
     }
     /**
-     * Every perk with a button on this page: the quest charm, the reroll and
-     * the mystery hint on the board, and the wheel respin beside the spin.
+     * Every perk with a button on this page: the quest charm and the mystery
+     * hint on the board, and the wheel respin beside the spin.
      */
     public function usePerk(string $effect): void
     {
@@ -783,20 +668,19 @@ new class extends Component
     /**
      * Buys a Quest Charm without leaving the page.
      *
-     * The charm is the one perk whose whole value is spent in a window that
-     * closes: it can only be cast on a chest that is still shut, and a kid who
-     * has to go to the Bonus Shop to buy one comes back to a page they have
-     * usually opened by then. Every other perk keeps until you need it, which
-     * is why this shortcut exists here and not on all of them.
+     * Sold from here because here is where it is spent: a charm lands on this
+     * board, for the rest of today, and a kid who has to go to the Bonus Shop
+     * to buy one has left the thing it acts on. The same reasoning as the OP
+     * Spin's button beside the wheel.
      */
     public function buyQuestCharm(): void
     {
-        $this->buyPerk(PerkEffect::QuestCharm, 'cast it before you open the chest!');
+        $this->buyPerk(PerkEffect::QuestCharm, 'cast it over the board!');
     }
 
     /**
      * Sold from beside the wheel for the same reason the charm is sold from
-     * the hero: the window to use one closes the moment the wheel goes, and a
+     * the board: the window to use one closes the moment the wheel goes, and a
      * kid who has to leave for the shop first comes back to a spent spin.
      */
     public function buyOpSpin(): void
@@ -933,9 +817,8 @@ new class extends Component
     /**
      * What the wheel can land on, or nothing at all.
      *
-     * Guarded because the eligible pool is built by excluding today's quest
-     * hand, so asking for it *deals* one — and a household with no chores at
-     * all makes that throw. Every entry point to the wheel goes through here.
+     * Guarded because a household whose board is empty makes the spin throw.
+     * Every entry point to the wheel goes through here.
      *
      * @return \Illuminate\Support\Collection<int, \App\Models\Chore>
      */
@@ -962,18 +845,6 @@ new class extends Component
 
         $service = app(ChoreService::class);
         $chore = $boost->chore;
-        $quest = $service->questFor($this->profile);
-
-        // The chest reveal is the whole ceremony of the main quest, so a boost
-        // that landed on it gets pointed back up the page rather than quietly
-        // claimed from under an unopened chest.
-        if ($quest->chore_id === $chore->id) {
-            return [
-                'claimable' => false,
-                'label' => 'This is your main quest',
-                'note' => 'Open the chest at the top of this page to claim it.',
-            ];
-        }
 
         $state = $service->stateFor($this->profile, $chore);
         $claimant = $service->claimantFor($chore);
@@ -1085,11 +956,10 @@ new class extends Component
         }
 
         $service = app(ChoreService::class);
-        $quest = $service->questFor($this->profile);
 
         // stateFor() already accounts for the mystery chore's household-wide
         // (not per-kid) exclusivity, so no special-casing is needed here.
-        if ($chore->id === $quest->chore_id || ! $chore->isAppropriateFor($this->profile)) {
+        if (! $chore->isAppropriateFor($this->profile)) {
             return false;
         }
 
@@ -1164,44 +1034,6 @@ new class extends Component
         $isUnavailable = fn (array $entry) => in_array($entry['state'], self::UNAVAILABLE_STATES, true);
         $shown = $this->hideUnavailable ? $board->reject($isUnavailable) : $board;
 
-        $quest = $service->questFor($this->profile);
-        $questRevealed = $quest->revealed_at !== null;
-        $questDone = $quest->completed_at !== null;
-
-        // The hand, and what each card is worth. Built here rather than in the
-        // component so the card can name a claimant the same way the board
-        // does — this is the one page that already has that lookup to hand.
-        $hand = $service->offeredChoresFor($this->profile);
-        $cardBonuses = $service->cardBonusesFor($this->profile);
-
-        $questCards = $hand->map(fn (Chore $chore) => [
-            'chore' => $chore,
-            'points' => $chore->points,
-            'bonus' => $cardBonuses[$chore->id] ?? 0,
-            'bold' => isset($cardBonuses[$chore->id]),
-            'takenBy' => $service->claimantOtherThan($chore, $this->profile)?->profile,
-            'expired' => $service->isExpired($chore),
-        ]);
-
-        // Claiming the quest sets completed_at immediately, but the points
-        // don't land until a parent approves — so "done" and "waiting" are
-        // different things and the CTA has to say which one it is. Scoped to
-        // today's household day rather than to completed_at, because a sent-back
-        // quest clears that stamp and the attempt still has to be findable —
-        // that's what turns the CTA into "have another go" instead of a bare
-        // "Mark it done" with no hint anything happened.
-        $clock = HouseholdClock::for($this->profile->household);
-
-        $questCompletion = ChoreCompletion::where('profile_id', $this->profile->id)
-            ->where('chore_id', $quest->chore_id)
-            ->where('submitted_at', '>=', $clock->startOf($clock->today()))
-            ->latest('submitted_at')
-            ->first();
-
-        $questApproved = $questCompletion?->status === CompletionStatus::Approved;
-        $questPending = $questCompletion?->status === CompletionStatus::Pending;
-        $questSentBack = $questCompletion?->status === CompletionStatus::Rejected;
-
         $boost = $spin->today($this->profile);
 
         // Before wheelChores(), which forces in whatever today's spin landed
@@ -1210,7 +1042,6 @@ new class extends Component
         $this->reconcileWheel($boost !== null);
 
         $wheelChores = $this->wheelChores();
-        $questBoosted = $boost && $boost->chore_id === $quest->chore_id;
 
         $household = $this->profile->household;
 
@@ -1303,27 +1134,6 @@ new class extends Component
         $slotTotal = (int) $slotChores->sum('points');
 
         return [
-            'quest' => $quest,
-            // A quest chore that expires is rerolled by questFor() rather than
-            // left to dead-end the day, so this is only ever a live deadline.
-            'questClosesAt' => $service->deadlineFor($quest->chore),
-            'questRevealed' => $questRevealed,
-            // The chest and the pick are separate stamps: the chest stays open
-            // across a refresh while the kid is still deciding, which is what
-            // stops the 2.6s rattle replaying every time they look at the page.
-            'handDealt' => $quest->dealt_at !== null,
-            'questCards' => $questCards,
-            'questBoldBonus' => $cardBonuses[$quest->chore_id] ?? 0,
-            // Null until the charm is cast, and its effect stays null until the
-            // chest is opened — the two together are what the cards' charm
-            // strip reads.
-            'questCharm' => $quest->isCharmed() ? $quest->charm_effect : null,
-            'questCharmed' => $quest->isCharmed(),
-            'questCharmPayout' => $service->charmPayoutFor($this->profile),
-            'questDone' => $questDone,
-            'questApproved' => $questApproved,
-            'questPending' => $questPending,
-            'questSentBack' => $questSentBack,
             'boost' => $boost,
             'boostClaim' => $this->boostClaim($boost),
             'wheelChores' => $wheelChores,
@@ -1352,12 +1162,16 @@ new class extends Component
                     ->enabled()
                     ->where('effect', PerkEffect::OpSpin)
                     ->first(),
-            'questBoosted' => $questBoosted,
-            // The bold card's bonus rides on top of any wheel multiplier
-            // rather than being multiplied by it — see BOLD_CARD_BONUS_PERCENT.
-            'questPoints' => $quest->chore->points * ($questBoosted ? $boost->multiplier : 1)
-                + ($cardBonuses[$quest->chore_id] ?? 0)
-                + $service->charmPayoutFor($this->profile),
+            // What a charm pays, for the strip above the board to quote. A
+            // constant rather than a sum: the bonus is a percentage of whatever
+            // row it lands on, so there is no single number until it lands.
+            'charmPercent' => ChoreService::CHARM_BONUS_PERCENT,
+            'charmChores' => ChoreService::CHARM_CHORES,
+            // How many rows are lit right now — the honest read of "did my
+            // ticket do anything", counted off the board the kid can see rather
+            // than off the charm rows, so a chore a sibling took since stops
+            // being counted.
+            'charmedCount' => $flagged->filter(fn (array $entry) => $entry['charmed'])->count(),
             // Filtered in PHP rather than re-queried — the board is already
             // loaded, and Chore::matches() is the in-memory twin of the
             // scope the parent admin searches with.
@@ -1402,7 +1216,7 @@ new class extends Component
             'sleepCard' => app(SleepService::class)->cardFor($this->profile),
             // Contextual "use it here" buttons for the perks that act on this
             // page, so a kid doesn't have to go hunting in the shop.
-            'heldPerks' => collect([PerkEffect::QuestReroll, PerkEffect::MysteryHint, PerkEffect::QuestCharm])
+            'heldPerks' => collect([PerkEffect::MysteryHint, PerkEffect::QuestCharm])
                 ->filter(fn (PerkEffect $effect) => $inventory->holds($this->profile, $effect))
                 ->mapWithKeys(fn (PerkEffect $effect) => [$effect->value => [
                     'effect' => $effect,
@@ -1444,8 +1258,8 @@ new class extends Component
         <x-monster-watcher :state="$monsterState" />
     @endif
 
-    {{-- One column: what you owe today, the quest that gates everything, and
-         only then the board itself and the things hanging off it. --}}
+    {{-- One column: what you owe today, then the board itself and the things
+         hanging off it. --}}
     <div class="flex flex-col gap-4">
         {{-- 1. Today's Target --}}
         <div class="flex flex-wrap items-center gap-4 rounded-[18px] border border-fq-line bg-fq-panel px-4 py-[13px]">
@@ -1505,33 +1319,6 @@ new class extends Component
                 </button>
             @endif
         </div>
-        {{-- 2. Main quest chest. There is exactly one place on this page to
-             tap it, and the card itself is shared with Home, which opens the
-             same chest at the top of its own page — see <x-quest-hero>. --}}
-        <x-quest-hero
-            :profile="$profile"
-            :household="$household"
-            :quest="$quest"
-            :quest-done-on-arrival="$questDoneOnArrival"
-            :quest-revealed="$questRevealed"
-            :hand-dealt="$handDealt"
-            :quest-cards="$questCards"
-            :quest-charm="$questCharm"
-            :quest-charmed="$questCharmed"
-            :quest-charm-payout="$questCharmPayout"
-            :quest-bold-bonus="$questBoldBonus"
-            :quest-points="$questPoints"
-            :quest-closes-at="$questClosesAt"
-            :quest-done="$questDone"
-            :quest-approved="$questApproved"
-            :quest-pending="$questPending"
-            :quest-sent-back="$questSentBack"
-            :quest-card-message="$questCardMessage"
-            :boost="$boost"
-            :quest-boosted="$questBoosted"
-            :charm-for-sale="$charmForSale"
-            :held-perks="$heldPerks"
-        />
         @if ($perkMessage)
             <div class="rounded-[16px] border border-fq-line-2 bg-fq-sunk px-4 py-3 text-sm text-fq-text-2">
                 {{ $perkMessage }}
@@ -2014,6 +1801,72 @@ new class extends Component
                 </span>
             </div>
 
+            {{-- The charm, in whichever of its three states applies: rows
+                 already lit, one in the pocket, or one for sale. The same
+                 three-state control the wheel's OP charge uses beside the SPIN
+                 button, and here for the same reason — this is the thing it
+                 acts on, so this is where it is worth a ticket.
+
+                 It sits above the bands rather than beside the board's title,
+                 because a charm changes what every row below is worth: it is a
+                 control over the list, like the bands and the chips, not a
+                 badge on it. --}}
+            <div class="flex flex-wrap items-center gap-2">
+                @if ($charmedCount > 0)
+                    <div
+                        class="flex items-center gap-2 rounded-[12px] border px-[14px] py-[10px] text-xs font-semibold"
+                        style="border-color: color-mix(in srgb, var(--fq-violet) 55%, transparent); background: color-mix(in srgb, var(--fq-violet) 16%, transparent); color: var(--fq-violet)"
+                    >
+                        <span class="font-baloo text-sm">&#10023;</span>
+                        <span>
+                            {{ $charmedCount }} {{ Str::plural('chore', $charmedCount) }} charmed &mdash;
+                            +{{ $charmPercent }}% each, today only
+                        </span>
+                    </div>
+                @endif
+
+                {{-- Offered alongside the mark, not instead of it: a second
+                     charm widens the spread, and a kid holding one after
+                     casting one should be able to spend it. --}}
+                @if (isset($heldPerks['quest_charm']))
+                    <div class="flex flex-col items-start gap-1">
+                        <x-perk-button :entry="$heldPerks['quest_charm']" />
+                        @if ($heldPerks['quest_charm']['blocked'])
+                            <span class="font-mono-fq text-[10px] text-fq-text-5">{{ $heldPerks['quest_charm']['blocked'] }}</span>
+                        @endif
+                    </div>
+                @elseif ($charmForSale)
+                    @php $canAffordCharm = $profile->bonus_tickets >= $charmForSale->cost; @endphp
+
+                    <button
+                        type="button"
+                        wire:click="buyQuestCharm"
+                        @disabled(! $canAffordCharm)
+                        title="{{ $charmForSale->description }}"
+                        class="inline-flex h-[42px] items-center gap-2 rounded-[12px] border px-[14px] text-xs font-semibold whitespace-nowrap transition hover:brightness-125 disabled:opacity-40"
+                        style="border-color: var(--fq-steel-edge); color: var(--fq-steel-text); background: var(--fq-steel-panel)"
+                    >
+                        <span class="font-baloo text-sm">{{ $charmForSale->glyph }}</span>
+                        <span>Buy a {{ $charmForSale->name }}</span>
+                        <span class="font-mono-fq text-[10px]" style="color: {{ $canAffordCharm ? 'var(--fq-lime)' : 'var(--fq-text-5)' }}">
+                            {{ $charmForSale->cost }}&#127903;
+                        </span>
+                    </button>
+
+                    {{-- A disabled button with no reason on it is the thing the
+                         board messages exist to stop. --}}
+                    @if (! $canAffordCharm)
+                        <span class="font-mono-fq text-[10px] text-fq-text-5">
+                            {{ $charmForSale->cost - $profile->bonus_tickets }} more
+                        </span>
+                    @else
+                        <span class="font-mono-fq text-[10px] text-fq-text-5">
+                            {{ $charmChores }} random chores, +{{ $charmPercent }}% each
+                        </span>
+                    @endif
+                @endif
+            </div>
+
             {{-- Price bands. Four constants over chores.points, declared in
                  dollars and resolved against the household's rate. The top one is
                  open-ended and usually empty — that's deliberate. It's where an
@@ -2190,8 +2043,14 @@ new class extends Component
                         $takenBy = $entry['takenBy'];
                         $closesAt = $entry['closesAt'];
                         $helpWanted = $entry['helpWanted'];
-                        $boosted = $questBoosted === false && $boost && $boost->chore_id === $chore->id;
-                        $payout = $chore->points * ($boosted ? $boost->multiplier : 1);
+                        $charmed = $entry['charmed'];
+                        $boosted = $boost && $boost->chore_id === $chore->id;
+                        // Read off the board rather than recomputed: the charm
+                        // rides on top of the multiplier rather than inside it,
+                        // exactly as ChoreService::claim() pays it, and this row
+                        // has to quote the number that will actually land.
+                        $charmBonus = $entry['charmBonus'];
+                        $payout = $chore->points * ($boosted ? $boost->multiplier : 1) + $charmBonus;
                         $boostColor = $boosted && $boost->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)';
                         $dimmed = $takenBy || $state === 'expired';
                         // Cadence first, then only what a kid browses by. Built the
@@ -2309,6 +2168,20 @@ new class extends Component
                                     &#9889; One-time
                                 </span>
                             @endif
+                            {{-- The charm mark. Below the other two because it
+                                 is the only one that is about this kid rather
+                                 than about the job: a flagged or one-time chore
+                                 is urgent for everybody, and a charmed one is
+                                 simply worth more to whoever paid the ticket.
+                                 It stays on a row a sibling has taken — unlike
+                                 the Help Wanted ticket, nothing about it was
+                                 lost by losing the race, and the mark is how a
+                                 kid finds out where their five landed. --}}
+                            @if ($charmed)
+                                <span class="mb-[2px] inline-block self-start rounded-[8px] px-[8px] py-[2px] font-mono-fq text-[9px] tracking-[0.14em] uppercase" style="background: color-mix(in srgb, var(--fq-violet) 24%, transparent); color: var(--fq-violet)">
+                                    &#10023; Charmed · +{{ $charmPercent }}%
+                                </span>
+                            @endif
                             <span class="text-[14.5px] leading-[1.2] font-semibold {{ $dimmed ? 'line-through decoration-2' : '' }}">{{ $chore->name }}</span>
                             <span class="font-mono-fq text-[9px] tracking-[0.06em] text-fq-text-4 uppercase">
                                 {{ implode(' · ', $tags) }}
@@ -2339,7 +2212,9 @@ new class extends Component
                         <div class="flex flex-none flex-col items-end">
                             <span
                                 class="font-baloo text-[19px] leading-none font-extrabold whitespace-nowrap"
-                                style="color: {{ $takenBy ? 'var(--fq-text-5)' : ($boosted ? $boostColor : 'var(--fq-lime)') }}"
+                                style="color: {{ $takenBy
+                                    ? 'var(--fq-text-5)'
+                                    : ($boosted ? $boostColor : ($charmed ? 'var(--fq-violet)' : 'var(--fq-lime)')) }}"
                             >{{ $money($payout) }}</span>
                             <span class="font-mono-fq text-[8.5px] text-fq-text-4">{{ $payout }} PTS</span>
                         </div>
@@ -2397,8 +2272,10 @@ new class extends Component
             @if ($confirming)
                 @php
                     $askChore = $confirming['chore'];
-                    $askBoosted = $questBoosted === false && $boost && $boost->chore_id === $askChore->id;
-                    $askPayout = $askChore->points * ($askBoosted ? $boost->multiplier : 1);
+                    $askBoosted = $boost && $boost->chore_id === $askChore->id;
+                    $askCharmed = $confirming['charmed'];
+                    $askCharmBonus = $confirming['charmBonus'];
+                    $askPayout = $askChore->points * ($askBoosted ? $boost->multiplier : 1) + $askCharmBonus;
                     $askTags = [$askChore->cadence->kidLabel()];
 
                     if ($askChore->effort) {
@@ -2457,14 +2334,24 @@ new class extends Component
                             <div class="flex flex-none flex-col items-end">
                                 <span
                                     class="font-baloo text-[24px] leading-none font-extrabold whitespace-nowrap"
-                                    style="color: {{ $askBoosted ? 'var(--fq-magenta)' : 'var(--fq-lime)' }}"
+                                    style="color: {{ $askBoosted ? 'var(--fq-magenta)' : ($askCharmed ? 'var(--fq-violet)' : 'var(--fq-lime)') }}"
                                 >{{ $money($askPayout) }}</span>
                                 <span class="font-mono-fq text-[8.5px] text-fq-text-4">{{ $askPayout }} PTS</span>
                             </div>
                         </div>
 
-                        @if ($askBoosted || $confirming['helpWanted'] || $confirming['closesAt'])
+                        @if ($askBoosted || $askCharmed || $confirming['helpWanted'] || $confirming['closesAt'])
                             <div class="mt-3 flex flex-wrap items-center gap-[6px]">
+                                @if ($askCharmed)
+                                    {{-- Says what the extra on the number above
+                                         actually is. Without it the sheet
+                                         quotes a payout that matches neither
+                                         the chore's own points nor anything
+                                         else in the app. --}}
+                                    <span class="inline-block rounded-[8px] px-[8px] py-[3px] font-mono-fq text-[9px] tracking-[0.14em] uppercase" style="background: color-mix(in srgb, var(--fq-violet) 24%, transparent); color: var(--fq-violet)">
+                                        &#10023; Charmed · +{{ number_format($askCharmBonus) }} pts
+                                    </span>
+                                @endif
                                 @if ($confirming['helpWanted'])
                                     <span class="inline-flex items-center gap-[5px] rounded-[8px] px-[8px] py-[3px] font-mono-fq text-[9px] tracking-[0.14em] uppercase" style="background: color-mix(in srgb, var(--fq-coral) 22%, transparent); color: var(--fq-coral)">
                                         <i class="fa-solid fa-hand" aria-hidden="true"></i>

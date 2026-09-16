@@ -130,21 +130,22 @@ class BonusShopTest extends TestCase
         $this->inventory()->use($kid, PerkEffect::WheelRespin);
     }
 
-    public function test_using_a_reroll_swaps_the_quest_and_re_hides_it(): void
+    public function test_using_a_charm_lights_up_chores_on_the_board(): void
     {
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create(['bonus_tickets' => 10]);
         Chore::factory()->for($household)->count(4)->create();
 
         $chores = app(ChoreService::class);
-        $chores->revealQuest($kid);
-        $before = $chores->questFor($kid)->chore_id;
 
-        $this->buy($kid, PerkEffect::QuestReroll);
-        $this->inventory()->use($kid, PerkEffect::QuestReroll);
+        $this->assertSame([], $chores->charmedChoreIdsFor($kid));
 
-        $this->assertNotSame($before, $chores->questFor($kid->refresh())->chore_id);
-        $this->assertFalse($chores->isQuestRevealedToday($kid));
+        $this->buy($kid, PerkEffect::QuestCharm);
+        $this->inventory()->use($kid, PerkEffect::QuestCharm);
+
+        // Four chores on the board and a charm that lights five, so it takes
+        // the lot — the count is capped by what is there, never padded.
+        $this->assertCount(4, $chores->charmedChoreIdsFor($kid->refresh()));
     }
 
     public function test_only_one_copy_is_spent_per_use(): void
@@ -200,11 +201,11 @@ class BonusShopTest extends TestCase
         $kid = Profile::factory()->for($household)->create(['bonus_tickets' => 20]);
         Chore::factory()->for($household)->create();
 
-        $this->buy($kid, PerkEffect::QuestReroll);
+        $this->buy($kid, PerkEffect::QuestCharm);
 
         $catalog = $this->shop()->catalogFor($kid->refresh())->keyBy(fn ($e) => $e['perk']->effect->value);
 
-        $this->assertSame(1, $catalog[PerkEffect::QuestReroll->value]['owned']);
+        $this->assertSame(1, $catalog[PerkEffect::QuestCharm->value]['owned']);
         $this->assertSame(0, $catalog[PerkEffect::WheelRespin->value]['owned']);
     }
 
@@ -214,14 +215,14 @@ class BonusShopTest extends TestCase
         $kid = Profile::factory()->for($household)->create(['bonus_tickets' => 20]);
         Chore::factory()->for($household)->count(3)->create();
 
-        $this->buy($kid, PerkEffect::QuestReroll);
+        $this->buy($kid, PerkEffect::QuestCharm);
 
         Auth::guard('profile')->login($kid);
 
         Volt::test('kid.bonus')
             ->assertSee('Bonus Shop')
             ->assertSee('In hand')
-            ->assertSee('Quest Reroll');
+            ->assertSee('Quest Charm');
     }
 
     public function test_buying_from_the_page_adds_to_inventory(): void
@@ -232,9 +233,9 @@ class BonusShopTest extends TestCase
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.bonus')->call('buy', $this->perk($kid, PerkEffect::QuestReroll)->id);
+        Volt::test('kid.bonus')->call('buy', $this->perk($kid, PerkEffect::QuestCharm)->id);
 
-        $this->assertSame(1, $this->inventory()->countOf($kid->refresh(), PerkEffect::QuestReroll));
+        $this->assertSame(1, $this->inventory()->countOf($kid->refresh(), PerkEffect::QuestCharm));
     }
 
     public function test_using_from_the_page_applies_the_perk(): void
@@ -243,15 +244,14 @@ class BonusShopTest extends TestCase
         $kid = Profile::factory()->for($household)->create(['bonus_tickets' => 20]);
         Chore::factory()->for($household)->count(4)->create();
 
-        $before = app(ChoreService::class)->questFor($kid)->chore_id;
-        $this->buy($kid, PerkEffect::QuestReroll);
+        $this->buy($kid, PerkEffect::QuestCharm);
 
         Auth::guard('profile')->login($kid);
 
-        Volt::test('kid.bonus')->call('usePerk', PerkEffect::QuestReroll->value);
+        Volt::test('kid.bonus')->call('usePerk', PerkEffect::QuestCharm->value);
 
-        $this->assertNotSame($before, app(ChoreService::class)->questFor($kid->refresh())->chore_id);
-        $this->assertSame(0, $this->inventory()->countOf($kid, PerkEffect::QuestReroll));
+        $this->assertNotEmpty(app(ChoreService::class)->charmedChoreIdsFor($kid->refresh()));
+        $this->assertSame(0, $this->inventory()->countOf($kid, PerkEffect::QuestCharm));
     }
 
     public function test_a_failed_purchase_surfaces_a_message_instead_of_erroring(): void
@@ -263,7 +263,7 @@ class BonusShopTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         Volt::test('kid.bonus')
-            ->call('buy', $this->perk($kid, PerkEffect::QuestReroll)->id)
+            ->call('buy', $this->perk($kid, PerkEffect::QuestCharm)->id)
             ->assertSee('Not enough tickets')
             ->assertSuccessful();
     }

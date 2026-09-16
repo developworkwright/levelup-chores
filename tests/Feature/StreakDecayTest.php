@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Enums\CompletionStatus;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
-use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Services\ChoreService;
@@ -43,22 +42,13 @@ class StreakDecayTest extends TestCase
         $this->chore = Chore::factory()->for($this->household)->create(['points' => 10]);
     }
 
-    /** A cleared and approved quest on the given household day. */
-    private function clearQuestOn(string $date): void
+    /** An approved chore on the given household day, which earns it. */
+    private function earnDay(string $date): void
     {
         $at = Carbon::parse("{$date} 12:00", $this->household->timezone);
 
-        $quest = DailyQuest::create([
-            'household_id' => $this->household->id,
-            'profile_id' => $this->kid->id,
-            'chore_id' => $this->chore->id,
-            'quest_date' => $date,
-            'revealed_at' => $at,
-            'completed_at' => $at,
-        ]);
-
         $completion = ChoreCompletion::create([
-            'chore_id' => $quest->chore_id,
+            'chore_id' => $this->chore->id,
             'profile_id' => $this->kid->id,
             'status' => CompletionStatus::Approved,
             'points_awarded' => 10,
@@ -79,7 +69,7 @@ class StreakDecayTest extends TestCase
         // Three days cleared, then nothing on the 4th. The header carried the
         // stale 3 until an approval happened to refresh it.
         foreach (['2026-03-01', '2026-03-02', '2026-03-03'] as $day) {
-            $this->clearQuestOn($day);
+            $this->earnDay($day);
         }
 
         $this->kid->update(['streak' => 3]);
@@ -94,8 +84,8 @@ class StreakDecayTest extends TestCase
     {
         // Mid-morning with today's quest still outstanding is not a lapse —
         // the chain is simply still anchored on yesterday.
-        $this->clearQuestOn('2026-03-01');
-        $this->clearQuestOn('2026-03-02');
+        $this->earnDay('2026-03-01');
+        $this->earnDay('2026-03-02');
         $this->kid->update(['streak' => 2]);
 
         $this->onDay('2026-03-03');
@@ -127,7 +117,7 @@ class StreakDecayTest extends TestCase
     public function test_a_restore_offers_the_missed_day_and_what_it_buys_back(): void
     {
         foreach (['2026-03-01', '2026-03-02', '2026-03-03', '2026-03-04'] as $day) {
-            $this->clearQuestOn($day);
+            $this->earnDay($day);
         }
 
         // Missed the 5th; standing on the 6th with today's quest untouched.
@@ -143,7 +133,7 @@ class StreakDecayTest extends TestCase
     public function test_clearing_todays_quest_closes_the_restore_window(): void
     {
         foreach (['2026-03-01', '2026-03-02', '2026-03-03'] as $day) {
-            $this->clearQuestOn($day);
+            $this->earnDay($day);
         }
 
         $this->onDay('2026-03-05');
@@ -152,9 +142,10 @@ class StreakDecayTest extends TestCase
         $streaks = app(StreakService::class);
         $this->assertNotNull($streaks->repairableStreakDate($this->kid));
 
-        // Today's quest goes in, which starts a fresh chain of one — the
-        // broken day is now behind a live streak and no longer savable.
-        $service->claimQuest($this->kid);
+        // A chore goes in today and is signed off, which starts a fresh chain
+        // of one — the broken day is now behind a live streak and no longer
+        // savable.
+        $service->approve($service->claim($this->kid, $this->chore), $this->parent);
 
         $this->assertNull($streaks->repairableStreakDate($this->kid));
         $this->assertNull($streaks->repairPreview($this->kid));
@@ -165,8 +156,8 @@ class StreakDecayTest extends TestCase
     {
         // A restore buys one day. Two days gone means the chain is over, and
         // repairing yesterday alone would manufacture a one-day streak.
-        $this->clearQuestOn('2026-03-01');
-        $this->clearQuestOn('2026-03-02');
+        $this->earnDay('2026-03-01');
+        $this->earnDay('2026-03-02');
 
         $this->onDay('2026-03-05');
 
@@ -179,7 +170,7 @@ class StreakDecayTest extends TestCase
     public function test_a_restore_used_in_time_rebuilds_the_whole_chain(): void
     {
         foreach (['2026-03-01', '2026-03-02', '2026-03-03'] as $day) {
-            $this->clearQuestOn($day);
+            $this->earnDay($day);
         }
 
         $this->kid->update(['streak' => 3]);
@@ -201,7 +192,7 @@ class StreakDecayTest extends TestCase
         // the parent console was quoting a run that had already died — a
         // different number from the one on the kid's own header.
         foreach (['2026-03-01', '2026-03-02', '2026-03-03'] as $day) {
-            $this->clearQuestOn($day);
+            $this->earnDay($day);
         }
 
         $this->kid->update(['streak' => 3]);
@@ -220,7 +211,7 @@ class StreakDecayTest extends TestCase
     public function test_the_parent_standings_page_expires_a_dead_streak(): void
     {
         foreach (['2026-03-01', '2026-03-02', '2026-03-03'] as $day) {
-            $this->clearQuestOn($day);
+            $this->earnDay($day);
         }
 
         $this->kid->update(['streak' => 3]);
@@ -243,7 +234,7 @@ class StreakDecayTest extends TestCase
     public function test_the_quests_page_shows_the_rescue_offer_and_what_it_restores(): void
     {
         foreach (['2026-03-01', '2026-03-02', '2026-03-03'] as $day) {
-            $this->clearQuestOn($day);
+            $this->earnDay($day);
         }
 
         $this->kid->update(['streak' => 3]);
@@ -256,6 +247,6 @@ class StreakDecayTest extends TestCase
             ->assertSee('Streak Rescue')
             ->assertSee('Mar 4, 2026')
             ->assertSee('4-day streak')
-            ->assertSee('Use it before you clear');
+            ->assertSee('Use it before anything you do today gets signed off');
     }
 }

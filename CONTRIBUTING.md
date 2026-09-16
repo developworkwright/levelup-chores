@@ -110,7 +110,7 @@ Domain rules live in `app/Services`, not in components, so they can be tested wi
 
 | Service | Owns |
 |---|---|
-| `ChoreService` | Daily quests, the chore board, mystery chore, streaks |
+| `ChoreService` | The chore board, charms, mystery chore, claims and approvals |
 | `SpinService` | Bonus wheel eligibility and multipliers |
 | `StoreService` | Loot shop redemptions |
 | `LedgerService` | Every balance change |

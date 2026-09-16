@@ -124,27 +124,18 @@ class ParentChoresAdminTest extends TestCase
         $this->assertNull($foreign->refresh()->hint);
     }
 
-    public function test_a_parent_can_toggle_a_chores_quest_eligibility(): void
-    {
-        $household = Household::factory()->create();
-        $parent = Profile::factory()->parent()->for($household)->create();
-        $chore = Chore::factory()->for($household)->create(['quest_eligible' => true]);
-
-        Auth::guard('profile')->login($parent);
-
-        Volt::test('parent.chores')
-            ->call('toggleQuestEligible', $chore->id);
-
-        $this->assertFalse($chore->refresh()->quest_eligible);
-    }
-
-    public function test_a_parent_can_toggle_a_chores_wheel_eligibility_without_touching_the_quest_one(): void
+    /**
+     * There used to be a second toggle beside this one, "Exclude from quest",
+     * and it went with the daily quest itself � a charm can land on any open
+     * chore, so there is nothing left for a parent to exclude a chore from
+     * except the wheel.
+     */
+    public function test_a_parent_can_toggle_a_chores_wheel_eligibility(): void
     {
         $household = Household::factory()->create();
         $parent = Profile::factory()->parent()->for($household)->create();
         $chore = Chore::factory()->for($household)->create([
             'name' => 'Put the groceries away',
-            'quest_eligible' => true,
             'wheel_eligible' => true,
         ]);
 
@@ -155,9 +146,7 @@ class ParentChoresAdminTest extends TestCase
             ->assertSee('Excluded from wheel')
             ->assertDontSee('Excluded from quest');
 
-        $chore->refresh();
-        $this->assertFalse($chore->wheel_eligible);
-        $this->assertTrue($chore->quest_eligible);
+        $this->assertFalse($chore->refresh()->wheel_eligible);
     }
 
     public function test_a_parent_cannot_bar_another_households_chore_from_the_wheel(): void

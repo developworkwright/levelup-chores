@@ -27,7 +27,6 @@ class Chore extends Model
         'points',
         'cadence',
         'min_age',
-        'quest_eligible',
         'wheel_eligible',
         'used_at',
         'reopened_at',
@@ -49,7 +48,6 @@ class Chore extends Model
             // collection of icon types, see ChoreCategory.
             'effort' => ChoreEffort::class,
             'category' => ChoreCategory::class,
-            'quest_eligible' => 'boolean',
             'wheel_eligible' => 'boolean',
             'used_at' => 'datetime',
             'reopened_at' => 'datetime',
@@ -178,11 +176,6 @@ class Chore extends Model
         return $query->where(function (Builder $q) use ($profile) {
             $q->whereNull('min_age')->orWhere('min_age', '<=', $profile->age ?? 0);
         });
-    }
-
-    public function scopeQuestEligible(Builder $query): Builder
-    {
-        return $query->where('quest_eligible', true);
     }
 
     public function scopeWheelEligible(Builder $query): Builder

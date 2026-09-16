@@ -19,8 +19,7 @@ class WheelClaimTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * A household the wheel can land in predictably: one quest-eligible chore
-     * to absorb the daily quest, and two the wheel draws from.
+     * A household the wheel can land in predictably: two chores it draws from.
      *
      * The wheel pair carry a min_age so they can never be drawn as the day's
      * mystery chore — age-gated chores are excluded from that draw — which
@@ -32,10 +31,7 @@ class WheelClaimTest extends TestCase
     {
         $household = Household::factory()->create($attributes);
         $kid = Profile::factory()->for($household)->create(['name' => 'Nova', 'age' => 10]);
-
-        Chore::factory()->for($household)->create(['name' => 'Main quest chore', 'quest_eligible' => true]);
         Chore::factory()->for($household)->count(2)->create([
-            'quest_eligible' => false,
             'min_age' => 5,
             'points' => 100,
         ]);
@@ -151,7 +147,7 @@ class WheelClaimTest extends TestCase
         // off the sofa for.
         [$household, $kid] = $this->household();
 
-        $household->chores()->where('quest_eligible', false)->update(['points' => 175]);
+        $household->chores()->update(['points' => 175]);
 
         $boost = $this->spin($kid);
 

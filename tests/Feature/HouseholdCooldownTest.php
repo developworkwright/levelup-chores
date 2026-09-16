@@ -126,11 +126,8 @@ class HouseholdCooldownTest extends TestCase
         $household = Household::factory()->create();
         $doer = Profile::factory()->for($household)->create();
         $sibling = Profile::factory()->for($household)->create();
-
-        Chore::factory()->for($household)->create(['name' => 'The quest', 'quest_eligible' => true]);
         $shared = Chore::factory()->for($household)->create([
             'name' => 'Feed animals',
-            'quest_eligible' => false,
             'cadence' => 'daily',
         ]);
 

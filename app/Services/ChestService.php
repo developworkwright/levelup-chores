@@ -88,18 +88,17 @@ class ChestService
     /**
      * Whether today's chest rolls on the good table.
      *
-     * **Any chore the kid has put in today boosts it — the main quest has no
-     * special standing here.** Gating the boost on the quest meant a kid who
-     * cleared four side quests and left the quest card alone rolled on the
-     * same table as one who did nothing all day, which is the wrong lesson
-     * about doing the work. The quest keeps its own pull through the bold
-     * card, the charm and the wheel.
+     * **Any chore the kid has put in today boosts it.** It was once gated on
+     * the daily quest specifically, which meant a kid who cleared four chores
+     * and left the quest card alone rolled on the same table as one who did
+     * nothing all day — the wrong lesson about doing the work, and the rule
+     * outlived the quest itself.
      *
      * The generous read ({@see StreakService::streakDaySecuredToday()}): work
-     * sitting in the approvals queue counts. That is parity with what it
-     * replaced — a quest boosted the chest the moment it was *claimed*, never
-     * on a parent signing it off — and a chest that rolls worse because nobody
-     * got round to the queue is blaming the kid for somebody else's inbox.
+     * sitting in the approvals queue counts. The boost lands the moment a chore
+     * is *claimed*, never on a parent signing it off — a chest that rolls worse
+     * because nobody got round to the queue is blaming the kid for somebody
+     * else's inbox.
      */
     public function isBoosted(Profile $profile): bool
     {

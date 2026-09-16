@@ -18,6 +18,7 @@ class ChoreCompletion extends Model
         'points_awarded',
         'struck_weak_point',
         'help_wanted',
+        'charm_bonus',
         'submitted_at',
         'decided_at',
         'decided_by_profile_id',

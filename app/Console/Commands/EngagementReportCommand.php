@@ -60,10 +60,11 @@ class EngagementReportCommand extends Command
         ['Chores still pending', 'chore_completions', 'profile_id', 'submitted_at', ['status', 'pending']],
         ['Chores rejected', 'chore_completions', 'profile_id', 'decided_at', ['status', 'rejected']],
         ['Help Wanted raised', 'chore_completions', 'profile_id', 'submitted_at', ['help_wanted', 1]],
-        ['Daily quest done', 'daily_quests', 'profile_id', 'completed_at'],
-        ['Quest hand dealt', 'daily_quests', 'profile_id', 'dealt_at'],
-        ['Quest charmed', 'daily_quests', 'profile_id', 'charmed_at'],
-        ['Quest skipped', 'quest_skips', 'profile_id', 'skip_date'],
+        // One row per chore a charm lit up, so this counts chores charmed
+        // rather than charms cast — five to a tap. It is still the right
+        // question for this report: a kid who stopped charming shows up as a
+        // date that stopped moving either way.
+        ['Chores charmed', 'charmed_chores', 'profile_id', 'charm_date'],
         ['Mystery found', 'daily_mysteries', 'found_by_profile_id', 'found_at'],
         ['Bonus wheel spun', 'spins', 'profile_id', 'spin_date'],
         ['Daily chest opened', 'daily_chests', 'profile_id', 'chest_date'],

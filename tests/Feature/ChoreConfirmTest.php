@@ -30,15 +30,10 @@ class ChoreConfirmTest extends TestCase
         return app(ChoreService::class);
     }
 
-    /** Boards exclude today's quest hand, so a fixture needs one to absorb it. */
+    /** Nothing is held back from the board, so this is just a household. */
     private function household(): Household
     {
         $household = Household::factory()->create();
-
-        Chore::factory()->for($household)->create([
-            'name' => 'The quest',
-            'quest_eligible' => true,
-        ]);
 
         return $household;
     }
@@ -47,7 +42,6 @@ class ChoreConfirmTest extends TestCase
     {
         return Chore::factory()->for($household)->create([
             'name' => $name,
-            'quest_eligible' => false,
             'cadence' => 'daily',
             'points' => 250,
         ]);

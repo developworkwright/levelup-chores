@@ -27,14 +27,10 @@ class BoardStalenessTest extends TestCase
         return app(ChoreService::class);
     }
 
-    /**
-     * One quest-eligible chore absorbs the daily quest assignment so the
-     * chores under test are guaranteed to stay on the board.
-     */
+    /** Nothing is held back from the board, so this is just a household. */
     private function household(): Household
     {
         $household = Household::factory()->create();
-        Chore::factory()->for($household)->create(['name' => 'The quest', 'quest_eligible' => true]);
 
         return $household;
     }
@@ -46,7 +42,6 @@ class BoardStalenessTest extends TestCase
         $sibling = Profile::factory()->for($household)->create(['name' => 'Nova']);
         $chore = Chore::factory()->for($household)->create([
             'name' => 'Feed animals',
-            'quest_eligible' => false,
             'cadence' => 'daily',
         ]);
 
@@ -62,7 +57,7 @@ class BoardStalenessTest extends TestCase
     {
         $household = $this->household();
         $kid = Profile::factory()->for($household)->create();
-        $chore = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
+        $chore = Chore::factory()->for($household)->create(['cadence' => 'daily']);
 
         $this->service()->claim($kid, $chore);
 
@@ -78,7 +73,7 @@ class BoardStalenessTest extends TestCase
     {
         $household = $this->household();
         $kid = Profile::factory()->for($household)->create();
-        $chore = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
+        $chore = Chore::factory()->for($household)->create(['cadence' => 'daily']);
 
         $entry = $this->service()->boardFor($kid)->firstWhere('chore.id', $chore->id);
 
@@ -91,7 +86,7 @@ class BoardStalenessTest extends TestCase
         $household = $this->household();
         $kid = Profile::factory()->for($household)->create();
         $sibling = Profile::factory()->for($household)->create(['name' => 'Nova']);
-        $chore = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'unlimited']);
+        $chore = Chore::factory()->for($household)->create(['cadence' => 'unlimited']);
 
         $this->service()->claim($sibling, $chore);
 
@@ -109,7 +104,6 @@ class BoardStalenessTest extends TestCase
         $sibling = Profile::factory()->for($household)->create(['name' => 'Nova']);
         $chore = Chore::factory()->for($household)->create([
             'name' => 'Feed animals',
-            'quest_eligible' => false,
             'cadence' => 'daily',
         ]);
 
@@ -131,8 +125,8 @@ class BoardStalenessTest extends TestCase
         $household = $this->household();
         $kid = Profile::factory()->for($household)->create();
         $sibling = Profile::factory()->for($household)->create(['name' => 'Nova']);
-        $taken = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
-        $free = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
+        $taken = Chore::factory()->for($household)->create(['cadence' => 'daily']);
+        $free = Chore::factory()->for($household)->create(['cadence' => 'daily']);
 
         Auth::guard('profile')->login($kid);
         $this->service()->claim($sibling, $taken);
@@ -147,9 +141,8 @@ class BoardStalenessTest extends TestCase
     public function test_an_undone_quest_does_not_hold_up_a_side_quest(): void
     {
         $household = Household::factory()->create();
-        Chore::factory()->for($household)->create(['name' => 'The quest', 'quest_eligible' => true]);
         $kid = Profile::factory()->for($household)->create();
-        $chore = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
+        $chore = Chore::factory()->for($household)->create(['cadence' => 'daily']);
 
         Auth::guard('profile')->login($kid);
 
@@ -170,7 +163,6 @@ class BoardStalenessTest extends TestCase
         $sibling = Profile::factory()->for($household)->create(['name' => 'Nova']);
         $chore = Chore::factory()->for($household)->create([
             'name' => 'Feed animals',
-            'quest_eligible' => false,
             'cadence' => 'daily',
         ]);
 
@@ -188,7 +180,7 @@ class BoardStalenessTest extends TestCase
         $household = $this->household();
         $kid = Profile::factory()->for($household)->create();
         $sibling = Profile::factory()->for($household)->create(['name' => 'Nova']);
-        $chore = Chore::factory()->for($household)->create(['quest_eligible' => false, 'cadence' => 'daily']);
+        $chore = Chore::factory()->for($household)->create(['cadence' => 'daily']);
 
         Auth::guard('profile')->login($kid);
         $this->service()->claim($sibling, $chore);
@@ -224,7 +216,6 @@ class BoardStalenessTest extends TestCase
         $sibling = Profile::factory()->for($household)->create(['name' => 'Nova']);
         $chore = Chore::factory()->for($household)->create([
             'name' => 'Feed animals',
-            'quest_eligible' => false,
             'cadence' => 'daily',
         ]);
 

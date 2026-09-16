@@ -240,8 +240,8 @@ new class extends Component
     public function saveHouseholdSettings(): void
     {
         // Bounded to the evening. A watch hour before the afternoon would have
-        // the Household page calling a quest at risk over breakfast, which is the sort
-        // of nagging this page's whole copy is written to avoid.
+        // the Household page calling a kid at risk over breakfast, which is the
+        // sort of nagging this page's whole copy is written to avoid.
         $hour = max(15, min(23, (int) $this->eveningWatchHour));
 
         // Anything off the list clears it rather than being stored: the kids'
@@ -440,36 +440,13 @@ new class extends Component
     }
 
     /**
-     * Same logic the kid's Quest Reroll perk uses, minus the ticket charge —
-     * so a parent can veto a chore without it costing anyone anything.
-     */
-    public function rerollQuest(int $profileId): void
-    {
-        $kid = $this->ownedKid($profileId);
-
-        if (! $kid) {
-            return;
-        }
-
-        $quest = app(ChoreService::class)->rerollQuest($kid);
-
-        // Never names a chore any more: a reroll deals a fresh hand, and the
-        // row's chore_id is a placeholder until the kid takes a card. Quoting
-        // it would tell a parent their kid's quest is something nobody has
-        // chosen — and something they may well not choose.
-        $this->questMessages[$profileId] = $quest
-            ? 'Dealt a new hand — '.count($quest->offeredChoreIds()).' fresh cards to choose from.'
-            : 'Nothing to swap — the quest is already cleared, or there is no other eligible chore.';
-    }
-
-    /**
-     * Hands a Quest Charm over for nothing, the way rerollQuest() hands over a
-     * reroll — same perk the Bonus Shop sells, minus the tickets.
+     * Hands a Quest Charm over for nothing — the same perk the Bonus Shop
+     * sells, minus the tickets.
      *
-     * Gives rather than casts. A charm only goes on a chest that is still shut,
-     * so a parent tapping this in the afternoon would be spending the kid's one
-     * gamble for them, on a hand the kid has already read. In the pocket it
-     * keeps until they decide a morning is worth it.
+     * Gives rather than casts. The charm lands on five random chores and the
+     * kid is the one who should decide which day is worth spending it on; a
+     * parent casting it for them would spend the gamble and the surprise at
+     * once. In the pocket it keeps until they want it.
      */
     public function giveQuestCharm(int $profileId): void
     {
@@ -485,13 +462,7 @@ new class extends Component
         $held = $perks->countOf($kid, PerkEffect::QuestCharm);
         $charms = $held.' '.Str::plural('charm', $held);
 
-        // Says which of the two things just happened, because they feel very
-        // different to a parent: a charm handed over at breakfast is for today,
-        // and one handed over after the chest is open is a present for a
-        // morning that hasn't come yet.
-        $this->questMessages[$profileId] = $perks->blockedReason($kid, PerkEffect::QuestCharm) === null
-            ? "Quest Charm handed over — {$kid->name} is holding {$charms}, and today's chest can still take one."
-            : "Quest Charm handed over — {$kid->name} is holding {$charms}. Today's chest can't take one any more, so it keeps for a future quest.";
+        $this->questMessages[$profileId] = "Quest Charm handed over — {$kid->name} is holding {$charms}.";
     }
 
     public function changePin(int $profileId): void
@@ -514,70 +485,34 @@ new class extends Component
     }
 
     /**
-     * What's assigned today, and how far the kid has gotten on it — lets a
-     * parent see today's main quest for each kid without waiting for an
-     * approval request to show up.
+     * What this kid has put in today, and what state it is in — the parent's
+     * answer to "have they done anything?" without going to the approvals
+     * queue and reading it backwards.
      *
-     * Opening the chest and clearing the quest are two different moments:
-     * `revealed_at` is the kid tapping the chest, `completed_at` is them
-     * marking the chore done. Reading only the second one meant the chest read
-     * as unopened right up until the quest was claimed — and a sent-back quest,
-     * which clears `completed_at` on purpose, fell all the way back to
-     * "not opened" as well.
+     * This replaces a card about the daily quest, which is gone. The question
+     * it answered is still worth answering; what changed is that there is no
+     * single chore that counts, so it reports the day rather than the quest:
+     * how many are in, what the most recent one is waiting on, and how many
+     * charms are in the pocket.
+     *
+     * @return array{done: int, pending: int, latest: ?ChoreCompletion, charmsHeld: int}
      */
-    private function questSummaryFor(Profile $kid): array
+    private function daySummaryFor(Profile $kid): array
     {
-        $chores = app(ChoreService::class);
-        $quest = $chores->questFor($kid);
-
-        // Before the pick there is no quest to name — `chore_id` holds a
-        // placeholder card, and printing it under "Today's Quest" told a
-        // parent their kid had been given a chore nobody has chosen. The hand
-        // goes out instead, which is the honest answer to what is happening
-        // and the thing a parent needs in order to judge whether to re-deal.
-        // `completed_at` is checked alongside the pick, not folded into it: a
-        // quest can be cleared without one — claimQuest() doesn't require a
-        // card to have been taken — and reporting a finished quest as "choosing
-        // a card" would hide work that is sitting waiting for approval.
-        if (! $quest->isPicked() && $quest->completed_at === null) {
-            return [
-                'chore' => null,
-                'hand' => $chores->offeredChoresFor($kid),
-                'status' => $quest->dealt_at !== null ? 'choosing' : 'not_started',
-                'canReroll' => true,
-                'charmed' => $quest->isCharmed(),
-                'charmsHeld' => app(PerkInventoryService::class)->countOf($kid, PerkEffect::QuestCharm),
-            ];
-        }
-
-        // Scoped to today's household day: the same chore may well have been
-        // done last week, and that attempt says nothing about today's quest.
         // Clocked off the parent's own household rather than the kid's, which
         // is the same household and one relation load per card cheaper.
         $clock = HouseholdClock::for($this->profile->household);
 
-        $completion = ChoreCompletion::where('profile_id', $kid->id)
-            ->where('chore_id', $quest->chore_id)
+        $today = ChoreCompletion::where('profile_id', $kid->id)
             ->where('submitted_at', '>=', $clock->startOf($clock->today()))
+            ->with('chore')
             ->latest('submitted_at')
-            ->first();
-
-        $status = match (true) {
-            $completion !== null => $completion->status->value,
-            $quest->completed_at !== null => 'pending',
-            $quest->revealed_at !== null => 'opened',
-            default => 'not_started',
-        };
+            ->get();
 
         return [
-            'chore' => $quest->chore,
-            'hand' => collect(),
-            'status' => $status,
-            // Mirrors what rerollQuest() will actually do, so the button isn't
-            // dead on a quest that is still swappable — opened and sent-back
-            // quests both still are.
-            'canReroll' => $quest->completed_at === null,
-            'charmed' => $quest->isCharmed(),
+            'done' => $today->where('status', CompletionStatus::Approved)->count(),
+            'pending' => $today->where('status', CompletionStatus::Pending)->count(),
+            'latest' => $today->first(),
             'charmsHeld' => app(PerkInventoryService::class)->countOf($kid, PerkEffect::QuestCharm),
         ];
     }
@@ -610,7 +545,7 @@ new class extends Component
             // point of putting this control on a page at all.
             'houseNow' => HouseholdClock::for($this->profile->household)->now(),
             'timezones' => self::timezoneOptions(),
-            'questSummaries' => $kids->mapWithKeys(fn (Profile $kid) => [$kid->id => $this->questSummaryFor($kid)]),
+            'daySummaries' => $kids->mapWithKeys(fn (Profile $kid) => [$kid->id => $this->daySummaryFor($kid)]),
             'spins' => $kids->mapWithKeys(function (Profile $kid) {
                 $spin = app(SpinService::class)->today($kid);
 
@@ -628,7 +563,7 @@ new class extends Component
                     'openedAt' => $chest->created_at,
                     // Whether it rolled on the boosted table — the honest answer
                     // to "why did they get a perk and mine got 50 points". Any
-                    // quest earns it, main or side; see ChestService::isBoosted().
+                    // chore earns it; see ChestService::isBoosted().
                     'questWasDone' => $chest->quest_was_done,
                 ] : null];
             }),
@@ -766,20 +701,19 @@ new class extends Component
         @foreach ($kids as $kid)
             @php
                 $dollars = number_format($kid->points / $profile->household->points_per_dollar, 2);
-                $quest = $questSummaries[$kid->id];
+                $day = $daySummaries[$kid->id];
                 $spin = $spins[$kid->id];
                 $chest = $chests[$kid->id];
-                $questLabels = [
-                    'not_started' => ['label' => 'Chest not opened', 'color' => 'var(--fq-text-4)'],
-                    // The chest is open and the cards are on the table. Its own
-                    // state because "not opened" and "opened, not done" both
-                    // claim the kid has a quest, and at this point they don't.
-                    'choosing' => ['label' => 'Choosing a card', 'color' => 'var(--fq-violet)'],
-                    'opened' => ['label' => 'Opened, not done', 'color' => 'var(--fq-cyan)'],
-                    'pending' => ['label' => 'Waiting on you', 'color' => 'var(--fq-gold)'],
-                    'approved' => ['label' => 'Cleared', 'color' => 'var(--fq-lime)'],
-                    'rejected' => ['label' => 'Sent back', 'color' => 'var(--fq-danger)'],
-                ][$quest['status']];
+                // Reads the most recent thing they handed in, because that is
+                // the one a parent is most likely to be asked about. "Nothing
+                // in yet" is its own state rather than a blank: it is the
+                // answer to the question, not an absence of one.
+                [$dayLabel, $dayColor] = match (true) {
+                    $day['latest'] === null => ['Nothing in yet', 'var(--fq-text-4)'],
+                    $day['pending'] > 0 => [$day['pending'].' waiting on you', 'var(--fq-gold)'],
+                    $day['latest']->status === CompletionStatus::Rejected => ['Last one sent back', 'var(--fq-danger)'],
+                    default => ['All signed off', 'var(--fq-lime)'],
+                };
             @endphp
             <div wire:key="kid-{{ $kid->id }}" class="flex flex-col gap-[14px] rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
                 <div class="flex items-center gap-3">
@@ -794,54 +728,34 @@ new class extends Component
                 </div>
 
                 <div class="rounded-[14px] border border-fq-line-2 bg-fq-sunk px-3 py-[10px]">
-                    <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Today's Quest</p>
+                    <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">Today</p>
                     <div class="mt-1 flex items-center justify-between gap-2">
                         <span class="text-sm font-semibold">
-                            {{-- Fully qualified: a Volt SFC template section
-                                 can't resolve a bare class name. --}}
-                            {{ $quest['chore']?->name ?? ($quest['hand']->count().' '.\Illuminate\Support\Str::plural('card', $quest['hand']->count()).' dealt') }}
+                            @if ($day['latest'])
+                                {{ $day['latest']->chore?->name ?? 'A chore' }}
+                            @else
+                                Nothing handed in
+                            @endif
                         </span>
-                        <span class="font-mono-fq text-[10px] font-semibold whitespace-nowrap" style="color: {{ $questLabels['color'] }}">{{ $questLabels['label'] }}</span>
+                        <span class="font-mono-fq text-[10px] font-semibold whitespace-nowrap" style="color: {{ $dayColor }}">{{ $dayLabel }}</span>
                     </div>
 
-                    {{-- What is actually on the table. Shown rather than hidden:
-                         a parent deciding whether to re-deal needs to see what
-                         they would be taking away. --}}
-                    @if ($quest['hand']->isNotEmpty())
-                        <p class="mt-1 font-mono-fq text-[10px] leading-snug text-fq-text-4">{{ $quest['hand']->pluck('name')->join(' · ') }}</p>
-                    @endif
-
-                    @php
-                        // What the parent needs before they hand another one
-                        // over: whether today is already charmed, and how many
-                        // are sitting unspent in the pocket.
-                        $charmNotes = array_filter([
-                            $quest['charmed'] ? 'Chest is charmed' : null,
-                            $quest['charmsHeld'] > 0
-                                ? $quest['charmsHeld'].' '.\Illuminate\Support\Str::plural('charm', $quest['charmsHeld']).' in pocket'
-                                : null,
-                        ]);
-                    @endphp
-                    @if ($charmNotes)
-                        <p class="mt-1 font-mono-fq text-[10px]" style="color: var(--fq-violet)">{{ implode(' · ', $charmNotes) }}</p>
-                    @endif
+                    <p class="mt-1 font-mono-fq text-[10px] leading-snug text-fq-text-4">
+                        {{ $day['done'] }} signed off · {{ $day['pending'] }} waiting
+                        @if ($day['charmsHeld'] > 0)
+                            · <span style="color: var(--fq-violet)">{{ $day['charmsHeld'] }} {{ \Illuminate\Support\Str::plural('charm', $day['charmsHeld']) }} in pocket</span>
+                        @endif
+                    </p>
 
                     <div class="mt-2 flex gap-2">
-                        <button
-                            type="button"
-                            wire:click="rerollQuest({{ $kid->id }})"
-                            @disabled(! $quest['canReroll'])
-                            class="flex-1 rounded-[10px] border border-fq-line-3 bg-fq-panel py-[6px] text-xs text-fq-text-3 disabled:opacity-40"
-                        >{{ $quest['chore'] ? 'Swap for new cards' : 'Deal a new hand' }}</button>
-
                         {{-- Never disabled: a charm is handed over, not cast,
-                             so there is always a pocket for it to go in even on
-                             a day whose chest is long since open. --}}
+                             so there is always a pocket for it to go in — even
+                             on a day the kid has already charmed. --}}
                         <button
                             type="button"
                             wire:click="giveQuestCharm({{ $kid->id }})"
-                            class="flex-shrink-0 rounded-[10px] border px-3 py-[6px] text-xs whitespace-nowrap"
-                            style="border-color: var(--fq-violet); color: var(--fq-violet); background: var(--fq-sunk)"
+                            class="flex-1 rounded-[10px] border px-3 py-[6px] text-xs whitespace-nowrap"
+                            style="border-color: var(--fq-violet); color: var(--fq-violet); background: var(--fq-panel)"
                         >&#10023; Give a charm</button>
                     </div>
                     @if (! empty($questMessages[$kid->id]))
@@ -1036,7 +950,7 @@ new class extends Component
                             <p class="mt-[2px] truncate text-sm font-semibold" style="color: var(--fq-chest-blue)">{{ $chest['prize'] }}</p>
                             <p class="font-mono-fq text-[10px] text-fq-text-5 uppercase">
                                 Opened {{ $chest['openedAt']->diffForHumans() }}
-                                · {{ $chest['questWasDone'] ? 'a quest was done first' : 'nothing done yet' }}
+                                · {{ $chest['questWasDone'] ? 'a chore was done first' : 'nothing done yet' }}
                             </p>
                         @else
                             <p class="mt-[2px] text-sm text-fq-text-4">Not opened today</p>
@@ -1164,7 +1078,7 @@ new class extends Component
                      this as "bedtime" would expect the app to take something
                      away at it, and nothing ever does. --}}
                 <p class="mt-2 text-[12.5px] leading-snug text-fq-text-4">
-                    When an unfinished quest starts showing as <em>at risk</em> on Household.
+                    When a kid with nothing signed off starts showing as <em>at risk</em> on Household.
                     Nothing expires — the day still rolls at
                     {{ $household->day_boundary_hour > 12 ? $household->day_boundary_hour - 12 : $household->day_boundary_hour }}:00am.
                 </p>

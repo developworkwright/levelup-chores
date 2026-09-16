@@ -34,9 +34,7 @@ class QuestBoardFilterTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * Boards exclude every card in today's quest hand, so fixtures need one
-     * quest-eligible chore to absorb the deal. The hinted decoy absorbs the
-     * mystery draw the same way — hinted chores win it outright, and an
+     * The hinted decoy absorbs the mystery draw — hinted chores win it outright, and an
      * unpinned pick gets named on the page once found, which flakes any
      * assertDontSee on a chore name.
      */
@@ -45,13 +43,7 @@ class QuestBoardFilterTest extends TestCase
         $household = Household::factory()->create();
 
         Chore::factory()->for($household)->create([
-            'name' => 'The quest',
-            'quest_eligible' => true,
-        ]);
-
-        Chore::factory()->for($household)->create([
             'name' => 'The decoy',
-            'quest_eligible' => false,
             'hint' => 'Somewhere warm',
         ]);
 
@@ -64,7 +56,6 @@ class QuestBoardFilterTest extends TestCase
         return Chore::factory()->for($household)->create($attributes + [
             'name' => $name,
             'points' => $points,
-            'quest_eligible' => false,
         ]);
     }
 

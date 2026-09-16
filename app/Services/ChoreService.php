@@ -6,12 +6,11 @@ use App\Enums\ChoreCadence;
 use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
 use App\Enums\ProfileRole;
-use App\Enums\QuestCharmEffect;
 use App\Enums\TicketKind;
+use App\Models\CharmedChore;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\DailyMystery;
-use App\Models\DailyQuest;
 use App\Models\Household;
 use App\Models\MysteryHintPurchase;
 use App\Models\Profile;
@@ -25,7 +24,6 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
-use RuntimeException;
 use Throwable;
 
 class ChoreService
@@ -48,66 +46,6 @@ class ChoreService
     public const HELP_WANTED_TICKETS = 1;
 
     /**
-     * Cards dealt for the daily quest.
-     *
-     * Three is the number that makes the deal a decision rather than a
-     * formality: two reads as a coin flip and four is more reading than a
-     * seven-year-old will do before tapping. A household with fewer than three
-     * eligible chores deals a shorter hand rather than repeating one.
-     */
-    public const HAND_SIZE = 3;
-
-    /**
-     * How many extra cards yesterday's work is worth on this morning's hand.
-     *
-     * The one reward on the board that is not denominated in currency, which is
-     * deliberate: the kid furthest ahead has more tickets than he can spend, so
-     * another perk means nothing to him — but a wider choice of what to do
-     * still does. It is also aimed at the failure this was written for, a kid
-     * being dealt a hand every day and taking none of it. If the hand is the
-     * problem, more of it is the fix.
-     *
-     * Earned by *yesterday*, because the hand is dealt in the morning before
-     * today's work exists.
-     */
-    public const HAND_BONUS_CARDS = 2;
-
-    /**
-     * What the biggest card in the hand pays on top of its own points, as a
-     * percentage of them.
-     *
-     * The hand is spread deliberately across the pool's range (see
-     * {@see self::dealHand()}), so the top card is always the most work on
-     * offer. Without a thumb on the scale the rational move is to take the
-     * cheap card every single day, and a choice with one right answer stops
-     * being a choice by about the third morning. The bonus is what buys the
-     * hard card a reason to exist.
-     *
-     * Computed off base points and added after any wheel multiplier rather
-     * than multiplied by it — a 3x spin landing on a bold card would otherwise
-     * pay four and a half times a chore's face value.
-     */
-    public const BOLD_CARD_BONUS_PERCENT = 50;
-
-    /** What a charm's hand-in roll adds, as a percentage of the chore's points. */
-    public const CHARM_PAYOUT_PERCENT = 25;
-
-    /**
-     * Odds the charm pays out at hand-in, per hundred, by whether the card
-     * they took was already bold.
-     *
-     * Longer odds on a bold card, and that ordering is doing real work. It
-     * consoles the kid who took a plain card — the case the charm most needs
-     * to cover — while stopping the two bonuses stacking into a routine
-     * double payout on the dearest chore in the hand. The incentive to be
-     * brave survives it comfortably: a bold card pays +50% for certain
-     * against a plain card's 60% shot at +25%.
-     */
-    private const CHARM_PAYOUT_ODDS_PLAIN = 60;
-
-    private const CHARM_PAYOUT_ODDS_BOLD = 30;
-
-    /**
      * XP for one approved chore, flat regardless of what the chore pays — a
      * level measures showing up, not payout size.
      *
@@ -121,6 +59,31 @@ class ChoreService
     /** How many finished household days a pace figure averages over. */
     public const PACE_DAYS = 7;
 
+    /**
+     * How many chores a Quest Charm lights up.
+     *
+     * Five rather than one or two because the board is long — a house with
+     * twenty open chores and a charm on a single row is a perk a kid has to go
+     * hunting for, and most days would never find. Five is enough that the
+     * charm changes what the board looks like the moment it is cast, which is
+     * the whole reason it is worth a ticket.
+     */
+    public const CHARM_CHORES = 5;
+
+    /**
+     * What a charmed chore pays on top of its own points, as a percentage.
+     *
+     * Inherited from the quest's old bold card, deliberately: it was the one
+     * number in the app kids already understood as "this one is worth more",
+     * and half again is big enough to redirect a choice without making an
+     * ordinary chore feel like a waste of an afternoon.
+     *
+     * Computed off base points and added after any wheel multiplier rather
+     * than multiplied by it — a 3x spin on a charmed chore would otherwise pay
+     * four and a half times face value.
+     */
+    public const CHARM_BONUS_PERCENT = 50;
+
     public function __construct(
         private LedgerService $ledger,
         private SpinService $spin,
@@ -130,623 +93,72 @@ class ChoreService
         private StreakService $streaks,
     ) {}
 
-    public function questFor(Profile $profile): DailyQuest
-    {
-        $today = HouseholdClock::for($profile->household)->today();
-
-        $quest = DailyQuest::where('profile_id', $profile->id)
-            ->whereDate('quest_date', $today)
-            ->first();
-
-        if ($quest) {
-            return $this->rerollIfUnavailable($profile, $this->dealHandIfMissing($profile, $quest));
-        }
-
-        $hand = $this->dealHand($profile);
-
-        if ($hand->isEmpty()) {
-            throw new RuntimeException('Household has no chores to assign as a quest.');
-        }
-
-        return DailyQuest::create([
-            'household_id' => $profile->household_id,
-            'profile_id' => $profile->id,
-            // A placeholder until they pick, not a quest. It is the first card
-            // rather than a random one so that anything reading the row before
-            // the pick — the wheel's exclusion, a parent's page — is at least
-            // reading a card that is genuinely on the table.
-            'chore_id' => $hand->first()->id,
-            'offered_chore_ids' => $hand->pluck('id')->all(),
-            'quest_date' => $today,
-        ]);
-    }
-
     /**
-     * Deals a hand to a quest row that never had one.
+     * Boards already built this request, by profile id.
      *
-     * Rows written before the hand existed carry a null `offered_chore_ids`,
-     * and {@see DailyQuest::offeredChoreIds()} reads that as a one-card hand of
-     * whatever they were assigned. That is the right reading for a day already
-     * spent — but not for a day still in front of the kid, where it means the
-     * chest opens onto a single card and a page that says "pick your quest"
-     * offers nothing to pick. Every household that has this ship mid-morning
-     * would spend the rest of that day with the mechanic switched off.
+     * {@see self::boardFor()} costs a claimantFor() query per chore, and it is
+     * asked for far more often than it looks: the Quests page draws it, the
+     * adding-up card narrows it, the Quest Charm's blocked reason counts what
+     * is left to charm, and Home's Work row reads the cheapest job and the
+     * board's span off it. On a twenty-chore household that was one 23-query
+     * walk each, three deep on a single render.
      *
-     * Deliberately not done in the migration: the deal is age-, cadence- and
-     * claim-aware, and a migration that reached into service logic to work all
-     * that out would be recording today's rules against a schema change that
-     * has to keep meaning the same thing in a year's time.
+     * Safe to hold only because every method that changes what a board says
+     * clears it — see {@see self::forgetBoards()} and its callers. The memo
+     * lives as long as the instance, which is one `app()` resolution: the same
+     * bargain {@see HouseholdService::tonightFor()} makes, for the same reason.
      *
-     * Guarded on the pick, not just on the column. A kid who has already taken
-     * their card — or already finished it — has a quest, and re-dealing under
-     * them would move it. Those rows keep the single-card reading forever, and
-     * with it a null bold bonus, which is what a day dealt before bold cards
-     * existed actually paid.
+     * @var array<int, Collection<int, array<string, mixed>>>
      */
-    private function dealHandIfMissing(Profile $profile, DailyQuest $quest): DailyQuest
-    {
-        if ($quest->offered_chore_ids !== null || $quest->isPicked() || $quest->completed_at !== null) {
-            return $quest;
-        }
-
-        $hand = $this->dealHand($profile);
-
-        if ($hand->isEmpty()) {
-            return $quest;
-        }
-
-        $quest->chore_id = $hand->first()->id;
-        $quest->offered_chore_ids = $hand->pluck('id')->all();
-        // Shut again, so the cards arrive out of a chest rather than appearing
-        // under one already open — which is exactly what a kid mid-transition
-        // is looking at.
-        $quest->dealt_at = null;
-        $quest->save();
-
-        return $quest->refresh();
-    }
+    private array $boards = [];
 
     /**
-     * The hand of cards to offer, cheapest first.
+     * Drops the memo. Called by everything that can change a board: a claim, a
+     * charm, an approval or rejection, a parent reopening a chore, and the two
+     * urgency controls.
      *
-     * Spread across the pool's range rather than drawn at random: the pool is
-     * sorted by points and split into {@see self::HAND_SIZE} bands, and one
-     * chore comes out of each. Three random draws routinely produce three
-     * near-identical chores, and a hand of three identical chores is a choice
-     * in name only — the spread is what guarantees the kid is always weighing
-     * "quick and cheap" against "big and paid for", which is the whole point
-     * of dealing cards instead of assigning one.
+     * Deliberately blunt — it forgets every profile's board rather than one
+     * kid's, because cooldowns are household-wide and one kid's claim changes
+     * what every sibling's board says.
      *
-     * Prefers chores nobody has claimed, but falls back to the full candidate
-     * list rather than dealing short — on a day the family has already cleared
-     * the board, a blocked quest beats no quest and a crash.
-     *
-     * @return Collection<int, Chore>
+     * Public because the kid shell's Refresh button means exactly this: a kid
+     * who suspects a sibling has taken something is asking to be told again,
+     * and a cached answer is the one thing that button must never give them.
+     * Nothing else needs it — a write through this service clears it already,
+     * and a write from another request gets a new instance.
      */
-    private function dealHand(Profile $profile, ?int $excludeChoreId = null): Collection
+    public function forgetBoards(): void
     {
-        $candidates = $this->questCandidates($profile, $excludeChoreId);
-
-        if ($candidates->isEmpty()) {
-            return collect();
-        }
-
-        $free = $this->unclaimed($candidates);
-        $pool = $free->isNotEmpty() ? $free : $candidates;
-        $size = $this->handSizeFor($profile);
-
-        if ($pool->count() <= $size) {
-            return $pool->sortBy('points')->values();
-        }
-
-        return $pool
-            ->sortBy('points')
-            ->values()
-            ->split($size)
-            ->map(fn (Collection $band) => $band->random())
-            ->sortBy('points')
-            ->values();
+        $this->boards = [];
     }
 
     /**
-     * How many cards this kid is dealt today.
+     * Point chores for the board, each annotated with
+     * ['chore' => Chore, 'state' => string]. The mystery chore (if any) stays
+     * in this list, indistinguishable from the rest — that's the whole point.
      *
-     * Wider for a kid who put work in yesterday. The band split means extra
-     * cards are not just more of the same — the pool is cut into as many bands
-     * as there are cards, so a bigger hand is a *finer* spread across the same
-     * range of chores, and the kid gets a genuinely wider choice rather than
-     * two more near-duplicates.
-     */
-    public function handSizeFor(Profile $profile): int
-    {
-        $yesterday = HouseholdClock::for($profile->household)->today()->subDay();
-
-        return $this->streaks->workedOn($profile, $yesterday)
-            ? self::HAND_SIZE + self::HAND_BONUS_CARDS
-            : self::HAND_SIZE;
-    }
-
-    /**
-     * Today's cards as chores, cheapest first — what the kid is choosing
-     * between.
-     *
-     * Ids that no longer resolve are dropped, so a chore a parent deleted
-     * mid-morning leaves a shorter hand rather than a hole.
-     *
-     * Still returns the whole hand after the pick, burned cards included. The
-     * page renders one card by then, but the bold bonus is a property of the
-     * hand the chosen card came out of — resolving it at claim time means
-     * knowing what it was up against.
-     *
-     * @return Collection<int, Chore>
-     */
-    public function offeredChoresFor(Profile $profile): Collection
-    {
-        return $this->handFor($profile, $this->questFor($profile));
-    }
-
-    /**
-     * Every chore today's quest could still turn out to be — the whole hand
-     * before the pick, the one chosen card after it.
-     *
-     * The bonus wheel excludes these. It has always excluded the quest chore,
-     * on the grounds that a 3x boost belongs on work the kid took on top of
-     * their quest rather than on the quest itself; a hand of three just means
-     * there are three answers to "what might the quest be" for as long as the
-     * chest is shut.
-     *
-     * @return array<int, int>
-     */
-    public function possibleQuestChoreIds(Profile $profile): array
-    {
-        $quest = $this->questFor($profile);
-
-        return $quest->isPicked() ? [$quest->chore_id] : $quest->offeredChoreIds();
-    }
-
-    /** @return Collection<int, Chore> */
-    private function handFor(Profile $profile, DailyQuest $quest): Collection
-    {
-        $byId = $profile->household->chores->keyBy('id');
-
-        return collect($quest->offeredChoreIds())
-            ->map(fn (int $id) => $byId->get($id))
-            ->filter()
-            ->sortBy('points')
-            ->values();
-    }
-
-    /**
-     * What each card in today's hand pays on top of its own points.
-     *
-     * One card is bold by default — the dearest — at
-     * {@see self::BOLD_CARD_BONUS_PERCENT}. A charm can widen that to two
-     * cards or the whole hand, or double what the one bold card pays; see
-     * {@see QuestCharmEffect}.
-     *
-     * A hand whose cards all pay the same has no bold card *by default*:
-     * nothing in it is braver than anything else, and a bonus nobody chose is
-     * just a bonus. A charm overrides that — the tickets were spent, and an
-     * arbitrary bold card beats a fizzle a kid paid for.
-     *
-     * @return array<int, int> chore id => bonus points
-     */
-    public function cardBonusesFor(Profile $profile): array
-    {
-        $quest = $this->questFor($profile);
-        $hand = $this->handFor($profile, $quest);
-
-        if ($hand->isEmpty()) {
-            return [];
-        }
-
-        $charm = $quest->charm_effect;
-        $flat = $hand->min('points') === $hand->max('points');
-
-        $boldCards = match (true) {
-            $charm !== null => $charm->boldCards() ?? $hand->count(),
-            $hand->count() < 2, $flat => 0,
-            default => 1,
-        };
-
-        if ($boldCards < 1) {
-            return [];
-        }
-
-        $percent = self::BOLD_CARD_BONUS_PERCENT * ($charm?->bonusMultiplier() ?? 1);
-
-        // The hand is already sorted cheapest-first, so reversing gives
-        // dearest-first without a second sort deciding ties differently.
-        return $hand
-            ->reverse()
-            ->take($boldCards)
-            ->mapWithKeys(fn (Chore $chore) => [
-                $chore->id => (int) round($chore->points * $percent / 100),
-            ])
-            ->all();
-    }
-
-    /**
-     * The bonus riding on the card this kid actually took, in points — the
-     * card's own bold bonus plus whatever the charm settled at hand-in.
-     *
-     * Resolved from the hand rather than stored on the quest so that a parent
-     * editing a chore's points mid-morning can't leave a bonus behind that no
-     * longer matches anything on screen.
-     */
-    public function questBonusFor(Profile $profile): int
-    {
-        $quest = $this->questFor($profile);
-
-        return ($this->cardBonusesFor($profile)[$quest->chore_id] ?? 0)
-            + $this->charmPayoutFor($profile);
-    }
-
-    /** The charm's hand-in bonus on the chosen card, in points. */
-    public function charmPayoutFor(Profile $profile): int
-    {
-        $quest = $this->questFor($profile);
-
-        if (! $quest->charm_payout_percent) {
-            return 0;
-        }
-
-        return (int) round($quest->chore->points * $quest->charm_payout_percent / 100);
-    }
-
-    /**
-     * Opens the chest and puts the cards on the table.
-     *
-     * Separate from the pick, and persisted, because they are two taps with a
-     * refresh-shaped gap between them: without a stamp of its own the chest
-     * would re-close on any re-render before the kid had chosen, and replay a
-     * 2.6s animation they had already sat through.
-     */
-    public function dealQuestHand(Profile $profile): DailyQuest
-    {
-        $quest = $this->questFor($profile);
-
-        if ($quest->dealt_at === null) {
-            $quest->dealt_at = now();
-            // The charm resolves as the lid comes up, not when it was cast —
-            // the cards flipping over is the moment it has to be visible in.
-            if ($quest->isCharmed() && $quest->charm_effect === null) {
-                $quest->charm_effect = QuestCharmEffect::roll();
-            }
-
-            $quest->save();
-        }
-
-        return $quest;
-    }
-
-    /**
-     * Puts a charm on today's quest. Null when there is nothing to charm.
-     *
-     * Refuses once the chest is open: a charm bought against cards the kid has
-     * already read is not a gamble, it is a purchase. The effect itself is
-     * rolled later, by {@see self::dealQuestHand()}.
-     */
-    public function charmQuest(Profile $profile): ?DailyQuest
-    {
-        $quest = $this->questFor($profile);
-
-        if ($quest->isCharmed() || $quest->dealt_at !== null || $quest->completed_at !== null) {
-            return null;
-        }
-
-        $quest->charmed_at = now();
-        $quest->save();
-
-        return $quest->refresh();
-    }
-
-    /**
-     * Settles the charm's second roll, once, as the quest is handed in.
-     *
-     * Stored rather than recomputed because it is a coin toss: asking twice
-     * would give two different answers, and the number a kid was shown on the
-     * hero has to be the number that reaches the ledger.
-     */
-    private function rollCharmPayout(Profile $profile, DailyQuest $quest): void
-    {
-        if (! $quest->isCharmed() || $quest->charm_payout_percent !== null) {
-            return;
-        }
-
-        $wasBold = isset($this->cardBonusesFor($profile)[$quest->chore_id]);
-        $odds = $wasBold ? self::CHARM_PAYOUT_ODDS_BOLD : self::CHARM_PAYOUT_ODDS_PLAIN;
-
-        // Zero rather than null on a miss: null means "not rolled yet", and
-        // the two have to stay tellable apart or a refresh would re-roll it.
-        $quest->charm_payout_percent = random_int(1, 100) <= $odds ? self::CHARM_PAYOUT_PERCENT : 0;
-        $quest->save();
-    }
-
-    /**
-     * Takes one of today's cards as the quest, burning the rest.
-     *
-     * Returns null when the card isn't takeable, which is how the page knows
-     * to say why rather than silently doing nothing. Two ways that happens,
-     * and they need different wording:
-     *
-     * - the id isn't in today's hand at all (a stale tab, or a poked request)
-     * - a sibling claimed that chore between the deal and the tap, which is
-     *   the same race the board already has to explain
-     *
-     * The two burned cards stay on the side-quest board. They were never
-     * withdrawn from it — the board only ever excludes the quest chore — so
-     * choosing costs the household nothing in available work, and the burn is
-     * drama rather than a penalty.
-     */
-    public function chooseQuest(Profile $profile, int $choreId): ?DailyQuest
-    {
-        $quest = $this->questFor($profile);
-
-        // Already chosen. Idempotent for the same card so a double-tap or a
-        // replayed request lands on the same quest instead of failing.
-        if ($quest->isPicked()) {
-            return $quest->chore_id === $choreId ? $quest : null;
-        }
-
-        if (! in_array($choreId, $quest->offeredChoreIds(), true)) {
-            return null;
-        }
-
-        $chore = $profile->household->chores->firstWhere('id', $choreId);
-
-        if (! $chore || $this->isExpired($chore)) {
-            return null;
-        }
-
-        $claimant = $this->claimantFor($chore);
-
-        if ($chore->cadence !== ChoreCadence::Unlimited && $claimant && $claimant->profile_id !== $profile->id) {
-            return null;
-        }
-
-        $quest->chore_id = $choreId;
-        // Always already set by the time a kid gets here — the cards can't be
-        // tapped until the chest has been opened. Stamped defensively anyway:
-        // the page keys the chest open on dealt_at, so a pick that somehow
-        // arrived without one would leave the hero rendered inside a chest
-        // drawn shut.
-        $quest->dealt_at ??= now();
-        $quest->revealed_at = now();
-        $quest->save();
-
-        return $quest->refresh();
-    }
-
-    /**
-     * Whether any card in today's hand can still be taken.
-     *
-     * A hand every card of which has been claimed out from under the kid is
-     * the unpicked twin of a blocked quest, and needs the same rescue — see
-     * {@see self::rerollIfUnavailable()}.
-     */
-    private function handIsDead(Profile $profile, DailyQuest $quest): bool
-    {
-        $byId = $profile->household->chores->keyBy('id');
-
-        foreach ($quest->offeredChoreIds() as $id) {
-            $chore = $byId->get($id);
-
-            if (! $chore || $this->isExpired($chore)) {
-                continue;
-            }
-
-            if ($chore->cadence === ChoreCadence::Unlimited) {
-                return false;
-            }
-
-            $claimant = $this->claimantFor($chore);
-
-            if (! $claimant || $claimant->profile_id === $profile->id) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
-     * Swaps today's quest for a different chore. Shared by the kid's ticket
-     * purchase and the parent's override button so both behave identically.
-     *
-     * Returns null when there's nothing to do — the quest is already cleared,
-     * or the household has no other eligible chore to offer — which is how
-     * callers know not to charge for it.
-     */
-    public function rerollQuest(Profile $profile): ?DailyQuest
-    {
-        $quest = $this->questFor($profile);
-
-        if ($quest->completed_at !== null) {
-            return null;
-        }
-
-        return $this->assignDifferentChore($profile, $quest);
-    }
-
-    /**
-     * Swaps a quest that's been taken out from under the kid — by a sibling
-     * claiming it, or by a parent's deadline closing it.
-     *
-     * Cooldowns are household-wide, so another kid finishing your quest chore
-     * would otherwise leave you unable to clear your quest at all — no streak,
-     * and a board that stays gated. Rerolling keeps the day recoverable
-     * without anyone having to intervene.
-     */
-    private function rerollIfUnavailable(Profile $profile, DailyQuest $quest): DailyQuest
-    {
-        if ($quest->completed_at !== null) {
-            return $quest;
-        }
-
-        // Before the pick, `chore_id` is a placeholder and the hand is what
-        // matters: a sibling taking the placeholder card leaves two perfectly
-        // good cards on the table, and re-dealing over it would yank a hand
-        // the kid may already be looking at. Only a hand with nothing left in
-        // it is stuck, and that is the same stuck a blocked quest is.
-        if (! $quest->isPicked()) {
-            return $this->handIsDead($profile, $quest)
-                ? $this->assignDifferentChore($profile, $quest) ?? $quest
-                : $quest;
-        }
-
-        // Checked ahead of the cadence shortcut below: a deadline closes an
-        // unlimited chore just as firmly as any other, so an expired one still
-        // has to move off the kid's quest.
-        if ($this->isExpired($quest->chore)) {
-            return $this->assignDifferentChore($profile, $quest) ?? $quest;
-        }
-
-        // Unlimited chores never lock, so a claim on one blocks nobody.
-        if ($quest->chore->cadence === ChoreCadence::Unlimited) {
-            return $quest;
-        }
-
-        $claimant = $this->claimantFor($quest->chore);
-
-        // Nobody holds it, or the kid holds it themselves — nothing to fix.
-        if (! $claimant || $claimant->profile_id === $profile->id) {
-            return $quest;
-        }
-
-        return $this->assignDifferentChore($profile, $quest) ?? $quest;
-    }
-
-    /**
-     * Deals a whole new hand, excluding the chore the quest is currently on.
-     * Null when the household has nothing else to offer.
-     *
-     * This is a re-deal rather than a swap because the quest is a hand now:
-     * handing back a single replacement chore would turn the ticket-priced
-     * reroll — and the silent rescue of a blocked quest — into the one path
-     * that takes the choice away, which is the thing being bought back.
-     */
-    private function assignDifferentChore(Profile $profile, DailyQuest $quest): ?DailyQuest
-    {
-        // dealHand() falls back to chores someone else holds when nothing is
-        // free. That is right on a fresh deal — a blocked quest beats no quest
-        // — and wrong here, where it would leave the kid exactly as stuck as
-        // they already were. Checked first so this path refuses instead, which
-        // is what tells rerollQuest() to keep the kid's ticket.
-        if ($this->unclaimed($this->questCandidates($profile, $quest->chore_id))->isEmpty()) {
-            return null;
-        }
-
-        $hand = $this->dealHand($profile, $quest->chore_id);
-
-        $quest->chore_id = $hand->first()->id;
-        $quest->offered_chore_ids = $hand->pluck('id')->all();
-        // Both stamps cleared on purpose — a new hand deserves the chest
-        // animation again, so the re-deal lands as a fresh reveal rather than
-        // a silent relabel. Also means the board stays gated until they pick.
-        //
-        // The charm columns are deliberately left alone. A charm survives a
-        // re-deal, since it was paid for and the reroll isn't its fault — but
-        // an effect already rolled is *not* rolled again, or a kid holding
-        // rerolls could spin the charm until it came up "every card bold".
-        // dealQuestHand() only rolls into a null effect, so that falls out
-        // without a guard here.
-        $quest->dealt_at = null;
-        $quest->revealed_at = null;
-        $quest->save();
-
-        return $quest->refresh();
-    }
-
-    /** @return Collection<int, Chore> */
-    private function questCandidates(Profile $profile, ?int $excludeChoreId = null): Collection
-    {
-        $clock = HouseholdClock::for($profile->household);
-
-        return $profile->household->chores()
-            ->appropriateFor($profile)
-            ->questEligible()
-            // A spent one-time chore never reopens on its own, so handing one
-            // out as a quest — even as the fallback pick below — would dead-end
-            // the kid's whole day rather than just their morning.
-            ->available()
-            // Same reasoning for a chore whose deadline has already passed: it
-            // won't reopen today, and a quest that can't be cleared costs a
-            // streak day and leaves a gated board gated.
-            ->notExpiredAt(now(), $clock->startOf($clock->today()))
-            ->when($excludeChoreId !== null, fn ($query) => $query->where('id', '!=', $excludeChoreId))
-            ->get();
-    }
-
-    /**
-     * @param  Collection<int, Chore>  $chores
-     * @return Collection<int, Chore>
-     */
-    private function unclaimed(Collection $chores): Collection
-    {
-        return $chores->reject(fn (Chore $chore) => $chore->cadence !== ChoreCadence::Unlimited
-            && $this->claimantFor($chore) !== null);
-    }
-
-    public function isQuestRevealedToday(Profile $profile): bool
-    {
-        return $this->questFor($profile)->revealed_at !== null;
-    }
-
-    /**
-     * Takes whichever card the quest is currently sitting on, without going
-     * through the deal.
-     *
-     * Kids don't reach this — the page deals and then picks. It is the path
-     * for everything that needs a quest simply *decided*: a household with one
-     * eligible chore has a one-card hand and nothing to choose between, and
-     * tests that only care about a revealed quest shouldn't have to stage a
-     * card pick to get one.
-     */
-    public function revealQuest(Profile $profile): DailyQuest
-    {
-        $quest = $this->questFor($profile);
-
-        if ($quest->revealed_at === null) {
-            $quest->dealt_at ??= now();
-            $quest->revealed_at = now();
-            $quest->save();
-        }
-
-        return $quest;
-    }
-
-    public function isQuestDoneToday(Profile $profile): bool
-    {
-        return $this->questFor($profile)->completed_at !== null;
-    }
-
-    /**
-     * Point chores for the board, excluding the assigned quest, each
-     * annotated with ['chore' => Chore, 'state' => string]. The mystery
-     * chore (if any) stays in this list, indistinguishable from the rest —
-     * that's the whole point.
+     * Nothing is held back any more. The board used to have the day's quest
+     * hand cut out of it, which meant the page a kid opens to find work was
+     * quietly missing up to five of the jobs on offer.
      */
     public function boardFor(Profile $profile): Collection
     {
-        // Every card still on the table comes off the board, not just the one
-        // the quest row currently points at. Before the pick that row holds a
-        // placeholder, so keying on it alone would leave two of the three cards
-        // sitting below as ordinary side quests — claimable, out from under a
-        // kid who is still deciding, and duplicated on screen while they do.
-        // After the pick the two burned cards drop back in, which is exactly
-        // what the copy on the cards promises.
-        $questChoreIds = $this->possibleQuestChoreIds($profile);
+        return $this->boards[$profile->id] ??= $this->buildBoardFor($profile);
+    }
 
+    /** @return Collection<int, array<string, mixed>> */
+    private function buildBoardFor(Profile $profile): Collection
+    {
         // Resolved here even though the board no longer needs it for state:
         // this is the call that lazily assigns the day's mystery chore, and
         // dropping it would leave that to whichever page happened to ask first.
         $this->mysteryChoreFor($profile->household);
 
+        $charmed = $this->charmedChoreIdsFor($profile);
+
         return $profile->household->chores
             ->filter(fn (Chore $chore) => $chore->isAppropriateFor($profile))
-            ->reject(fn (Chore $chore) => in_array($chore->id, $questChoreIds, true))
-            ->map(function (Chore $chore) use ($profile) {
+            ->map(function (Chore $chore) use ($profile, $charmed) {
                 $claimant = $chore->cadence === ChoreCadence::Unlimited
                     ? null
                     : $this->claimantFor($chore);
@@ -768,6 +180,21 @@ class ChoreService
                     // badge and its colour, and neither should be re-deriving
                     // the household day per render.
                     'helpWanted' => $this->isHelpWanted($chore),
+                    // Per-kid, unlike everything else on this row: a charm is
+                    // bought and cast by one child, and a sibling looking at
+                    // the same chore sees an ordinary job paying ordinary
+                    // points. Passed in as a resolved set rather than queried
+                    // per chore — the board is twenty rows and this is one
+                    // lookup for all of them.
+                    'charmed' => in_array($chore->id, $charmed, true),
+                    // What that charm is worth on this row, in points. Resolved
+                    // here so the rule lives in one place: the row, the confirm
+                    // sheet and claim() all have to quote the same number, and
+                    // three copies of `points * percent / 100` is how one of
+                    // them ends up rounding differently from the ledger.
+                    'charmBonus' => in_array($chore->id, $charmed, true)
+                        ? (int) round($chore->points * self::CHARM_BONUS_PERCENT / 100)
+                        : 0,
                 ];
             })
             // A taken one-time chore leaves the board outright — that's the
@@ -806,9 +233,208 @@ class ChoreService
     }
 
     /**
+     * Everything this kid has handed in today, newest first.
+     *
+     * The tally Home's Work row is built from, and it counts a claim rather
+     * than an approval: the kid did the job, and a row that only appeared once
+     * a parent got round to it would be the app telling them they had done
+     * nothing all afternoon. A rejected one stays, because "sent back" is
+     * something they need to see.
+     *
+     * @return Collection<int, ChoreCompletion>
+     */
+    public function workTodayFor(Profile $profile): Collection
+    {
+        $clock = HouseholdClock::for($profile->household);
+
+        return ChoreCompletion::where('profile_id', $profile->id)
+            ->where('submitted_at', '>=', $clock->startOf($clock->today()))
+            ->with('chore')
+            ->latest('submitted_at')
+            ->get();
+    }
+
+    /**
+     * One job to point a kid at when they have done nothing yet: the cheapest
+     * thing they can still claim.
+     *
+     * This is the quest's replacement, and deliberately the smallest possible
+     * version of it. A board of forty jobs is a decision, and the six-year-old
+     * is the one who cannot make it — so something has to say *this one, now*.
+     * Cheapest rather than cleverest because cheap is predictable and never
+     * intimidating: the answer to "what now" should be the easiest thing in the
+     * house, not the most valuable.
+     *
+     * It suggests and nothing more. Nothing is assigned, nothing expires, and
+     * it pays exactly what it says on the board — which is the whole difference
+     * between this and the quest.
+     */
+    public function suggestedChoreFor(Profile $profile): ?Chore
+    {
+        return $this->boardFor($profile)
+            ->filter(fn (array $entry) => $entry['state'] === 'ready')
+            ->map(fn (array $entry) => $entry['chore'])
+            ->sortBy([['points', 'asc'], ['id', 'asc']])
+            ->first();
+    }
+
+    /**
+     * How much is up for grabs right now: how many claimable chores, and what
+     * the cheapest and dearest pay.
+     *
+     * The footnote under Home's Work row. It is the one line on that page that
+     * says the board is bigger than the two jobs they did — read live, so a
+     * house that added ten chores this morning says so.
+     *
+     * @return array{count: int, min: int, max: int}
+     */
+    public function boardSpanFor(Profile $profile): array
+    {
+        $points = $this->boardFor($profile)
+            ->filter(fn (array $entry) => $entry['state'] === 'ready')
+            ->map(fn (array $entry) => (int) $entry['chore']->points);
+
+        return [
+            'count' => $points->count(),
+            'min' => (int) ($points->min() ?? 0),
+            'max' => (int) ($points->max() ?? 0),
+        ];
+    }
+
+    /**
+     * Casts a Quest Charm over the board: up to {@see self::CHARM_CHORES}
+     * chores this kid can still claim today start paying
+     * {@see self::CHARM_BONUS_PERCENT} more, for this kid alone.
+     *
+     * Returns the chores it landed on, or an empty collection when there was
+     * nothing to charm — which is how the perk knows to refuse and keep the
+     * ticket.
+     *
+     * Random rather than chosen, and that is the whole mechanic. A kid picking
+     * which five chores pay half again is not gambling, they are giving
+     * themselves a pay rise on the five they were going to do anyway; the
+     * charm is worth a ticket precisely because it might light up the bins.
+     *
+     * Only `'ready'` chores are candidates. Charming a job a sibling has
+     * already claimed spends a ticket on a row that can't be tapped, and
+     * charming an expired one is worse — it pays out tomorrow, when the chore
+     * reopens and the charm has lapsed.
+     *
+     * @return Collection<int, Chore>
+     */
+    public function charmBoard(Profile $profile): Collection
+    {
+        $already = $this->charmedChoreIdsFor($profile);
+
+        $candidates = $this->boardFor($profile)
+            ->filter(fn (array $entry) => $entry['state'] === 'ready')
+            ->map(fn (array $entry) => $entry['chore'])
+            // A second charm widens the spread rather than doubling up on a
+            // chore already lit: nothing stacks, so re-charming the same row
+            // would be a ticket that bought nothing.
+            ->reject(fn (Chore $chore) => in_array($chore->id, $already, true))
+            ->values();
+
+        if ($candidates->isEmpty()) {
+            return collect();
+        }
+
+        $picked = $candidates->count() <= self::CHARM_CHORES
+            ? $candidates
+            : $candidates->random(self::CHARM_CHORES);
+
+        $today = HouseholdClock::for($profile->household)->today();
+        $now = now();
+
+        // insertOrIgnore rather than create(): the table's unique index on
+        // (profile, chore, date) is the no-stacking rule, and a kid who taps
+        // "use charm" twice before the first round trip lands would otherwise
+        // meet it as a 500. Ignoring the collision is the right answer — the
+        // chore is already charmed, which is what they asked for.
+        CharmedChore::insertOrIgnore($picked->map(fn (Chore $chore) => [
+            'profile_id' => $profile->id,
+            'chore_id' => $chore->id,
+            'charm_date' => $today->toDateString(),
+            'created_at' => $now,
+            'updated_at' => $now,
+        ])->all());
+
+        // The board this was picked from is now out of date by exactly these
+        // rows.
+        $this->forgetBoards();
+
+        return $picked->sortByDesc('points')->values();
+    }
+
+    /**
+     * The chores charmed for this kid today.
+     *
+     * Keyed to the household day, so a charm lapses at the rollover like the
+     * Help Wanted flag and a deadline do — there is nothing to clear and no
+     * scheduled job. That expiry is the price of the mechanic: a charm that
+     * kept until it was spent would make the ticket a savings account, and the
+     * point of it is that today's board looks different.
+     *
+     * @return array<int, int>
+     */
+    public function charmedChoreIdsFor(Profile $profile): array
+    {
+        return CharmedChore::where('profile_id', $profile->id)
+            ->whereDate('charm_date', HouseholdClock::for($profile->household)->today())
+            ->pluck('chore_id')
+            ->all();
+    }
+
+    public function isCharmed(Profile $profile, Chore $chore): bool
+    {
+        return in_array($chore->id, $this->charmedChoreIdsFor($profile), true);
+    }
+
+    /**
+     * Whether this kid has already been paid the charm on this chore today.
+     *
+     * Read off the completion's own `charm_bonus` rather than inferred from
+     * "have they done this chore today", so a charm cast *after* an ordinary
+     * claim still pays on the next one — the first claim recorded a zero, and
+     * a zero is not a payment.
+     *
+     * A rejected claim doesn't count. Nothing was earned by work a parent sent
+     * back, so redoing it is owed the bonus the board promised the first time.
+     */
+    private function charmPaidToday(Profile $profile, Chore $chore): bool
+    {
+        $clock = HouseholdClock::for($profile->household);
+
+        return ChoreCompletion::where('profile_id', $profile->id)
+            ->where('chore_id', $chore->id)
+            ->where('status', '!=', CompletionStatus::Rejected)
+            ->where('charm_bonus', '>', 0)
+            ->where('submitted_at', '>=', $clock->startOf($clock->today()))
+            ->exists();
+    }
+
+    /**
+     * What a charm adds to this chore for this kid, in points, or zero.
+     *
+     * Resolved from the chore's live points rather than stored when the charm
+     * was cast, so a parent repricing a chore mid-afternoon can't leave a bonus
+     * behind that matches nothing on screen. It stops being live the moment the
+     * work is claimed — see {@see self::claim()}, which freezes it into
+     * `points_awarded` like every other bonus paid at claim time.
+     */
+    public function charmBonusFor(Profile $profile, Chore $chore): int
+    {
+        if (! $this->isCharmed($profile, $chore)) {
+            return 0;
+        }
+
+        return (int) round($chore->points * self::CHARM_BONUS_PERCENT / 100);
+    }
+
+    /**
      * The chore randomly picked as today's household-wide mystery bonus —
-     * lazily assigned (like the daily quest and the wheel's spin result)
-     * the first time it's needed each day, then persisted so it stays the
+     * lazily assigned (like the wheel's spin result) the first time it's
+     * needed each day, then persisted so it stays the
      * same chore for everyone, all day, no matter how many times it's
      * looked up.
      *
@@ -873,7 +499,7 @@ class ChoreService
 
     /**
      * Today's draw itself, for callers that need more than who won it — the
-     * quest page stamps the card with the moment it was found. Never draws one:
+     * Quests page stamps the card with the moment it was found. Never draws one:
      * see mysteryOn(). A page that wants the chore calls mysteryChoreFor().
      */
     public function mysteryTodayFor(Household $household): ?DailyMystery
@@ -887,6 +513,8 @@ class ChoreService
      */
     public function rerollMysteryChore(Household $household): ?Chore
     {
+        $this->forgetBoards();
+
         $today = HouseholdClock::for($household)->today();
 
         $existing = $this->mysteryOn($household, $today);
@@ -1077,8 +705,8 @@ class ChoreService
     /**
      * The completion holding a chore when it belongs to somebody else.
      *
-     * The board and the quest cards both need "who took it, if it wasn't you"
-     * and neither wants the Unlimited special case spelled out again — an
+     * The board row and the confirm sheet both need "who took it, if it wasn't
+     * you" and neither wants the Unlimited special case spelled out again — an
      * unlimited chore is never held by anyone, however many people have done
      * it today.
      */
@@ -1226,6 +854,8 @@ class ChoreService
      */
     public function setDeadline(Chore $chore, Carbon $at): void
     {
+        $this->forgetBoards();
+
         $chore->expires_at = $at;
         $chore->save();
 
@@ -1266,6 +896,8 @@ class ChoreService
      */
     public function flagHelpWanted(Chore $chore): void
     {
+        $this->forgetBoards();
+
         $chore->help_wanted_at = now();
         $chore->save();
 
@@ -1300,6 +932,8 @@ class ChoreService
      */
     public function clearHelpWanted(Chore $chore): void
     {
+        $this->forgetBoards();
+
         $chore->help_wanted_at = null;
         $chore->save();
     }
@@ -1307,6 +941,8 @@ class ChoreService
     /** Lifts a deadline, putting the chore back on its ordinary cadence. */
     public function clearDeadline(Chore $chore): void
     {
+        $this->forgetBoards();
+
         $chore->expires_at = null;
         $chore->save();
     }
@@ -1357,16 +993,27 @@ class ChoreService
      * points_awarded is what the kid has earned so far, and until a parent has
      * signed the work off that is the chore's own points and nothing more.
      */
-    /**
-     * @param  int  $bonusPoints  Paid on top of the chore's own points, after
-     *                            any wheel multiplier. Only the daily quest's
-     *                            bold card uses it — see
-     *                            {@see self::BOLD_CARD_BONUS_PERCENT}.
-     */
-    public function claim(Profile $profile, Chore $chore, int $bonusPoints = 0): ChoreCompletion
+    public function claim(Profile $profile, Chore $chore): ChoreCompletion
     {
+        $this->forgetBoards();
+
         $multiplier = $this->spin->multiplierFor($profile, $chore);
         $aim = $this->aimFor($profile->household, $chore);
+
+        // Added after the multiplier rather than multiplied by it, and frozen
+        // into points_awarded here: the charm was cast on the board this kid
+        // was looking at when they decided which job to do, so a charm that
+        // lapses overnight must not change what today's work turned out to be
+        // worth. Same rule as `help_wanted` below and `struck_weak_point`.
+        //
+        // Paid once per chore per household day, and that guard is not optional:
+        // ChoreCadence::Unlimited has no cooldown at all, so without it a
+        // charmed unlimited chore pays half again on every submission, all day,
+        // for one ticket. Exactly the hole awardHelpWantedTicket() closes for
+        // the flag.
+        $charmBonus = $this->charmPaidToday($profile, $chore)
+            ? 0
+            : $this->charmBonusFor($profile, $chore);
 
         // Not for the bonus — for the assignment. The draw excludes chores that
         // already have a claimant, so a day whose first mystery lookup happened
@@ -1379,12 +1026,16 @@ class ChoreService
             'chore_id' => $chore->id,
             'profile_id' => $profile->id,
             'status' => CompletionStatus::Pending,
-            'points_awarded' => $chore->points * $multiplier + $bonusPoints,
+            'points_awarded' => $chore->points * $multiplier + $charmBonus,
             // Frozen here for the same reason struck_weak_point is: the flag
             // is why this chore may have been picked over another, so a parent
             // clearing it before they get round to approving must not reach
             // back and cancel the ticket the work had already earned.
             'help_wanted' => $this->isHelpWanted($chore),
+            // Inside points_awarded already; recorded on its own so the next
+            // claim of the same chore today can see that the charm has been
+            // spent. See charmPaidToday().
+            'charm_bonus' => $charmBonus,
             'submitted_at' => now(),
             ...$aim,
         ]);
@@ -1446,47 +1097,6 @@ class ChoreService
         return [
             'struck_weak_point' => $monster !== null && $this->monsters->isWeakPoint($monster, $chore),
         ];
-    }
-
-    /**
-     * Claiming (not approval) is what unlocks the rest of the board —
-     * deliberate, so a kid isn't blocked by a parent's response time. The
-     * streak is not touched here; it only moves once a parent approves.
-     */
-    public function claimQuest(Profile $profile): DailyQuest
-    {
-        $quest = $this->questFor($profile);
-
-        if ($quest->completed_at === null) {
-            // Settled before the stamp, in this order: the payout roll reads
-            // the card bonuses to know whether the chosen card was bold, and
-            // questBonusFor() then has to see the number it wrote. Both go
-            // back through questFor(), and a completed quest is one
-            // rerollIfUnavailable() stops rescuing — so asking afterwards
-            // would be asking about a different quest than the one claimed.
-            $this->rollCharmPayout($profile, $quest);
-
-            $bonus = $this->questBonusFor($profile);
-
-            $quest->completed_at = now();
-            $quest->save();
-
-            $this->claim($profile, $quest->chore, $bonus);
-        }
-
-        return $quest;
-    }
-
-    /** The quest this completion clears, if it clears one. */
-    private function questForCompletion(ChoreCompletion $completion, Profile $profile): ?DailyQuest
-    {
-        $questDate = HouseholdClock::for($profile->household)->dayFor($completion->submitted_at);
-
-        $quest = DailyQuest::where('profile_id', $profile->id)
-            ->whereDate('quest_date', $questDate)
-            ->first();
-
-        return $quest?->chore_id === $completion->chore_id ? $quest : null;
     }
 
     /**
@@ -1575,6 +1185,8 @@ class ChoreService
 
     public function approve(ChoreCompletion $completion, Profile $approver): void
     {
+        $this->forgetBoards();
+
         // The approvals screen only ever lists pending items, so this is a
         // guard rather than a real path — but approving twice would credit
         // the ledger twice, which is not something to leave to chance.
@@ -1623,10 +1235,10 @@ class ChoreService
         // Before badges, not after — the streak_3/7/14 badges read the
         // profile's streak, so it has to be current by the time they run.
         //
-        // Every approval is offered, not just the quest's: any approved chore
-        // earns the day now, so a side quest signed off is as much a reason to
-        // recompute as the main one. StreakService decides whether it actually
-        // changes anything — see StreakService::recordApproval().
+        // Every approval is offered: any approved chore earns the day, so
+        // whichever one a kid happens to hand in is a reason to recompute.
+        // StreakService decides whether it actually changes anything — see
+        // StreakService::recordApproval().
         $this->streaks->recordApproval($completion, $profile);
 
         $this->badges->evaluate($profile);
@@ -1753,6 +1365,8 @@ class ChoreService
 
     public function sendBack(ChoreCompletion $completion, Profile $approver): void
     {
+        $this->forgetBoards();
+
         $completion->status = CompletionStatus::Rejected;
         $completion->decided_at = now();
         $completion->decided_by_profile_id = $approver->id;
@@ -1766,24 +1380,9 @@ class ChoreService
             $completion->chore->save();
         }
 
-        // "Do it again" is the whole point of sending something back, so the
-        // quest has to become claimable again too. Leaving completed_at stamped
-        // left the kid staring at a dead "Sent back" button with no way to
-        // resubmit — a side quest reopened on rejection but the main one, the
-        // only one that feeds the streak, was the one that couldn't.
-        $quest = $this->questForCompletion($completion, $completion->profile);
-
-        if ($quest) {
-            // revealed_at is deliberately left alone — they've already seen
-            // which chore it is, and replaying the chest to redo work they
-            // just got told off for would read as mockery.
-            $quest->completed_at = null;
-            $quest->save();
-        }
-
         // Pointed at the board rather than Home: this one comes with something
-        // to do, and the whole reason the quest was just reopened above is that
-        // the kid is meant to go and do it again.
+        // to do, and the whole point of sending work back is that the kid is
+        // meant to go and do it again.
         try {
             $completion->profile->notify(new ChoreReviewed(
                 'Sent back',
@@ -1810,6 +1409,8 @@ class ChoreService
      */
     public function reopen(Chore $chore): void
     {
+        $this->forgetBoards();
+
         $chore->used_at = null;
         $chore->reopened_at = now();
 
