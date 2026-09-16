@@ -849,92 +849,9 @@ new class extends Component
                 </span>
             </div>
 
-            {{-- The board, on a phone: nine live statuses in three short rows, with the feed
-                 starting under it rather than over it.
-
-                 The board is the accordion's *handle* — the panel opens below
-                 it, never in place of it, so the index never scrolls away while
-                 a kid is using what it opened. --}}
-            <div class="grid grid-cols-3 gap-[7px] lg:hidden" style="order: 1">
-                @foreach ($dayRows as $row)
-                    @php $open = $openRow === $row['key']; @endphp
-
-                    <button
-                        type="button"
-                        wire:key="tile-{{ $row['key'] }}"
-                        wire:click="toggleRow('{{ $row['key'] }}')"
-                        aria-expanded="{{ $open ? 'true' : 'false' }}"
-                        aria-controls="day-panel"
-                        @class([
-                            'flex min-h-[72px] flex-col justify-center gap-[3px] rounded-[14px] border px-2 py-[9px] text-center transition',
-                            'opacity-[.72]' => ! $open && ($row['done'] || $row['quiet']),
-                        ])
-                        style="{{ $open
-                            ? 'border-color: var(--fq-gold); background: var(--fq-gold-fill); box-shadow: 0 0 0 1px var(--fq-ticket-line)'
-                            : 'border-color: var(--fq-line); background: var(--fq-panel)' }}"
-                    >
-                        <span class="text-[17px]" aria-hidden="true">{{ $row['glyph'] }}</span>
-                        <span
-                            class="font-baloo text-[13.5px] font-extrabold"
-                            style="color: {{ $open ? 'var(--fq-gold)' : $row['accent'] }}"
-                        >{{ $row['tileLabel'] }}</span>
-                        {{-- The status never carries the meaning on its own: the
-                             colour says it twice, and this says it in words. --}}
-                        <span
-                            class="font-mono-fq text-[8px] tracking-[0.1em] uppercase"
-                            style="color: {{ $open ? 'var(--fq-gold)' : 'var(--fq-text-4)' }}"
-                        >{{ $open ? 'Open ▲' : $row['status'] }}</span>
-                    </button>
-                @endforeach
-            </div>
-
-            {{-- The same nine at desk size, where a 340px column has the room to
-                 say what each one is rather than abbreviate it. Each row is a
-                 child of the column itself so the panel can be ordered between
-                 them. --}}
-            @foreach ($dayRows as $index => $row)
-                @php $open = $openRow === $row['key']; @endphp
-
-                    <button
-                        type="button"
-                        wire:key="row-{{ $row['key'] }}"
-                        wire:click="toggleRow('{{ $row['key'] }}')"
-                        aria-expanded="{{ $open ? 'true' : 'false' }}"
-                        aria-controls="day-panel"
-                        @class([
-                            'hidden items-center gap-[11px] rounded-[16px] border p-3 text-left transition lg:flex',
-                            // A breath between the day and the house rows.
-                            'lg:mt-[6px]' => $index === $dayCount,
-                            'opacity-[.72] hover:opacity-100' => ! $open && ($row['done'] || $row['quiet']),
-                        ])
-                        style="order: {{ 2 + $index * 2 }}; {{ $open
-                            ? 'border-color: var(--fq-ticket-line); background: linear-gradient(160deg, var(--fq-gold-fill), var(--fq-panel) 72%)'
-                            : 'border-color: var(--fq-line); background: var(--fq-panel)' }}"
-                    >
-                        <span
-                            class="grid h-[34px] w-[34px] flex-none place-items-center rounded-[11px] text-[16px]"
-                            style="background: var(--fq-sunk)"
-                            aria-hidden="true"
-                        >{{ $row['glyph'] }}</span>
-
-                        <span class="min-w-0 flex-1">
-                            <span
-                                class="block font-baloo text-[16px] font-extrabold"
-                                style="color: {{ $open ? 'var(--fq-gold)' : $row['accent'] }}"
-                            >{{ $row['label'] }}</span>
-                            <span class="block truncate text-[12.5px] text-fq-text-4">{{ $row['sub'] }}</span>
-                        </span>
-
-                        <span
-                            class="flex-none font-mono-fq text-[10px] whitespace-nowrap"
-                            style="color: {{ $open ? 'var(--fq-gold)' : $row['statusColor'] }}"
-                        >{{ $row['status'] }}</span>
-
-                        <span class="flex-none text-[13px]" style="color: {{ $open ? 'var(--fq-gold)' : 'var(--fq-text-5)' }}" aria-hidden="true">
-                            {{ $open ? '▲' : '▼' }}
-                        </span>
-                    </button>
-                @endforeach
+            {{-- The board on a phone, the rows at desk size — see <x-day-index>.
+                 The house rows get a breath above them on a desk. --}}
+            <x-day-index :rows="$dayRows" :open-row="$openRow" :break-before="$dayCount" />
 
             {{-- The one open panel, ordered into place — see $panelOrder above. --}}
             <div id="day-panel" class="flex min-w-0 flex-col gap-[11px]" style="order: {{ $panelOrder }}">
@@ -1619,47 +1536,7 @@ new class extends Component
                 @endif
 
                 @if ($openRow === 'meals')
-                {{-- Every night a grown-up has filled in, tonight first. Unset
-                     nights are skipped rather than drawn as gaps: a column of
-                     "not set yet" is the app nagging the grown-ups on the one
-                     screen they are not the audience for. --}}
-                <div
-                    wire:key="home-meals"
-                    class="flex flex-col gap-[7px] rounded-[20px] border p-[13px]"
-                    style="border-color: var(--fq-line-2); background: linear-gradient(120deg, var(--fq-wash-violet), var(--fq-panel) 66%)"
-                >
-                    @forelse ($meals as $meal)
-                        @php
-                            $days = (int) $mealsToday->diffInDays($meal->served_on);
-                            $when = match ($days) {
-                                0 => 'Tonight',
-                                1 => 'Tomorrow',
-                                default => $meal->served_on->format($days < 7 ? 'l' : 'D j M'),
-                            };
-                        @endphp
-
-                        <div
-                            wire:key="meal-{{ $meal->id }}"
-                            class="flex flex-col gap-[2px] rounded-[13px] bg-fq-sunk px-[11px] py-[9px]"
-                        >
-                            <span
-                                class="font-mono-fq text-[9px] tracking-[0.16em] uppercase"
-                                style="color: {{ $days === 0 ? 'var(--fq-gold)' : 'var(--fq-text-5)' }}"
-                            >{{ $when }}</span>
-                            <span @class([
-                                'font-baloo font-bold',
-                                'text-[16px]' => $days === 0,
-                                'text-[14.5px] text-fq-text-2' => $days !== 0,
-                            ])>{{ $meal->name }}</span>
-
-                            @if ($meal->note)
-                                <span class="text-[12.5px] text-fq-text-4">{{ $meal->note }}</span>
-                            @endif
-                        </div>
-                    @empty
-                        <p class="px-1 py-2 text-[13.5px] text-fq-text-5">Nobody has said what's for dinner yet.</p>
-                    @endforelse
-                </div>
+                <x-meal-list :meals="$meals" :today="$mealsToday" />
                 @endif
 
             </div>{{-- /the open panel --}}

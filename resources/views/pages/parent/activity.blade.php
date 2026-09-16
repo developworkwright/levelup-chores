@@ -162,7 +162,13 @@ new class extends Component
      <div class="mt-[14px] rounded-[22px] border p-[18px]" style="background: var(--fq-wash-blue); border-color: var(--fq-line-cool)">
         <div class="flex items-center justify-between">
             <h2 class="font-baloo text-xl font-bold">Grateful For</h2>
-            <span class="font-mono-fq text-[10px] text-fq-text-4">NEWEST FIRST</span>
+            {{-- The last few here; the Gratitude page has every one. --}}
+            <a
+                href="{{ route('parent.gratitude') }}"
+                wire:navigate
+                class="font-mono-fq text-[10px] tracking-[0.1em] uppercase underline"
+                style="color: var(--fq-cyan)"
+            >See every entry &rarr;</a>
         </div>
 
         <div class="mt-3 flex flex-col gap-2">

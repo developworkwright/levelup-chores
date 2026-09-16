@@ -336,10 +336,13 @@ class LuckyBlockTest extends TestCase
         $this->loginParent($household);
 
         Volt::test('parent.home')
+            ->call('toggleRow', 'lucky')
             ->assertSee('Lucky Block Wins')
             ->assertSee('Front seat')
             ->call('tickOffLucky', $hit->id)
-            ->assertDontSee('Lucky Block Wins');
+            // The row stays — it is one of Home's handles — but the win is gone.
+            ->assertSee('No Lucky Block prizes owed.')
+            ->assertDontSee('Front seat');
 
         $this->assertNotNull($hit->fresh()->fulfilled_at);
     }

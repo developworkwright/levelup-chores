@@ -348,6 +348,7 @@ class CelebrationDayTest extends TestCase
         Auth::guard('profile')->login($parent);
 
         Volt::test('parent.home')
+            ->call('toggleRow', 'celebration')
             ->assertSee('Sam')
             ->assertSee('Nobody talked to me.')
             ->assertSee('Hard');

@@ -27,6 +27,8 @@
         'arcade' => ['label' => 'Arcade', 'icon' => 'fa-gamepad', 'route' => 'parent.arcade', 'accent' => 'var(--fq-green)'],
         'music' => ['label' => 'Music', 'icon' => 'fa-music', 'route' => 'parent.music', 'accent' => 'var(--fq-blue)'],
         'meals' => ['label' => 'Meals', 'icon' => 'fa-utensils', 'route' => 'parent.meals', 'accent' => 'var(--fq-gold)'],
+        // The kids' Journal icon, since it is the same lists read from this side.
+        'gratitude' => ['label' => 'Gratitude', 'icon' => 'fa-feather', 'route' => 'parent.gratitude', 'accent' => 'var(--fq-green)'],
     ];
 
     /*
@@ -63,10 +65,11 @@
     ];
 
     // The tail, two to a row: nothing here is administration. Standings and the
-    // arcade are for looking at; quotes, music and the menu are for feeding the
-    // kids' side. Exit is not among them — the header keeps its power button,
-    // which is the one control a parent uses on a shared laptop.
-    $sheetGrid = ['standings', 'quotes', 'arcade', 'music', 'meals'];
+    // arcade are for looking at, and so is every gratitude list the kids have
+    // written; quotes, music and the menu are for feeding the kids' side. Exit
+    // is not among them — the header keeps its power button, which is the one
+    // control a parent uses on a shared laptop.
+    $sheetGrid = ['standings', 'gratitude', 'quotes', 'arcade', 'music', 'meals'];
 
     /*
      * Everything waiting on a grown-up, on the one page that holds all of it.

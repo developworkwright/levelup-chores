@@ -189,6 +189,7 @@ class BountyPagesTest extends TestCase
         $bounty = Bounty::firstOrFail();
 
         Volt::test('parent.home')
+            ->call('toggleRow', 'jobs')
             ->assertOk()
             ->assertSee('Jobs On Offer')
             ->assertSee('Wash the car')
@@ -246,8 +247,9 @@ class BountyPagesTest extends TestCase
 
         // Hiring it would put "My blue Lego set" on the chore board.
         Volt::test('parent.home')
+            ->set('openRow', 'jobs')
             ->assertOk()
-            ->assertDontSee('Jobs On Offer')
+            ->assertSee('Nobody is offering a job right now.')
             ->assertDontSee('My blue Lego set');
     }
 
@@ -260,8 +262,9 @@ class BountyPagesTest extends TestCase
 
         // Taking it would be hijacking a deal between two kids.
         Volt::test('parent.home')
+            ->set('openRow', 'jobs')
             ->assertOk()
-            ->assertDontSee('Jobs On Offer')
+            ->assertSee('Nobody is offering a job right now.')
             ->assertDontSee('Wash the car');
     }
 
@@ -274,8 +277,9 @@ class BountyPagesTest extends TestCase
 
         // That is just a chore, and chores already exist.
         Volt::test('parent.home')
+            ->set('openRow', 'jobs')
             ->assertOk()
-            ->assertDontSee('Jobs On Offer')
+            ->assertSee('Nobody is offering a job right now.')
             ->assertDontSee('Make my bed');
     }
 
@@ -289,6 +293,7 @@ class BountyPagesTest extends TestCase
         Auth::guard('profile')->login($parent);
 
         Volt::test('parent.home')
+            ->call('toggleRow', 'approvals')
             ->assertOk()
             ->assertSee('Chore Approvals')
             ->assertSee('Wash the car');

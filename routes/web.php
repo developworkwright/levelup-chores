@@ -122,4 +122,6 @@ Route::middleware(['auth:profile', 'role:parent', 'arcade-last-call'])->prefix('
     Volt::route('/kids', 'parent.kids')->name('parent.kids');
     Volt::route('/standings', 'parent.standings')->name('parent.standings');
     Volt::route('/activity', 'parent.activity')->name('parent.activity');
+    // Every gratitude list, not just the last few Activity shows.
+    Volt::route('/gratitude', 'parent.gratitude')->name('parent.gratitude');
 });

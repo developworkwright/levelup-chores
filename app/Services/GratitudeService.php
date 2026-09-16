@@ -139,6 +139,25 @@ class GratitudeService
     }
 
     /**
+     * Every entry the house has ever written, newest first, a page at a time —
+     * the parent Gratitude page. Optionally one kid's alone.
+     *
+     * Paged rather than capped like journalForHousehold(): that one is the last
+     * few days on the Activity page, and this is the archive it points at.
+     *
+     * @return LengthAwarePaginator<int, GratitudeEntry>
+     */
+    public function archiveForHousehold(Household $household, ?int $profileId = null, int $perPage = 20): LengthAwarePaginator
+    {
+        return GratitudeEntry::where('household_id', $household->id)
+            ->when($profileId, fn ($query) => $query->where('profile_id', $profileId))
+            ->with('profile')
+            ->latest('entry_date')
+            ->latest('id')
+            ->paginate($perPage);
+    }
+
+    /**
      * Trims, drops the blanks and caps the length, then takes the first ITEMS.
      * Reindexed so the JSON column stores a list rather than an object with
      * holes in it where the empty boxes were.

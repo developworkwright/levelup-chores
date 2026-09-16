@@ -235,6 +235,7 @@ class FeelingsCardTest extends TestCase
         Auth::guard('profile')->login($this->parent);
 
         Volt::test('parent.home')
+            ->call('toggleRow', 'feelings')
             ->assertOk()
             ->assertSee('How are you feeling today?')
             ->call('answerFeeling', 'flat', 'long week', 'house');

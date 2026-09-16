@@ -98,18 +98,18 @@ new class extends Component
     /**
      * Whether an embedded feed caps its messages to a scrolling box on a laptop.
      *
-     * On for parent Home, where the approval queues sit underneath and a busy
-     * afternoon would push them down. Off on the kid's Home, where the feed has
-     * a column of its own with nothing below it — a box there only hides
-     * messages behind a second scrollbar for no page it is protecting.
+     * Off on both Homes, where the feed has a column of its own with nothing
+     * below it — a box there only hides messages behind a second scrollbar for
+     * no page it is protecting. It was on for parent Home while the approval
+     * queues were stacked underneath the feed.
      */
     public bool $capped = true;
 
     /**
      * Whether the quiet half — Today in the house and Grateful today — is drawn.
      *
-     * Off on the kid's Home, where the feelings card, the gratitude quest and
-     * the menu are rows of "Your day" with the house's answers inside them. On
+     * Off on both Homes, where feelings, gratitude and the menu are rows of their
+     * own with the house.s answers inside them. On
      * a phone the quiet half sorts under the room, so there it was a second
      * copy of those rows stuck at the foot of however long the chat had got.
      */
