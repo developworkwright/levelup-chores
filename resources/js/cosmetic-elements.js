@@ -58,7 +58,7 @@ function picture(src, motion, fit) {
 
 class FqCosmetic extends HTMLElement {
     static get observedAttributes() {
-        return ['kind', 'recipe', 'src', 'motion', 'mode', 'still', 'label'];
+        return ['kind', 'recipe', 'src', 'motion', 'mode', 'still', 'label', 'pose'];
     }
 
     connectedCallback() {
@@ -115,6 +115,31 @@ class FqCosmetic extends HTMLElement {
             // The recipes are the bundle's own code over the bundle's own
             // palettes; nothing a user typed ever reaches this string.
             inner.innerHTML = svg;
+
+            return;
+        }
+
+        /*
+         * A pet is a 4x3 sprite sheet, so a still one is a window onto one cell
+         * of it — `pose` names which, defaulting to the idle pose. The sheet is
+         * scaled to 400% by 300% so one cell fills the box exactly, which is
+         * how the engine will show a pet too.
+         */
+        if (kind === 'pet') {
+            if (! src) {
+                return;
+            }
+
+            const poses = ['idle', 'blink', 'crouch', 'jump', 'walk', 'happy', 'held', 'landed', 'play', 'toss', 'sleep', 'toy'];
+            const index = Math.max(0, poses.indexOf(this.getAttribute('pose') || 'idle'));
+            const column = index % 4;
+            const row = Math.floor(index / 4);
+
+            box.style.background = 'url("' + encodeURI(src) + '") no-repeat';
+            box.style.backgroundSize = '400% 300%';
+            // Thirds and halves of the leftover space, which is what a
+            // percentage background-position means: column 1 of 4 is 33.3%.
+            box.style.backgroundPosition = (column * 100 / 3) + '% ' + (row * 100 / 2) + '%';
 
             return;
         }
@@ -283,13 +308,19 @@ class FqSpark extends HTMLElement {
      * seeing a tap effect you haven't bought doesn't also fire the one you have.
      */
     connectedCallback() {
-        this.trigger = this.getAttribute('trigger') || 'celebrate';
+        // The worn one also answers a petted pet: stroking the animal throws
+        // the kid's own tap effect out of it, which is two bought things
+        // meeting and the cheapest joke in the app.
+        this.triggers = this.hasAttribute('trigger')
+            ? [this.getAttribute('trigger')]
+            : ['celebrate', 'fq-pet-petted'];
+
         this.onCelebrate = () => this.fire();
-        window.addEventListener(this.trigger, this.onCelebrate);
+        this.triggers.forEach((name) => window.addEventListener(name, this.onCelebrate));
     }
 
     disconnectedCallback() {
-        window.removeEventListener(this.trigger, this.onCelebrate);
+        this.triggers.forEach((name) => window.removeEventListener(name, this.onCelebrate));
     }
 
     fire() {

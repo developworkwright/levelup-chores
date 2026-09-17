@@ -318,6 +318,324 @@ class ParentCosmeticsTest extends TestCase
         }
     }
 
+    /**
+     * A pet sheet the way a generator really hands one back: twelve poses, and
+     * the grid ruled in over the top whatever the prompt asked for.
+     *
+     * @param  array<int, int>  $skipCells  poses to leave out
+     */
+    private function petSheetPng(array $skipCells = [], bool $gridLines = true, bool $bleed = false, int $scale = 1): string
+    {
+        $image = imagecreatetruecolor(1024 * $scale, 768 * $scale);
+        imagesavealpha($image, true);
+        imagealphablending($image, false);
+        imagefill($image, 0, 0, imagecolorallocatealpha($image, 0, 0, 0, 127));
+        imagealphablending($image, true);
+
+        $fur = imagecolorallocate($image, 168, 116, 72);
+        $cell = 256 * $scale;
+
+        foreach (range(0, 11) as $index) {
+            if (in_array($index, $skipCells, true)) {
+                continue;
+            }
+
+            $left = ($index % 4) * $cell;
+            $top = intdiv($index, 4) * $cell;
+            $width = $bleed ? $cell : (int) ($cell * 0.6);
+
+            imagefilledellipse($image, (int) ($left + $cell / 2), (int) ($top + $cell / 2), $width, (int) ($cell * 0.6), $fur);
+        }
+
+        if ($gridLines) {
+            $ink = imagecolorallocate($image, 90, 40, 20);
+
+            foreach ([1, 2, 3] as $column) {
+                imagefilledrectangle($image, $column * $cell - 1, 0, $column * $cell, 768 * $scale - 1, $ink);
+            }
+
+            foreach ([1, 2] as $row) {
+                imagefilledrectangle($image, 0, $row * $cell - 1, 1024 * $scale - 1, $row * $cell, $ink);
+            }
+
+            // The foot line a generator rules across a row of cells.
+            imagefilledrectangle($image, 0, (int) ($cell * 0.9), 1024 * $scale - 1, (int) ($cell * 0.9) + 1, $ink);
+        }
+
+        ob_start();
+        imagepng($image);
+
+        return (string) ob_get_clean();
+    }
+
+    /** @return array<int, array{label: string, status: string}> */
+    private function inspectPet(string $png): array
+    {
+        $art = app(CosmeticArt::class);
+        $tidied = $art->normalize($png, CosmeticSlot::Pet);
+
+        return [...$tidied['checks'], ...$art->inspect($tidied['binary'], CosmeticSlot::Pet)];
+    }
+
+    public function test_a_pet_sheet_passes_once_its_ruled_grid_is_rubbed_out(): void
+    {
+        $checks = $this->inspectPet($this->petSheetPng());
+        $labels = array_column($checks, 'label');
+
+        $this->assertNotContains('fail', array_column($checks, 'status'), implode(' | ', $labels));
+        $this->assertContains('All 12 poses are there', $labels);
+        $this->assertContains('Every pose stays inside its cell', $labels);
+        $this->assertStringContainsString('Rubbed out', implode(' ', $labels));
+    }
+
+    public function test_a_pet_sheet_with_a_missing_pose_names_the_empty_cell(): void
+    {
+        // Cell 11 is Sleep, cell 12 the toy.
+        $labels = array_column(
+            array_filter($this->inspectPet($this->petSheetPng(skipCells: [10, 11])), fn ($c) => $c['status'] === 'fail'),
+            'label',
+        );
+
+        $this->assertContains('Nothing in the sleep, toy cells', $labels);
+    }
+
+    /**
+     * A pose against its cell edge is worth saying and not worth refusing: the
+     * harm is a sliver of the neighbour down the side of a 78px sprite, where
+     * refusing costs a grown-up a sheet that is otherwise perfect.
+     */
+    public function test_a_pose_against_its_cell_edge_warns_rather_than_refuses(): void
+    {
+        $checks = $this->inspectPet($this->petSheetPng(bleed: true));
+
+        $this->assertNotContains('fail', array_column($checks, 'status'));
+        $this->assertStringContainsString(
+            'sits right on the cell edge',
+            implode(' ', array_column(array_filter($checks, fn ($c) => $c['status'] === 'warn'), 'label')),
+        );
+    }
+
+    public function test_a_bigger_sheet_in_the_same_shape_is_shrunk_rather_than_refused(): void
+    {
+        $checks = $this->inspectPet($this->petSheetPng(scale: 2));
+        $labels = array_column($checks, 'label');
+
+        $this->assertNotContains('fail', array_column($checks, 'status'), implode(' | ', $labels));
+        $this->assertContains('Resized from 2048×1536 to 1024×768', $labels);
+        $this->assertContains('1024×768, PNG', $labels);
+    }
+
+    /**
+     * The sheet a real generator handed back: 1200x896 rather than 1024x768,
+     * and the "transparent" background drawn in as an actual grey-and-white
+     * checkerboard. Both are the app's problem to solve, not the parent's.
+     */
+    private function checkerboardSheetPng(): string
+    {
+        $image = imagecreatetruecolor(1200, 896);
+        $light = imagecolorallocate($image, 255, 255, 255);
+        $dark = imagecolorallocate($image, 229, 229, 229);
+
+        for ($y = 0; $y < 896; $y += 16) {
+            for ($x = 0; $x < 1200; $x += 16) {
+                imagefilledrectangle($image, $x, $y, $x + 15, $y + 15, (($x + $y) / 16) % 2 ? $dark : $light);
+            }
+        }
+
+        $fur = imagecolorallocate($image, 168, 116, 72);
+        $eye = imagecolorallocate($image, 255, 255, 255);
+        $cellWidth = 1200 / 4;
+        $cellHeight = 896 / 3;
+
+        foreach (range(0, 11) as $index) {
+            $cx = (int) ((($index % 4) + 0.5) * $cellWidth);
+            $cy = (int) ((intdiv($index, 4) + 0.5) * $cellHeight);
+
+            imagefilledellipse($image, $cx, $cy, (int) ($cellWidth * 0.6), (int) ($cellHeight * 0.6), $fur);
+            // A white patch *inside* the drawing: the flood must leave it alone.
+            imagefilledellipse($image, $cx - 20, $cy - 10, 18, 18, $eye);
+        }
+
+        $ink = imagecolorallocate($image, 90, 40, 20);
+
+        foreach ([1, 2, 3] as $column) {
+            imagefilledrectangle($image, (int) ($column * $cellWidth) - 1, 0, (int) ($column * $cellWidth), 895, $ink);
+        }
+
+        foreach ([1, 2] as $row) {
+            imagefilledrectangle($image, 0, (int) ($row * $cellHeight) - 1, 1199, (int) ($row * $cellHeight), $ink);
+        }
+
+        ob_start();
+        imagepng($image);
+
+        return (string) ob_get_clean();
+    }
+
+    /**
+     * A pet whose drawing encloses some of the background — a curled tail, a
+     * gap between two legs — over a painted-in checkerboard. The hole is
+     * background and has to go; a flat white patch in the same place is a
+     * drawing and has to stay.
+     */
+    private function sheetWithHolesPng(): string
+    {
+        $image = imagecreatetruecolor(1024, 768);
+        $light = imagecolorallocate($image, 255, 255, 255);
+        $dark = imagecolorallocate($image, 229, 229, 229);
+
+        $checker = function (int $x, int $y) use ($light, $dark) {
+            return ((intdiv($x, 16) + intdiv($y, 16)) % 2) ? $dark : $light;
+        };
+
+        for ($y = 0; $y < 768; $y++) {
+            for ($x = 0; $x < 1024; $x++) {
+                imagesetpixel($image, $x, $y, $checker($x, $y));
+            }
+        }
+
+        $fur = imagecolorallocate($image, 168, 116, 72);
+        $eye = imagecolorallocate($image, 252, 252, 252);
+
+        foreach (range(0, 11) as $index) {
+            $cx = (($index % 4) * 256) + 128;
+            $cy = (intdiv($index, 4) * 256) + 128;
+
+            // A ring of fur with the background showing through the middle.
+            imagefilledellipse($image, $cx, $cy, 150, 150, $fur);
+
+            for ($y = $cy - 40; $y <= $cy + 40; $y++) {
+                for ($x = $cx - 40; $x <= $cx + 40; $x++) {
+                    if (($x - $cx) ** 2 + ($y - $cy) ** 2 <= 40 ** 2) {
+                        imagesetpixel($image, $x, $y, $checker($x, $y));
+                    }
+                }
+            }
+
+            // And a flat white patch inside the drawing — an eye. White art that
+            // touches the background *is* cut, and cannot not be: nothing can
+            // tell it from the background it is joined to. Real art has an
+            // outline round it, which is what keeps them apart.
+            imagefilledellipse($image, $cx + 45, $cy - 40, 22, 22, $eye);
+        }
+
+        ob_start();
+        imagepng($image);
+
+        return (string) ob_get_clean();
+    }
+
+    public function test_background_trapped_inside_the_drawing_is_cut_but_flat_white_art_is_kept(): void
+    {
+        $art = app(CosmeticArt::class);
+        $tidied = $art->normalize($this->sheetWithHolesPng(), CosmeticSlot::Pet);
+        $clean = imagecreatefromstring($tidied['binary']);
+
+        $transparent = fn (int $x, int $y) => ((imagecolorat($clean, $x, $y) >> 24) & 0x7F) >= 110;
+
+        // The middle of the ring: background, gone.
+        $this->assertTrue($transparent(128, 128), 'The hole inside the drawing kept its background.');
+        // The ring itself: art, kept.
+        $this->assertFalse($transparent(128, 128 - 60), 'The drawing itself was cut away.');
+        // The flat white patch enclosed by the drawing: art, kept.
+        $this->assertFalse($transparent(173, 88), 'A flat white part of the drawing was cut away.');
+
+        $this->assertNotContains('fail', array_column($art->inspect($tidied['binary'], CosmeticSlot::Pet), 'status'));
+    }
+
+    public function test_a_sheet_with_the_checkerboard_painted_in_is_cleaned_up_rather_than_refused(): void
+    {
+        $checks = $this->inspectPet($this->checkerboardSheetPng());
+        $labels = array_column($checks, 'label');
+
+        $this->assertNotContains('fail', array_column($checks, 'status'), implode(' | ', $labels));
+        $this->assertContains('Resized from 1200×896 to 1024×768', $labels);
+        $this->assertContains('Cut out the painted-in background', $labels);
+        $this->assertContains('All 12 poses are there', $labels);
+        $this->assertContains('Transparent background', $labels);
+    }
+
+    /**
+     * The line stripper has to know when to give up. Art that really does run
+     * edge to edge is not a grid, and rubbing every row out would leave an
+     * empty sheet that passed its transparency check on the way.
+     */
+    public function test_a_picture_that_is_all_art_keeps_every_row_of_it(): void
+    {
+        $image = imagecreatetruecolor(1024, 768);
+        imagefill($image, 0, 0, imagecolorallocate($image, 40, 90, 60));
+        ob_start();
+        imagepng($image);
+        $solid = (string) ob_get_clean();
+
+        $labels = array_column($this->inspectPet($solid), 'label');
+
+        $this->assertNotContains('Rubbed out 768 ruled grid lines', $labels);
+        $this->assertStringNotContainsString('Rubbed out', implode(' ', $labels));
+    }
+
+    public function test_a_pet_is_published_with_an_effect_and_lands_in_the_locker(): void
+    {
+        Auth::guard('profile')->login($this->parent);
+
+        Volt::test('parent.cosmetics')
+            ->call('$set', 'slot', 'pet')
+            ->assertSee('1024×768')
+            ->set('upload', $this->upload($this->petSheetPng(), 'tabby.png'))
+            ->set('name', 'Tabby')
+            ->set('stock', 'limited')
+            ->set('effect', 'rainbow')
+            ->call('bumpCost', 15)
+            ->call('publish')
+            ->assertHasNoErrors();
+
+        $pet = Cosmetic::where('name', 'Tabby')->firstOrFail();
+
+        $this->assertSame(CosmeticSlot::Pet, $pet->slot);
+        $this->assertSame(20, $pet->cost);
+        $this->assertSame('rainbow', $pet->effect->value);
+        $this->assertTrue($pet->isSheet());
+        $this->assertFalse($pet->isDraft());
+    }
+
+    /**
+     * The bundled prompts say what to draw and never said what file to hand
+     * back, which is how a JPEG or a painted-on checkerboard gets generated.
+     */
+    public function test_every_prompt_ends_by_asking_for_a_png_at_that_slots_size(): void
+    {
+        Auth::guard('profile')->login($this->parent);
+
+        $page = Volt::test('parent.cosmetics');
+
+        foreach (CosmeticSlot::uploadable() as $slot) {
+            $spec = $slot->uploadSpec();
+            $output = $slot->promptOutput();
+
+            $this->assertStringContainsString('Hand back a PNG file', $output);
+            $this->assertStringContainsString("{$spec['width']}x{$spec['height']} pixels", $output);
+            $this->assertStringContainsString(
+                $spec['alpha'] ? 'REAL transparency' : 'No transparency',
+                $output,
+                $slot->value,
+            );
+
+            // And it reaches the page, alongside the prompt it belongs to.
+            $page->assertSee(str_replace("\n", '\n', 'Hand back a PNG file'), false);
+            $page->assertSee("{$spec['width']}x{$spec['height']} pixels", false);
+        }
+    }
+
+    public function test_the_pet_prompt_asks_for_the_twelve_poses_and_no_ruled_grid(): void
+    {
+        $prompt = CosmeticSlot::PET_PROMPT.CosmeticSlot::Pet->promptOutput();
+
+        $this->assertStringContainsString('4 columns × 3 rows', $prompt);
+        $this->assertStringContainsString('ruled foot line', $prompt);
+        $this->assertStringContainsString('1024x768 pixels', $prompt);
+        $this->assertStringContainsString('REAL transparency', $prompt);
+    }
+
     public function test_a_kid_cannot_open_the_console(): void
     {
         $kid = Profile::factory()->for($this->household)->create();

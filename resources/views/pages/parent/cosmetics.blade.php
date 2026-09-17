@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\CosmeticEffect;
 use App\Enums\CosmeticFlavor;
 use App\Enums\CosmeticMotion;
 use App\Enums\CosmeticSlot;
@@ -49,6 +50,9 @@ new class extends Component
     /** A CosmeticMotion value, or '' for a still item. */
     public string $motion = '';
 
+    /** A CosmeticEffect value, or '' for plain art. What a 20-ticket pet has. */
+    public string $effect = '';
+
     /** Which slot's published items are listed below. */
     public string $listSlot = 'frame';
 
@@ -74,6 +78,7 @@ new class extends Component
             'cost' => ['required', 'integer', 'min:1', 'max:25'],
             'stock' => ['required', 'in:'.implode(',', array_map(fn (CosmeticStock $s) => $s->value, CosmeticStock::cases()))],
             'motion' => ['nullable', 'in:'.implode(',', array_map(fn (CosmeticMotion $m) => $m->value, CosmeticMotion::cases()))],
+            'effect' => ['nullable', 'in:'.implode(',', array_map(fn (CosmeticEffect $e) => $e->value, CosmeticEffect::cases()))],
         ];
     }
 
@@ -124,8 +129,11 @@ new class extends Component
 
         $slot = CosmeticSlot::from($this->slot);
         $art = app(CosmeticArt::class);
-        $binary = (string) $this->upload->get();
-        $checks = $art->inspect($binary, $slot);
+        // Shrunk and, on a sprite sheet, de-gridded first — then checked, so
+        // the checks and the stored file are talking about the same pixels.
+        $tidied = $art->normalize((string) $this->upload->get(), $slot);
+        $binary = $tidied['binary'];
+        $checks = [...$tidied['checks'], ...$art->inspect($binary, $slot)];
         $passes = collect($checks)->doesntContain('status', 'fail');
 
         if ($publish && ! $passes) {
@@ -152,6 +160,7 @@ new class extends Component
             'stock' => $this->stock,
             'flavor' => $this->flavor !== '' ? $this->flavor : null,
             'motion' => $this->motion !== '' ? $this->motion : null,
+            'effect' => $this->effect !== '' ? $this->effect : null,
             'checks' => $checks,
             'published_at' => $publish ? now() : null,
         ]);
@@ -162,7 +171,7 @@ new class extends Component
             ? trim($this->name).' is in the shop.'
             : trim($this->name).' is saved as a draft. Nobody can see it yet.';
 
-        $this->reset('upload', 'name', 'motion');
+        $this->reset('upload', 'name', 'motion', 'effect');
         app(CosmeticService::class)->forget();
     }
 
@@ -237,7 +246,12 @@ new class extends Component
         $previewUrl = null;
 
         if ($this->upload && ! $this->getErrorBag()->has('upload')) {
-            $checks = rescue(fn () => app(CosmeticArt::class)->inspect((string) $this->upload->get(), $slot), [], false);
+            $art = app(CosmeticArt::class);
+            $checks = rescue(function () use ($art, $slot) {
+                $tidied = $art->normalize((string) $this->upload->get(), $slot);
+
+                return [...$tidied['checks'], ...$art->inspect($tidied['binary'], $slot)];
+            }, [], false);
             $previewUrl = rescue(fn () => $this->upload->temporaryUrl(), null, false);
         }
 
@@ -273,7 +287,18 @@ new class extends Component
         'pattern' => 'Seamless is the one thing you cannot fix later, and the uploader checks it: opposite edges have to match or the page shows a grid of seams.',
         'cabinet' => 'The screen must come back empty and black — the game draws into it.',
         'spark' => 'Keep the center empty: this animates outward from whatever button was tapped.',
+        'pet' => 'One sheet, twelve poses, so it stays the same animal — generating each pose on its own gives you twelve slightly different creatures. Generators rule the grid in whatever the prompt says; those lines are rubbed out on upload.',
     ];
+
+    // Six of the prompts ship with the artwork bundle. The pet's is the app's
+    // own, so it is handed to the panel from here — see CosmeticSlot::PET_PROMPT.
+    $ownPrompts = ['pet' => App\Enums\CosmeticSlot::PET_PROMPT];
+
+    // And every one of them gets the file it must hand back spelled out on the
+    // end, which none of the bundled six ever said. See promptOutput().
+    $promptOutputs = collect(App\Enums\CosmeticSlot::uploadable())
+        ->mapWithKeys(fn (App\Enums\CosmeticSlot $case) => [$case->value => $case->promptOutput()])
+        ->all();
 
     $promptTabs = collect(App\Enums\CosmeticSlot::uploadable())
         ->mapWithKeys(fn (App\Enums\CosmeticSlot $case) => [$case->value => [$case->label(), $promptNotes[$case->value]]])
@@ -413,6 +438,20 @@ new class extends Component
                     <span class="text-[11.5px] text-fq-text-4">Moving items belong at 6–8 tickets — motion is how a kid tells the good one.</span>
                 </label>
 
+                {{-- Laid over the art rather than drawn into it, so one sheet can
+                     be sold plain and again as the special one. What a 20-ticket
+                     pet is worth 20 for. --}}
+                <label class="flex flex-col gap-[6px]">
+                    <span class="{{ $label }}">Special</span>
+                    <select wire:model.live="effect" class="{{ $field }}">
+                        <option value="">Nothing — the art as it is</option>
+                        @foreach (App\Enums\CosmeticEffect::cases() as $case)
+                            <option value="{{ $case->value }}">{{ $case->label() }}</option>
+                        @endforeach
+                    </select>
+                    <span class="text-[11.5px] text-fq-text-4">A rainbow or a flame on top of the picture. Worth about 20 tickets on a pet.</span>
+                </label>
+
                 <div class="flex gap-[9px] pt-[2px]">
                     <button
                         type="button"
@@ -489,11 +528,26 @@ new class extends Component
             </div>
         </div>
 
-        {{-- The prompt, straight out of cosmetics.js. Same shape every time: a
-             subject to change, then geometry and negative blocks to leave
-             alone — the geometry is what image models get wrong by default. --}}
+        {{-- The prompts: six out of cosmetics.js, plus the app's own for a pet.
+             Same shape every time — a subject to change, then geometry and
+             negative blocks to leave alone, since the geometry is what image
+             models get wrong by default.
+
+             `Js::from` rather than `@js` in the x-data: it escapes quotes as
+             unicode, and one literal double quote inside an x-data attribute
+             ends the attribute early and kills the whole component. --}}
         <div
-            x-data="{ promptKind: 'frame', promptCopied: false }"
+            x-data="{
+                promptKind: 'frame',
+                promptCopied: false,
+                own: {{ Js::from($ownPrompts) }},
+                outputs: {{ Js::from($promptOutputs) }},
+                get promptText() {
+                    const body = this.own[this.promptKind] ?? (window.FQCosmetics?.PROMPTS[this.promptKind] || '');
+
+                    return body ? body + (this.outputs[this.promptKind] ?? '') : '';
+                },
+            }"
             class="flex flex-col gap-[11px] rounded-[18px] border border-fq-line-2 p-[14px]"
             style="background: linear-gradient(160deg,#150c26,#0a0512 70%)"
         >
@@ -502,7 +556,7 @@ new class extends Component
                 <span class="text-[12px] text-fq-text-4">Swap the bracketed subject, leave the rest alone.</span>
                 <button
                     type="button"
-                    x-on:click="navigator.clipboard?.writeText(window.FQCosmetics?.PROMPTS[promptKind] || ''); promptCopied = true; setTimeout(() => promptCopied = false, 1600)"
+                    x-on:click="navigator.clipboard?.writeText(promptText); promptCopied = true; setTimeout(() => promptCopied = false, 1600)"
                     class="ml-auto flex shrink-0 items-center gap-[7px] rounded-[9px] px-[13px] py-2 font-mono-fq text-[9.5px] tracking-[0.1em] whitespace-nowrap"
                     :style="promptCopied ? 'background:#7dffb0;color:#05170c' : 'background:#d8b4ff;color:#0a0512'"
                 >
@@ -526,7 +580,7 @@ new class extends Component
 
             <div
                 class="rounded-[13px] border border-fq-line bg-fq-bg p-[14px] font-mono-fq text-[10.5px] leading-[1.8] whitespace-pre-wrap text-fq-text-2"
-                x-text="window.FQCosmetics?.PROMPTS[promptKind] || ''"
+                x-text="promptText"
             ></div>
 
             <div class="flex items-start gap-[9px]">

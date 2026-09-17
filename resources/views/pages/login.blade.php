@@ -93,6 +93,19 @@ new class extends Component
             'worn' => collect($kids)
                 ->mapWithKeys(fn (Profile $kid): array => [$kid->id => $cosmetics->worn($kid)])
                 ->all(),
+            // The pets, one per kid who has one out. `home` is a fraction of the
+            // row's width rather than a pixel count, so each pen still lines up
+            // with its kid's tile however the row wraps.
+            'pets' => collect($kids)
+                ->map(fn (Profile $kid) => $cosmetics->wornIn($kid, App\Enums\CosmeticSlot::Pet))
+                ->map(fn (?App\Models\Cosmetic $pet, int $index) => $pet === null ? null : [
+                    'src' => $pet->artUrl(),
+                    'effect' => $pet->effect?->cssClass(),
+                    'home' => round(($index + 0.5) / max(1, count($kids)), 4),
+                    'roam' => 64,
+                ])
+                ->filter()
+                ->values(),
             'parents' => Profile::query()
                 ->where('role', ProfileRole::Parent)
                 ->orderBy('id')
@@ -114,7 +127,18 @@ new class extends Component
         <p class="font-baloo text-xl font-bold text-fq-text-3">Select your avatar</p>
     </div>
 
-    <div class="flex flex-wrap justify-center gap-x-[14px] gap-y-4">
+    {{-- The pets, one per kid who has one out, each penned around its own tile
+         so the row reads as one animal per child. Petting works; dragging does
+         not — this page is public, and a stranger who found the URL should not
+         be able to rearrange the family's pets.
+
+         `home` is a fraction of the row's width rather than a pixel, so the
+         pens still line up with the tiles when the row wraps on a phone. --}}
+    <div class="relative flex flex-wrap justify-center gap-x-[14px] gap-y-4">
+        @if ($pets->isNotEmpty())
+            <fq-pets sheets="{{ $pets->toJson(JSON_UNESCAPED_SLASHES) }}"></fq-pets>
+        @endif
+
         @foreach ($kids as $i => $kid)
             @php
                 $accent = $kid->color->cssVar();

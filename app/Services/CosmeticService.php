@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\CosmeticSlot;
 use App\Enums\CosmeticStock;
+use App\Enums\ProfileRole;
 use App\Exceptions\CosmeticUnavailableException;
 use App\Exceptions\InsufficientTicketsException;
 use App\Models\Cosmetic;
@@ -407,6 +408,43 @@ class CosmeticService
             'drafts' => $catalog->filter(fn (Cosmetic $item) => $item->isDraft())->count(),
             'rotation' => $this->rotationThisWeek($household)->count() + $this->limitedThisWeek($household)->count(),
         ];
+    }
+
+    /**
+     * A sibling's pet, come to visit — or null, which is most of the time.
+     *
+     * Worked out from the kid, the day and the hour rather than rolled, so a
+     * refresh does not re-roll it and a visit lasts as long as the hour does.
+     * Nothing schedules it: like everything else here, the answer is arithmetic
+     * the page does on its way in.
+     *
+     * Roughly one hour in three has a visitor. Often enough to be a thing that
+     * happens, rare enough that it is still a small event when it does.
+     */
+    public function visitingPet(Profile $kid): ?Cosmetic
+    {
+        $hour = HouseholdClock::for($kid->household)->now()->format('o-\WW-N-H');
+
+        if (crc32('visit|'.$kid->id.'|'.$hour) % 3 !== 0) {
+            return null;
+        }
+
+        $siblings = Profile::where('household_id', $kid->household_id)
+            ->where('role', ProfileRole::Kid)
+            ->whereKeyNot($kid->id)
+            ->whereNotNull(CosmeticSlot::Pet->wornColumn())
+            ->orderBy('id')
+            ->get()
+            ->filter(fn (Profile $sibling) => $this->wornIn($sibling, CosmeticSlot::Pet) !== null)
+            ->values();
+
+        if ($siblings->isEmpty()) {
+            return null;
+        }
+
+        $visitor = $siblings[crc32('who|'.$kid->id.'|'.$hour) % $siblings->count()];
+
+        return $this->wornIn($visitor, CosmeticSlot::Pet);
     }
 
     /** Drops every memo, after anything that changes the catalog or a wardrobe. */

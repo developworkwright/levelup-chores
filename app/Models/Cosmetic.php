@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\CosmeticEffect;
 use App\Enums\CosmeticFlavor;
 use App\Enums\CosmeticMotion;
 use App\Enums\CosmeticSlot;
@@ -31,6 +32,7 @@ class Cosmetic extends Model
         'stock',
         'flavor',
         'motion',
+        'effect',
         'checks',
         'published_at',
         'pulled_at',
@@ -43,6 +45,7 @@ class Cosmetic extends Model
             'stock' => CosmeticStock::class,
             'flavor' => CosmeticFlavor::class,
             'motion' => CosmeticMotion::class,
+            'effect' => CosmeticEffect::class,
             'checks' => 'array',
             'cost' => 'integer',
             'published_at' => 'datetime',
@@ -92,6 +95,12 @@ class Cosmetic extends Model
     public function isUpload(): bool
     {
         return $this->art_path !== null;
+    }
+
+    /** A pet is a sprite sheet the engine cuts up, not one picture. */
+    public function isSheet(): bool
+    {
+        return $this->slot->poseGrid() !== null;
     }
 
     public function isLimited(): bool

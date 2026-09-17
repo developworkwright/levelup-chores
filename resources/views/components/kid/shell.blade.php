@@ -477,6 +477,11 @@
     // one is drawn.
     $wornPlate = ($worn['plate'] && ! $worn['plate']->isFree()) ? $worn['plate'] : null;
     $wornPattern = ($worn['pattern'] && ! $worn['pattern']->isFree()) ? $worn['pattern'] : null;
+
+    // Past bedtime the pet curls up. Null bedtime — a house that switched it
+    // off — means it never does.
+    $bedtime = App\Services\HouseholdClock::for($profile->household)->bedtime();
+    $petAsleep = $bedtime !== null && now()->greaterThanOrEqualTo($bedtime);
 @endphp
 {{-- `isolate` so the watching monster's negative z-index puts it behind the
      page's content without dropping it behind the page background entirely. --}}
@@ -888,7 +893,35 @@
         @endif
     </div>
 
-    <div class="mt-4">
+    <div class="mt-4" data-fq-page>
         {{ $slot }}
     </div>
+
+    {{-- The pet, over the page and under nothing. It takes no pointer events
+         itself — only the animal and its toy do — so every button underneath
+         still works, and it is never keyed to the page: a Livewire round trip
+         must not restart a pet mid-jump. See resources/js/pets.js. --}}
+    @if ($worn['pet'])
+        <fq-pets
+            sheet="{{ $worn['pet']->artUrl() }}"
+            @if ($worn['pet']->effect) effect="{{ $worn['pet']->effect->cssClass() }}" @endif
+            {{-- The toy drops in on the day's first chore and stays out for the
+                 rest of it. Never a punishment for the days it isn't there:
+                 before then the pet simply wanders. --}}
+            @if ($poweredUpToday) toy @endif
+            @if ($petAsleep) asleep @endif
+            {{-- A sibling's pet, on Home only and only now and again — see
+                 CosmeticService::visitingPet(). Home because that is the page a
+                 kid stands on rather than passes through, and a visitor nobody
+                 is around to see is a visitor wasted. --}}
+            @if ($active === 'home' && ! $petAsleep)
+                @php $visitor = $cosmetics->visitingPet($profile); @endphp
+
+                @if ($visitor)
+                    visitor="{{ json_encode(['src' => $visitor->artUrl(), 'effect' => $visitor->effect?->cssClass()], JSON_UNESCAPED_SLASHES) }}"
+                @endif
+            @endif
+            drag
+        ></fq-pets>
+    @endif
 </div>

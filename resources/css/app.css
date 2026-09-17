@@ -1159,3 +1159,73 @@ body {
         animation: none;
     }
 }
+
+/*
+ * The two treatments laid over uploaded art — see App\Enums\CosmeticEffect.
+ * They are what makes the top-priced pet worth its price without a second
+ * drawing: the same sheet, with its colours crawling or with fire behind it.
+ *
+ * Both sit on the element the art is drawn into, so they work for a still tile
+ * in the locker and for a pet running about a page alike.
+ */
+.fq-aura-rainbow {
+    animation: fq-aura-hue 6s linear infinite;
+}
+
+@keyframes fq-aura-hue {
+    to {
+        filter: hue-rotate(1turn);
+    }
+}
+
+/*
+ * Fire, behind the art rather than over it — the same two-teardrop flame the
+ * login door burns for a streak, scaled to the art it sits behind. `isolation`
+ * keeps the negative z-index inside this element instead of dropping the flame
+ * behind the page.
+ */
+.fq-aura-flame {
+    position: relative;
+    isolation: isolate;
+}
+
+.fq-aura-flame::before,
+.fq-aura-flame::after {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    left: 50%;
+    border-radius: 46% 46% 44% 44% / 64% 64% 36% 36%;
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+
+.fq-aura-flame::before {
+    bottom: -6%;
+    width: 116%;
+    height: 118%;
+    background: radial-gradient(ellipse at 50% 78%, #ffb43a 0%, #ff7a18 44%, rgb(255 60 0 / 0%) 74%);
+    filter: blur(6px);
+    opacity: 0.75;
+    animation: fq-fire-body 1.9s ease-in-out infinite alternate;
+}
+
+.fq-aura-flame::after {
+    bottom: 0;
+    width: 72%;
+    height: 86%;
+    background: radial-gradient(ellipse at 50% 80%, #fff6c8 0%, var(--fq-gold) 40%, rgb(255 140 0 / 0%) 70%);
+    filter: blur(3px);
+    opacity: 0.6;
+    animation: fq-fire-core 1.25s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    /* Both carry information — this art cost more than the plain kind — so they
+       stay and simply stop moving, the same rule the streak fire follows. */
+    .fq-aura-rainbow,
+    .fq-aura-flame::before,
+    .fq-aura-flame::after {
+        animation: none;
+    }
+}

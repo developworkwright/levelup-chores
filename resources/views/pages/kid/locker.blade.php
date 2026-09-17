@@ -358,6 +358,22 @@ new class extends Component
                     >{{ $short > 0 ? $short.' short' : 'Buy · '.$trying->cost.' ✦' }}</button>
                 </div>
 
+                {{-- A pet is twelve poses, so trying one on shows the sheet cut
+                     up — the whole animal, not one still tile. It runs about
+                     for real once it is bought. --}}
+                @if ($trying->slot === App\Enums\CosmeticSlot::Pet)
+                    <div class="flex w-full flex-wrap gap-[6px]" data-fq-pose-strip>
+                        @foreach (App\Enums\CosmeticSlot::PET_POSES as $pose)
+                            <span class="flex flex-col items-center gap-[3px]">
+                                <span class="relative block h-[52px] w-[52px] overflow-hidden rounded-[10px] bg-fq-bg">
+                                    <x-cosmetic.art :item="$trying" :pose="$pose" mode="fill" still class="absolute inset-0" />
+                                </span>
+                                <span class="font-mono-fq text-[7px] tracking-[0.08em] text-fq-text-5 uppercase">{{ $pose }}</span>
+                            </span>
+                        @endforeach
+                    </div>
+                @endif
+
                 {{-- A cabinet is judged around a game, not as a tile: the same
                      <fq-cabinet> bezel the arcade page draws, round a stand-in
                      screen. --}}
@@ -505,7 +521,15 @@ new class extends Component
                 @endif
 
                 <span class="font-mono-fq text-[8.5px] tracking-[0.1em] whitespace-nowrap text-fq-text-5">
-                    {{ $shelf->isEmpty() ? 'NOTHING IN THIS SET YET' : $shelf->count().($fromCost ? ' · FROM '.$fromCost.' ✦' : '') }}
+                    @if ($shelf->isNotEmpty())
+                        {{ $shelf->count() }}{{ $fromCost ? ' · FROM '.$fromCost.' ✦' : '' }}
+                    @elseif ($openSlot === App\Enums\CosmeticSlot::Pet && $flavor === 'all')
+                        {{-- Pets are the one slot the app ships nothing for: every
+                             one is a sprite sheet a grown-up uploads. --}}
+                        NO PETS YET — ASK A GROWN-UP
+                    @else
+                        NOTHING IN THIS SET YET
+                    @endif
                 </span>
             </div>
         </div>

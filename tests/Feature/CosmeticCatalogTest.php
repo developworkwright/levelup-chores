@@ -83,14 +83,53 @@ class CosmeticCatalogTest extends TestCase
         }
     }
 
-    public function test_the_slots_are_the_artworks_slots_in_order(): void
+    /**
+     * The artwork's seven slots come first, in its order and with its words.
+     * Pet is the app's own eighth and is deliberately not in the bundle: it has
+     * no drawn-in-code art, only uploaded sprite sheets.
+     */
+    public function test_the_slots_start_with_the_artworks_slots_in_order(): void
     {
         preg_match_all("/\{ key: '(\w+)', name: '([^']+)', blurb: '([^']+)', icon: '([^']+)' \}/", $this->source(), $matches, PREG_SET_ORDER);
 
-        $this->assertSame(
-            array_map(fn (array $m) => [$m[1], $m[2], $m[3], $m[4]], $matches),
-            array_map(fn (CosmeticSlot $slot) => [$slot->value, $slot->label(), $slot->blurb(), $slot->icon()], CosmeticSlot::cases()),
+        $artwork = array_map(fn (array $m) => [$m[1], $m[2], $m[3], $m[4]], $matches);
+        $slots = array_map(fn (CosmeticSlot $slot) => [$slot->value, $slot->label(), $slot->blurb(), $slot->icon()], CosmeticSlot::cases());
+
+        $this->assertCount(7, $artwork);
+        $this->assertSame($artwork, array_slice($slots, 0, 7));
+        $this->assertSame([CosmeticSlot::Pet], array_slice(CosmeticSlot::cases(), 7));
+    }
+
+    /**
+     * A pet's twelve poses are a contract between three things: the prompt that
+     * asks for the sheet, the checks that name an empty cell, and the element
+     * that crops one pose out of it. All three read this list.
+     */
+    public function test_the_pet_poses_are_the_same_in_the_prompt_the_enum_and_the_element(): void
+    {
+        $poses = CosmeticSlot::PET_POSES;
+        $grid = CosmeticSlot::Pet->poseGrid();
+
+        $this->assertCount($grid['cols'] * $grid['rows'], $poses);
+
+        // The prompt numbers its cells; every pose has to be named in it.
+        foreach ($poses as $pose) {
+            $this->assertStringContainsStringIgnoringCase(
+                $pose === 'toy' ? 'the toy on its own' : $pose,
+                CosmeticSlot::PET_PROMPT,
+                "The prompt never mentions the {$pose} pose.",
+            );
+        }
+
+        preg_match(
+            "/const poses = \[(.*?)\];/s",
+            file_get_contents(resource_path('js/cosmetic-elements.js')),
+            $block,
         );
+
+        preg_match_all("/'(\w+)'/", $block[1] ?? '', $inElement);
+
+        $this->assertSame($poses, $inElement[1], 'cosmetic-elements.js has drifted from PET_POSES.');
     }
 
     public function test_the_theme_colours_match_the_artwork(): void

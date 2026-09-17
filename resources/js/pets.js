@@ -1,0 +1,845 @@
+/*
+ * The pet that lives on a kid's pages.
+ *
+ * One custom element, `<fq-pets>`, laid over the page. It draws the pet from the
+ * twelve-pose sprite sheet a grown-up uploaded (see App\Enums\CosmeticSlot), and
+ * the pet gets on with its own day: wanders, hops onto the top edge of a card,
+ * sits and blinks, looks at whatever was tapped last, plays with its toy on a
+ * powered-up day, and sleeps after bedtime. It can be petted and picked up.
+ *
+ * Three things shape how this is written.
+ *
+ * **Livewire.** The layer is a shadow root, so a re-render can't strip the pet
+ * mid-jump, and the element is never keyed to page content. Where the pet can
+ * stand is re-read from the DOM each time it decides, rather than cached, so a
+ * card that appeared or vanished in a round trip is simply the new world.
+ *
+ * **Taps have to keep working.** The layer never takes pointer events; only the
+ * pet and its toy do. A pet sitting over a button is a pet you can pet, and the
+ * button still works everywhere else.
+ *
+ * **It has to be testable without an animation frame.** requestAnimationFrame
+ * does not fire while a browser is being driven by a tool, so the whole thing is
+ * a `step(dt)` on a world object that the frame loop merely calls. Reach it as
+ * `document.querySelector('fq-pets').world` and drive it by hand.
+ */
+
+/** How big the pet is drawn, in CSS pixels. One cell of the sheet. */
+const PET_SIZE = 78;
+
+/** The poses, in the order the sheet draws them. Mirrors CosmeticSlot::PET_POSES. */
+const POSES = ['idle', 'blink', 'crouch', 'jump', 'walk', 'happy', 'held', 'landed', 'play', 'toss', 'sleep', 'toy'];
+
+const WALK_SPEED = 46;
+const CHASE_SPEED = 96;
+const GRAVITY = 2200;
+
+/** Where one pose sits in the sheet, as a background-position pair. */
+function posePosition(pose) {
+    const index = Math.max(0, POSES.indexOf(pose));
+
+    return ((index % 4) * 100 / 3) + '% ' + (Math.floor(index / 4) * 100 / 2) + '%';
+}
+
+function random(min, max) {
+    return min + Math.random() * (max - min);
+}
+
+/**
+ * One animal. Holds where it is and what it is doing; knows nothing about the
+ * page, which is the world's job.
+ */
+class Pet {
+    /**
+     * A home and a roam distance pen a pet in around a point. The login door
+     * uses them: every kid's pet stays by their own tile, so the row reads as
+     * one animal per child rather than a scrum. Left out, it has the whole page.
+     */
+    constructor(world, sprite, options) {
+        const settings = options ?? {};
+
+        this.world = world;
+        this.sprite = sprite;
+        this.home = settings.home ?? null;
+        this.roam = settings.roam ?? 120;
+        this.visiting = settings.visiting ?? false;
+        this.x = settings.home ?? random(60, Math.max(120, world.width - 60));
+        this.y = world.floor();
+        this.vx = 0;
+        this.vy = 0;
+        this.facing = 1;
+        this.pose = 'idle';
+        this.perch = null;
+        this.held = false;
+        this.think = 0;
+        this.blinkIn = random(2, 6);
+        this.state = 'idle';
+    }
+
+    /** Puts a pose up and holds it for a moment before the pet decides again. */
+    act(state, pose, seconds) {
+        this.state = state;
+        this.pose = pose;
+        this.think = seconds;
+    }
+
+    /** The surface under a point: the top of a card, or the floor. */
+    settle() {
+        const perch = this.world.perchUnder(this.x, this.y);
+
+        this.perch = perch;
+        this.y = perch ? perch.top : this.world.floor();
+    }
+
+    /** Picked up by a finger. */
+    grab() {
+        this.held = true;
+        this.perch = null;
+        this.vx = 0;
+        this.vy = 0;
+        this.act('held', 'held', 0);
+    }
+
+    /**
+     * Let go.
+     *
+     * Dropped over a card it lands on that card, even though the card's top
+     * edge is above the point it was let go at — a kid dropping a pet onto a
+     * card means "sit there", and falling straight past it to the floor reads
+     * as the drop having failed. Dropped over nothing, it falls.
+     */
+    drop() {
+        this.held = false;
+        this.state = 'falling';
+        this.pose = 'jump';
+        this.vy = 0;
+
+        const onto = this.world.perches()
+            .filter((perch) => this.x >= perch.left && this.x <= perch.right && perch.top - this.y > -40 && perch.top - this.y < 160)
+            .sort((a, b) => Math.abs(a.top - this.y) - Math.abs(b.top - this.y))[0];
+
+        this.landOn = onto ? onto.top : null;
+        this.y = onto ? Math.min(this.y, onto.top - 12) : this.y;
+    }
+
+    /** Petted. */
+    pet() {
+        if (this.held) {
+            return;
+        }
+
+        this.act('happy', 'happy', 1.4);
+        this.world.emit('fq-pet-petted');
+    }
+
+    /** Sent somewhere: a celebration, the toy, a sibling's pet. */
+    runTo(x, speed) {
+        this.goal = x;
+        this.speed = speed || WALK_SPEED;
+        this.act('walking', 'walk', 0);
+    }
+
+    hop() {
+        this.act('crouch', 'crouch', 0.18);
+    }
+
+    /** Keeps a penned pet near home, and everything else on the page. */
+    pen(x) {
+        if (this.home === null) {
+            return this.world.clampX(x);
+        }
+
+        return Math.min(Math.max(this.home - this.roam, x), this.home + this.roam);
+    }
+
+    /** Says hello to whoever it has just bumped into. */
+    greet(other) {
+        this.facing = other.x < this.x ? -1 : 1;
+        this.act('happy', 'happy', random(0.9, 1.6));
+    }
+
+    step(dt) {
+        const world = this.world;
+
+        // Its own clock, for the gait — see FqPets.paint().
+        this.clock = (this.clock ?? 0) + dt;
+
+        if (this.held) {
+            return;
+        }
+
+        if (world.asleep) {
+            if (this.state !== 'sleeping' && this.state !== 'happy') {
+                this.settle();
+                this.act('sleeping', 'sleep', 0);
+            }
+
+            if (this.state === 'happy' && (this.think -= dt) <= 0) {
+                this.act('sleeping', 'sleep', 0);
+            }
+
+            return;
+        }
+
+        if (this.state === 'falling') {
+            this.vy += GRAVITY * dt;
+            this.y += this.vy * dt;
+            this.x += this.vx * dt;
+
+            const ground = this.landOn ?? world.groundUnder(this.x, this.y);
+
+            if (this.y >= ground) {
+                this.y = ground;
+                this.landOn = null;
+                this.settle();
+                this.vx = 0;
+                this.act('landed', 'landed', 0.7);
+            }
+
+            return;
+        }
+
+        if (this.state === 'jumping') {
+            this.vy += GRAVITY * dt;
+            this.y += this.vy * dt;
+            this.x += this.vx * dt;
+
+            // The top of what the kid can see is a ceiling. Without it a hop at
+            // a card high up the page carries the pet clean off the screen, and
+            // a pet you cannot see reads as one that broke.
+            if (this.y < world.ceiling()) {
+                this.y = world.ceiling();
+                this.vy = Math.max(this.vy, 0);
+            }
+
+            if (this.vy > 0 && this.y >= this.target) {
+                this.y = this.target;
+                this.settle();
+                this.vx = 0;
+                this.act('idle', 'idle', random(0.6, 1.8));
+            }
+
+            return;
+        }
+
+        this.think -= dt;
+
+        if (this.state === 'walking') {
+            const to = this.goal;
+            const distance = to - this.x;
+
+            this.facing = distance < 0 ? -1 : 1;
+            this.x += Math.sign(distance) * Math.min(Math.abs(distance), this.speed * dt);
+            this.pose = 'walk';
+
+            // Following the floor as the page scrolls under it.
+            if (! this.perch) {
+                this.y = world.floor();
+            }
+
+            if (Math.abs(distance) < 4) {
+                this.act('idle', 'idle', random(0.4, 1.4));
+            }
+
+            return;
+        }
+
+        if (this.state === 'crouch' && this.think <= 0) {
+            // Up and over to wherever it was aiming.
+            const target = this.jumpTo ?? { x: this.x, y: world.floor() };
+            const rise = Math.max(160, (this.y - target.y) + 150);
+
+            this.vy = -Math.sqrt(2 * GRAVITY * rise);
+            this.vx = (target.x - this.x) / (2 * Math.abs(this.vy) / GRAVITY);
+            this.target = target.y;
+            this.facing = this.vx < 0 ? -1 : 1;
+            this.state = 'jumping';
+            this.pose = 'jump';
+
+            return;
+        }
+
+        if (this.state === 'idle' || this.state === 'happy' || this.state === 'landed' || this.state === 'playing') {
+            if (! this.perch) {
+                this.y = world.floor();
+            }
+
+            this.blinkIn -= dt;
+
+            if (this.state === 'idle' && this.blinkIn <= 0) {
+                this.pose = this.pose === 'blink' ? 'idle' : 'blink';
+                this.blinkIn = this.pose === 'blink' ? 0.16 : random(2, 6);
+            }
+
+            if (this.think <= 0) {
+                this.decide();
+            }
+        }
+    }
+
+    /** What to do next, when nothing is already happening. */
+    decide() {
+        const world = this.world;
+        const toy = world.toy;
+
+        // The toy, when there is one and it is not already being sat next to.
+        if (toy && Math.random() < 0.45) {
+            if (Math.abs(toy.x - this.x) > 40) {
+                this.runTo(toy.x + random(-24, 24), CHASE_SPEED);
+
+                return;
+            }
+
+            this.pose = Math.random() < 0.5 ? 'play' : 'toss';
+            this.state = 'playing';
+            this.think = random(0.8, 1.6);
+
+            return;
+        }
+
+        const roll = Math.random();
+
+        if (roll < 0.36) {
+            const perch = this.home === null ? world.randomPerch(this.y) : null;
+
+            if (perch) {
+                this.jumpTo = { x: Math.min(Math.max(perch.left + 30, perch.left), perch.right - 30), y: perch.top };
+                this.hop();
+
+                return;
+            }
+        }
+
+        if (roll < 0.78) {
+            this.runTo(this.pen(this.x + random(-260, 260)));
+
+            return;
+        }
+
+        this.act('idle', 'idle', random(1.2, 3.4));
+    }
+}
+
+/**
+ * The page as the pet sees it: how wide it is, where the floor is, and which
+ * card edges can be stood on. Everything here is measured fresh, because
+ * Livewire rewrites the page underneath it.
+ */
+class World {
+    constructor(host) {
+        this.host = host;
+        this.pets = [];
+        this.toy = null;
+        this.asleep = false;
+        this.width = 0;
+    }
+
+    measure() {
+        const box = this.host.getBoundingClientRect();
+
+        this.width = box.width;
+        this.top = box.top + window.scrollY;
+        this.height = box.height;
+    }
+
+    /**
+     * How far outside the page's column the pet may wander, in pixels.
+     *
+     * On a phone the column is the whole screen and this is nothing. On a
+     * desktop there is a wide margin either side of it, and a pet that turned
+     * back at the column edge looked like it had hit an invisible wall — or
+     * worse, walked behind a curtain, which is what the clipping used to do.
+     */
+    margin() {
+        return Math.max(0, (window.innerWidth - this.width) / 2 - PET_SIZE * 0.35);
+    }
+
+    /** Keeps a wandering pet inside the page and its margins. */
+    clampX(x) {
+        const margin = this.margin();
+
+        return Math.min(Math.max(-margin + PET_SIZE * 0.2, x), this.width + margin - PET_SIZE * 0.2);
+    }
+
+    /** The top of what the kid can see, in the layer's own coordinates. */
+    ceiling() {
+        return Math.max(PET_SIZE * 0.3, window.scrollY - this.top + PET_SIZE * 0.3);
+    }
+
+    /** The bottom of what the kid can see, in the layer's own coordinates. */
+    floor() {
+        const bottom = window.scrollY + window.innerHeight - this.top - 8;
+
+        return Math.max(PET_SIZE, Math.min(bottom, this.height - 4));
+    }
+
+    /**
+     * The card edges a pet can stand on, read from the page every time it is
+     * asked — a Livewire round trip may have replaced all of them.
+     *
+     * Found by shape rather than by marking up every card on twelve pages: a
+     * card is a rounded box of a certain size inside the page area. An element
+     * can insist with `data-fq-perch`, or refuse with `data-fq-no-perch`.
+     *
+     * Only what is on screen counts, so the pet stays where the kid is looking
+     * and the walk never costs more than a handful of rectangles.
+     */
+    perches() {
+        const page = document.querySelector('[data-fq-page]') ?? document.body;
+        const found = [];
+        const left = this.hostLeft();
+
+        const consider = (element, depth) => {
+            if (depth > 3 || ! (element instanceof HTMLElement)) {
+                return;
+            }
+
+            if (element.hasAttribute('data-fq-no-perch') || element.closest('[data-fq-no-perch]')) {
+                return;
+            }
+
+            const box = element.getBoundingClientRect();
+            // Room above it for the animal, or the pet perches with its head off
+            // the top of the screen.
+            const onScreen = box.bottom > 0 && box.top < window.innerHeight - 20 && box.top > PET_SIZE;
+            const radius = parseFloat(getComputedStyle(element).borderTopLeftRadius) || 0;
+            const isCard = element.hasAttribute('data-fq-perch') || (radius >= 10 && box.height >= 48);
+
+            if (onScreen && isCard && box.width >= 140) {
+                found.push({
+                    left: box.left - left,
+                    right: box.right - left,
+                    top: box.top + window.scrollY - this.top,
+                });
+
+                // The card itself, not the cards inside it — a pet perching on
+                // every nested box would have nowhere to walk.
+                return;
+            }
+
+            Array.from(element.children).forEach((child) => consider(child, depth + 1));
+        };
+
+        Array.from(page.children).forEach((child) => consider(child, 1));
+
+        return found;
+    }
+
+    hostLeft() {
+        return this.host.getBoundingClientRect().left;
+    }
+
+    /**
+     * Somewhere to hop to from where the pet is standing.
+     *
+     * Within reach, deliberately: a pet that tried for a card near the top of a
+     * long page would launch itself off the screen, and a pet you cannot see is
+     * a pet that broke. Out of reach, it walks instead and tries again from
+     * wherever it ends up — which is how it gets up a page of cards.
+     *
+     * A screen's worth of reach, because the gap from the floor to the lowest
+     * card is most of one: any tighter and the pet never leaves the floor.
+     */
+    randomPerch(fromY) {
+        const reach = Math.max(260, window.innerHeight * 0.55);
+        const perches = this.perches().filter((perch) => perch.right - perch.left > 90
+            && (fromY === undefined || Math.abs(perch.top - fromY) < reach));
+
+        return perches.length ? perches[Math.floor(Math.random() * perches.length)] : null;
+    }
+
+    /** The perch a pet standing at this point is on, if any. */
+    perchUnder(x, y) {
+        return this.perches().find((perch) => x >= perch.left && x <= perch.right && Math.abs(perch.top - y) < 26) ?? null;
+    }
+
+    /** What a falling pet will land on: the nearest card top below it, or the floor. */
+    groundUnder(x, y) {
+        const floor = this.floor();
+        const tops = this.perches()
+            .filter((perch) => x >= perch.left && x <= perch.right && perch.top > y)
+            .map((perch) => perch.top);
+
+        return tops.length ? Math.min(floor, Math.min(...tops)) : floor;
+    }
+
+    /**
+     * Two pets standing next to each other say hello.
+     *
+     * Only when both are loafing, so a greeting never interrupts a jump or a
+     * drag, and on a cooldown — without one they stand nose to nose grinning at
+     * each other forever, which is funny exactly once.
+     */
+    introduce() {
+        this.met = Math.max(0, (this.met ?? 0) - 1);
+
+        if (this.pets.length < 2 || this.met > 0 || this.asleep) {
+            return;
+        }
+
+        const loafing = (one) => one.state === 'idle' || one.state === 'walking';
+
+        for (const pet of this.pets) {
+            for (const other of this.pets) {
+                if (pet === other || pet.held || other.held) {
+                    continue;
+                }
+
+                if (loafing(pet) && loafing(other) && Math.abs(pet.x - other.x) < 56 && Math.abs(pet.y - other.y) < 30) {
+                    pet.greet(other);
+                    other.greet(pet);
+                    this.met = 240;
+
+                    return;
+                }
+            }
+        }
+    }
+
+    emit(name, detail) {
+        window.dispatchEvent(new CustomEvent(name, { detail: detail ?? {} }));
+    }
+
+    step(dt) {
+        this.measure();
+        this.pets.forEach((pet) => pet.step(dt));
+        this.introduce();
+
+        if (this.toy) {
+            this.toy.step(dt, this);
+        }
+    }
+}
+
+/** The toy: a sprite that falls, sits, and can be dragged about. */
+class Toy {
+    constructor(world) {
+        this.x = random(80, Math.max(140, world.width - 80));
+        this.y = -40;
+        this.vy = 0;
+        this.held = false;
+    }
+
+    step(dt, world) {
+        if (this.held) {
+            return;
+        }
+
+        const ground = world.groundUnder(this.x, this.y);
+
+        if (this.y < ground) {
+            this.vy += GRAVITY * dt;
+            this.y = Math.min(ground, this.y + this.vy * dt);
+        } else {
+            this.y = ground;
+            this.vy = 0;
+        }
+    }
+}
+
+class FqPets extends HTMLElement {
+    static get observedAttributes() {
+        return ['sheet', 'effect', 'toy', 'asleep', 'drag', 'sheets', 'visitor'];
+    }
+
+    connectedCallback() {
+        this.reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        this.render();
+
+        this.onCelebrate = () => this.cheer();
+        this.onVisible = () => (document.hidden ? this.pause() : this.play());
+
+        window.addEventListener('celebrate', this.onCelebrate);
+        document.addEventListener('visibilitychange', this.onVisible);
+    }
+
+    disconnectedCallback() {
+        this.pause();
+        window.removeEventListener('celebrate', this.onCelebrate);
+        document.removeEventListener('visibilitychange', this.onVisible);
+    }
+
+    attributeChangedCallback(name) {
+        if (! this.isConnected) {
+            return;
+        }
+
+        // The sheet changing is a different pet; everything else is the same
+        // pet in a different mood, and must not restart it mid-jump.
+        if (name === 'sheet' || name === 'effect' || name === 'sheets' || name === 'visitor') {
+            this.render();
+
+            return;
+        }
+
+        if (this.world) {
+            this.world.asleep = this.hasAttribute('asleep');
+            this.syncToy();
+        }
+    }
+
+    /**
+     * Every animal this layer holds.
+     *
+     * One kid's own pet from `sheet`, a sibling's from `visitor`, or a whole
+     * row of them from `sheets` — which is the login door, where each pet is
+     * penned around its own kid's tile.
+     *
+     * @return array<int, {src: string, effect: ?string, home: ?number, roam: ?number, visiting: ?boolean}>
+     */
+    cast() {
+        const read = (name) => {
+            try {
+                return JSON.parse(this.getAttribute(name) || 'null');
+            } catch (error) {
+                return null;
+            }
+        };
+
+        const many = read('sheets');
+
+        if (Array.isArray(many)) {
+            return many.filter((entry) => entry && entry.src);
+        }
+
+        const mine = this.getAttribute('sheet');
+        const visitor = read('visitor');
+
+        return [
+            mine ? { src: mine, effect: this.getAttribute('effect') } : null,
+            visitor && visitor.src ? { ...visitor, visiting: true } : null,
+        ].filter(Boolean);
+    }
+
+    render() {
+        const root = this.shadowRoot || this.attachShadow({ mode: 'open' });
+        const cast = this.cast();
+
+        this.pause();
+        root.replaceChildren();
+
+        if (cast.length === 0) {
+            return;
+        }
+
+        const style = document.createElement('style');
+        style.textContent = `
+            /*
+             * No overflow clipping, deliberately. The layer is the page's own
+             * 1080px column, and hiding what leaves it made the pet disappear
+             * into a curtain at each edge on a wide screen. Nothing above this
+             * clips either, so the pet can walk out over the margins and stay
+             * on screen — see World.margin() for how far.
+             */
+            :host { position: absolute; inset: 0; pointer-events: none; z-index: 30; }
+            .pet, .toy {
+                position: absolute; width: ${PET_SIZE}px; height: ${PET_SIZE}px;
+                background-image: var(--sheet); background-size: 400% 300%;
+                background-repeat: no-repeat; pointer-events: auto; cursor: grab;
+                touch-action: none; will-change: transform;
+            }
+            .toy { width: ${PET_SIZE * 0.5}px; height: ${PET_SIZE * 0.5}px; background-size: 400% 300%; }
+        `;
+
+        root.append(style);
+
+        this.world = new World(this);
+        this.world.asleep = this.hasAttribute('asleep');
+        this.world.measure();
+
+        cast.forEach((entry) => {
+            const sprite = document.createElement('div');
+            sprite.className = 'pet ' + (entry.effect || '');
+            sprite.style.setProperty('--sheet', 'url("' + encodeURI(entry.src) + '")');
+
+            if (! this.hasAttribute('drag')) {
+                sprite.style.cursor = 'pointer';
+            }
+
+            root.append(sprite);
+
+            const pet = new Pet(this.world, sprite, {
+                // A fraction of the layer's width, so a pet's patch of the
+                // login row survives the row being laid out differently on a
+                // phone — see the login page.
+                home: entry.home === undefined || entry.home === null ? null : entry.home * this.world.width,
+                roam: entry.roam ?? Math.max(70, this.world.width * 0.12),
+                visiting: entry.visiting ?? false,
+            });
+
+            this.world.pets.push(pet);
+            this.bindDrag(sprite, pet);
+        });
+
+        this.syncToy();
+        this.paint();
+
+        if (! this.reduced) {
+            this.play();
+        }
+    }
+
+    /** The toy comes and goes with the powered-up day. */
+    syncToy() {
+        if (! this.world || ! this.shadowRoot) {
+            return;
+        }
+
+        const wanted = this.hasAttribute('toy') && ! this.reduced;
+
+        if (wanted && ! this.world.toy) {
+            const sprite = document.createElement('div');
+            sprite.className = 'toy';
+            sprite.style.setProperty('--sheet', 'url("' + encodeURI(this.cast()[0].src) + '")');
+            sprite.style.backgroundPosition = posePosition('toy');
+            this.shadowRoot.append(sprite);
+
+            this.world.toy = new Toy(this.world);
+            this.world.toy.sprite = sprite;
+            this.bindDrag(sprite, this.world.toy);
+        }
+
+        if (! wanted && this.world.toy) {
+            this.world.toy.sprite.remove();
+            this.world.toy = null;
+        }
+    }
+
+    /** Petting, and picking up. A tap is a drag that never went anywhere. */
+    bindDrag(sprite, thing) {
+        let from = null;
+        let moved = false;
+
+        sprite.addEventListener('pointerdown', (event) => {
+            from = { x: event.clientX, y: event.clientY };
+            moved = false;
+            sprite.setPointerCapture(event.pointerId);
+            event.preventDefault();
+        });
+
+        sprite.addEventListener('pointermove', (event) => {
+            if (! from) {
+                return;
+            }
+
+            if (! moved && Math.hypot(event.clientX - from.x, event.clientY - from.y) > 7) {
+                moved = true;
+
+                if (this.hasAttribute('drag')) {
+                    thing.grab ? thing.grab() : (thing.held = true);
+                }
+            }
+
+            if (moved && thing.held) {
+                const box = this.getBoundingClientRect();
+                thing.x = event.clientX - box.left;
+                thing.y = event.clientY - box.top + PET_SIZE / 2;
+                this.paint();
+            }
+        });
+
+        const release = () => {
+            if (! from) {
+                return;
+            }
+
+            from = null;
+
+            if (! moved) {
+                thing.pet ? thing.pet() : null;
+            } else if (thing.held) {
+                thing.drop ? thing.drop() : (thing.held = false);
+            }
+
+            this.paint();
+        };
+
+        sprite.addEventListener('pointerup', release);
+        sprite.addEventListener('pointercancel', release);
+    }
+
+    /** Something good happened: run over to it and jump about. */
+    cheer() {
+        if (! this.world || this.reduced || this.world.asleep) {
+            return;
+        }
+
+        const pet = this.world.pets[0];
+
+        if (! pet || pet.held) {
+            return;
+        }
+
+        pet.runTo(this.world.clampX(pet.x + random(-150, 150)), CHASE_SPEED);
+        setTimeout(() => pet.held || pet.hop(), 400);
+    }
+
+    play() {
+        if (this.frame || this.reduced || ! this.world) {
+            return;
+        }
+
+        let last = performance.now();
+
+        const tick = (now) => {
+            // Capped, so coming back to a tab left open for an hour does not
+            // fling the pet across the page in one step.
+            const dt = Math.min(0.05, (now - last) / 1000);
+            last = now;
+
+            this.world.step(dt);
+            this.paint();
+            this.frame = requestAnimationFrame(tick);
+        };
+
+        this.frame = requestAnimationFrame(tick);
+    }
+
+    pause() {
+        if (this.frame) {
+            cancelAnimationFrame(this.frame);
+            this.frame = null;
+        }
+    }
+
+    /** Puts what the world says on screen. Nothing here decides anything. */
+    paint() {
+        if (! this.world) {
+            return;
+        }
+
+        this.world.pets.forEach((pet) => {
+            pet.sprite.style.backgroundPosition = posePosition(pet.pose);
+
+            /*
+             * The sheet has one walking frame, so walking it across the page
+             * slides it like a sticker. A gait instead: the body rises and dips
+             * twice a stride and squashes on the down beat, which is what a
+             * two-frame walk cycle is really doing. Cheap, and it reads as legs
+             * even though the legs never move.
+             */
+            let gait = '';
+
+            if (pet.state === 'walking') {
+                const stride = pet.clock * (pet.speed > WALK_SPEED ? 13 : 9);
+                const bob = Math.abs(Math.sin(stride)) * -3.2;
+                const squash = 1 - Math.abs(Math.cos(stride)) * 0.035;
+
+                gait = ' translateY(' + bob.toFixed(2) + 'px) scaleY(' + squash.toFixed(3) + ')';
+            }
+
+            pet.sprite.style.transformOrigin = '50% 100%';
+            pet.sprite.style.transform = 'translate(' + (pet.x - PET_SIZE / 2) + 'px,' + (pet.y - PET_SIZE) + 'px) scaleX(' + pet.facing + ')' + gait;
+        });
+
+        const toy = this.world.toy;
+
+        if (toy) {
+            toy.sprite.style.transform = 'translate(' + (toy.x - PET_SIZE * 0.25) + 'px,' + (toy.y - PET_SIZE * 0.5) + 'px)';
+        }
+    }
+}
+
+if (! customElements.get('fq-pets')) {
+    customElements.define('fq-pets', FqPets);
+}

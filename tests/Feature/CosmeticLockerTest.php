@@ -413,6 +413,46 @@ class CosmeticLockerTest extends TestCase
         Volt::test('kid.bonus')->assertDontSee('data-fq-theme', false);
     }
 
+    /** The one slot the app ships nothing for: every pet is an uploaded sheet. */
+    public function test_the_pet_slot_says_so_while_the_house_has_no_pets(): void
+    {
+        Auth::guard('profile')->login($this->kid);
+
+        Volt::test('kid.locker')
+            ->call('pickSlot', 'pet')
+            ->assertSee('NO PETS YET — ASK A GROWN-UP')
+            ->assertSee('Runs around your pages');
+    }
+
+    public function test_a_pet_is_bought_like_anything_else_and_shows_its_poses_on_the_way(): void
+    {
+        $pet = Cosmetic::create([
+            'household_id' => $this->household->id,
+            'slot' => 'pet',
+            'art_path' => 'cosmetics/1/tabby.png',
+            'name' => 'Tabby',
+            'cost' => 10,
+            'stock' => 'shelf',
+            'effect' => 'rainbow',
+            'published_at' => now(),
+        ]);
+
+        Auth::guard('profile')->login($this->kid);
+
+        Volt::test('kid.locker')
+            ->call('pickSlot', 'pet')
+            ->assertSee('Tabby')
+            ->call('choose', $pet->id)
+            // The sheet, cut into its twelve poses.
+            ->assertSee('data-fq-pose-strip', false)
+            ->assertSee('pose="sleep"', false)
+            ->assertSee('fq-aura-rainbow', false)
+            ->call('buyTrying')
+            ->assertSee('it follows you page to page');
+
+        $this->assertSame($pet->id, $this->kid->fresh()->worn_pet_id);
+    }
+
     public function test_the_locker_is_behind_shop_in_the_kid_rail(): void
     {
         Auth::guard('profile')->login($this->kid);

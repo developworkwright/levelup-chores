@@ -10,10 +10,11 @@
     'mode' => 'tile',
     'still' => false,
     'label' => null,
+    'pose' => null,
 ])
 
 <fq-cosmetic
-    {{ $attributes }}
+    {{ $attributes->class([$item->effect?->cssClass()]) }}
     kind="{{ $item->slot->value }}"
     @if ($item->isUpload())
         src="{{ $item->artUrl() }}"
@@ -24,5 +25,6 @@
     mode="{{ $mode }}"
     @if ($still) still @endif
     @if ($label) label="{{ $label }}" @endif
+    @if ($pose) pose="{{ $pose }}" @endif
     aria-hidden="true"
 ></fq-cosmetic>

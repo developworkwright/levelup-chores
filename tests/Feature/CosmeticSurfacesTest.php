@@ -9,6 +9,7 @@ use App\Models\Household;
 use App\Models\Profile;
 use App\Services\CosmeticService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Volt;
 use Tests\TestCase;
@@ -135,6 +136,104 @@ class CosmeticSurfacesTest extends TestCase
         Auth::guard('profile')->login($sibling);
 
         Volt::test('arcade')->assertDontSee('<fq-cabinet', false);
+    }
+
+    private function pet(string $name, int $cost = 10): Cosmetic
+    {
+        return Cosmetic::create([
+            'household_id' => $this->household->id,
+            'slot' => 'pet',
+            'art_path' => 'cosmetics/1/'.$name.'.png',
+            'name' => $name,
+            'cost' => $cost,
+            'stock' => 'shelf',
+            'published_at' => now(),
+        ]);
+    }
+
+    public function test_the_login_door_carries_one_pet_per_kid_who_has_one_out(): void
+    {
+        $tabby = $this->pet('Tabby');
+        $gremlin = $this->pet('Gremlin');
+
+        $colton = Profile::factory()->for($this->household)->create(['name' => 'Colton', 'bonus_tickets' => 40, 'age' => 12]);
+        $westin = Profile::factory()->for($this->household)->create(['name' => 'Westin', 'bonus_tickets' => 40, 'age' => 9]);
+        // A third kid with no pet, so the row is not all animals.
+        Profile::factory()->for($this->household)->create(['name' => 'Ada', 'age' => 6]);
+
+        app(CosmeticService::class)->buy($colton, $tabby);
+        app(CosmeticService::class)->buy($westin, $gremlin);
+        app()->forgetScopedInstances();
+
+        $html = Volt::test('login')->html();
+
+        $this->assertStringContainsString('<fq-pets', $html);
+        $this->assertSame(2, substr_count($html, 'cosmetics/art/'));
+        // Each pet is penned around its own kid's tile, as a fraction of the row.
+        $this->assertStringContainsString('&quot;home&quot;:0.1667', $html);
+        // And nothing can be dragged about on a page anybody can open.
+        $this->assertStringNotContainsString('<fq-pets drag', $html);
+    }
+
+    public function test_the_door_has_no_pet_layer_when_nobody_has_one_out(): void
+    {
+        Profile::factory()->for($this->household)->create(['name' => 'Westin']);
+
+        Volt::test('login')->assertDontSee('<fq-pets', false);
+    }
+
+    public function test_a_kids_own_pet_is_on_every_page_of_theirs_and_can_be_dragged(): void
+    {
+        $kid = $this->kidWearing('Colton', []);
+        app(CosmeticService::class)->buy($kid, $this->pet('Tabby'));
+        app()->forgetScopedInstances();
+
+        Auth::guard('profile')->login($kid->fresh());
+
+        Volt::test('kid.bonus')
+            ->assertSee('<fq-pets', false)
+            ->assertSee('drag', false);
+    }
+
+    /**
+     * A visit is worked out from the hour rather than rolled, so a refresh
+     * cannot re-roll it — and it only happens on Home.
+     */
+    public function test_a_siblings_pet_visits_home_now_and_again_and_never_changes_its_mind(): void
+    {
+        $colton = Profile::factory()->for($this->household)->create(['name' => 'Colton', 'bonus_tickets' => 40]);
+        $westin = Profile::factory()->for($this->household)->create(['name' => 'Westin', 'bonus_tickets' => 40]);
+
+        app(CosmeticService::class)->buy($westin, $this->pet('Gremlin'));
+        app()->forgetScopedInstances();
+
+        $service = app(CosmeticService::class);
+        $hours = collect(range(0, 23))->map(function (int $hour) use ($service, $colton) {
+            $this->travelTo(Carbon::parse('2026-09-18 '.str_pad((string) $hour, 2, '0', STR_PAD_LEFT).':10', 'America/Chicago'));
+
+            return $service->visitingPet($colton)?->name;
+        });
+
+        // Some hours, not all of them, and not none of them.
+        $this->assertGreaterThan(0, $hours->filter()->count(), 'A sibling with a pet never visited all day.');
+        $this->assertLessThan(24, $hours->filter()->count(), 'The visitor never went home.');
+
+        // The same hour, asked twice, answers the same.
+        $this->travelTo(Carbon::parse('2026-09-18 12:10', 'America/Chicago'));
+        $this->assertSame($service->visitingPet($colton)?->name, app(CosmeticService::class)->visitingPet($colton->fresh())?->name);
+    }
+
+    public function test_a_sibling_with_no_pet_never_visits(): void
+    {
+        $colton = Profile::factory()->for($this->household)->create(['name' => 'Colton']);
+        Profile::factory()->for($this->household)->create(['name' => 'Westin']);
+
+        foreach (range(0, 23) as $hour) {
+            $this->travelTo(Carbon::parse('2026-09-18 '.str_pad((string) $hour, 2, '0', STR_PAD_LEFT).':10', 'America/Chicago'));
+            app()->forgetScopedInstances();
+
+            $this->assertNull(app(CosmeticService::class)->visitingPet($colton));
+        }
     }
 
     public function test_a_worn_tap_effect_is_on_the_kids_pages(): void
