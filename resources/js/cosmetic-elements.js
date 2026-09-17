@@ -35,6 +35,18 @@ function motionCss(word) {
     return (word && C() && C().MOTION[word]) || '';
 }
 
+/**
+ * A URL, safe to drop inside a CSS url("...").
+ *
+ * Never encodeURI: that escapes the percent signs in an already-encoded URL, so
+ * a presigned S3 link — which is most of what Livewire hands back for an upload
+ * preview in production — turns its %2F into %252F and 404s. The URL arrives
+ * encoded already; all this has to do is survive being inside quotes.
+ */
+function cssUrl(src) {
+    return String(src).replace(/["\\]/g, (character) => '\\' + character).replace(/[\r\n]/g, '');
+}
+
 function el(tag, style) {
     const node = document.createElement(tag);
 
@@ -135,7 +147,7 @@ class FqCosmetic extends HTMLElement {
             const column = index % 4;
             const row = Math.floor(index / 4);
 
-            box.style.background = 'url("' + encodeURI(src) + '") no-repeat';
+            box.style.background = 'url("' + cssUrl(src) + '") no-repeat';
             box.style.backgroundSize = '400% 300%';
             // Thirds and halves of the leftover space, which is what a
             // percentage background-position means: column 1 of 4 is 33.3%.
@@ -146,7 +158,7 @@ class FqCosmetic extends HTMLElement {
 
         if (kind === 'pattern') {
             const anim = still ? '' : (src ? uploadMotion : (C().patternAnim ? C().patternAnim(recipe) : ''));
-            box.style.background = src ? 'url("' + encodeURI(src) + '") 0 0 / 128px 128px repeat' : C().pattern(recipe);
+            box.style.background = src ? 'url("' + cssUrl(src) + '") 0 0 / 128px 128px repeat' : C().pattern(recipe);
 
             if (anim) {
                 box.style.animation = anim;
@@ -175,7 +187,7 @@ class FqCosmetic extends HTMLElement {
             name.textContent = this.getAttribute('label') || 'NAME';
 
             if (src) {
-                name.style.background = 'url("' + encodeURI(src) + '") center / 100% 100% no-repeat';
+                name.style.background = 'url("' + cssUrl(src) + '") center / 100% 100% no-repeat';
                 name.style.color = '#fff';
                 name.style.textShadow = '0 1px 3px #000';
             } else {
@@ -240,7 +252,7 @@ class FqPlate extends HTMLElement {
         const style = document.createElement('style');
 
         if (src) {
-            style.textContent = ':host{display:inline-block;background:url("' + encodeURI(src) + '") center / 100% 100% no-repeat;color:#fff;text-shadow:0 1px 3px #000}';
+            style.textContent = ':host{display:inline-block;background:url("' + cssUrl(src) + '") center / 100% 100% no-repeat;color:#fff;text-shadow:0 1px 3px #000}';
         } else if (C()) {
             const p = C().plate(this.getAttribute('recipe'));
             // `!important` on the border only because Tailwind's preflight
@@ -280,7 +292,7 @@ class FqCabinet extends HTMLElement {
         const base = ':host{display:flex;flex-direction:column;gap:11px;border-radius:24px;padding:12px !important;border-width:1px !important;border-style:solid !important;';
 
         if (src) {
-            style.textContent = base + 'border-color:#3a2360 !important;background:linear-gradient(rgba(10,5,18,.55),rgba(10,5,18,.55)),url("' + encodeURI(src) + '") center / cover no-repeat}';
+            style.textContent = base + 'border-color:#3a2360 !important;background:linear-gradient(rgba(10,5,18,.55),rgba(10,5,18,.55)),url("' + cssUrl(src) + '") center / cover no-repeat}';
         } else if (C()) {
             const c = C().cabinet(this.getAttribute('recipe'));
             style.textContent = base + 'border-color:' + c.edge + ' !important;background:' + c.bezel + ';box-shadow:0 0 28px ' + c.glow + '}';

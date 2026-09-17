@@ -41,6 +41,11 @@ function posePosition(pose) {
     return ((index % 4) * 100 / 3) + '% ' + (Math.floor(index / 4) * 100 / 2) + '%';
 }
 
+/** A URL, safe inside a CSS url("..."). See cosmetic-elements.js for why not encodeURI. */
+function cssUrl(src) {
+    return String(src).replace(/["\\]/g, (character) => '\\' + character).replace(/[\r\n]/g, '');
+}
+
 function random(min, max) {
     return min + Math.random() * (max - min);
 }
@@ -650,7 +655,7 @@ class FqPets extends HTMLElement {
         cast.forEach((entry) => {
             const sprite = document.createElement('div');
             sprite.className = 'pet ' + (entry.effect || '');
-            sprite.style.setProperty('--sheet', 'url("' + encodeURI(entry.src) + '")');
+            sprite.style.setProperty('--sheet', 'url("' + cssUrl(entry.src) + '")');
 
             if (! this.hasAttribute('drag')) {
                 sprite.style.cursor = 'pointer';
@@ -690,7 +695,7 @@ class FqPets extends HTMLElement {
         if (wanted && ! this.world.toy) {
             const sprite = document.createElement('div');
             sprite.className = 'toy';
-            sprite.style.setProperty('--sheet', 'url("' + encodeURI(this.cast()[0].src) + '")');
+            sprite.style.setProperty('--sheet', 'url("' + cssUrl(this.cast()[0].src) + '")');
             sprite.style.backgroundPosition = posePosition('toy');
             this.shadowRoot.append(sprite);
 
