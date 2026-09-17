@@ -1,0 +1,546 @@
+<?php
+
+use App\Enums\CosmeticFlavor;
+use App\Enums\CosmeticSlot;
+use App\Exceptions\CosmeticUnavailableException;
+use App\Exceptions\InsufficientTicketsException;
+use App\Models\Cosmetic;
+use App\Models\Profile;
+use App\Services\CosmeticService;
+use Illuminate\Support\Facades\Auth;
+use Livewire\Volt\Component;
+
+/**
+ * The cosmetic locker — seven slots, all worn at once, all seen by the house.
+ *
+ * Mirror first: the top of the page is the kid's card exactly as the house sees
+ * it, and it changes the instant they tap something. Below it the slots as a
+ * rail, then this week's limiteds, then the shelf for whichever slot is open.
+ * One page, no second screen — the preview is the thing being bought rather
+ * than a picture of it.
+ *
+ * Owned is forever and swapping is free: the ticket buys the item, never the
+ * wearing of it. See CosmeticService.
+ */
+new class extends Component
+{
+    public Profile $profile;
+
+    /** Which slot's shelf is open. */
+    public string $slot = 'frame';
+
+    /** Which flavor chip is picked; 'all' is Everything. */
+    public string $flavor = 'all';
+
+    /** The item just bought, for the "yours now" card. */
+    public ?int $boughtId = null;
+
+    /**
+     * Something the kid is trying on before buying. It goes on the mirror —
+     * and, for a theme, over the whole page — and costs nothing until they say
+     * Buy. Nothing about it is saved: leave the page and it's gone.
+     */
+    public ?int $tryingId = null;
+
+    public ?string $flashMessage = null;
+
+    public function mount(): void
+    {
+        $this->profile = Auth::guard('profile')->user();
+        abort_unless($this->profile->isKid(), 403);
+    }
+
+    public function pickSlot(string $slot): void
+    {
+        if (CosmeticSlot::tryFrom($slot)) {
+            $this->slot = $slot;
+            $this->flashMessage = null;
+        }
+    }
+
+    public function pickFlavor(string $flavor): void
+    {
+        if ($flavor === 'all' || CosmeticFlavor::tryFrom($flavor)) {
+            $this->flavor = $flavor;
+        }
+    }
+
+    /**
+     * One tap: wear it if it's yours, try it on if it isn't. Buying is always a
+     * second, deliberate tap on the try-on bar — a six-year-old tapping round
+     * the shelf to see what things look like must never spend a ticket doing it.
+     */
+    public function choose(int $cosmeticId): void
+    {
+        $item = Cosmetic::where('household_id', $this->profile->household_id)->find($cosmeticId);
+
+        if (! $item) {
+            return;
+        }
+
+        $service = app(CosmeticService::class);
+        $this->boughtId = null;
+        $this->flashMessage = null;
+
+        if ($service->owns($this->profile, $item)) {
+            $this->tryingId = null;
+
+            try {
+                $service->wear($this->profile, $item);
+            } catch (CosmeticUnavailableException $e) {
+                $this->flashMessage = $e->getMessage();
+            }
+
+            return;
+        }
+
+        if (! $service->isForSale($item)) {
+            $this->flashMessage = 'That one isn\'t on sale this week.';
+
+            return;
+        }
+
+        $this->tryingId = $item->id;
+    }
+
+    /** The second tap: buy what's being tried on, and put it on for real. */
+    public function buyTrying(): void
+    {
+        $item = $this->tryingId
+            ? Cosmetic::where('household_id', $this->profile->household_id)->find($this->tryingId)
+            : null;
+
+        if (! $item) {
+            $this->tryingId = null;
+
+            return;
+        }
+
+        try {
+            app(CosmeticService::class)->buy($this->profile, $item);
+        } catch (InsufficientTicketsException|CosmeticUnavailableException $e) {
+            $this->flashMessage = $e->getMessage();
+
+            return;
+        }
+
+        $this->tryingId = null;
+        $this->flashMessage = null;
+        $this->boughtId = $item->id;
+        $this->dispatch('celebrate', message: "{$item->name} is yours!", style: 'ticket', motion: 'burst', origin: 'tap');
+    }
+
+    public function putBack(): void
+    {
+        $this->tryingId = null;
+    }
+
+    public function takeOff(string $slot): void
+    {
+        $case = CosmeticSlot::tryFrom($slot);
+
+        if ($case && $case->startsEmpty()) {
+            app(CosmeticService::class)->takeOff($this->profile, $case);
+        }
+    }
+
+    public function with(): array
+    {
+        $service = app(CosmeticService::class);
+        $household = $this->profile->household;
+        $catalog = $service->catalog($household);
+        $slot = CosmeticSlot::tryFrom($this->slot) ?? CosmeticSlot::Frame;
+
+        $worn = $service->worn($this->profile);
+
+        // A try-on is only honoured while it is still something they could buy.
+        $trying = $this->tryingId ? $catalog->get($this->tryingId) : null;
+
+        if ($trying && ($service->owns($this->profile, $trying) || ! $service->isForSale($trying))) {
+            $trying = null;
+        }
+
+        // What the mirror shows: the wardrobe, with the try-on swapped in.
+        $mirror = $worn;
+
+        if ($trying) {
+            $mirror[$trying->slot->value] = $trying;
+        }
+
+        // What a slot shows when nothing is bought for it: the free house item,
+        // which is the app as it already looks. Frames and avatars have none.
+        $houseItem = fn (CosmeticSlot $case) => $catalog->first(fn (Cosmetic $item) => $item->slot === $case && $item->isFree() && ! $item->isDraft());
+
+        $shelf = $service->shelfFor($this->profile, $slot);
+
+        if ($this->flavor !== 'all') {
+            $shelf = $shelf->filter(fn (Cosmetic $item) => $item->flavorOrHouse()->value === $this->flavor)->values();
+        }
+
+        $priced = $shelf->reject(fn (Cosmetic $item) => $item->isFree());
+
+        return [
+            'service' => $service,
+            'openSlot' => $slot,
+            'worn' => $worn,
+            'mirror' => $mirror,
+            'trying' => $trying,
+            'trialThemeCss' => $trying?->slot === CosmeticSlot::Theme ? $service->themeCssFor($trying) : null,
+            'shown' => collect(CosmeticSlot::cases())->mapWithKeys(fn (CosmeticSlot $case) => [
+                $case->value => $mirror[$case->value] ?? ($case->startsEmpty() ? null : $houseItem($case)),
+            ]),
+            'limited' => $service->limitedThisWeek($household),
+            'daysLeft' => $service->daysLeftInWeek($household),
+            'shelf' => $shelf,
+            'fromCost' => $priced->min('cost'),
+            'bought' => $this->boughtId ? $catalog->get($this->boughtId) : null,
+        ];
+    }
+}; ?>
+
+@php
+    /*
+     * Buy / wear / worn / short, as one set of looks — the design's action().
+     * A limited is gold-rimmed with a gold button, everything else lilac.
+     */
+    $look = function (App\Models\Cosmetic $item) use ($service, $profile, $trying) {
+        $isWorn = $service->wornIn($profile, $item->slot)?->id === $item->id;
+
+        if ($trying?->id === $item->id) {
+            return ['label' => 'Trying', 'bg' => 'transparent', 'rim' => '#54e8d0', 'ink' => '#54e8d0', 'border' => '#54e8d0', 'card' => '#07202c', 'name' => '#c2e6ee'];
+        }
+
+        if ($isWorn) {
+            return ['label' => 'Worn', 'bg' => '#7dffb0', 'rim' => '#7dffb0', 'ink' => '#05170c', 'border' => '#7dffb0', 'card' => '#0d2a1c', 'name' => '#c7ebd8'];
+        }
+
+        if ($service->owns($profile, $item)) {
+            return ['label' => 'Wear', 'bg' => 'transparent', 'rim' => '#6a3fb0', 'ink' => '#d8b4ff', 'border' => '#4a2f7a', 'card' => 'var(--fq-panel)', 'name' => 'var(--fq-text)'];
+        }
+
+        if ($item->cost > $profile->bonus_tickets) {
+            return ['label' => ($item->cost - $profile->bonus_tickets).' short', 'bg' => 'transparent', 'rim' => '#2e1b4d', 'ink' => '#6f6288', 'border' => '#241539', 'card' => '#0b0616', 'name' => '#8c7bab'];
+        }
+
+        $gold = $item->isLimited();
+
+        return [
+            'label' => $item->cost.' ✦',
+            'bg' => $gold ? 'linear-gradient(150deg,#fff6b0,#ffc93d)' : '#d8b4ff',
+            'rim' => $gold ? '#ffc93d' : '#d8b4ff',
+            'ink' => $gold ? '#231702' : '#0a0512',
+            'border' => $gold ? '#ffc93d' : '#6a3fb0',
+            'card' => 'var(--fq-panel)',
+            'name' => 'var(--fq-text)',
+        ];
+    };
+
+    $plate = $shown['plate'];
+@endphp
+
+<x-kid.shell :profile="$profile" active="locker">
+    <div class="mx-auto flex max-w-[720px] flex-col gap-[13px]">
+        <div class="flex items-center justify-between gap-[10px]">
+            <div>
+                <h2 class="font-baloo text-[24px] leading-tight font-extrabold">Locker</h2>
+                <p class="text-[12.5px] text-fq-text-3">Wear it all at once</p>
+            </div>
+
+            <span class="flex shrink-0 items-center gap-[7px] rounded-[10px] border border-fq-line-2 bg-fq-sunk px-[11px] py-[7px] font-mono-fq text-[11px] whitespace-nowrap text-fq-magenta">
+                <i class="fa-solid fa-ticket text-[11px]"></i>{{ $profile->bonus_tickets }} TICKETS
+            </span>
+        </div>
+
+        {{-- The mirror. What the house sees, repainted on every tap. --}}
+        <div class="relative isolate flex items-center gap-[14px] overflow-hidden rounded-[22px] border border-fq-line-2 bg-fq-bg p-4" data-fq-mirror>
+            @if ($shown['pattern'])
+                <x-cosmetic.art :item="$shown['pattern']" mode="fill" class="absolute inset-0 -z-10" />
+            @endif
+
+            <div class="relative h-[86px] w-[86px] shrink-0">
+                @unless ($mirror['avatar'])
+                    <span
+                        class="absolute inset-[11px] grid place-items-center rounded-full font-baloo text-[30px] font-extrabold text-fq-bg"
+                        style="background: {{ $profile->color->cssVar() }}"
+                    >{{ mb_substr($profile->name, 0, 1) }}</span>
+                @endunless
+
+                <x-cosmetic.face :avatar="$mirror['avatar']" :frame="$mirror['frame']" avatar-inset="11px" />
+            </div>
+
+            <div class="flex min-w-0 flex-1 flex-col items-start gap-[8px]">
+                @if ($plate)
+                    <x-cosmetic.plate :item="$plate" class="px-[15px] py-[7px] font-baloo text-[18px] leading-none font-extrabold">{{ $profile->name }}</x-cosmetic.plate>
+                @else
+                    <span class="font-baloo text-[18px] leading-none font-extrabold">{{ $profile->name }}</span>
+                @endif
+
+                <span class="font-mono-fq text-[9.5px] tracking-[0.14em] text-fq-text-3 uppercase">LVL {{ $profile->level() }} {{ $profile->rank()->label() }}</span>
+                <span class="font-mono-fq text-[9px] tracking-[0.12em]" style="color: {{ $trying ? '#54e8d0' : 'var(--fq-text-4)' }}">{{ $trying ? 'TRYING IT ON · NOT BOUGHT YET' : 'THE HOUSE SEES YOUR FACE, FRAME & PLATE' }}</span>
+            </div>
+
+            @if ($shown['spark'])
+                <x-cosmetic.art :item="$shown['spark']" mode="fill" class="h-[46px] w-[46px] shrink-0 opacity-90" />
+            @endif
+        </div>
+
+        {{-- A theme on trial repaints the page. After the worn theme's own rule
+             in the shell, so it wins, and gone the moment it's put back. --}}
+        @if ($trialThemeCss)
+            <style data-fq-theme-trial>:root { {!! $trialThemeCss !!} }</style>
+        @endif
+
+        @if ($trying)
+            @php $short = max(0, $trying->cost - $profile->bonus_tickets); @endphp
+
+            <div
+                wire:key="trying-{{ $trying->id }}"
+                class="flex flex-wrap items-center gap-[12px] rounded-[18px] border p-[12px]"
+                style="border-color: #54e8d0; background: linear-gradient(160deg,#07202c,#150c26 74%)"
+                data-fq-trying
+            >
+                <span class="relative h-[52px] w-[52px] shrink-0 overflow-hidden rounded-[13px] bg-fq-bg">
+                    <x-cosmetic.art :item="$trying" :label="mb_strtoupper($profile->name)" class="absolute inset-0" />
+                </span>
+
+                <div class="min-w-[120px] flex-1">
+                    <p class="font-mono-fq text-[8.5px] tracking-[0.16em]" style="color: #54e8d0">TRYING ON</p>
+                    <p class="mt-[2px] font-baloo text-[17px] leading-tight font-extrabold">{{ $trying->name }}</p>
+                    <p class="mt-[2px] text-[11.5px] text-fq-text-3">
+                        @switch ($trying->slot)
+                            @case (App\Enums\CosmeticSlot::Theme)
+                                The whole page is wearing it — have a look round.
+                                @break
+                            @case (App\Enums\CosmeticSlot::Cabinet)
+                                That's your arcade machine in it.
+                                @break
+                            @case (App\Enums\CosmeticSlot::Spark)
+                                That flies out every time you win something.
+                                @break
+                            @case (App\Enums\CosmeticSlot::Pattern)
+                                It's behind the mirror — yours goes behind all your own pages.
+                                @break
+                            @default
+                                It's on the mirror — once it's yours, the whole house sees it.
+                        @endswitch
+                    </p>
+                </div>
+
+                <div class="flex shrink-0 gap-[7px]">
+                    @if ($trying->slot === App\Enums\CosmeticSlot::Spark)
+                        {{-- Its own trigger, so the tap effect already worn
+                             stays out of it. The burst comes out of this tap. --}}
+                        <fq-spark
+                            trigger="fq-spark-preview"
+                            @if ($trying->isUpload()) src="{{ $trying->artUrl() }}" @else recipe="{{ $trying->recipe }}" @endif
+                        ></fq-spark>
+                        <button
+                            type="button"
+                            x-data
+                            x-on:click="window.dispatchEvent(new CustomEvent('fq-spark-preview'))"
+                            class="rounded-[10px] border px-[12px] py-[8px] font-baloo text-[13px] font-extrabold"
+                            style="border-color: #54e8d0; color: #54e8d0"
+                        >See it</button>
+                    @endif
+
+                    <button
+                        type="button"
+                        wire:click="putBack"
+                        class="rounded-[10px] border border-fq-line-2 px-[12px] py-[8px] font-baloo text-[13px] font-extrabold text-fq-text-3"
+                    >Put back</button>
+
+                    <button
+                        type="button"
+                        wire:click="buyTrying"
+                        @disabled($short > 0)
+                        class="rounded-[10px] px-[14px] py-[8px] font-baloo text-[13px] font-extrabold"
+                        style="{{ $short > 0 ? 'background: var(--fq-panel-alt-2); color: var(--fq-text-5)' : ($trying->isLimited() ? 'background: linear-gradient(150deg,#fff6b0,#ffc93d); color: #231702' : 'background: #d8b4ff; color: #0a0512') }}"
+                    >{{ $short > 0 ? $short.' short' : 'Buy · '.$trying->cost.' ✦' }}</button>
+                </div>
+
+                {{-- A cabinet is judged around a game, not as a tile: the same
+                     <fq-cabinet> bezel the arcade page draws, round a stand-in
+                     screen. --}}
+                @if ($trying->slot === App\Enums\CosmeticSlot::Cabinet)
+                    <div class="w-full" data-fq-cabinet-preview>
+                        <fq-cabinet
+                            @if ($trying->isUpload()) src="{{ $trying->artUrl() }}" @else recipe="{{ $trying->recipe }}" @endif
+                            class="mx-auto max-w-[320px]"
+                        >
+                            <div class="flex items-end justify-between gap-2">
+                                <span class="font-baloo text-[22px] leading-none font-extrabold text-fq-lime">12 <span class="font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-5 uppercase">floors</span></span>
+                                <span class="font-mono-fq text-[9px] tracking-[0.14em] text-fq-text-5 uppercase">best 31</span>
+                            </div>
+                            <div class="relative grid aspect-[320/300] place-items-center overflow-hidden rounded-[18px] border-2 border-fq-line-2 bg-fq-bg">
+                                <div class="flex flex-col items-center gap-2 text-center">
+                                    <span class="font-mono-fq text-[9px] tracking-[0.3em] text-fq-cyan uppercase">Arcade</span>
+                                    <span class="font-baloo text-[24px] leading-none font-extrabold">Your machine</span>
+                                    <span class="text-[11px] text-fq-text-3">Every game plays in here.</span>
+                                </div>
+                            </div>
+                        </fq-cabinet>
+                    </div>
+                @endif
+            </div>
+        @endif
+
+        @if ($flashMessage)
+            <div class="rounded-[16px] border border-fq-line-2 bg-fq-sunk px-4 py-3 text-sm text-fq-text-2">{{ $flashMessage }}</div>
+        @endif
+
+        {{-- A purchase celebrates with the thing that was bought. A tap effect
+             fires itself; anything else fires the kid's own over its art. --}}
+        @if ($bought)
+            <div
+                wire:key="bought-{{ $bought->id }}"
+                class="flex items-center gap-[13px] rounded-[18px] border border-fq-gold p-[13px]"
+                style="background: linear-gradient(160deg,#2a2405,#150c26 74%); animation: fq-pop .26s ease both"
+            >
+                <span class="relative h-[58px] w-[58px] shrink-0 overflow-hidden rounded-[14px] bg-fq-bg">
+                    <x-cosmetic.art :item="$bought" :label="mb_strtoupper($profile->name)" class="absolute inset-0" />
+                </span>
+
+                <div class="min-w-0 flex-1">
+                    <p class="font-mono-fq text-[8.5px] tracking-[0.16em] text-fq-ticket-label">YOURS NOW</p>
+                    <p class="mt-[3px] font-baloo text-[18px] leading-tight font-extrabold text-fq-lime">{{ $bought->name }}</p>
+                    <p class="mt-[2px] text-[11.5px] text-fq-notice-text">
+                        {{ $bought->slot->seenBy() }}
+                    </p>
+                </div>
+            </div>
+        @endif
+
+        {{-- The slots, each showing what's worn in it rather than an icon. --}}
+        <div class="flex gap-[5px]" role="tablist" aria-label="Slots">
+            @foreach (App\Enums\CosmeticSlot::cases() as $case)
+                @php $active = $openSlot === $case; @endphp
+
+                <button
+                    type="button"
+                    wire:key="slot-{{ $case->value }}"
+                    wire:click="pickSlot('{{ $case->value }}')"
+                    role="tab"
+                    aria-selected="{{ $active ? 'true' : 'false' }}"
+                    title="{{ $case->label() }}"
+                    class="flex min-w-0 flex-1 flex-col items-center gap-[4px] rounded-[13px] border px-[4px] pt-[6px] pb-[5px] transition"
+                    style="border-color: {{ $active ? '#c9a0ff' : 'var(--fq-line)' }}; background: {{ $active ? '#241546' : 'var(--fq-panel)' }}"
+                >
+                    <span class="relative grid aspect-square w-full place-items-center overflow-hidden rounded-[9px] bg-fq-bg">
+                        @if ($shown[$case->value])
+                            <x-cosmetic.art :item="$shown[$case->value]" still :label="mb_strtoupper($profile->name)" class="absolute inset-0" />
+                        @else
+                            <i class="fa-solid {{ $case->icon() }} text-[14px]" style="color: {{ $active ? '#d8b4ff' : 'var(--fq-text-5)' }}"></i>
+                        @endif
+                    </span>
+                    <span class="font-mono-fq text-[7px] tracking-[0.02em] md:text-[9px]" style="color: {{ $active ? '#c9a0ff' : 'var(--fq-text-5-b)' }}">{{ $case->short() }}</span>
+                </button>
+            @endforeach
+        </div>
+
+        @if ($limited->isNotEmpty())
+            <div class="flex flex-col gap-[9px] rounded-[16px] border border-fq-ticket-line p-[11px]" style="background: linear-gradient(180deg,#2a2405,#150c26)">
+                <div class="flex items-center justify-between gap-[9px]">
+                    <span class="font-baloo text-[15px] font-extrabold text-fq-lime">This week only</span>
+                    <span class="font-mono-fq text-[9px] tracking-[0.1em] whitespace-nowrap text-fq-ticket-label">
+                        {{ $daysLeft === 1 ? 'GONE TONIGHT' : 'UNTIL SUNDAY · '.$daysLeft.' DAYS' }}
+                    </span>
+                </div>
+
+                <div class="grid grid-cols-3 gap-[7px] sm:grid-cols-4 md:grid-cols-7">
+                    @foreach ($limited as $item)
+                        @php $l = $look($item); @endphp
+
+                        <button
+                            type="button"
+                            wire:key="limited-{{ $item->id }}"
+                            wire:click="choose({{ $item->id }})"
+                            class="flex min-w-0 flex-col items-center gap-[6px] rounded-[12px] border bg-fq-panel p-[7px]"
+                            style="border-color: {{ $l['border'] }}"
+                        >
+                            <span class="relative aspect-square w-full overflow-hidden rounded-[9px] bg-fq-bg">
+                                <x-cosmetic.art :item="$item" :label="mb_strtoupper($profile->name)" class="absolute inset-0" />
+                            </span>
+                            <span class="text-center text-[10.5px] leading-tight font-semibold" style="color: {{ $l['name'] }}">{{ $item->name }}</span>
+                            <span class="font-mono-fq text-[7.5px] tracking-[0.08em] text-fq-gold">{{ mb_strtoupper($item->slot->label()) }}</span>
+                            <span
+                                class="w-full rounded-[7px] border py-[4px] text-center font-baloo text-[11px] font-extrabold"
+                                style="background: {{ $l['bg'] }}; border-color: {{ $l['rim'] }}; color: {{ $l['ink'] }}"
+                            >{{ $l['label'] }}</span>
+                        </button>
+                    @endforeach
+                </div>
+            </div>
+        @endif
+
+        <div class="flex flex-wrap gap-[5px]">
+            @foreach (array_merge(['all'], array_map(fn ($f) => $f->value, App\Enums\CosmeticFlavor::cases())) as $key)
+                @php
+                    $case = App\Enums\CosmeticFlavor::tryFrom($key);
+                    $on = $flavor === $key;
+                @endphp
+
+                <button
+                    type="button"
+                    wire:key="flavor-{{ $key }}"
+                    wire:click="pickFlavor('{{ $key }}')"
+                    class="rounded-full border px-[10px] py-[5px] font-mono-fq text-[8.5px] tracking-[0.08em] uppercase md:text-[10px]"
+                    style="border-color: {{ $on ? ($case?->border() ?? '#6a3fb0') : '#241539' }}; background: {{ $on ? '#1d1036' : '#0b0616' }}; color: {{ $on ? ($case?->ink() ?? '#c9a0ff') : '#6f6288' }}"
+                >{{ $case?->label() ?? 'Everything' }}</button>
+            @endforeach
+        </div>
+
+        <div class="flex items-center justify-between gap-[10px]">
+            <div>
+                <p class="font-baloo text-[16px] font-extrabold">{{ $openSlot->label() }}</p>
+                <p class="text-[11px] text-fq-text-4">{{ $openSlot->blurb() }}</p>
+            </div>
+
+            <div class="flex shrink-0 items-center gap-[8px]">
+                @if ($openSlot->startsEmpty() && $worn[$openSlot->value])
+                    <button
+                        type="button"
+                        wire:click="takeOff('{{ $openSlot->value }}')"
+                        class="rounded-[8px] border border-fq-line-2 px-[9px] py-[5px] font-mono-fq text-[8.5px] tracking-[0.1em] text-fq-text-4 uppercase"
+                    >Take off</button>
+                @endif
+
+                <span class="font-mono-fq text-[8.5px] tracking-[0.1em] whitespace-nowrap text-fq-text-5">
+                    {{ $shelf->isEmpty() ? 'NOTHING IN THIS SET YET' : $shelf->count().($fromCost ? ' · FROM '.$fromCost.' ✦' : '') }}
+                </span>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-[7px] sm:grid-cols-4 md:grid-cols-5">
+            @foreach ($shelf as $item)
+                @php $g = $look($item); @endphp
+
+                <button
+                    type="button"
+                    wire:key="item-{{ $item->id }}"
+                    wire:click="choose({{ $item->id }})"
+                    data-cosmetic="{{ $item->slot->value }}:{{ $item->recipe ?? $item->id }}"
+                    class="flex min-w-0 flex-col items-center gap-[6px] rounded-[14px] border px-[7px] py-[8px]"
+                    style="border-color: {{ $g['border'] }}; background: {{ $g['card'] }}"
+                >
+                    <span class="relative aspect-square w-full overflow-hidden rounded-[10px] bg-fq-bg">
+                        <x-cosmetic.art :item="$item" :label="mb_strtoupper($profile->name)" class="absolute inset-0" />
+
+                        @if ($item->motion)
+                            <span class="absolute top-[4px] left-[4px] z-[2] rounded-full border px-[5px] py-[1px] font-mono-fq text-[6.5px] tracking-[0.08em]" style="background: rgba(10,5,18,.82); border-color: #54e8d0; color: #54e8d0">MOVES</span>
+                        @endif
+                    </span>
+                    <span class="text-center text-[10.5px] leading-tight font-semibold" style="color: {{ $g['name'] }}">{{ $item->name }}</span>
+                    <span
+                        class="w-full rounded-[7px] border py-[4px] text-center font-baloo text-[11px] font-extrabold"
+                        style="background: {{ $g['bg'] }}; border-color: {{ $g['rim'] }}; color: {{ $g['ink'] }}"
+                    >{{ $g['label'] }}</span>
+                </button>
+            @endforeach
+        </div>
+
+        <div class="flex items-start gap-[9px] rounded-[14px] border border-dashed border-fq-line-2 px-3 py-[10px]">
+            <i class="fa-solid fa-shirt mt-[2px] text-[12px] text-fq-text-4"></i>
+            <span class="flex-1 text-[11.5px] text-fq-text-4">Owned is forever and swapping is free — the ticket buys the item, never the wearing of it. Nothing here is refundable, so buying is the only decision.</span>
+        </div>
+    </div>
+</x-kid.shell>

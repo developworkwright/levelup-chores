@@ -3,6 +3,7 @@
 use App\Enums\AccentColor;
 use App\Enums\ProfileRole;
 use App\Models\Profile;
+use App\Services\CosmeticService;
 use App\Services\StreakService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
@@ -57,13 +58,14 @@ new class extends Component
         $kids = $this->fannedKids();
 
         $streaks = app(StreakService::class);
+        $cosmetics = app(CosmeticService::class);
 
         // Who has put work in today, keyed by id.
         //
         // This page is public, so the bar for putting anything on it is what a
         // stranger with the URL learns. A glowing tile says "this kid did a
-        // chore today" — less than the level and the rank already beside it,
-        // and nothing like the real names and scores that got the arcade moved
+        // chore today" — less than the level and the rank this tile used to
+        // print, and nothing like the real names and scores that got the arcade moved
         // behind the PIN. It earns its place by being the only thing here that
         // changes during a day: a door that looked identical at bedtime and at
         // breakfast was the whole complaint.
@@ -85,6 +87,12 @@ new class extends Component
             // The fan is centred on the row, so the tilt is symmetrical about
             // the middle tile and the step tightens as more kids are added.
             'tiltStep' => min(6, 14 / max(1, count($kids) - 1)),
+            // What each kid is wearing from the locker — a face, a frame and a
+            // plate. Themes and patterns never apply here: the door belongs to
+            // the house, not to whoever tapped last.
+            'worn' => collect($kids)
+                ->mapWithKeys(fn (Profile $kid): array => [$kid->id => $cosmetics->worn($kid)])
+                ->all(),
             'parents' => Profile::query()
                 ->where('role', ProfileRole::Parent)
                 ->orderBy('id')
@@ -137,7 +145,23 @@ new class extends Component
                 @endif
 
                 {{-- The offset shadow is the accent at 58% of each channel;
-                     mixing toward black in sRGB is exactly that multiply. --}}
+                     mixing toward black in sRGB is exactly that multiply.
+
+                     A bought frame sits over the tile and a bought face inside
+                     it; the accent block stays underneath, because it is what a
+                     parent points at. Under a frame the tile face gains a dark
+                     7px band, so a frame never has to out-contrast the kid's own
+                     colour — a gold frame on the gold kid would otherwise vanish.
+
+                     Powered up with a frame on, the frame is the status light
+                     and the rainbow ring stands down: two concentric rings read
+                     as decorated rather than lit. --}}
+                @php
+                    $avatar = $worn[$kid->id]['avatar'];
+                    $frame = $worn[$kid->id]['frame'];
+                    $powered = $poweredUp[$kid->id] ?? false;
+                    $plate = $worn[$kid->id]['plate'];
+                @endphp
                 <div
                     @class([
                         'fq-avatar-tile relative z-10 grid h-[78px] w-[78px] place-items-center rounded-[24px] border-[3px] border-fq-bg font-baloo text-[34px] font-extrabold text-fq-bg',
@@ -145,58 +169,35 @@ new class extends Component
                         // already wears a 3px background-coloured border and a
                         // hairline behind that would read as a rendering
                         // artefact rather than a halo.
-                        'fq-powered-token' => $poweredUp[$kid->id] ?? false,
+                        'fq-powered-token' => $powered && ! $frame,
                     ])
                     @style([
                         'background: '.$accent,
-                        'box-shadow: 5px 6px 0 color-mix(in srgb, '.$accent.' 58%, #000)',
-                        '--fq-powered-inset: -7px' => $poweredUp[$kid->id] ?? false,
+                        'box-shadow: 5px 6px 0 color-mix(in srgb, '.$accent.' 58%, #000)'.($frame ? ', inset 0 0 0 7px rgba(7, 3, 15, 0.66)' : ''),
+                        '--fq-powered-inset: -7px' => $powered && ! $frame,
                     ])
                 >
-                    {{ mb_substr($kid->name, 0, 1) }}
+                    @unless ($avatar){{ mb_substr($kid->name, 0, 1) }}@endunless
 
-                    {{-- A run only shows once there is one. "0d" is the first
-                         thing a kid read off their own tile after a bad night,
-                         and a scoreboard that opens by telling you that isn't
-                         worth the reminder. The chip is absolutely positioned,
-                         so dropping it leaves the tile exactly as it was. --}}
-                    @if ($kid->streak > 0)
-                        <span
-                            class="fq-avatar-chip absolute right-[-10px] bottom-[-10px] rounded-full border-2 bg-fq-bg px-[7px] py-[2px] font-mono-fq text-[10px] font-semibold"
-                            style="border-color: {{ $accent }}; color: {{ $accent }}"
-                        >{{ $kid->streak }}d</span>
-                    @endif
+                    <x-cosmetic.face
+                        :avatar="$avatar"
+                        :frame="$frame"
+                        avatar-inset="7px"
+                        frame-inset="-4px"
+                        :glow="$powered && $frame ? $accent : null"
+                    />
                 </div>
 
-                {{-- The XP bar used to sit between the name and the level, and
-                     it took the eye first — which made the tile about how far
-                     along a bar somebody was, a thing that creeps daily and
-                     says nothing at a glance. What a kid wants off this screen
-                     is where they stand, so the level is the loudest thing on
-                     the tile and the rank names it underneath. How close the
-                     next one is belongs on a page they can read properly. --}}
-                <div class="flex w-full flex-col items-center gap-[5px]">
-                    <span class="text-[15px] font-semibold">{{ $kid->name }}</span>
-                    @php $rank = $kid->rank(); @endphp
-                    <span
-                        @class([
-                            'font-baloo text-[21px] leading-none font-extrabold',
-                            'fq-rainbow-ink' => $rank->isAnimated(),
-                        ])
-                        @style(['color: '.$rank->ringVar() => ! $rank->isAnimated()])
-                    >
-                        LVL {{ $kid->level() }}
-                    </span>
-                    <span
-                        @class([
-                            'font-mono-fq text-[9px] font-semibold tracking-[0.14em] uppercase',
-                            'fq-rainbow-ink' => $rank->isAnimated(),
-                        ])
-                        @style(['color: '.$rank->ringVar() => ! $rank->isAnimated()])
-                    >
-                        {{ $rank->label() }}
-                    </span>
-                </div>
+                {{-- A first name, on whatever plate it was bought. Nothing else
+                     in words: this page is public, and a level and a rank tell a
+                     stranger how a named child is doing, where a bought face
+                     tells them nothing. The level, the rank and the streak chip
+                     all came off with the locker — see login-page-privacy. --}}
+                @if ($plate && ! $plate->isFree())
+                    <x-cosmetic.plate :item="$plate" class="px-[11px] py-[4px] font-baloo text-[14px] leading-none font-extrabold">{{ $kid->name }}</x-cosmetic.plate>
+                @else
+                    <span class="rounded-full border border-fq-line-2 bg-fq-sunk px-[11px] py-[4px] font-baloo text-[14px] leading-none font-extrabold">{{ $kid->name }}</span>
+                @endif
             </a>
         @endforeach
     </div>

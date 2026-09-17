@@ -502,7 +502,23 @@ class FeelingService
             // How many people the strip is still waiting on. Said as a count
             // rather than as names: "three still to go" is news about the day,
             // and a list of who hasn't answered is a list of people to chase.
-            'waiting' => $house?->whereNull('entry')->count() ?? 0,
+            'waiting' => $house?->whereNull('entry')->count() ?? $this->waitingToday($profile->household),
         ];
+    }
+
+    /**
+     * How many people in the house have not answered today. Counted without
+     * the strip, so a viewer who hasn't answered yet still gets a true number
+     * — the strip is null for them, and reading that as nobody waiting said
+     * everyone had.
+     */
+    public function waitingToday(Household $household): int
+    {
+        $answered = FeelingEntry::where('household_id', $household->id)
+            ->whereDate('felt_on', $this->todaysDate($household))
+            ->distinct()
+            ->count('profile_id');
+
+        return max(0, $household->profiles()->count() - $answered);
     }
 }

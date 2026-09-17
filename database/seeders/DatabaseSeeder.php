@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Enums\PerkEffect;
 use App\Models\BonusPerk;
 use App\Models\Chore;
+use App\Models\Cosmetic;
 use App\Models\Household;
 use App\Models\LuckyPrize;
 use App\Models\Profile;
@@ -35,6 +36,7 @@ class DatabaseSeeder extends Seeder
         // that already exist, this seeds the demo one, the factory seeds the
         // ones tests build.
         LuckyPrize::seedDefaults($household);
+        Cosmetic::seedDefaults($household);
         $this->seedSavingGoals($household);
         $this->seedMonster($household);
     }

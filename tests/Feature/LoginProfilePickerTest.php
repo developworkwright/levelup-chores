@@ -14,7 +14,13 @@ class LoginProfilePickerTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_it_shows_a_kids_rank_rather_than_their_age(): void
+    /**
+     * The tile is a first name and whatever the kid bought to wear — nothing
+     * else in words. This page is public, and a level and a rank tell a
+     * stranger how a named child is doing where a bought face tells them
+     * nothing. They came off with the cosmetic locker; see login-page-privacy.
+     */
+    public function test_the_door_shows_a_first_name_but_no_rank_level_or_age(): void
     {
         $household = Household::factory()->create();
         Profile::factory()->for($household)->create([
@@ -25,40 +31,38 @@ class LoginProfilePickerTest extends TestCase
 
         Volt::test('login')
             ->assertSee('Nova')
-            ->assertSee(Rank::Bonebreaker->label())
+            ->assertDontSee(Rank::Bonebreaker->label())
+            ->assertDontSee('LVL 12')
             ->assertDontSee('Age 12');
     }
 
-    public function test_a_brand_new_kid_wears_the_first_rank(): void
+    public function test_a_brand_new_kid_is_not_labelled_with_a_rank_either(): void
     {
         $household = Household::factory()->create();
         Profile::factory()->for($household)->create(['name' => 'Scout', 'xp' => 0]);
 
-        Volt::test('login')->assertSee(Rank::Prowler->label());
+        Volt::test('login')->assertDontSee(Rank::Prowler->label());
     }
 
-    public function test_the_level_is_shown_but_not_the_bar_to_the_next_one(): void
+    public function test_there_is_no_bar_to_the_next_level(): void
     {
-        // The bar took the eye before the level did. It came off this screen
-        // deliberately while the level stayed and got louder — if the bar
-        // comes back, it should be a decision rather than a drift.
         $household = Household::factory()->create();
         Profile::factory()->for($household)->create([
             'name' => 'Nova',
             'xp' => Profile::xpToReachLevel(12) + 100,
         ]);
 
-        Volt::test('login')
-            ->assertSee('LVL 12')
-            ->assertDontSee('h-[6px] w-full overflow-hidden rounded-full', false);
+        Volt::test('login')->assertDontSee('h-[6px] w-full overflow-hidden rounded-full', false);
     }
 
-    public function test_each_tile_wears_the_kids_streak(): void
+    public function test_a_run_shows_as_fire_rather_than_a_day_count(): void
     {
         $household = Household::factory()->create();
         Profile::factory()->for($household)->create(['name' => 'Nova', 'streak' => 4]);
 
-        Volt::test('login')->assertSee('4d');
+        Volt::test('login')
+            ->assertSee('fq-streak-fire')
+            ->assertDontSee('fq-avatar-chip');
     }
 
     public function test_a_kid_with_no_run_going_is_not_told_so(): void

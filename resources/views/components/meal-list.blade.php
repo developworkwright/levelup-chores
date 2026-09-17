@@ -13,7 +13,11 @@
 >
     @forelse ($meals as $meal)
         @php
-            $days = (int) $today->diffInDays($meal->served_on);
+            // Calendar dates, not instants: `today` is midnight in the house's
+            // zone and `served_on` is midnight in the app's, so the raw gap to
+            // tomorrow is under a day and truncated to "Tonight".
+            $days = (int) \Illuminate\Support\Carbon::parse($today->toDateString())
+                ->diffInDays(\Illuminate\Support\Carbon::parse($meal->served_on->toDateString()));
             $when = match ($days) {
                 0 => 'Tonight',
                 1 => 'Tomorrow',

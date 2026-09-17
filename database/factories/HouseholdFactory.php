@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Enums\PerkEffect;
 use App\Models\BonusPerk;
+use App\Models\Cosmetic;
 use App\Models\Household;
 use App\Models\LuckyPrize;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -55,6 +56,7 @@ class HouseholdFactory extends Factory
             }
 
             LuckyPrize::seedDefaults($household);
+            Cosmetic::seedDefaults($household);
         });
     }
 }

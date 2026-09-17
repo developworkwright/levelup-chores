@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\CosmeticArtController;
 use App\Http\Controllers\FeedMediaController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
@@ -38,6 +39,11 @@ Route::post('/logout', function () {
     return redirect('/');
 })->middleware('auth:profile')->name('logout');
 
+// An uploaded cosmetic picture. Outside auth on purpose: a worn frame is drawn
+// on the public login door. Drafts are refused to everybody but a grown-up of
+// the house — see the controller.
+Route::get('/cosmetics/art/{cosmetic}', CosmeticArtController::class)->name('cosmetics.art');
+
 // A family feed picture — a finger drawing or a photograph — for anybody who
 // can read the room it was posted in. Kids and grown-ups alike, so these sit
 // outside both role groups. The bucket is private and there is no public URL
@@ -71,6 +77,9 @@ Route::middleware(['auth:profile', 'role:kid', 'sync-streak', 'arcade-last-call'
     // the deal was aimed at rather than by what kind of deal it was.
     Volt::route('/trades', 'kid.trades')->name('kid.trades');
     Volt::route('/bonus', 'kid.bonus')->name('kid.bonus');
+    // The cosmetic locker: the one ticket sink that doesn't get used up. See
+    // CosmeticService.
+    Volt::route('/locker', 'kid.locker')->name('kid.locker');
     Volt::route('/badges', 'kid.badges')->name('kid.badges');
     Volt::route('/stats', 'kid.stats')->name('kid.stats');
     Volt::route('/journal', 'kid.journal')->name('kid.journal');
@@ -105,6 +114,9 @@ Route::middleware(['auth:profile', 'role:parent', 'arcade-last-call'])->prefix('
     // screen that leads with that reads differently from a shelf of prices.
     Volt::route('/lucky', 'parent.lucky')->name('parent.lucky');
     Volt::route('/monsters', 'parent.monsters')->name('parent.monsters');
+    // The locker's catalog: upload, preview and publish, and pull stock. See
+    // CosmeticArt for the checks and CosmeticService for the rotation.
+    Volt::route('/cosmetics', 'parent.cosmetics')->name('parent.cosmetics');
     // The one parent screen that isn't administration: it writes to a log the
     // kids read rather than to anything they can spend.
     Volt::route('/quotes', 'parent.quotes')->name('parent.quotes');

@@ -1111,3 +1111,51 @@ body {
     width: auto;
     max-width: none;
 }
+
+/*
+ * The cosmetic locker's motion — FQCosmetics.KEYFRAMES from cosmetics.js, the
+ * nine rules every moving item shares. The art itself carries copies inside its
+ * shadow roots; these are for the document, where a tap effect bursts and a
+ * lit frame breathes. Kept byte-for-byte equal to the bundle by
+ * CosmeticCatalogTest.
+ */
+@keyframes fqspin { to { transform: rotate(360deg); } }
+@keyframes fqtick { to { transform: rotate(360deg); } }
+@keyframes fqthrob { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.06); opacity: .74; } }
+@keyframes fqbob { 0%,100% { transform: translateY(0) scaleY(1); } 50% { transform: translateY(-3px) scaleY(1.03); } }
+@keyframes fqsway { 0%,100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
+@keyframes fqblink { 0%,92%,100% { transform: scaleY(1); } 96% { transform: scaleY(.08); } }
+@keyframes fqflicker { 0%,100% { opacity: 1; } 42% { opacity: .55; } 46% { opacity: 1; } 61% { opacity: .4; } 65% { opacity: 1; } }
+@keyframes fqdrift { to { background-position: 120px 120px; } }
+@keyframes fqradiate { 0% { transform: scale(.72); opacity: .35; } 55% { opacity: 1; } 100% { transform: scale(1.12); opacity: 0; } }
+
+/*
+ * A powered-up kid wearing a frame: the frame is the status light, rather than
+ * a second ring around it. The glow stays outside the shape — three stacked
+ * drop-shadows in the kid's accent, and a blurred copy of the same ring
+ * breathing behind the sharp one — so a gold frame on the gold kid's tile is
+ * still legible. No brightness lift on the art: that washed a gold frame out.
+ */
+.fq-frame-lit {
+    filter: drop-shadow(0 0 3px var(--fq-glow)) drop-shadow(0 0 10px var(--fq-glow)) drop-shadow(0 0 20px color-mix(in srgb, var(--fq-glow) 66%, transparent));
+}
+
+.fq-frame-halo {
+    filter: blur(3.5px) drop-shadow(0 0 10px var(--fq-glow)) drop-shadow(0 0 24px var(--fq-glow));
+    opacity: .8;
+    animation: fq-frame-halo 2.2s ease-in-out infinite;
+    pointer-events: none;
+}
+
+@keyframes fq-frame-halo {
+    0%, 100% { opacity: .5; }
+    50% { opacity: .8; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    /* The halo carries information, so it stays at its bright end rather than
+       going — same rule as the powered-up token. */
+    .fq-frame-halo {
+        animation: none;
+    }
+}

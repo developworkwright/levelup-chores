@@ -11,6 +11,20 @@
 import './monsters.js';
 
 /*
+ * The cosmetic locker's artwork — frames, avatars, plates, themes, patterns,
+ * cabinets and tap effects, as `window.FQCosmetics`. Shipped verbatim from
+ * handoff/design_handoff_cosmetic_locker for the same reason monsters.js is:
+ * the art is code, and hand-porting it would drift the first time either side
+ * changed. `CosmeticCatalogTest` holds the PHP catalog to it.
+ *
+ * The elements after it are the app's own: `<fq-cosmetic>`, `<fq-plate>`,
+ * `<fq-cabinet>` and `<fq-spark>`, which draw that art into shadow roots so a
+ * Livewire morph can't strip it.
+ */
+import './cosmetics.js';
+import './cosmetic-elements.js';
+
+/*
  * Stack the Mess, the arcade's first game. Registers the `fqStacker` Alpine
  * component and nothing else. Bundling it here keeps the app to one script,
  * which is the whole point of it installing as a PWA.

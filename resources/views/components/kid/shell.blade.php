@@ -25,6 +25,9 @@
         // The word rides on the count because "3" alone reads as a chore.
         'loot' => ['label' => 'Loot Shop', 'short' => 'Loot', 'icon' => 'fa-gem', 'route' => 'kid.loot', 'accent' => 'var(--fq-blue)', 'countWord' => 'new'],
         'bonus' => ['label' => 'Bonus Shop', 'short' => 'Bonus', 'icon' => 'fa-star', 'route' => 'kid.bonus', 'accent' => 'var(--fq-gold)'],
+        // The third thing behind Shop: it spends tickets like Bonus does, but
+        // what it sells stays on the kid rather than getting used up.
+        'locker' => ['label' => 'Locker', 'short' => 'Locker', 'icon' => 'fa-shirt', 'route' => 'kid.locker', 'accent' => 'var(--fq-coral)'],
         'household' => ['label' => 'Household', 'short' => 'House', 'icon' => 'fa-ranking-star', 'route' => 'kid.household', 'accent' => 'var(--fq-green)'],
         'trades' => ['label' => 'Trades & Jobs', 'short' => 'Trades', 'icon' => 'fa-right-left', 'route' => 'kid.trades', 'accent' => 'var(--fq-coral)'],
         'journal' => ['label' => 'Journal', 'icon' => 'fa-feather', 'route' => 'kid.journal', 'accent' => 'var(--fq-green)'],
@@ -71,7 +74,7 @@
     $rail = [
         ['label' => 'Home', 'icon' => 'fa-house', 'pages' => ['home']],
         ['label' => 'Quests', 'icon' => 'fa-flag', 'pages' => ['quests']],
-        ['label' => 'Shop', 'icon' => 'fa-gem', 'pages' => ['loot', 'bonus']],
+        ['label' => 'Shop', 'icon' => 'fa-gem', 'pages' => ['loot', 'bonus', 'locker']],
         /*
          * The fourth slot was House — Household and the trades — and it is the
          * Arcade instead.
@@ -99,7 +102,7 @@
     $sheetGroups = [
         'Every day' => ['home', 'quests', 'family', 'loot', 'journal'],
         'The house' => ['household', 'trades'],
-        'Now and then' => ['bonus', 'arcade', 'music'],
+        'Now and then' => ['bonus', 'locker', 'arcade', 'music'],
     ];
 
     // The tail of the last group, two to a row — a footnote rather than four
@@ -460,6 +463,20 @@
     $celebrating = $celebration !== null
         && ($celebration['decor'] ?? 'balloons') === 'balloons'
         && $celebrations->isTheDay($profile->household, $celebration);
+
+    /*
+     * What this kid is wearing from the locker. The frame, face and plate are
+     * who they are in the header; the theme, pattern and tap effect are the
+     * three that repaint only their own pages — never the login door, and never
+     * a sibling's screen.
+     */
+    $cosmetics = app(App\Services\CosmeticService::class);
+    $worn = $cosmetics->worn($profile);
+    $themeCss = $cosmetics->themeCss($profile);
+    // The standard plate is the header as it always looked, so only a bought
+    // one is drawn.
+    $wornPlate = ($worn['plate'] && ! $worn['plate']->isFree()) ? $worn['plate'] : null;
+    $wornPattern = ($worn['pattern'] && ! $worn['pattern']->isFree()) ? $worn['pattern'] : null;
 @endphp
 {{-- `isolate` so the watching monster's negative z-index puts it behind the
      page's content without dropping it behind the page background entirely. --}}
@@ -468,6 +485,28 @@
          it behind the page's content without dropping it behind the page
          background entirely. --}}
     <x-kid.sky :constellations="$sky" :powered-up="$poweredUpToday" />
+
+    {{-- The worn theme. Inside the page rather than the head, so wire:navigate
+         takes it away with the page and a theme can never outlive the kid who
+         is wearing it — and inside the root element, because a Livewire page
+         has to have exactly one. --}}
+    @if ($themeCss)
+        <style data-fq-theme>:root { {!! $themeCss !!} }</style>
+    @endif
+
+    {{-- The home pattern, behind everything on the kid's own pages. Fixed, so
+         it stays put while the page scrolls over it the way the sky does. --}}
+    @if ($wornPattern)
+        <x-cosmetic.art :item="$wornPattern" mode="fill" class="pointer-events-none fixed inset-0 -z-20 opacity-70" />
+    @endif
+
+    {{-- The tap effect: bursts out of whatever was tapped whenever the app
+         celebrates. Draws nothing until then. --}}
+    @if ($worn['spark'])
+        <fq-spark
+            @if ($worn['spark']->isUpload()) src="{{ $worn['spark']->artUrl() }}" @else recipe="{{ $worn['spark']->recipe }}" @endif
+        ></fq-spark>
+    @endif
 
     @if ($celebrating)
         <x-kid.balloons />
@@ -531,14 +570,32 @@
                  layout and this sits in a header that is on every single kid
                  page. A conic gradient on a pseudo-element only ever composites.
                  It stops dead under prefers-reduced-motion — see app.css. --}}
-            <span
+            {{-- A bought frame and face sit over the tile rather than replacing
+                 it. With a frame on, the frame is what lights up — the rainbow
+                 ring would be a second ring round the first. Frames move here
+                 and faces hold still: this header is on every page. --}}
+            <a
+                href="{{ route('kid.locker') }}"
+                wire:navigate
                 @class([
-                    'grid h-[34px] w-[34px] shrink-0 place-items-center rounded-[11px] font-baloo text-[15px] font-extrabold text-fq-bg md:h-[46px] md:w-[46px] md:rounded-[15px] md:text-[20px]',
-                    'fq-powered-token' => $poweredUpToday,
+                    'relative grid h-[34px] w-[34px] shrink-0 place-items-center rounded-[11px] font-baloo text-[15px] font-extrabold text-fq-bg md:h-[46px] md:w-[46px] md:rounded-[15px] md:text-[20px]',
+                    'fq-powered-token' => $poweredUpToday && ! $worn['frame'],
                 ])
                 style="background:{{ $profile->color->cssVar() }}"
-                @if ($poweredUpToday) title="Powered up — you did a chore today" @endif
-            >{{ mb_substr($profile->name, 0, 1) }}</span>
+                title="{{ $poweredUpToday ? 'Powered up — you did a chore today' : 'Your locker' }}"
+                data-fq-header-face
+            >
+                @unless ($worn['avatar']){{ mb_substr($profile->name, 0, 1) }}@endunless
+
+                <x-cosmetic.face
+                    :avatar="$worn['avatar']"
+                    :frame="$worn['frame']"
+                    avatar-inset="9%"
+                    frame-inset="-5px"
+                    motion="frame"
+                    :glow="$poweredUpToday ? $profile->color->cssVar() : null"
+                />
+            </a>
 
             @php $rank = $profile->rank(); @endphp
 
@@ -558,7 +615,11 @@
                      the tooltip says what a chore switches on, not what is
                      being withheld. See StreakService::hasWorkedToday(). --}}
                 <div class="flex min-w-0 items-center gap-[6px]">
-                    <span class="truncate font-baloo text-[14.5px] font-bold md:text-[19px]">{{ $profile->name }}</span>
+                    @if ($wornPlate)
+                        <x-cosmetic.plate :item="$wornPlate" class="min-w-0 truncate px-[9px] py-[3px] font-baloo text-[13.5px] leading-none font-bold md:px-[11px] md:py-[4px] md:text-[17px]">{{ $profile->name }}</x-cosmetic.plate>
+                    @else
+                        <span class="truncate font-baloo text-[14.5px] font-bold md:text-[19px]">{{ $profile->name }}</span>
+                    @endif
                     <i
                         @class([
                             'fa-solid fa-bolt shrink-0 text-[12px] md:text-[15px]',

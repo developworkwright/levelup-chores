@@ -1,8 +1,10 @@
 <?php
 
 use App\Enums\ArcadeGame;
+use App\Enums\CosmeticSlot;
 use App\Models\Profile;
 use App\Services\ArcadeService;
+use App\Services\CosmeticService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\RateLimiter;
 use Livewire\Volt\Component;
@@ -142,6 +144,10 @@ new class extends Component
         // played this game this week — there is no row to pull up.
         $myRank = $standings->search(fn (object $score) => $score->profile_id === $player->id);
 
+        $cabinet = $player->isKid()
+            ? app(CosmeticService::class)->wornIn($player, CosmeticSlot::Cabinet)
+            : null;
+
         return [
             'arcade' => $arcade,
             'player' => $player,
@@ -154,6 +160,10 @@ new class extends Component
             // A grown-up can top the week and gets nothing for it, so the target
             // strip must not promise them tickets. See ArcadeService.
             'canWinTickets' => $player->isKid(),
+            // The reader's own cabinet skin — theirs only, never drawn on a
+            // sibling's screen. The free house cabinet is the machine as it
+            // already looks, so it draws nothing extra.
+            'cabinet' => $cabinet?->isFree() === false ? $cabinet : null,
             'standings' => $standings,
             'myRank' => $myRank === false ? null : $myRank,
             // The All-time block, and the three queries behind it. Skipped on a
@@ -415,9 +425,19 @@ new class extends Component
                      replaced it. --}}
                 <div
                     wire:key="machine-{{ $game->value }}"
-                    class="flex flex-col gap-[11px] rounded-[24px] border border-fq-line-3 p-[12px]"
+                    class="relative isolate flex flex-col gap-[11px] rounded-[24px] border border-fq-line-3 p-[12px]"
                     style="background: linear-gradient(160deg, var(--fq-cabinet), var(--fq-panel))"
                 >
+                    {{-- A kid's cabinet skin from the locker, as the bezel behind
+                         the game. Behind rather than around, so nothing about
+                         the canvases or their wire:ignore changes. --}}
+                    @if ($cabinet)
+                        <fq-cabinet
+                            @if ($cabinet->isUpload()) src="{{ $cabinet->artUrl() }}" @else recipe="{{ $cabinet->recipe }}" @endif
+                            aria-hidden="true"
+                            style="position: absolute; inset: -1px; z-index: -1; pointer-events: none"
+                        ></fq-cabinet>
+                    @endif
                     @if ($game === ArcadeGame::StackTheMess)
                         {{-- `wire:ignore` because everything inside is drawn by hand
                              and held in Alpine state. Posting a score re-renders the

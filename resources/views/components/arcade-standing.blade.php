@@ -35,10 +35,17 @@
         ])
     >{{ $rank }}</span>
 
+    {{-- A bought face and frame ride along, held still — a board is a list,
+         and nothing in a list moves. --}}
+    @php
+        $cosmetics = $score->profile ? app(App\Services\CosmeticService::class) : null;
+        $face = $cosmetics?->wornIn($score->profile, App\Enums\CosmeticSlot::Avatar);
+        $ring = $cosmetics?->wornIn($score->profile, App\Enums\CosmeticSlot::Frame);
+    @endphp
     <span
-        class="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full font-baloo text-[11px] font-extrabold text-fq-bg"
+        class="relative grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full font-baloo text-[11px] font-extrabold text-fq-bg"
         style="background: {{ $score->profile?->color->cssVar() ?? 'var(--fq-line-3)' }}"
-    >{{ mb_substr($score->displayName(), 0, 1) }}</span>
+    >@unless ($face){{ mb_substr($score->displayName(), 0, 1) }}@endunless<x-cosmetic.face :avatar="$face" :frame="$ring" avatar-inset="6%" frame-inset="-3px" motion="none" /></span>
 
     <span
         @class([

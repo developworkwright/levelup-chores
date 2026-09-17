@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Services\ChoreService;
+use App\Services\CosmeticService;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -36,6 +37,11 @@ class AppServiceProvider extends ServiceProvider
          * instances of it exist in one request.
          */
         $this->app->scoped(ChoreService::class);
+
+        // Scoped for the same reason: the header, the feed and the boards all
+        // ask what somebody is wearing on one request, and the household's
+        // catalog should be one query however many of them ask.
+        $this->app->scoped(CosmeticService::class);
     }
 
     /**

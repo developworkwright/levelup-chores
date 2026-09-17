@@ -22,6 +22,9 @@
         // The skull is the app's monster mark everywhere else — see the Lucky
         // Block's prize sources.
         'monsters' => ['label' => 'Monsters', 'icon' => 'fa-skull', 'route' => 'parent.monsters', 'accent' => 'var(--fq-violet)'],
+        // What the kids can buy with tickets and wear. Shares the kids' Locker
+        // icon for the reason Quests shares the flag.
+        'cosmetics' => ['label' => 'Cosmetics', 'icon' => 'fa-shirt', 'route' => 'parent.cosmetics', 'accent' => 'var(--fq-coral)'],
         'standings' => ['label' => 'Standings', 'icon' => 'fa-ranking-star', 'route' => 'parent.standings', 'accent' => 'var(--fq-green)'],
         'quotes' => ['label' => 'Quotes', 'icon' => 'fa-quote-left', 'route' => 'parent.quotes', 'accent' => 'var(--fq-green)'],
         'arcade' => ['label' => 'Arcade', 'icon' => 'fa-gamepad', 'route' => 'parent.arcade', 'accent' => 'var(--fq-green)'],
@@ -60,7 +63,7 @@
      */
     $sheetGroups = [
         'Every day' => ['home', 'chores', 'kids', 'activity'],
-        'Set up the game' => ['loot', 'lucky', 'monsters'],
+        'Set up the game' => ['loot', 'lucky', 'monsters', 'cosmetics'],
         'Now and then' => [],
     ];
 
