@@ -468,6 +468,17 @@ class CosmeticService
      */
     public function visitingPet(Profile $kid): ?Cosmetic
     {
+        $visitor = $this->visitingSibling($kid);
+
+        return $visitor ? $this->wornIn($visitor, CosmeticSlot::Pet) : null;
+    }
+
+    /**
+     * Whose pet it is, when one visits — the pet comes at its owner's size, so
+     * the layer needs the owner as well as the animal.
+     */
+    public function visitingSibling(Profile $kid): ?Profile
+    {
         $hour = HouseholdClock::for($kid->household)->now()->format('o-\WW-N-H');
 
         if (crc32('visit|'.$kid->id.'|'.$hour) % 3 !== 0) {
@@ -487,9 +498,7 @@ class CosmeticService
             return null;
         }
 
-        $visitor = $siblings[crc32('who|'.$kid->id.'|'.$hour) % $siblings->count()];
-
-        return $this->wornIn($visitor, CosmeticSlot::Pet);
+        return $siblings[crc32('who|'.$kid->id.'|'.$hour) % $siblings->count()];
     }
 
     /** Drops every memo, after anything that changes the catalog or a wardrobe. */

@@ -7,6 +7,7 @@ use App\Exceptions\InsufficientTicketsException;
 use App\Models\Cosmetic;
 use App\Models\Profile;
 use App\Services\CosmeticService;
+use App\Services\PetService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
@@ -144,6 +145,22 @@ new class extends Component
         }
     }
 
+    /**
+     * Back to a baby, because the kid asked. Never happens any other way —
+     * putting a different pet out and back again keeps it as grown as it was.
+     */
+    public function raiseAgain(int $cosmeticId): void
+    {
+        $pet = Cosmetic::where('household_id', $this->profile->household_id)->find($cosmeticId);
+
+        if (! $pet || $pet->slot !== CosmeticSlot::Pet || ! app(CosmeticService::class)->owns($this->profile, $pet)) {
+            return;
+        }
+
+        app(PetService::class)->raiseAgain($this->profile, $pet);
+        $this->flashMessage = "{$pet->name} is a baby again.";
+    }
+
     public function with(): array
     {
         $service = app(CosmeticService::class);
@@ -152,6 +169,7 @@ new class extends Component
         $slot = CosmeticSlot::tryFrom($this->slot) ?? CosmeticSlot::Frame;
 
         $worn = $service->worn($this->profile);
+        $pets = app(PetService::class);
 
         // A try-on is only honoured while it is still something they could buy.
         $trying = $this->tryingId ? $catalog->get($this->tryingId) : null;
@@ -194,6 +212,15 @@ new class extends Component
             'shelf' => $shelf,
             'fromCost' => $priced->min('cost'),
             'bought' => $this->boughtId ? $catalog->get($this->boughtId) : null,
+            // How grown up each pet they own is, so a pet put away shows the
+            // size it will come back out at.
+            'petStages' => $slot === CosmeticSlot::Pet ? $pets->stagesFor($this->profile) : [],
+            'petOut' => $slot === CosmeticSlot::Pet && $worn['pet'] ? [
+                'item' => $worn['pet'],
+                'growth' => $pets->growthOf($this->profile, $worn['pet']),
+                'stage' => $pets->stageOf($this->profile, $worn['pet']),
+                'toGo' => $pets->choresToGrow($this->profile, $worn['pet']),
+            ] : null,
         ];
     }
 }; ?>
@@ -534,9 +561,68 @@ new class extends Component
             </div>
         </div>
 
+        {{-- The pet that's out: how grown up it is, a snack, and the way back to
+             a baby. Growing is the kid's chores; feeding is only play, and is
+             done entirely by the pet layer — see feed() in pets.js. --}}
+        @if ($petOut)
+            @php
+                $stageNow = $petOut['stage'];
+                $nextStage = $stageNow->next();
+                $span = $nextStage ? $nextStage->startsAt() - $stageNow->startsAt() : 1;
+                $along = $nextStage ? ($petOut['growth'] - $stageNow->startsAt()) / $span : 1;
+            @endphp
+
+            <div wire:key="pet-out-{{ $petOut['item']->id }}" class="flex flex-wrap items-center gap-[13px] rounded-[18px] border border-fq-line-2 bg-fq-panel p-[13px]" data-pet-out>
+                <span class="relative grid h-[64px] w-[64px] shrink-0 place-items-end overflow-hidden rounded-[14px] bg-fq-bg">
+                    <span class="relative block" style="width: {{ round(64 * $petOut['item']->drawScale($stageNow)) }}px; height: {{ round(64 * $petOut['item']->drawScale($stageNow)) }}px; margin: 0 auto">
+                        <x-cosmetic.art :item="$petOut['item']" :stage="$stageNow" mode="fill" class="absolute inset-0" />
+                    </span>
+                </span>
+
+                <div class="min-w-[150px] flex-1">
+                    <p class="font-mono-fq text-[8.5px] tracking-[0.16em] text-fq-text-4 uppercase">{{ $stageNow->label() }}</p>
+                    <p class="mt-[2px] font-baloo text-[17px] leading-tight font-extrabold">{{ $petOut['item']->name }}</p>
+
+                    <div class="mt-[7px] h-[7px] overflow-hidden rounded-full bg-fq-track">
+                        <div class="h-full rounded-full" style="width: {{ round($along * 100) }}%; background: linear-gradient(90deg,#54e8d0,#7dffb0)"></div>
+                    </div>
+
+                    <p class="mt-[5px] text-[11px] text-fq-text-4">
+                        @if ($petOut['toGo'] === null)
+                            All grown up.
+                        @else
+                            {{ $petOut['toGo'] }} more {{ Str::plural('chore', $petOut['toGo']) }} and it grows up{{ $nextStage === App\Enums\PetStage::Adult ? ' all the way' : '' }}.
+                        @endif
+                    </p>
+                    <p class="mt-[3px] text-[11px] text-fq-text-4"><i class="fa-solid fa-hand-pointer mr-[4px] text-fq-green"></i>Hungry? Tap anywhere empty on any page and a snack drops right there.</p>
+                </div>
+
+                <div class="flex shrink-0 flex-col gap-[6px]">
+                    <button
+                        type="button"
+                        x-on:click="window.dispatchEvent(new CustomEvent('fq-pet-feed'))"
+                        class="rounded-[10px] px-[14px] py-[8px] font-baloo text-[14px] font-extrabold text-fq-ink"
+                        style="background: linear-gradient(150deg,#b8ffd9,#54e8d0)"
+                    ><i class="fa-solid fa-drumstick-bite mr-[5px] text-[12px]"></i>Feed</button>
+
+                    @if ($petOut['growth'] > 0)
+                        <button
+                            type="button"
+                            wire:click="raiseAgain({{ $petOut['item']->id }})"
+                            wire:confirm="Make {{ $petOut['item']->name }} a baby again? It will grow back up with your chores."
+                            class="rounded-[8px] border border-fq-line-2 px-[9px] py-[5px] font-mono-fq text-[8.5px] tracking-[0.08em] text-fq-text-4 uppercase"
+                        >Raise again from a baby</button>
+                    @endif
+                </div>
+            </div>
+        @endif
+
         <div class="grid grid-cols-3 gap-[7px] sm:grid-cols-4 md:grid-cols-5">
             @foreach ($shelf as $item)
-                @php $g = $look($item); @endphp
+                @php
+                    $g = $look($item);
+                    $petStage = $petStages[$item->id] ?? null;
+                @endphp
 
                 <button
                     type="button"
@@ -547,7 +633,11 @@ new class extends Component
                     style="border-color: {{ $g['border'] }}; background: {{ $g['card'] }}"
                 >
                     <span class="relative aspect-square w-full overflow-hidden rounded-[10px] bg-fq-bg">
-                        <x-cosmetic.art :item="$item" :label="mb_strtoupper($profile->name)" class="absolute inset-0" />
+                        <x-cosmetic.art :item="$item" :stage="$petStage" :label="mb_strtoupper($profile->name)" class="absolute inset-0" />
+
+                        @if ($petStage)
+                            <span class="absolute right-[4px] bottom-[4px] z-[2] rounded-full border px-[5px] py-[1px] font-mono-fq text-[6.5px] tracking-[0.08em] uppercase" style="background: rgba(10,5,18,.82); border-color: #7dffb0; color: #7dffb0">{{ $petStage->label() }}</span>
+                        @endif
 
                         @if ($item->motion)
                             <span class="absolute top-[4px] left-[4px] z-[2] rounded-full border px-[5px] py-[1px] font-mono-fq text-[6.5px] tracking-[0.08em]" style="background: rgba(10,5,18,.82); border-color: #54e8d0; color: #54e8d0">MOVES</span>

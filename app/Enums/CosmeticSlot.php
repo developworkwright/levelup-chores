@@ -170,51 +170,84 @@ enum CosmeticSlot: string
     ];
 
     /**
-     * The image-generation prompt for a pet.
+     * The grid of a sheet with all three ages on it: six by six, two rows per
+     * age, baby at the top. Square because every image generator makes square
+     * pictures, and because the twelve poses in two rows of six put each pose
+     * in the same column for every age — the one layout hint generators follow.
+     * App\Services\CosmeticArt::splitFamily() cuts it into the three sheets.
      *
-     * The other six live in cosmetics.js, because the design bundle shipped
-     * them. This one is the app's own, and it is written to the same shape: a
-     * subject line to edit, then geometry and negative blocks to leave alone.
-     *
-     * One sheet rather than twelve pictures, and that is the whole trick.
-     * Generating "the pet sleeping" and "the pet jumping" separately gives you a
-     * slightly different animal each time — different colours, different ears.
-     * Asking for every pose in one image gets one character.
+     * @var array{cols: int, rows: int}
      */
-    public const PET_PROMPT = 'A sprite sheet of one small pet character, [SUBJECT: a stubby three-eyed swamp gremlin with a long tail], rendered as [STYLE: bold flat cartoon with thick dark outlines], the same character drawn eleven times, plus its toy drawn once.
+    public const FAMILY_GRID = ['cols' => 6, 'rows' => 6];
 
-The pet\'s toy is [TOY: a squeaky rubber bone], sized to fit in the pet\'s paws.
+    /**
+     * The prompt for a pet: baby, young and adult in one picture. The only
+     * way a pet is made — every pet has all three ages.
+     *
+     * One picture rather than three prompts, because a generator keeps a
+     * character consistent inside one image far better than across separate
+     * ones — asked separately it drifts, and handed its own adult sheet as a
+     * reference it tends to hand the same drawing back as the "young" one.
+     *
+     * The ages are drawn at their true sizes here, which is also what stops
+     * that copying: a young pet that has to be visibly shorter than the adult
+     * cannot be the adult again. The app draws each age's own art full size.
+     */
+    public const PET_FAMILY_PROMPT = 'A sprite sheet of ONE pet character at three ages — baby, young and adult — [SUBJECT: a stubby three-eyed swamp gremlin with a long tail], rendered as [STYLE: bold flat cartoon with thick dark outlines]. It is the same individual animal growing up: identical colours, identical markings in the same places, the same number of eyes, limbs, ears and tails. Only its proportions and size change.
+
+The pet\'s toy is [TOY: a squeaky rubber bone]. It is the same toy at every age, and it ages with the pet: brand new and shiny with the BABY, chewed and scuffed with the YOUNG pet, ragged, torn and patched with the ADULT — visibly the same toy, visibly well loved. Every cell of one age uses that age\'s toy.
 
 GEOMETRY — follow exactly:
-· 1024x768 image, fully transparent background.
-· A grid of 4 columns × 3 rows of equal 256×256 cells. Nothing crosses a cell
-  edge.
-· In every cell the character is the SAME size, centered left to right, with its
-  feet on the same line 24px above the bottom of the cell.
-· The standing character fills about 70% of the cell height.
-· Identical colours, markings, proportions and outline weight in every cell.
+· A SQUARE image, fully transparent background.
+· A grid of 6 columns × 6 rows of equal square cells — 36 cells. Nothing
+  crosses a cell edge.
+· Rows 1–2: the BABY. Rows 3–4: the YOUNG pet. Rows 5–6: the ADULT.
+· Each age takes its two rows the same way: the twelve cells below, left to
+  right, six in its first row and six in its second. So every column holds the
+  same pose at all three ages.
+· Feet on a line about 10% above the bottom of every cell.
+· Sizes grow with age: the ADULT stands about 70% of the cell height, the
+  YOUNG pet about 63%, the BABY about 56%.
+· ONE SCALE PER AGE, in every one of its twelve cells. The animal in the
+  second row of an age is exactly as big as in the first — same head size,
+  same paw size, same body length. Poses change its shape, never its size:
+  playing, tossing and sleeping are NOT drawn smaller to make room for the
+  toy. If the toy does not fit, make the toy smaller, never the animal.
 
-THE TWELVE CELLS, left to right, top row first:
+WHAT EACH AGE LOOKS LIKE:
+· BABY: oversized head, huge eyes, stubby legs, a round soft body. Every
+  marking already there, just softer.
+· YOUNG: lanky legs, big paws and ears it has not grown into, markings nearly
+  full.
+· ADULT: the full build, every marking crisp.
+Each age is drawn fresh. Never repeat one age\'s drawing for another.
+
+THE TWELVE CELLS OF EACH AGE, in order:
 1. Idle — standing, facing the viewer, relaxed.
 2. Blink — exactly cell 1 with its eyes closed.
-3. Crouch — squashed down, about to jump.
+3. Crouch — squashed down low, about to jump.
 4. Jump — in the air, stretched tall, feet tucked up (may leave the foot line).
-5. Walk — facing right, one foot forward.
+5. Walk — side view facing right, one foot forward.
 6. Happy — eyes squeezed shut, grinning, as if it has just been petted.
-7. Held — dangling from the scruff of its neck, legs hanging, surprised but not
-   upset. Centered in the cell; it may leave the foot line.
+7. Held — hanging in mid-air from the scruff of its neck, the way a mother cat
+   carries a kitten: the scruff at the top of the cell, the body hanging
+   straight down below it, every leg dangling limp, feet off the foot line.
+   Surprised, not upset. NOT sitting, NOT standing.
 8. Landed — flattened on the foot line as if it has just dropped, dizzy, not
    hurt.
-9. Play — on its back or pouncing, holding the toy.
-10. Toss — throwing the toy up, the toy just above its paws.
-11. Sleep — curled up lying down, eyes closed.
+9. Play — on its back or pouncing, holding the toy. Full size: the body as
+   long as it is when walking.
+10. Toss — throwing the toy up, the toy just above its paws. Full size: its
+    head as big as in Idle.
+11. Sleep — curled up lying down, eyes closed. Full size: curled up, not
+    shrunk — as wide as the walking pose is long.
 12. The toy on its own, no pet, resting on the foot line.
 
 MUST NOT INCLUDE: a background, ground, cast shadow or scenery; grid lines,
-borders, cell outlines or a ruled foot line; text, numerals, "zzz", hearts or
-sound effects; more than one character in a cell; any prop other than the toy;
-motion blur or speed lines; anything touching the left or right edge of its
-cell.';
+borders, cell outlines or a ruled foot line; text, labels, numerals, "zzz",
+hearts or sound effects; more than one character in a cell; any prop other than
+the toy; motion blur or speed lines; anything touching the left or right edge of
+its cell.';
 
     /**
      * The block the parent console adds to the end of every prompt.
@@ -232,7 +265,7 @@ cell.';
     public function promptOutput(): string
     {
         $spec = $this->uploadSpec();
-        $size = "{$spec['width']}x{$spec['height']}";
+        $size = $this->promptSize();
 
         $background = $spec['alpha']
             ? '· The background must be REAL transparency — an alpha channel, not a white'."\n".
@@ -245,6 +278,18 @@ cell.';
             $background."\n".
             "· Exactly {$size} pixels, or a larger size in the same shape ".
             'and nothing else — a different shape gets turned away.';
+    }
+
+    /**
+     * The picture size a prompt asks for. The stored size, except for a pet:
+     * what is uploaded is the square with all three ages on it, which is cut
+     * into three sheets of uploadSpec()'s size.
+     */
+    public function promptSize(): string
+    {
+        $spec = $this->uploadSpec();
+
+        return $this === self::Pet ? '1024x1024' : "{$spec['width']}x{$spec['height']}";
     }
 
     /** The size cap in words — "1 MB" — for the hint, the refusal and the check alike. */

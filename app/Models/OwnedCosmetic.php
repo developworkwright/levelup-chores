@@ -8,6 +8,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * One cosmetic a kid bought. Written once, never deleted — owned is forever.
  * Free house items have no row; everybody owns those.
+ *
+ * On a pet it also carries `growth`: approved chores done while it was out,
+ * which is how grown up it is. See App\Services\PetService.
  */
 class OwnedCosmetic extends Model
 {
@@ -16,7 +19,15 @@ class OwnedCosmetic extends Model
         'profile_id',
         'cosmetic_id',
         'tickets_paid',
+        'growth',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'growth' => 'integer',
+        ];
+    }
 
     public function profile(): BelongsTo
     {

@@ -902,9 +902,16 @@
          still works, and it is never keyed to the page: a Livewire round trip
          must not restart a pet mid-jump. See resources/js/pets.js. --}}
     @if ($worn['pet'])
+        @php
+            $pets = app(App\Services\PetService::class);
+            $ownPet = $pets->spriteFor($profile);
+        @endphp
+
         <fq-pets
-            sheet="{{ $worn['pet']->artUrl() }}"
-            @if ($worn['pet']->effect) effect="{{ $worn['pet']->effect->cssClass() }}" @endif
+            sheet="{{ $ownPet['src'] }}"
+            {{-- Drawn smaller while it is young — see App\Enums\PetStage. --}}
+            scale="{{ $ownPet['scale'] }}"
+            @if ($ownPet['effect']) effect="{{ $ownPet['effect'] }}" @endif
             {{-- The toy drops in on the day's first chore and stays out for the
                  rest of it. Never a punishment for the days it isn't there:
                  before then the pet simply wanders. --}}
@@ -915,13 +922,19 @@
                  kid stands on rather than passes through, and a visitor nobody
                  is around to see is a visitor wasted. --}}
             @if ($active === 'home' && ! $petAsleep)
-                @php $visitor = $cosmetics->visitingPet($profile); @endphp
+                @php
+                    $visitingSibling = $cosmetics->visitingSibling($profile);
+                    $visitor = $visitingSibling ? $pets->spriteFor($visitingSibling) : null;
+                @endphp
 
                 @if ($visitor)
-                    visitor="{{ json_encode(['src' => $visitor->artUrl(), 'effect' => $visitor->effect?->cssClass()], JSON_UNESCAPED_SLASHES) }}"
+                    visitor="{{ json_encode($visitor, JSON_UNESCAPED_SLASHES) }}"
                 @endif
             @endif
             drag
+            {{-- A tap on nothing in particular drops a snack there. Buttons,
+                 links and anything else tappable keep their taps. --}}
+            feed-on-tap
         ></fq-pets>
     @endif
 </div>

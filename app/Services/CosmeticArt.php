@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\CosmeticSlot;
+use App\Enums\PetStage;
 use GdImage;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Storage;
@@ -27,6 +28,12 @@ class CosmeticArt
 {
     /** The folder every picture is filed under, on whichever disk is in use. */
     public const FOLDER = 'cosmetics';
+
+    /**
+     * Bumped whenever the way a pet picture is cut or checked changes, so a
+     * cut cached under the old rules (see the parent console) is never used.
+     */
+    public const CUT_VERSION = 2;
 
     /** Past this many pixels nothing is decoded — the decompression-bomb ceiling. */
     private const MAX_PIXELS = 4000000;
@@ -77,7 +84,17 @@ class CosmeticArt
 
         $corners = $this->opacity($image, fn (int $x, int $y) => ($x < $width * 0.06 || $x > $width * 0.94) && ($y < $height * 0.06 || $y > $height * 0.94));
 
-        if ($spec['alpha']) {
+        /*
+         * On a sprite sheet the corners are the corners of pose cells, and a
+         * pet rolling on its back in the play cell fills one. So a sheet is
+         * judged on the whole picture instead: a painted-in background covers
+         * nearly all of it, and a real sheet is mostly empty space.
+         */
+        if ($spec['alpha'] && $slot->poseGrid() !== null) {
+            $checks[] = $this->opacity($image, fn () => true) < 0.75
+                ? ['label' => 'Transparent background', 'status' => 'pass']
+                : ['label' => 'The background isn\'t transparent', 'status' => 'fail'];
+        } elseif ($spec['alpha']) {
             $checks[] = $corners < 0.1
                 ? ['label' => 'Transparent background', 'status' => 'pass']
                 : ['label' => 'The background isn\'t transparent', 'status' => 'fail'];
@@ -893,6 +910,827 @@ class CosmeticArt
         return (abs((($a >> 16) & 0xFF) - (($b >> 16) & 0xFF))
             + abs((($a >> 8) & 0xFF) - (($b >> 8) & 0xFF))
             + abs(($a & 0xFF) - ($b & 0xFF))) / 3;
+    }
+
+    /**
+     * Whether an upload for a pet is the all-ages sheet rather than one age:
+     * square, where one age's sheet is four by three.
+     */
+    public function isFamilySheet(string $binary): bool
+    {
+        $info = @getimagesizefromstring($binary);
+
+        if (! is_array($info) || ($info[2] ?? null) !== IMAGETYPE_PNG) {
+            return false;
+        }
+
+        [$width, $height] = [(int) $info[0], (int) $info[1]];
+
+        return $height > 0
+            && abs($width / $height - 1) <= 0.03
+            && min($width, $height) >= 600
+            && $width * $height <= self::MAX_PIXELS;
+    }
+
+    /**
+     * A pet's whole family from one square sheet: the three ages cut apart,
+     * tidied and checked, ready to store as three ordinary sheets.
+     *
+     * Every age is held to every check, because every pet has all three: a
+     * younger age with a missing pose, or one that is just another age's
+     * drawing handed back again, fails the upload like a broken adult does.
+     *
+     * @return array{sheets: array<string, string|null>, checks: array<int, array{label: string, status: string}>}
+     *                                                                                                             sheets keyed by PetStage value
+     */
+    public function prepareFamily(string $binary): array
+    {
+        $cut = $this->splitFamily($binary);
+
+        if ($cut === null) {
+            return ['sheets' => ['baby' => null, 'young' => null, 'adult' => null], 'checks' => [['label' => 'The picture would not open', 'status' => 'fail']]];
+        }
+
+        $sheets = [];
+        $stageChecks = [];
+
+        foreach (PetStage::cases() as $stage) {
+            $tidied = $this->normalize($cut['sheets'][$stage->value], CosmeticSlot::Pet);
+            $sheets[$stage->value] = $tidied['binary'];
+            $stageChecks[$stage->value] = [...$tidied['checks'], ...$this->inspect($tidied['binary'], CosmeticSlot::Pet)];
+        }
+
+        $checks = [...$cut['checks'], ...array_map(
+            fn (array $check) => ['label' => 'Adult: '.$check['label'], 'status' => $check['status']],
+            $stageChecks['adult'],
+        )];
+
+        // Youngest last, so "young" is judged before "baby" is compared with it.
+        foreach ([PetStage::Young, PetStage::Baby] as $stage) {
+            $older = $stage->next();
+            $failed = collect($stageChecks[$stage->value])->firstWhere('status', 'fail');
+            $olderSheet = $sheets[$older->value] ?? $sheets['adult'];
+            $name = $stage->label();
+
+            $problem = match (true) {
+                $failed !== null => mb_strtolower($failed['label']),
+                $this->looksTheSame($sheets[$stage->value], $olderSheet) => 'it is the '.mb_strtolower($older === PetStage::Adult ? 'adult' : $older->label()).' drawing again',
+                default => null,
+            };
+
+            if ($problem !== null) {
+                $sheets[$stage->value] = null;
+                $checks[] = ['label' => "{$name}: {$problem} — generate the picture again", 'status' => 'fail'];
+
+                continue;
+            }
+
+            $checks[] = $this->standingHeight($sheets[$stage->value]) >= 0.92 * $this->standingHeight($olderSheet)
+                ? ['label' => "{$name} is drawn as big as the age above — check it is really younger", 'status' => 'warn']
+                : ['label' => "{$name}: all ".count(CosmeticSlot::PET_POSES).' poses, and smaller than the age above', 'status' => 'pass'];
+        }
+
+        return ['sheets' => $sheets, 'checks' => $checks];
+    }
+
+    /**
+     * Cuts the square all-ages sheet into three ordinary four-by-three sheets,
+     * one per age, untidied.
+     *
+     * The grid is not trusted. Asked for six even rows, a generator draws the
+     * adults taller than the babies and lets the rows grow to fit, so slicing
+     * the square into even strips cuts through the animals — feet at the top of
+     * one cell, the head chopped off the next. So each animal is *found*
+     * instead: rows are the bands of art between empty lines across the whole
+     * picture, and within a row, each pose is the art between empty columns.
+     * Only when the art will not come apart into six by six does it fall back
+     * to even strips.
+     *
+     * Every pose is then set into its 256px cell at one scale for the whole
+     * picture, so the ages keep the sizes the generator gave them, and each
+     * row keeps its own foot line — the jump still floats above it.
+     *
+     * @return array{sheets: array<string, string>, checks: array<int, array{label: string, status: string}>}|null
+     */
+    public function splitFamily(string $binary): ?array
+    {
+        if (! $this->isFamilySheet($binary)) {
+            return null;
+        }
+
+        $source = @imagecreatefromstring($binary);
+
+        if (! $source instanceof GdImage) {
+            return null;
+        }
+
+        imagepalettetotruecolor($source);
+        $grid = CosmeticSlot::FAMILY_GRID;
+        $width = imagesx($source);
+        $height = imagesy($source);
+        $checks = [];
+
+        $background = $this->cutBackground($source, $grid);
+
+        if ($background['cut']) {
+            $checks[] = ['label' => 'Cut out the painted-in background', 'status' => 'pass'];
+            imagealphablending($source, false);
+            $this->defringe($source, $background['palette']);
+            imagealphablending($source, true);
+        }
+
+        // Before looking for the gaps between animals: a ruled grid fills
+        // every gap it is drawn in.
+        if (($erased = $this->stripSheetLines($source)) > 0) {
+            $checks[] = ['label' => 'Rubbed out '.$erased.' ruled grid '.($erased === 1 ? 'line' : 'lines'), 'status' => 'pass'];
+        }
+
+        [$labels, $pieces] = $this->pieces($source);
+        $pieces = array_filter($pieces, fn (array $piece) => $piece['count'] >= 6);
+
+        $found = true;
+        $touched = false;
+        $rows = $this->bands(
+            fn (int $y) => $this->visibleAcross($source, 0, $width, $y, true),
+            $height,
+            $grid['rows'],
+            fn (array $run) => $this->divide($pieces, 'y', $run, [0, $width - 1]),
+            $touched,
+        );
+
+        if ($rows === null) {
+            $found = false;
+            $rows = $this->evenBands($height, $grid['rows']);
+        }
+
+        // Two animals drawn touching — one's feet on the other's head — are
+        // one piece of art. Pull them apart before anything is handed out.
+        $pieces = $this->separate($labels, $pieces, $rows);
+
+        // Where each pose roughly is, row by row, in reading order.
+        $cells = [];
+
+        foreach ($rows as $row) {
+            $columns = $this->bands(
+                fn (int $x) => $this->visibleAcross($source, $row[0], $row[1] + 1, $x, false),
+                $width,
+                $grid['cols'],
+                fn (array $run) => $this->divide($pieces, 'x', $run, $row),
+                $touched,
+            );
+
+            if ($columns === null) {
+                $found = false;
+                $columns = $this->evenBands($width, $grid['cols']);
+            }
+
+            foreach ($columns as $column) {
+                $cells[] = ['left' => $column[0], 'top' => $row[0], 'right' => $column[1], 'bottom' => $row[1]];
+            }
+        }
+
+        // And which art belongs to which pose — whole pieces, never a cut line.
+        $figures = $this->claim($cells, $pieces);
+
+        $checks = [
+            match (true) {
+                ! $found => ['label' => "{$width}×{$height} — cut into even strips; the poses would not come apart cleanly, so check them", 'status' => 'warn'],
+                $touched => ['label' => "{$width}×{$height} — found all 36 poses, but some were touching; check the edges in POSES", 'status' => 'warn'],
+                default => ['label' => "{$width}×{$height} — found all 36 poses and cut them apart", 'status' => 'pass'],
+            },
+            ...$checks,
+        ];
+
+        $spec = CosmeticSlot::Pet->uploadSpec();
+        $sheetGrid = CosmeticSlot::Pet->poseGrid();
+        $cell = $spec['width'] / $sheetGrid['cols'];
+        $foot = $cell - 24;
+        $posesPerAge = count(CosmeticSlot::PET_POSES);
+
+        /*
+         * One scale for the whole picture: the adult's idle pose stands at 70%
+         * of a cell, which is what a four-by-three sheet asks for, and nothing
+         * may grow past the cell. The same scale for every age is what keeps a
+         * baby baby-sized.
+         */
+        $adultIdle = $figures[2 * $posesPerAge];
+        $scale = 0.7 * $cell / max(1, $adultIdle['bottom'] - $adultIdle['top'] + 1);
+
+        foreach ($figures as $figure) {
+            $scale = min($scale, 0.94 * $cell / max(1, $figure['right'] - $figure['left'] + 1, $figure['bottom'] - $figure['top'] + 1));
+        }
+
+        /*
+         * A floor under the younger ages. Generators draw babies tiny — a
+         * third of the adult — and at a 78px pet that is a speck nobody can
+         * tap. So no age stands shorter than PetStage::scale() of the adult:
+         * the same size an age is shrunk to when it borrows an older sheet, so
+         * a pet is the same size at every age whichever sheet it comes from.
+         * A younger age drawn bigger than that keeps its own size.
+         */
+        $idleHeight = fn (array $figure) => max(1, $figure['bottom'] - $figure['top'] + 1);
+        $ageScale = [];
+
+        foreach ([PetStage::Baby, PetStage::Young, PetStage::Adult] as $band => $stage) {
+            $mine = array_slice($figures, $band * $posesPerAge, $posesPerAge);
+            $grow = max(1.0, $stage->scale() * $idleHeight($adultIdle) / $idleHeight($mine[0]));
+
+            // Never past the edge of a cell, however far it has to grow.
+            foreach ($mine as $figure) {
+                $grow = min($grow, max(1.0, 0.94 * $cell / ($scale * max(1, $figure['right'] - $figure['left'] + 1, $figure['bottom'] - $figure['top'] + 1))));
+            }
+
+            $ageScale[$band] = $scale * $grow;
+        }
+
+        $sheets = [];
+
+        // Baby at the top, as the prompt asks.
+        foreach ([PetStage::Baby, PetStage::Young, PetStage::Adult] as $band => $stage) {
+            $sheet = imagecreatetruecolor($spec['width'], $spec['height']);
+            imagealphablending($sheet, false);
+            imagesavealpha($sheet, true);
+            imagefill($sheet, 0, 0, imagecolorallocatealpha($sheet, 0, 0, 0, 127));
+
+            foreach (array_keys(CosmeticSlot::PET_POSES) as $index) {
+                $number = $band * $posesPerAge + $index;
+                $figure = $figures[$number];
+
+                if ($figure['empty'] ?? false) {
+                    continue;
+                }
+
+                // This row's floor: where most of its animals stand.
+                $row = intdiv($number, $grid['cols']);
+                $bottoms = array_map(fn (array $one) => $one['bottom'], array_slice($figures, $row * $grid['cols'], $grid['cols']));
+                sort($bottoms);
+                $floor = $bottoms[intdiv(count($bottoms), 2)];
+
+                $drawWidth = (int) round(($figure['right'] - $figure['left'] + 1) * $ageScale[$band]);
+                $drawHeight = (int) round(($figure['bottom'] - $figure['top'] + 1) * $ageScale[$band]);
+                $cellLeft = ($index % $sheetGrid['cols']) * $cell;
+                $cellTop = intdiv($index, $sheetGrid['cols']) * $cell;
+                $top = (int) round($cellTop + $foot - ($floor - $figure['bottom']) * $ageScale[$band] - $drawHeight);
+                $top = max($cellTop + 2, min($top, $cellTop + $cell - 2 - $drawHeight));
+
+                $lifted = $this->lift($source, $labels, $figure);
+
+                imagecopyresampled(
+                    $sheet,
+                    $lifted,
+                    (int) round($cellLeft + ($cell - $drawWidth) / 2),
+                    $top,
+                    0,
+                    0,
+                    $drawWidth,
+                    $drawHeight,
+                    imagesx($lifted),
+                    imagesy($lifted),
+                );
+
+                imagedestroy($lifted);
+            }
+
+            ob_start();
+            imagepng($sheet, null, 9);
+            $sheets[$stage->value] = (string) ob_get_clean();
+            imagedestroy($sheet);
+        }
+
+        imagedestroy($source);
+
+        return ['sheets' => $sheets, 'checks' => $checks];
+    }
+
+    /**
+     * Every separate piece of art in the picture: each animal, and each thing
+     * floating free of one — a thrown toy, a stray speck.
+     *
+     * Labelled at half size, which is plenty to tell one animal from the next
+     * and a quarter of the work, and eight-connected so a thin outline does
+     * not fall apart into pieces.
+     *
+     * @return array{0: array{width: int, labels: array<int, int>}, 1: array<int, array{left: int, top: int, right: int, bottom: int, count: int, x: float, y: float}>}
+     */
+    private function pieces(GdImage $image): array
+    {
+        $width = imagesx($image);
+        $height = imagesy($image);
+        $halfWidth = intdiv($width + 1, 2);
+        $halfHeight = intdiv($height + 1, 2);
+        $solid = [];
+
+        for ($y = 0; $y < $halfHeight; $y++) {
+            for ($x = 0; $x < $halfWidth; $x++) {
+                foreach ([[0, 0], [1, 0], [0, 1], [1, 1]] as [$dx, $dy]) {
+                    $px = min($width - 1, $x * 2 + $dx);
+                    $py = min($height - 1, $y * 2 + $dy);
+
+                    if (((imagecolorat($image, $px, $py) >> 24) & 0x7F) < 110) {
+                        $solid[$y * $halfWidth + $x] = true;
+
+                        break;
+                    }
+                }
+            }
+        }
+
+        $labels = [];
+        $pieces = [];
+        $next = 0;
+
+        foreach (array_keys($solid) as $start) {
+            if (isset($labels[$start])) {
+                continue;
+            }
+
+            $id = ++$next;
+            $labels[$start] = $id;
+            $stack = [$start];
+            $piece = ['left' => PHP_INT_MAX, 'top' => PHP_INT_MAX, 'right' => 0, 'bottom' => 0, 'count' => 0, 'x' => 0.0, 'y' => 0.0];
+
+            while ($stack !== []) {
+                $at = array_pop($stack);
+                $x = $at % $halfWidth;
+                $y = intdiv($at, $halfWidth);
+
+                $piece['left'] = min($piece['left'], $x);
+                $piece['top'] = min($piece['top'], $y);
+                $piece['right'] = max($piece['right'], $x);
+                $piece['bottom'] = max($piece['bottom'], $y);
+                $piece['count']++;
+                $piece['x'] += $x;
+                $piece['y'] += $y;
+
+                for ($dy = -1; $dy <= 1; $dy++) {
+                    for ($dx = -1; $dx <= 1; $dx++) {
+                        $nx = $x + $dx;
+                        $ny = $y + $dy;
+                        $neighbour = $ny * $halfWidth + $nx;
+
+                        if ($nx < 0 || $ny < 0 || $nx >= $halfWidth || $ny >= $halfHeight || isset($labels[$neighbour]) || ! isset($solid[$neighbour])) {
+                            continue;
+                        }
+
+                        $labels[$neighbour] = $id;
+                        $stack[] = $neighbour;
+                    }
+                }
+            }
+
+            // Back to full-size coordinates.
+            $pieces[$id] = [
+                'left' => $piece['left'] * 2,
+                'top' => $piece['top'] * 2,
+                'right' => min($width - 1, $piece['right'] * 2 + 1),
+                'bottom' => min($height - 1, $piece['bottom'] * 2 + 1),
+                'count' => $piece['count'],
+                'x' => $piece['x'] / $piece['count'] * 2 + 1,
+                'y' => $piece['y'] / $piece['count'] * 2 + 1,
+            ];
+        }
+
+        return [['width' => $halfWidth, 'labels' => $labels], $pieces];
+    }
+
+    /**
+     * Cuts apart any piece that is really two animals from neighbouring rows
+     * drawn touching — an adult's feet resting on the head of the one below.
+     *
+     * A piece counts as two when a good share of it lies on each side of a row
+     * line. It is cut where it is narrowest in its middle stretch, which is the
+     * spot where the two drawings meet, and each half becomes a piece of its
+     * own. One animal that merely dips over a line (a tail, an ear) is never
+     * cut: most of it sits on one side.
+     *
+     * @param  array{width: int, labels: array<int, int>}  $labels  relabelled in place
+     * @param  array<int, array{left: int, top: int, right: int, bottom: int, count: int, x: float, y: float}>  $pieces
+     * @param  array<int, array{0: int, 1: int}>  $rows
+     * @return array<int, array{left: int, top: int, right: int, bottom: int, count: int, x: float, y: float}>
+     */
+    private function separate(array &$labels, array $pieces, array $rows): array
+    {
+        $halfWidth = $labels['width'];
+        $next = $pieces === [] ? 1 : max(array_keys($pieces)) + 1;
+        $lines = array_map(fn (array $row) => $row[1], array_slice($rows, 0, -1));
+
+        foreach ($pieces as $id => $piece) {
+            $span = $piece['bottom'] - $piece['top'] + 1;
+            $straddled = array_filter($lines, fn (int $line) => $line - $piece['top'] >= 0.3 * $span && 0.3 * $span <= $piece['bottom'] - $line);
+
+            if ($straddled === []) {
+                continue;
+            }
+
+            // How wide the piece is on each half-size row of its middle stretch.
+            $top = intdiv($piece['top'], 2);
+            $bottom = intdiv($piece['bottom'], 2);
+            $left = intdiv($piece['left'], 2);
+            $right = intdiv($piece['right'], 2);
+            $cut = null;
+            $narrowest = PHP_INT_MAX;
+
+            for ($y = $top + (int) (($bottom - $top) * 0.2); $y <= $bottom - (int) (($bottom - $top) * 0.2); $y++) {
+                $across = 0;
+
+                for ($x = $left; $x <= $right; $x++) {
+                    $across += ($labels['labels'][$y * $halfWidth + $x] ?? null) === $id ? 1 : 0;
+                }
+
+                if ($across < $narrowest) {
+                    $narrowest = $across;
+                    $cut = $y;
+                }
+            }
+
+            if ($cut === null) {
+                continue;
+            }
+
+            $lower = $next++;
+            $halves = [$id => ['left' => PHP_INT_MAX, 'top' => PHP_INT_MAX, 'right' => 0, 'bottom' => 0, 'count' => 0, 'x' => 0.0, 'y' => 0.0]];
+            $halves[$lower] = $halves[$id];
+
+            for ($y = $top; $y <= $bottom; $y++) {
+                for ($x = $left; $x <= $right; $x++) {
+                    $at = $y * $halfWidth + $x;
+
+                    if (($labels['labels'][$at] ?? null) !== $id) {
+                        continue;
+                    }
+
+                    $half = $y > $cut ? $lower : $id;
+                    $labels['labels'][$at] = $half;
+                    $halves[$half]['left'] = min($halves[$half]['left'], $x);
+                    $halves[$half]['top'] = min($halves[$half]['top'], $y);
+                    $halves[$half]['right'] = max($halves[$half]['right'], $x);
+                    $halves[$half]['bottom'] = max($halves[$half]['bottom'], $y);
+                    $halves[$half]['count']++;
+                    $halves[$half]['x'] += $x;
+                    $halves[$half]['y'] += $y;
+                }
+            }
+
+            foreach ($halves as $half => $stats) {
+                if ($stats['count'] === 0) {
+                    unset($pieces[$half]);
+
+                    continue;
+                }
+
+                $pieces[$half] = [
+                    'left' => $stats['left'] * 2,
+                    'top' => $stats['top'] * 2,
+                    'right' => $stats['right'] * 2 + 1,
+                    'bottom' => $stats['bottom'] * 2 + 1,
+                    'count' => $stats['count'],
+                    'x' => $stats['x'] / $stats['count'] * 2 + 1,
+                    'y' => $stats['y'] / $stats['count'] * 2 + 1,
+                ];
+            }
+        }
+
+        return $pieces;
+    }
+
+    /**
+     * Where a run holding two rows (or two columns) of animals divides: halfway
+     * across the widest gap between the middles of the animals in it.
+     *
+     * Only the big pieces vote — a third the size of the biggest there or more
+     * — so a thrown toy floating between two rows cannot pull the line to it.
+     * The line only decides which cell a piece's middle falls in; no animal is
+     * ever cut along it.
+     *
+     * @param  array<int, array{left: int, top: int, right: int, bottom: int, count: int, x: float, y: float}>  $pieces
+     * @param  array{0: int, 1: int}  $run  along $axis
+     * @param  array{0: int, 1: int}  $across  the other way
+     */
+    private function divide(array $pieces, string $axis, array $run, array $across): ?int
+    {
+        $other = $axis === 'y' ? 'x' : 'y';
+        $inside = array_filter($pieces, fn (array $piece) => $piece[$axis] >= $run[0] && $piece[$axis] <= $run[1]
+            && $piece[$other] >= $across[0] && $piece[$other] <= $across[1]);
+
+        if (count($inside) < 2) {
+            return null;
+        }
+
+        $biggest = max(array_column($inside, 'count'));
+        $middles = array_column(array_filter($inside, fn (array $piece) => $piece['count'] >= $biggest / 3), $axis);
+        sort($middles);
+
+        if (count($middles) < 2) {
+            return null;
+        }
+
+        $split = null;
+        $widest = -1.0;
+
+        for ($i = 1; $i < count($middles); $i++) {
+            if ($widest < $middles[$i] - $middles[$i - 1]) {
+                $widest = $middles[$i] - $middles[$i - 1];
+                $split = (int) round(($middles[$i] + $middles[$i - 1]) / 2);
+            }
+        }
+
+        return $split;
+    }
+
+    /**
+     * Hands every piece of art to a pose.
+     *
+     * A piece belongs to the cell its middle is in — so an animal whose tail
+     * dips into the row below still comes out whole, from its own cell. A
+     * small piece floating free (a thrown toy) goes instead to whichever
+     * animal it sits closest to, which is the one throwing it even when it has
+     * sailed up over a row line. Specks are dropped.
+     *
+     * @param  array<int, array{left: int, top: int, right: int, bottom: int}>  $cells
+     * @param  array<int, array{left: int, top: int, right: int, bottom: int, count: int, x: float, y: float}>  $pieces
+     * @return array<int, array{left: int, top: int, right: int, bottom: int, pieces?: array<int, int>, empty?: bool}>
+     */
+    private function claim(array $cells, array $pieces): array
+    {
+        $pieces = array_filter($pieces, fn (array $piece) => $piece['count'] >= 6);
+        $owner = [];
+
+        foreach ($pieces as $id => $piece) {
+            $best = null;
+            $bestDistance = INF;
+
+            foreach ($cells as $index => $cell) {
+                $dx = max(0, $cell['left'] - $piece['x'], $piece['x'] - $cell['right']);
+                $dy = max(0, $cell['top'] - $piece['y'], $piece['y'] - $cell['bottom']);
+                $distance = $dx * $dx + $dy * $dy;
+
+                if ($distance < $bestDistance) {
+                    $best = $index;
+                    $bestDistance = $distance;
+                }
+            }
+
+            $owner[$id] = $best;
+        }
+
+        // Each cell's animal: its biggest piece.
+        $anchors = [];
+
+        foreach ($owner as $id => $index) {
+            if (! isset($anchors[$index]) || $pieces[$id]['count'] > $pieces[$anchors[$index]]['count']) {
+                $anchors[$index] = $id;
+            }
+        }
+
+        $gap = function (array $one, array $other): float {
+            $dx = max(0, $one['left'] - $other['right'], $other['left'] - $one['right']);
+            $dy = max(0, $one['top'] - $other['bottom'], $other['top'] - $one['bottom']);
+
+            return sqrt($dx * $dx + $dy * $dy);
+        };
+
+        foreach ($owner as $id => $index) {
+            if ($anchors[$index] === $id || $pieces[$id]['count'] >= 0.25 * $pieces[$anchors[$index]]['count']) {
+                continue;
+            }
+
+            $closest = $index;
+            $closestGap = $gap($pieces[$id], $pieces[$anchors[$index]]);
+
+            foreach ($anchors as $other => $anchor) {
+                if (($distance = $gap($pieces[$id], $pieces[$anchor])) < $closestGap) {
+                    $closest = $other;
+                    $closestGap = $distance;
+                }
+            }
+
+            $owner[$id] = $closest;
+        }
+
+        $figures = [];
+
+        foreach ($cells as $index => $cell) {
+            $mine = array_keys($owner, $index, true);
+
+            if ($mine === []) {
+                $figures[] = ['left' => $cell['left'], 'top' => $cell['top'], 'right' => $cell['left'], 'bottom' => $cell['top'], 'empty' => true];
+
+                continue;
+            }
+
+            $figures[] = [
+                'left' => min(array_map(fn (int $id) => $pieces[$id]['left'], $mine)),
+                'top' => min(array_map(fn (int $id) => $pieces[$id]['top'], $mine)),
+                'right' => max(array_map(fn (int $id) => $pieces[$id]['right'], $mine)),
+                'bottom' => max(array_map(fn (int $id) => $pieces[$id]['bottom'], $mine)),
+                'pieces' => $mine,
+            ];
+        }
+
+        return $figures;
+    }
+
+    /**
+     * One pose, cut out on its own: the pixels of its own pieces inside its
+     * box, and nothing of the neighbour whose ear pokes into the same box.
+     *
+     * @param  array{width: int, labels: array<int, int>}  $labels
+     * @param  array{left: int, top: int, right: int, bottom: int, pieces?: array<int, int>}  $figure
+     */
+    private function lift(GdImage $source, array $labels, array $figure): GdImage
+    {
+        $width = $figure['right'] - $figure['left'] + 1;
+        $height = $figure['bottom'] - $figure['top'] + 1;
+        $mine = array_flip($figure['pieces'] ?? []);
+
+        $lifted = imagecreatetruecolor($width, $height);
+        imagealphablending($lifted, false);
+        imagesavealpha($lifted, true);
+        imagefill($lifted, 0, 0, imagecolorallocatealpha($lifted, 0, 0, 0, 127));
+
+        for ($y = 0; $y < $height; $y++) {
+            for ($x = 0; $x < $width; $x++) {
+                $sx = $figure['left'] + $x;
+                $sy = $figure['top'] + $y;
+                $label = $labels['labels'][intdiv($sy, 2) * $labels['width'] + intdiv($sx, 2)] ?? null;
+
+                if ($label !== null && isset($mine[$label])) {
+                    imagesetpixel($lifted, $x, $y, imagecolorat($source, $sx, $sy));
+                }
+            }
+        }
+
+        return $lifted;
+    }
+
+    /**
+     * How many pixels of one line of the picture are art — a row when
+     * $across, a column between $from and $to otherwise.
+     */
+    private function visibleAcross(GdImage $image, int $from, int $to, int $at, bool $across): int
+    {
+        $visible = 0;
+
+        for ($i = $from; $i < $to; $i++) {
+            $rgb = $across ? imagecolorat($image, $i, $at) : imagecolorat($image, $at, $i);
+            $visible += (($rgb >> 24) & 0x7F) < 110 ? 1 : 0;
+        }
+
+        return $visible;
+    }
+
+    /**
+     * The runs of art along one direction, separated by empty lines, as
+     * [first, last] pairs — exactly $expected of them, or null.
+     *
+     * A stray speck makes a run of its own, and a thrown toy floating clear of
+     * the animal under it makes another. Both are folded into their nearest
+     * neighbour — whichever pair of runs has the narrowest gap between them —
+     * until the count is right.
+     *
+     * Too few runs means two rows touch: a big adult's tail dipping into the
+     * row below, so there is no empty line between them. $splitAt says where
+     * the widest run divides — worked out from where the animals in it sit,
+     * never from a line through them — and $touched says it happened.
+     *
+     * @param  callable(int): int  $visibleAt
+     * @param  callable(array{0: int, 1: int}): ?int  $splitAt
+     * @return array<int, array{0: int, 1: int}>|null
+     */
+    private function bands(callable $visibleAt, int $length, int $expected, callable $splitAt, bool &$touched = false): ?array
+    {
+        $runs = [];
+        $start = null;
+
+        for ($i = 0; $i <= $length; $i++) {
+            $art = $i < $length && $visibleAt($i) > 1;
+
+            if ($art && $start === null) {
+                $start = $i;
+            } elseif (! $art && $start !== null) {
+                $runs[] = [$start, $i - 1];
+                $start = null;
+            }
+        }
+
+        while (count($runs) > $expected) {
+            $narrowest = 0;
+
+            for ($j = 1; $j < count($runs) - 1; $j++) {
+                if ($runs[$j + 1][0] - $runs[$j][1] < $runs[$narrowest + 1][0] - $runs[$narrowest][1]) {
+                    $narrowest = $j;
+                }
+            }
+
+            array_splice($runs, $narrowest, 2, [[$runs[$narrowest][0], $runs[$narrowest + 1][1]]]);
+        }
+
+        // Only ever a run or two short; more than that is not a grid of animals.
+        while ($runs !== [] && count($runs) < $expected && count($runs) >= $expected - 2) {
+            $widest = 0;
+
+            foreach ($runs as $j => $run) {
+                if ($runs[$widest][1] - $runs[$widest][0] < $run[1] - $run[0]) {
+                    $widest = $j;
+                }
+            }
+
+            [$first, $last] = $runs[$widest];
+            $split = $splitAt($runs[$widest]);
+
+            if ($split === null || $split <= $first || $split >= $last) {
+                break;
+            }
+
+            array_splice($runs, $widest, 1, [[$first, $split], [$split + 1, $last]]);
+            $touched = true;
+        }
+
+        return count($runs) === $expected ? $runs : null;
+    }
+
+    /**
+     * Even strips, for when the art will not come apart on its own.
+     *
+     * @return array<int, array{0: int, 1: int}>
+     */
+    private function evenBands(int $length, int $count): array
+    {
+        return array_map(
+            fn (int $i) => [(int) round($i * $length / $count), (int) round(($i + 1) * $length / $count) - 1],
+            range(0, $count - 1),
+        );
+    }
+
+    /**
+     * Whether two sheets are the same drawing — what a generator does when it
+     * gives up on an age and repeats the one next to it. Compared small, so a
+     * resampling difference is not mistaken for a new drawing.
+     */
+    private function looksTheSame(string $one, string $other): bool
+    {
+        $shrink = function (string $binary): ?GdImage {
+            $image = @imagecreatefromstring($binary);
+
+            if (! $image instanceof GdImage) {
+                return null;
+            }
+
+            $small = imagecreatetruecolor(128, 96);
+            imagealphablending($small, false);
+            imagesavealpha($small, true);
+            imagecopyresampled($small, $image, 0, 0, 0, 0, 128, 96, imagesx($image), imagesy($image));
+            imagedestroy($image);
+
+            return $small;
+        };
+
+        [$a, $b] = [$shrink($one), $shrink($other)];
+
+        if (! $a || ! $b) {
+            return false;
+        }
+
+        $difference = 0;
+        $compared = 0;
+
+        for ($y = 0; $y < 96; $y++) {
+            for ($x = 0; $x < 128; $x++) {
+                $pa = imagecolorat($a, $x, $y);
+                $pb = imagecolorat($b, $x, $y);
+                $alphaA = ($pa >> 24) & 0x7F;
+                $alphaB = ($pb >> 24) & 0x7F;
+
+                // Empty in both is not evidence of anything.
+                if ($alphaA >= 110 && $alphaB >= 110) {
+                    continue;
+                }
+
+                $difference += $this->distance($pa, $pb) + abs($alphaA - $alphaB) * 2;
+                $compared++;
+            }
+        }
+
+        imagedestroy($a);
+        imagedestroy($b);
+
+        return $compared > 0 && $difference / $compared < 12;
+    }
+
+    /** How tall the idle pose stands in a sheet, in pixels — the age's size. */
+    private function standingHeight(string $binary): int
+    {
+        $image = @imagecreatefromstring($binary);
+
+        if (! $image instanceof GdImage) {
+            return 0;
+        }
+
+        $cell = (int) (imagesx($image) / CosmeticSlot::Pet->poseGrid()['cols']);
+        $box = $this->boundingBox($image, 0, 0, $cell, $cell);
+        imagedestroy($image);
+
+        return $box === null ? 0 : $box['bottom'] - $box['top'];
     }
 
     /**

@@ -120,53 +120,45 @@ class ParentCosmeticsTest extends TestCase
         $this->assertStringStartsWith('cosmetics/'.$this->household->id.'/', $item->art_path);
     }
 
-    public function test_an_upload_that_fails_its_checks_can_only_be_a_draft(): void
+    /**
+     * There is no draft: art that fails is never saved at all, and is tossed
+     * to make way for the next picture.
+     */
+    public function test_an_upload_that_fails_its_checks_is_never_saved_and_can_be_tossed(): void
     {
         Auth::guard('profile')->login($this->parent);
 
         Volt::test('parent.cosmetics')
+            ->assertDontSee('Save draft')
             ->set('upload', $this->upload($this->ringPng(filledMiddle: true)))
             ->set('name', 'Face Already In It')
             ->call('publish')
-            ->assertHasErrors('upload');
+            ->assertHasErrors('upload')
+            ->call('toss')
+            ->assertSet('upload', null)
+            ->assertSee('Tossed.');
 
         $this->assertSame(0, Cosmetic::where('name', 'Face Already In It')->count());
-
-        Volt::test('parent.cosmetics')
-            ->set('upload', $this->upload($this->ringPng(filledMiddle: true)))
-            ->set('name', 'Face Already In It')
-            ->call('saveDraft')
-            ->assertHasNoErrors();
-
-        $draft = Cosmetic::where('name', 'Face Already In It')->firstOrFail();
-
-        $this->assertTrue($draft->isDraft());
-        $this->assertFalse($draft->passesChecks());
-
-        Volt::test('parent.cosmetics')->call('publishDraft', $draft->id);
-
-        $this->assertTrue($draft->fresh()->isDraft());
     }
 
-    public function test_a_draft_can_be_published_later_or_binned(): void
+    /** Drafts saved before the draft state was dropped can still be dealt with. */
+    public function test_an_old_draft_can_still_be_published_or_binned(): void
     {
         Auth::guard('profile')->login($this->parent);
+        $disk = Storage::disk('drawings');
+
+        [$later, $never] = collect(['Later', 'Never'])->map(function (string $name) use ($disk) {
+            $path = 'cosmetics/'.$this->household->id.'/'.$name.'.png';
+            $disk->put($path, $this->ringPng());
+
+            return Cosmetic::create([
+                'household_id' => $this->household->id, 'slot' => 'frame', 'art_path' => $path,
+                'name' => $name, 'cost' => 5, 'stock' => 'shelf', 'checks' => [],
+            ]);
+        })->all();
 
         Volt::test('parent.cosmetics')
-            ->set('upload', $this->upload($this->ringPng()))
-            ->set('name', 'Later')
-            ->call('saveDraft');
-
-        Volt::test('parent.cosmetics')
-            ->set('upload', $this->upload($this->ringPng()))
-            ->set('name', 'Never')
-            ->call('saveDraft');
-
-        $later = Cosmetic::where('name', 'Later')->firstOrFail();
-        $never = Cosmetic::where('name', 'Never')->firstOrFail();
-
-        Volt::test('parent.cosmetics')
-            ->assertSee('Drafts · not visible to anyone yet')
+            ->assertSee('Old drafts')
             ->call('publishDraft', $later->id)
             ->call('binDraft', $never->id);
 
@@ -196,7 +188,8 @@ class ParentCosmeticsTest extends TestCase
 
         Volt::test('parent.cosmetics')
             ->assertSee('75 LIVE')
-            ->assertSee('0 DRAFTS')
+            // No drafts any more, so no counter for them unless old ones remain.
+            ->assertDontSee('DRAFTS')
             ->assertSee('Need art? Start from this prompt')
             ->assertSee('Double Ring');
     }
@@ -574,30 +567,6 @@ class ParentCosmeticsTest extends TestCase
         $this->assertStringNotContainsString('Rubbed out', implode(' ', $labels));
     }
 
-    public function test_a_pet_is_published_with_an_effect_and_lands_in_the_locker(): void
-    {
-        Auth::guard('profile')->login($this->parent);
-
-        Volt::test('parent.cosmetics')
-            ->call('$set', 'slot', 'pet')
-            ->assertSee('1024×768')
-            ->set('upload', $this->upload($this->petSheetPng(), 'tabby.png'))
-            ->set('name', 'Tabby')
-            ->set('stock', 'limited')
-            ->set('effect', 'rainbow')
-            ->call('bumpCost', 15)
-            ->call('publish')
-            ->assertHasNoErrors();
-
-        $pet = Cosmetic::where('name', 'Tabby')->firstOrFail();
-
-        $this->assertSame(CosmeticSlot::Pet, $pet->slot);
-        $this->assertSame(20, $pet->cost);
-        $this->assertSame('rainbow', $pet->effect->value);
-        $this->assertTrue($pet->isSheet());
-        $this->assertFalse($pet->isDraft());
-    }
-
     /**
      * The bundled prompts say what to draw and never said what file to hand
      * back, which is how a JPEG or a painted-on checkerboard gets generated.
@@ -613,7 +582,7 @@ class ParentCosmeticsTest extends TestCase
             $output = $slot->promptOutput();
 
             $this->assertStringContainsString('Hand back a PNG file', $output);
-            $this->assertStringContainsString("{$spec['width']}x{$spec['height']} pixels", $output);
+            $this->assertStringContainsString("{$slot->promptSize()} pixels", $output);
             $this->assertStringContainsString(
                 $spec['alpha'] ? 'REAL transparency' : 'No transparency',
                 $output,
@@ -622,17 +591,17 @@ class ParentCosmeticsTest extends TestCase
 
             // And it reaches the page, alongside the prompt it belongs to.
             $page->assertSee(str_replace("\n", '\n', 'Hand back a PNG file'), false);
-            $page->assertSee("{$spec['width']}x{$spec['height']} pixels", false);
+            $page->assertSee("{$slot->promptSize()} pixels", false);
         }
     }
 
-    public function test_the_pet_prompt_asks_for_the_twelve_poses_and_no_ruled_grid(): void
+    public function test_the_pet_prompt_asks_for_every_age_and_no_ruled_grid(): void
     {
-        $prompt = CosmeticSlot::PET_PROMPT.CosmeticSlot::Pet->promptOutput();
+        $prompt = CosmeticSlot::PET_FAMILY_PROMPT.CosmeticSlot::Pet->promptOutput();
 
-        $this->assertStringContainsString('4 columns × 3 rows', $prompt);
+        $this->assertStringContainsString('6 columns × 6 rows', $prompt);
         $this->assertStringContainsString('ruled foot line', $prompt);
-        $this->assertStringContainsString('1024x768 pixels', $prompt);
+        $this->assertStringContainsString('1024x1024 pixels', $prompt);
         $this->assertStringContainsString('REAL transparency', $prompt);
     }
 

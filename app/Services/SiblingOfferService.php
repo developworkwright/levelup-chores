@@ -205,6 +205,20 @@ class SiblingOfferService
     }
 
     /**
+     * Calls off an offer whose item no longer exists — a pet taken out of the
+     * game entirely — refunding whatever it was holding, like any other offer
+     * that ends without a trade.
+     */
+    public function cancelForRemovedItem(SiblingOffer $offer): void
+    {
+        if ($offer->status !== SiblingOfferStatus::Pending) {
+            return;
+        }
+
+        $this->settle($offer, SiblingOfferStatus::Cancelled, 'that item is gone');
+    }
+
+    /**
      * Lapse every offer in the household that ran out of time, refunding
      * whatever it was holding.
      *

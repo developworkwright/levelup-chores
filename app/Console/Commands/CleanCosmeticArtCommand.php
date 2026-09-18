@@ -38,34 +38,39 @@ class CleanCosmeticArtCommand extends Command
         $changed = 0;
 
         foreach ($items as $item) {
-            if (! $disk->exists($item->art_path)) {
-                $this->warn("{$item->name}: the file is missing from the disk.");
+            // A pet can have up to three sheets, one per stage; each is cleaned.
+            foreach ($item->artPaths() as $column => $path) {
+                $which = $column === 'art_path' ? $item->name : "{$item->name} ({$column})";
 
-                continue;
+                if (! $disk->exists($path)) {
+                    $this->warn("{$which}: the file is missing from the disk.");
+
+                    continue;
+                }
+
+                $before = (string) $disk->get($path);
+                $tidied = $art->normalize($before, $item->slot);
+                $notes = collect($tidied['checks'])->pluck('label')->implode('; ');
+
+                if ($tidied['binary'] === $before) {
+                    $this->line("{$which}: already clean.");
+
+                    continue;
+                }
+
+                $this->info("{$which}: ".($notes !== '' ? $notes : 'redrawn'));
+                $changed++;
+
+                if ($this->option('pretend')) {
+                    continue;
+                }
+
+                $disk->put($path, $tidied['binary']);
+
+                // The art's URL carries this timestamp, so the browser fetches
+                // the cleaned picture instead of the one it already has.
+                $item->touch();
             }
-
-            $before = (string) $disk->get($item->art_path);
-            $tidied = $art->normalize($before, $item->slot);
-            $notes = collect($tidied['checks'])->pluck('label')->implode('; ');
-
-            if ($tidied['binary'] === $before) {
-                $this->line("{$item->name}: already clean.");
-
-                continue;
-            }
-
-            $this->info("{$item->name}: ".($notes !== '' ? $notes : 'redrawn'));
-            $changed++;
-
-            if ($this->option('pretend')) {
-                continue;
-            }
-
-            $disk->put($item->art_path, $tidied['binary']);
-
-            // The art's URL carries this timestamp, so the browser fetches the
-            // cleaned picture instead of the one it already has.
-            $item->touch();
         }
 
         $this->newLine();

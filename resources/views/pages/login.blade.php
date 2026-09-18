@@ -96,11 +96,11 @@ new class extends Component
             // The pets, one per kid who has one out. `home` is a fraction of the
             // row's width rather than a pixel count, so each pen still lines up
             // with its kid's tile however the row wraps.
+            // Each at its own kid's stage, so a baby looks like one here too.
             'pets' => collect($kids)
-                ->map(fn (Profile $kid) => $cosmetics->wornIn($kid, App\Enums\CosmeticSlot::Pet))
-                ->map(fn (?App\Models\Cosmetic $pet, int $index) => $pet === null ? null : [
-                    'src' => $pet->artUrl(),
-                    'effect' => $pet->effect?->cssClass(),
+                ->map(fn (Profile $kid) => app(App\Services\PetService::class)->spriteFor($kid))
+                ->map(fn (?array $pet, int $index) => $pet === null ? null : [
+                    ...$pet,
                     'home' => round(($index + 0.5) / max(1, count($kids)), 4),
                     'roam' => 64,
                 ])

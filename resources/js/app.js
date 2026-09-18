@@ -25,6 +25,12 @@ import './cosmetics.js';
 import './cosmetic-elements.js';
 
 /*
+ * `window.fqShrinkPng`: the parent console's cosmetic uploads are shrunk in
+ * the browser when a generator hands back more than PHP will accept.
+ */
+import './png-shrink.js';
+
+/*
  * The pet that lives on a kid's pages: `<fq-pets>`, which draws whichever pet
  * they have out and lets it get on with its day. Ours rather than the bundle's,
  * because a pet is the one cosmetic that is never a still picture.

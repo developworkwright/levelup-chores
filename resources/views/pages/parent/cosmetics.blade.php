@@ -5,11 +5,13 @@ use App\Enums\CosmeticFlavor;
 use App\Enums\CosmeticMotion;
 use App\Enums\CosmeticSlot;
 use App\Enums\CosmeticStock;
+use App\Enums\PetStage;
 use App\Models\Cosmetic;
 use App\Models\Profile;
 use App\Services\CosmeticArt;
 use App\Services\CosmeticService;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Livewire\Volt\Component;
 use Livewire\WithFileUploads;
 
@@ -23,9 +25,11 @@ use Livewire\WithFileUploads;
  * the preview: the only question worth asking about a piece of cosmetic art is
  * whether it still reads at 40px in a header.
  *
- * Uploading never puts anything in front of a kid. A draft is invisible to the
- * locker and to the rotation until it is published, and a published item can be
- * pulled from stock but never deleted — somebody may be wearing it.
+ * Uploading never puts anything in front of a kid. There is no draft: an upload
+ * is judged on this page — a pet can be let loose on the grown-up's own screen
+ * first — and then published or tossed. A published item can be pulled from
+ * stock but never deleted, because somebody may be wearing it. Drafts saved
+ * before that are still listed, to publish or bin.
  */
 new class extends Component
 {
@@ -52,6 +56,7 @@ new class extends Component
 
     /** A CosmeticEffect value, or '' for plain art. What a 20-ticket pet has. */
     public string $effect = '';
+
 
     /** Which slot's published items are listed below. */
     public string $listSlot = 'frame';
@@ -94,9 +99,16 @@ new class extends Component
         ];
     }
 
+    /**
+     * Which age of the new pet is out on the grown-up's own screen, or null
+     * when nothing is being tried out. See tryOut().
+     */
+    public ?string $trialAge = null;
+
     /** Checked the moment a file lands, so a refusal shows before anything is filled in. */
     public function updatedUpload(): void
     {
+        $this->trialAge = null;
         $this->validateOnly('upload');
     }
 
@@ -113,37 +125,109 @@ new class extends Component
         $this->cost = max(1, min(25, $this->cost + $by));
     }
 
-    public function saveDraft(): void
+    /**
+     * The upload, tidied and checked — and for a square pet picture, cut into
+     * its three ages.
+     *
+     * Worked out once per file and slot and kept for half an hour, because a
+     * pet takes a second or two to cut and every click on this page renders it
+     * again. It is also what makes the try-out honest: the pet on the screen,
+     * the checks beside it and what Publish stores are the same pixels.
+     *
+     * @return array{family: bool, sheets: array<string, string|null>, checks: array<int, array{label: string, status: string}>}
+     */
+    private function prepared(): array
     {
-        $this->store(publish: false);
+        $slot = CosmeticSlot::from($this->slot);
+        $key = 'cosmetic-upload:v'.CosmeticArt::CUT_VERSION.':'.$this->profile->id.':'.$slot->value.':'.$this->upload->getFilename();
+
+        $kept = Cache::remember($key, now()->addMinutes(30), function () use ($slot) {
+            $art = app(CosmeticArt::class);
+            $raw = (string) $this->upload->get();
+
+            if ($slot === CosmeticSlot::Pet && $art->isFamilySheet($raw)) {
+                $family = $art->prepareFamily($raw);
+                $prepared = ['family' => true, 'sheets' => $family['sheets'], 'checks' => $family['checks']];
+            } elseif ($slot === CosmeticSlot::Pet) {
+                // Every pet has all three ages, so a pet is only ever the square.
+                $prepared = ['family' => false, 'sheets' => ['adult' => null], 'checks' => [
+                    ['label' => 'A pet needs all three ages in one square picture — use the Pet prompt', 'status' => 'fail'],
+                ]];
+            } else {
+                // Shrunk and, on a sprite sheet, de-gridded first — then checked,
+                // so the checks and the stored file are the same pixels.
+                $tidied = $art->normalize($raw, $slot);
+                $prepared = ['family' => false, 'sheets' => ['adult' => $tidied['binary']], 'checks' => [...$tidied['checks'], ...$art->inspect($tidied['binary'], $slot)]];
+            }
+
+            // Encoded, because the cache may be a database column.
+            $prepared['sheets'] = array_map(fn (?string $sheet) => $sheet === null ? null : base64_encode($sheet), $prepared['sheets']);
+
+            return $prepared;
+        });
+
+        $kept['sheets'] = array_map(fn (?string $sheet) => $sheet === null ? null : base64_decode($sheet), $kept['sheets']);
+
+        return $kept;
     }
 
+    /**
+     * Puts the new pet out on the grown-up's own screen, as if they owned it —
+     * running about, pettable, feedable — starting as the baby a kid would get.
+     * Nothing is saved: it is the upload, straight from the cut.
+     */
+    public function tryOut(string $age = 'baby'): void
+    {
+        if (! $this->upload || $this->slot !== CosmeticSlot::Pet->value || ! PetStage::tryFrom($age)) {
+            return;
+        }
+
+        $this->validateOnly('upload');
+        $this->trialAge = $age;
+    }
+
+    public function stopTrying(): void
+    {
+        $this->trialAge = null;
+    }
+
+    /** Throws the upload away, to try again with another picture. */
+    public function toss(): void
+    {
+        if ($this->upload) {
+            Cache::forget('cosmetic-upload:v'.CosmeticArt::CUT_VERSION.':'.$this->profile->id.':'.$this->slot.':'.$this->upload->getFilename());
+            rescue(fn () => $this->upload->delete(), report: false);
+        }
+
+        $this->reset('upload', 'trialAge', 'motion', 'effect');
+        $this->resetErrorBag();
+        $this->flashMessage = 'Tossed. Upload another picture when you have one.';
+    }
+
+    /**
+     * Straight to the shop. There is no draft: the art is judged here, on this
+     * page, and anything that fails is tossed rather than kept.
+     */
     public function publish(): void
-    {
-        $this->store(publish: true);
-    }
-
-    private function store(bool $publish): void
     {
         $this->validate();
 
         $slot = CosmeticSlot::from($this->slot);
         $art = app(CosmeticArt::class);
-        // Shrunk and, on a sprite sheet, de-gridded first — then checked, so
-        // the checks and the stored file are talking about the same pixels.
-        $tidied = $art->normalize((string) $this->upload->get(), $slot);
-        $binary = $tidied['binary'];
-        $checks = [...$tidied['checks'], ...$art->inspect($binary, $slot)];
-        $passes = collect($checks)->doesntContain('status', 'fail');
+        $prepared = $this->prepared();
+        $binary = $prepared['sheets']['adult'] ?? null;
+        $checks = $prepared['checks'];
+        $younger = array_filter(['baby' => $prepared['sheets']['baby'] ?? null, 'young' => $prepared['sheets']['young'] ?? null]);
 
-        if ($publish && ! $passes) {
-            $this->addError('upload', 'It didn\'t pass the checks, so it can only be saved as a draft.');
+        if ($binary === null || collect($checks)->contains('status', 'fail')) {
+            $this->addError('upload', 'It didn\'t pass the checks — toss it and try another picture.');
 
             return;
         }
 
         try {
             $path = $art->store($this->profile->household_id, $binary);
+            $youngerPaths = array_map(fn (string $sheet) => $art->store($this->profile->household_id, $sheet), $younger);
         } catch (RuntimeException $e) {
             report($e);
             $this->addError('upload', $e->getMessage());
@@ -155,6 +239,8 @@ new class extends Component
             'household_id' => $this->profile->household_id,
             'slot' => $slot,
             'art_path' => $path,
+            'baby_art_path' => $youngerPaths['baby'] ?? null,
+            'young_art_path' => $youngerPaths['young'] ?? null,
             'name' => trim($this->name),
             'cost' => $this->cost,
             'stock' => $this->stock,
@@ -162,16 +248,15 @@ new class extends Component
             'motion' => $this->motion !== '' ? $this->motion : null,
             'effect' => $this->effect !== '' ? $this->effect : null,
             'checks' => $checks,
-            'published_at' => $publish ? now() : null,
+            'published_at' => now(),
         ]);
 
+        Cache::forget('cosmetic-upload:v'.CosmeticArt::CUT_VERSION.':'.$this->profile->id.':'.$slot->value.':'.$this->upload->getFilename());
         rescue(fn () => $this->upload->delete(), report: false);
 
-        $this->flashMessage = $publish
-            ? trim($this->name).' is in the shop.'
-            : trim($this->name).' is saved as a draft. Nobody can see it yet.';
+        $this->flashMessage = trim($this->name).' is in the shop.';
 
-        $this->reset('upload', 'name', 'motion', 'effect');
+        $this->reset('upload', 'name', 'motion', 'effect', 'trialAge');
         app(CosmeticService::class)->forget();
     }
 
@@ -188,8 +273,24 @@ new class extends Component
             return;
         }
 
+        // Checked again, against today's rules: the checks saved with a draft
+        // are from the day it was uploaded, and a check that has since been
+        // fixed must not keep good art stuck in drafts forever. A pet's
+        // younger ages were settled when it was cut, so only the adult sheet —
+        // the one that must pass — is looked at again.
+        if ($item->isUpload()) {
+            $art = app(CosmeticArt::class);
+            $stored = rescue(fn () => $art->disk()->get($item->art_path), null, false);
+
+            if ($stored !== null) {
+                $fresh = $art->inspect($stored, $item->slot);
+                $kept = collect($item->checks ?? [])->filter(fn (array $check) => $check['status'] === 'warn' && ! str_starts_with($check['label'], 'Adult: '));
+                $item->update(['checks' => [...$fresh, ...$kept->values()->all()]]);
+            }
+        }
+
         if (! $item->passesChecks()) {
-            $this->flashMessage = $item->name.' didn\'t pass its checks — bin it and upload a new picture.';
+            $this->flashMessage = $item->name.' didn\'t pass its checks — '.(collect($item->checks)->firstWhere('status', 'fail')['label'] ?? 'see its row').'. Bin it and upload a new picture.';
 
             return;
         }
@@ -208,8 +309,8 @@ new class extends Component
             return;
         }
 
-        if ($item->art_path) {
-            rescue(fn () => app(CosmeticArt::class)->disk()->delete($item->art_path), report: false);
+        foreach ($item->artPaths() as $path) {
+            rescue(fn () => app(CosmeticArt::class)->disk()->delete($path), report: false);
         }
 
         $this->flashMessage = $item->name.' is gone.';
@@ -244,15 +345,40 @@ new class extends Component
 
         $checks = [];
         $previewUrl = null;
+        $previewIsFamily = false;
+        $trial = null;
 
         if ($this->upload && ! $this->getErrorBag()->has('upload')) {
-            $art = app(CosmeticArt::class);
-            $checks = rescue(function () use ($art, $slot) {
-                $tidied = $art->normalize((string) $this->upload->get(), $slot);
-
-                return [...$tidied['checks'], ...$art->inspect($tidied['binary'], $slot)];
-            }, [], false);
+            $prepared = rescue(fn () => $this->prepared(), null, false);
+            $checks = $prepared['checks'] ?? [];
+            $previewIsFamily = $prepared['family'] ?? false;
             $previewUrl = rescue(fn () => $this->upload->temporaryUrl(), null, false);
+
+            /*
+             * The pet out on this screen: the age being tried, drawn from its
+             * own sheet when the cut gave it one and from the next age up —
+             * shrunk — when it did not, exactly as a kid's would be.
+             */
+            $age = $this->trialAge ? PetStage::tryFrom($this->trialAge) : null;
+
+            if ($age && $slot === CosmeticSlot::Pet && $prepared) {
+                $drawn = $age;
+
+                while ($drawn->next() !== null && ($prepared['sheets'][$drawn->value] ?? null) === null) {
+                    $drawn = $drawn->next();
+                }
+
+                $sheet = $prepared['sheets'][$drawn->value] ?? null;
+
+                $trial = $sheet === null ? null : [
+                    'age' => $age,
+                    'src' => 'data:image/png;base64,'.base64_encode($sheet),
+                    'scale' => round($age->scale() / $drawn->scale(), 3),
+                    'borrowed' => $drawn === $age ? null : $drawn,
+                    'own' => collect(PetStage::cases())->mapWithKeys(fn (PetStage $one) => [$one->value => ($prepared['sheets'][$one->value] ?? null) !== null])->all(),
+                    'passes' => collect($checks)->doesntContain('status', 'fail'),
+                ];
+            }
         }
 
         $rotation = $service->rotationThisWeek($household)->keys()->merge($service->limitedThisWeek($household)->pluck('id'));
@@ -262,6 +388,8 @@ new class extends Component
             'uploadSlot' => $slot,
             'checks' => $checks,
             'previewUrl' => $previewUrl,
+            'previewIsFamily' => $previewIsFamily,
+            'trial' => $trial,
             // A real face under the preview, since a frame is judged by how it
             // sits round one.
             'previewFace' => $catalog->first(fn (Cosmetic $item) => $item->slot === CosmeticSlot::Avatar && ! $item->isDraft()),
@@ -287,17 +415,18 @@ new class extends Component
         'pattern' => 'Seamless is the one thing you cannot fix later, and the uploader checks it: opposite edges have to match or the page shows a grid of seams.',
         'cabinet' => 'The screen must come back empty and black — the game draws into it.',
         'spark' => 'Keep the center empty: this animates outward from whatever button was tapped.',
-        'pet' => 'One sheet, twelve poses, so it stays the same animal — generating each pose on its own gives you twelve slightly different creatures. Generators rule the grid in whatever the prompt says; those lines are rubbed out on upload.',
+        'pet' => 'Baby, young and adult in ONE square picture — a generator keeps a character far more consistent inside one image than across separate ones. Upload it as it comes and it is cut apart for you. Every pet needs all three ages: one missing a pose, or copied from another age, means generating again. Press Try it out to watch each age run about on your own screen before publishing.',
     ];
 
     // Six of the prompts ship with the artwork bundle. The pet's is the app's
-    // own, so it is handed to the panel from here — see CosmeticSlot::PET_PROMPT.
-    $ownPrompts = ['pet' => App\Enums\CosmeticSlot::PET_PROMPT];
+    // own — every age in one picture — so it is handed to the panel from here.
+    $ownPrompts = ['pet' => App\Enums\CosmeticSlot::PET_FAMILY_PROMPT];
 
     // And every one of them gets the file it must hand back spelled out on the
     // end, which none of the bundled six ever said. See promptOutput().
     $promptOutputs = collect(App\Enums\CosmeticSlot::uploadable())
         ->mapWithKeys(fn (App\Enums\CosmeticSlot $case) => [$case->value => $case->promptOutput()])
+
         ->all();
 
     $promptTabs = collect(App\Enums\CosmeticSlot::uploadable())
@@ -321,7 +450,9 @@ new class extends Component
 
             <div class="flex flex-wrap gap-2">
                 <span class="rounded-[9px] border border-fq-line-2 bg-fq-sunk px-[11px] py-[7px] font-mono-fq text-[10px] tracking-[0.1em] whitespace-nowrap text-fq-green">{{ $counts['live'] }} LIVE</span>
-                <span class="rounded-[9px] border border-fq-ticket-line px-[11px] py-[7px] font-mono-fq text-[10px] tracking-[0.1em] whitespace-nowrap text-fq-lime" style="background: var(--fq-gold-fill)">{{ $counts['drafts'] }} {{ Str::plural('DRAFT', $counts['drafts']) }}</span>
+                @if ($counts['drafts'] > 0)
+                    <span class="rounded-[9px] border border-fq-ticket-line px-[11px] py-[7px] font-mono-fq text-[10px] tracking-[0.1em] whitespace-nowrap text-fq-lime" style="background: var(--fq-gold-fill)">{{ $counts['drafts'] }} OLD {{ Str::plural('DRAFT', $counts['drafts']) }}</span>
+                @endif
                 <span class="rounded-[9px] border border-fq-line-2 bg-fq-sunk px-[11px] py-[7px] font-mono-fq text-[10px] tracking-[0.1em] whitespace-nowrap text-fq-text-4">{{ $counts['rotation'] }} IN ROTATION</span>
             </div>
         </div>
@@ -329,6 +460,8 @@ new class extends Component
         @if ($flashMessage)
             <div class="rounded-[14px] border border-fq-line-2 bg-fq-sunk px-4 py-3 text-sm text-fq-text-2">{{ $flashMessage }}</div>
         @endif
+
+
 
         <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_300px] md:items-start">
             <div class="flex flex-col gap-[13px]">
@@ -344,14 +477,31 @@ new class extends Component
                     <span class="min-w-0 flex-1">
                         <span class="block font-baloo text-[16px] font-extrabold">{{ $upload ? 'Choose a different PNG' : 'Choose a PNG' }}</span>
                         <span class="mt-1 block font-mono-fq text-[10px] text-fq-text-4 uppercase">
-                            {{ $uploadSlot->label() }} · {{ $spec['width'] }}×{{ $spec['height'] }} · {{ $spec['alpha'] ? 'transparent background' : 'solid, seamless' }} · max {{ $uploadSlot->uploadLimitLabel() }}
+                            {{ $uploadSlot->label() }} · {{ $uploadSlot === App\Enums\CosmeticSlot::Pet ? 'square, all three ages' : $spec['width'].'×'.$spec['height'] }} · {{ $spec['alpha'] ? 'transparent background' : 'solid, seamless' }} · max {{ $uploadSlot->uploadLimitLabel() }}
                         </span>
                     </span>
                     <span class="shrink-0 rounded-[9px] px-3 py-2 font-mono-fq text-[10px] tracking-[0.1em] whitespace-nowrap text-fq-bg" style="background: var(--fq-cyan)">CHOOSE</span>
-                    <input type="file" wire:model="upload" accept="image/png" class="sr-only">
+                    {{-- Uploaded by hand rather than wire:model, so a picture over
+                         the cap can be shrunk in the browser first — an all-ages
+                         sheet straight out of a generator is usually over 2 MB,
+                         which PHP drops before this app can say why. --}}
+                    <input
+                        type="file"
+                        accept="image/png"
+                        class="sr-only"
+                        x-data
+                        x-on:change="
+                            const file = $event.target.files[0];
+                            $event.target.value = '';
+                            if (file) $wire.upload('upload', await window.fqShrinkPng(file, {{ $spec['max_kb'] }}));
+                        "
+                    >
                 </label>
 
                 <div wire:loading wire:target="upload" class="font-mono-fq text-[10px] text-fq-text-4">UPLOADING…</div>
+                @if ($uploadSlot === App\Enums\CosmeticSlot::Pet)
+                    <p class="text-[11.5px] text-fq-text-4">One square picture with the baby, young and adult on it — made from the Pet prompt below.</p>
+                @endif
                 @error('upload') <p class="text-[12.5px] text-fq-danger">{{ $message }}</p> @enderror
 
                 {{-- Chips rather than a dropdown: all six kinds of upload are on
@@ -452,20 +602,34 @@ new class extends Component
                     <span class="text-[11.5px] text-fq-text-4">A rainbow or a flame on top of the picture. Worth about 20 tickets on a pet.</span>
                 </label>
 
-                <div class="flex gap-[9px] pt-[2px]">
+                {{-- No drafts: the art is judged here and now. A pet can be let
+                     loose on this screen first; anything that is not right is
+                     tossed, and the next picture uploaded in its place. --}}
+                <div class="flex flex-wrap gap-[9px] pt-[2px]">
+                    @if ($upload && $uploadSlot === App\Enums\CosmeticSlot::Pet)
+                        <button
+                            type="button"
+                            wire:click="tryOut('baby')"
+                            wire:loading.attr="disabled"
+                            class="rounded-[12px] px-[18px] py-3 text-center font-baloo text-[15px] font-extrabold text-fq-ink"
+                            style="background: linear-gradient(150deg,#b8ffd9,#54e8d0)"
+                        ><i class="fa-solid fa-paw mr-[6px] text-[13px]"></i>Try it out</button>
+                    @endif
                     <button
                         type="button"
                         wire:click="publish"
                         wire:loading.attr="disabled"
-                        class="flex-1 rounded-[12px] p-3 text-center font-baloo text-[15px] font-extrabold text-fq-ink"
+                        class="min-w-[160px] flex-1 rounded-[12px] p-3 text-center font-baloo text-[15px] font-extrabold text-fq-ink"
                         style="background: linear-gradient(150deg,#fff6b0,#ffc93d)"
                     >Publish to the shop</button>
-                    <button
-                        type="button"
-                        wire:click="saveDraft"
-                        wire:loading.attr="disabled"
-                        class="rounded-[12px] border border-fq-line-3 px-[18px] py-3 text-center font-baloo text-[15px] font-extrabold text-fq-cyan"
-                    >Save draft</button>
+                    @if ($upload)
+                        <button
+                            type="button"
+                            wire:click="toss"
+                            wire:loading.attr="disabled"
+                            class="rounded-[12px] border border-fq-line-3 px-[18px] py-3 text-center font-baloo text-[15px] font-extrabold text-fq-text-3"
+                        >Toss it</button>
+                    @endif
                 </div>
             </div>
 
@@ -473,7 +637,10 @@ new class extends Component
                 <p class="font-mono-fq text-[9.5px] tracking-[0.16em] text-fq-text-4 uppercase">Preview</p>
 
                 <div class="flex flex-col gap-3 rounded-[16px] border border-fq-line-2 bg-fq-panel p-[13px]">
-                    @if ($previewUrl)
+                    @if ($previewUrl && $previewIsFamily)
+                        <img src="{{ $previewUrl }}" alt="" class="w-full rounded-[10px]" style="background: repeating-conic-gradient(#1d1036 0 25%, #0b0616 0 50%) 0 0 / 16px 16px">
+                        <p class="text-[12px] text-fq-text-4">All three ages in one picture. It is cut into baby, young and adult — press Try it out to see each age running about on this screen before it goes in the shop.</p>
+                    @elseif ($previewUrl)
                         @php
                             $motionCss = App\Enums\CosmeticMotion::tryFrom($motion)?->value;
                             $sizes = in_array($uploadSlot, [App\Enums\CosmeticSlot::Frame, App\Enums\CosmeticSlot::Avatar], true)
@@ -571,12 +738,13 @@ new class extends Component
                         type="button"
                         {{-- Picks the upload slot to match: the art made from
                              this prompt is what gets uploaded next. --}}
-                        x-on:click="promptKind = '{{ $kind }}'; promptCopied = false; $wire.set('slot', '{{ $kind }}')"
+                        x-on:click="promptKind = '{{ $kind }}'; promptCopied = false; $wire.set('slot', '{{ str_starts_with($kind, 'pet') ? 'pet' : $kind }}')"
                         class="rounded-full border px-3 py-[6px] font-mono-fq text-[9.5px] tracking-[0.08em] uppercase"
                         :style="promptKind === '{{ $kind }}' ? 'border-color:#c9a0ff;background:#241546;color:#d8b4ff' : 'border-color:#241539;background:#0b0616;color:#6f6288'"
                     >{{ $tab }}</button>
                 @endforeach
             </div>
+
 
             <div
                 class="rounded-[13px] border border-fq-line bg-fq-bg p-[14px] font-mono-fq text-[10.5px] leading-[1.8] whitespace-pre-wrap text-fq-text-2"
@@ -593,7 +761,7 @@ new class extends Component
 
         @if ($drafts->isNotEmpty())
             <div class="flex items-center gap-[9px] pt-1">
-                <span class="font-mono-fq text-[9.5px] tracking-[0.16em] text-fq-text-4 uppercase">Drafts · not visible to anyone yet</span>
+                <span class="font-mono-fq text-[9.5px] tracking-[0.16em] text-fq-text-4 uppercase">Old drafts · not visible to anyone · publish or bin them</span>
                 <span class="h-px flex-1 bg-fq-track"></span>
             </div>
 
@@ -618,8 +786,9 @@ new class extends Component
                         <span class="min-w-[120px] flex-1 text-[11.5px]" style="color: {{ $failed ? '#ff8098' : ($warned ? '#e8ddbd' : '#7dffb0') }}">
                             {{ $failed['label'] ?? $warned['label'] ?? 'All checks passed' }}
                         </span>
-                        <button type="button" wire:click="publishDraft({{ $draft->id }})" @disabled($failed) class="shrink-0 rounded-[8px] px-[11px] py-[6px] font-mono-fq text-[9px] tracking-[0.1em] whitespace-nowrap disabled:opacity-40" style="background: #7dffb0; color: #05170c">PUBLISH</button>
+                        <button type="button" wire:click="publishDraft({{ $draft->id }})" class="shrink-0 rounded-[8px] px-[11px] py-[6px] font-mono-fq text-[9px] tracking-[0.1em] whitespace-nowrap" style="background: {{ $failed ? '#ffc93d' : '#7dffb0' }}; color: #05170c">{{ $failed ? 'CHECK AGAIN' : 'PUBLISH' }}</button>
                         <button type="button" wire:click="binDraft({{ $draft->id }})" wire:confirm="Bin {{ $draft->name }}? The picture goes too." class="shrink-0 rounded-[8px] border border-fq-line-2 px-[11px] py-[6px] font-mono-fq text-[9px] tracking-[0.1em] whitespace-nowrap text-fq-text-4">BIN</button>
+
                     </div>
                 @endforeach
             </div>
@@ -667,6 +836,7 @@ new class extends Component
                             class="shrink-0 rounded-[8px] border border-fq-line-2 px-[11px] py-[6px] font-mono-fq text-[9px] tracking-[0.1em] whitespace-nowrap {{ $item->isPulled() ? 'text-fq-green' : 'text-fq-text-4' }}"
                         >{{ $item->isPulled() ? 'PUT BACK' : 'PULL FROM STOCK' }}</button>
                     @endunless
+
                 </div>
             @endforeach
         </div>
@@ -678,4 +848,71 @@ new class extends Component
             </span>
         </div>
     </div>
+
+    {{-- The pet being tried out, loose on this screen as it would be on a
+         kid's: pettable, draggable, feedable, with its toy out. The layer is
+         fixed to the window, so the pet walks along the bottom of whatever is
+         in view. Keyed on the age, so switching age is a fresh animal. --}}
+    @if ($trial)
+        <div wire:key="trial-{{ $trial['age']->value }}" class="pointer-events-none fixed inset-0 z-30" data-pet-trial="{{ $trial['age']->value }}">
+            <fq-pets
+                sheet="{{ $trial['src'] }}"
+                scale="{{ $trial['scale'] }}"
+                @if ($effect !== '') effect="{{ App\Enums\CosmeticEffect::from($effect)->cssClass() }}" @endif
+                toy
+                drag
+                feed-on-tap
+            ></fq-pets>
+        </div>
+
+        {{-- At the top: the pet lives along the bottom of the window, and a
+             bar there sat right on top of it. --}}
+        <div class="fixed inset-x-0 top-0 z-40 flex justify-center px-3 pt-3">
+            <div class="flex max-w-[720px] flex-1 flex-wrap items-center gap-[8px] rounded-[16px] border border-fq-line-2 px-[12px] py-[10px] shadow-2xl" style="background: rgba(14,7,25,.96)">
+                <div class="min-w-[140px] flex-1">
+                    <p class="font-mono-fq text-[8.5px] tracking-[0.14em] text-fq-cyan uppercase">Trying out · nothing is saved</p>
+                    <p class="text-[12px] text-fq-text-3">
+                        {{ $name !== '' ? $name : 'The new pet' }}, as a {{ mb_strtolower($trial['age']->label()) }}.
+                        @if ($trial['borrowed'])
+                            <span class="text-fq-gold">No {{ $trial['age']->value }} art — it's the {{ mb_strtolower($trial['borrowed']->label()) }} drawn smaller.</span>
+                        @endif
+                        Pet it, pick it up, tap anywhere empty to feed it.
+                    </p>
+                </div>
+
+                <div class="flex gap-[4px]" role="radiogroup" aria-label="Age">
+                    @foreach (App\Enums\PetStage::cases() as $age)
+                        @php $on = $trial['age'] === $age; @endphp
+                        <button
+                            type="button"
+                            role="radio"
+                            aria-checked="{{ $on ? 'true' : 'false' }}"
+                            wire:click="tryOut('{{ $age->value }}')"
+                            class="rounded-full border px-[10px] py-[5px] font-mono-fq text-[9px] tracking-[0.08em] uppercase"
+                            style="border-color: {{ $on ? '#54e8d0' : '#3a2360' }}; color: {{ $on ? '#54e8d0' : ($trial['own'][$age->value] ? '#b0a3cc' : '#6f6288') }}"
+                        >{{ $age->value }}</button>
+                    @endforeach
+                </div>
+
+                <button
+                    type="button"
+                    x-data
+                    x-on:click="window.dispatchEvent(new CustomEvent('fq-pet-feed'))"
+                    class="rounded-[10px] border border-fq-line-2 px-[11px] py-[7px] font-baloo text-[13px] font-extrabold text-fq-green"
+                ><i class="fa-solid fa-drumstick-bite mr-[4px] text-[11px]"></i>Feed</button>
+
+                <button
+                    type="button"
+                    wire:click="publish"
+                    @disabled(! $trial['passes'])
+                    class="rounded-[10px] px-[12px] py-[7px] font-baloo text-[13px] font-extrabold text-fq-ink disabled:opacity-40"
+                    style="background: linear-gradient(150deg,#fff6b0,#ffc93d)"
+                    title="{{ $name === '' ? 'Give it a name first' : '' }}"
+                >Publish</button>
+
+                <button type="button" wire:click="toss" class="rounded-[10px] border border-fq-line-2 px-[11px] py-[7px] font-baloo text-[13px] font-extrabold text-fq-text-3">Toss</button>
+                <button type="button" wire:click="stopTrying" aria-label="Put it away" class="px-[6px] py-[7px] text-[13px] text-fq-text-4"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+        </div>
+    @endif
 </x-parent.shell>

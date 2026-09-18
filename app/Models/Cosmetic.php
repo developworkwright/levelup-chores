@@ -7,6 +7,7 @@ use App\Enums\CosmeticFlavor;
 use App\Enums\CosmeticMotion;
 use App\Enums\CosmeticSlot;
 use App\Enums\CosmeticStock;
+use App\Enums\PetStage;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -27,6 +28,8 @@ class Cosmetic extends Model
         'slot',
         'recipe',
         'art_path',
+        'baby_art_path',
+        'young_art_path',
         'name',
         'cost',
         'stock',
@@ -118,13 +121,66 @@ class Cosmetic extends Model
      * Where an uploaded picture is fetched from. Versioned on the row's own
      * timestamp, so a replaced picture is never served from a stale cache.
      */
-    public function artUrl(): ?string
+    public function artUrl(?PetStage $stage = null): ?string
     {
         if (! $this->isUpload()) {
             return null;
         }
 
-        return route('cosmetics.art', ['cosmetic' => $this->id, 'v' => $this->updated_at?->timestamp]);
+        $drawn = $stage === null ? null : $this->drawnStage($stage);
+
+        return route('cosmetics.art', array_filter([
+            'cosmetic' => $this->id,
+            'stage' => $drawn === null || $drawn === PetStage::Adult ? null : $drawn->value,
+            'v' => $this->updated_at?->timestamp,
+        ]));
+    }
+
+    /**
+     * The stage whose sheet a pet at this stage is drawn from: its own when one
+     * was uploaded, otherwise the next one up. The adult always exists — it is
+     * the sheet the pet was made with.
+     */
+    public function drawnStage(PetStage $stage): PetStage
+    {
+        for ($try = $stage; $try !== null; $try = $try->next()) {
+            if ($this->getAttribute($try->artColumn()) !== null) {
+                return $try;
+            }
+        }
+
+        return PetStage::Adult;
+    }
+
+    /**
+     * How much to shrink a pet at this stage when it is drawn: not at all on
+     * its own sheet, which is drawn at its true size, and down to size when it
+     * is borrowing an older stage's.
+     */
+    public function drawScale(PetStage $stage): float
+    {
+        return round($stage->scale() / $this->drawnStage($stage)->scale(), 3);
+    }
+
+    /** Where this stage's art is stored, falling back the same way. */
+    public function artPathFor(PetStage $stage): ?string
+    {
+        return $this->getAttribute($this->drawnStage($stage)->artColumn());
+    }
+
+    /**
+     * Every stored file this item draws from, so binning a draft or cleaning the
+     * art reaches all of a pet's sheets and not just the adult.
+     *
+     * @return array<string, string> keyed by column
+     */
+    public function artPaths(): array
+    {
+        return array_filter([
+            'art_path' => $this->art_path,
+            'baby_art_path' => $this->baby_art_path,
+            'young_art_path' => $this->young_art_path,
+        ]);
     }
 
     /**

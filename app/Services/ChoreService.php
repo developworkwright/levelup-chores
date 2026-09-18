@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\ChoreCadence;
 use App\Enums\CompletionStatus;
 use App\Enums\LedgerKind;
+use App\Enums\PetStage;
 use App\Enums\ProfileRole;
 use App\Enums\TicketKind;
 use App\Models\CharmedChore;
@@ -91,6 +92,7 @@ class ChoreService
         private TicketService $tickets,
         private MonsterService $monsters,
         private StreakService $streaks,
+        private PetService $pets,
     ) {}
 
     /**
@@ -1226,6 +1228,10 @@ class ChoreService
         $profile->xp += self::XP_PER_CHORE;
         $profile->save();
 
+        // Whichever pet is out grows with the kid's work. Only the one out: a
+        // pet put away stays exactly as big as it was left.
+        $grewInto = $this->pets->grow($profile);
+
         // The whole of the family-goal side of an approval. Damage, the
         // leaderboard under each bar, the kill and the cards announcing it all
         // come out of this one call — there is no second tally kept alongside
@@ -1256,7 +1262,12 @@ class ChoreService
             $profile->notify(new ChoreReviewed(
                 'Signed off!',
                 "+{$completion->points_awarded} points for {$completion->chore->name}."
-                    .($ticketed ? ' Plus '.self::HELP_WANTED_TICKETS.' bonus '.Str::plural('ticket', self::HELP_WANTED_TICKETS).' for helping out!' : ''),
+                    .($ticketed ? ' Plus '.self::HELP_WANTED_TICKETS.' bonus '.Str::plural('ticket', self::HELP_WANTED_TICKETS).' for helping out!' : '')
+                    .match ($grewInto) {
+                        PetStage::Young => ' Your pet is growing up!',
+                        PetStage::Adult => ' Your pet is all grown up!',
+                        default => '',
+                    },
             ));
         } catch (Throwable $e) {
             Log::error('Chore reviewed notification failed for approval.', [

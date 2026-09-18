@@ -5,7 +5,7 @@
  * twelve-pose sprite sheet a grown-up uploaded (see App\Enums\CosmeticSlot), and
  * the pet gets on with its own day: wanders, hops onto the top edge of a card,
  * sits and blinks, looks at whatever was tapped last, plays with its toy on a
- * powered-up day, and sleeps after bedtime. It can be petted and picked up.
+ * powered-up day, and sleeps after bedtime. It can be petted, picked up and fed.
  *
  * Three things shape how this is written.
  *
@@ -75,6 +75,21 @@ const SCRUFF = 0.04;
  */
 const VISIT_SECONDS = 300;
 
+/** How long a snack takes to eat, in seconds. */
+const EAT_SECONDS = 1.8;
+
+/**
+ * What a tap on the page lands on when it is *not* a request for a snack:
+ * anything that does something when tapped. Livewire and Alpine handlers are
+ * attributes, so an element carrying one counts even without a button's role.
+ */
+const TAPPABLE = [
+    'a', 'button', 'input', 'select', 'textarea', 'label', 'summary', 'details', 'video', 'audio',
+    '[role="button"]', '[role="link"]', '[role="tab"]', '[role="radio"]', '[role="checkbox"]', '[role="switch"]', '[role="menuitem"]',
+    '[contenteditable]', '[tabindex]:not([tabindex="-1"])', '[wire\\:click]', '[x-on\\:click]', '[\\@click]',
+    'fq-pets', 'fq-cosmetic', 'canvas', '[data-fq-no-feed]',
+].join(',');
+
 /** Where one pose sits in the sheet, as a background-position pair. */
 function posePosition(pose) {
     const index = Math.max(0, POSES.indexOf(pose));
@@ -109,6 +124,8 @@ class Pet {
         this.home = settings.home ?? null;
         this.roam = settings.roam ?? 120;
         this.visiting = settings.visiting ?? false;
+        // Smaller while it is young — see App\Enums\PetStage.
+        this.scale = settings.scale ?? 1;
         this.x = settings.home ?? random(60, Math.max(120, world.width - 60));
         this.y = world.floor();
         this.vx = 0;
@@ -263,6 +280,13 @@ class Pet {
         this.runTo(this.x < world.width / 2 ? -(world.margin() + PET_SIZE) : world.width + world.margin() + PET_SIZE, WALK_SPEED * 1.3);
     }
 
+    /** Standing right by a snack that has landed, and it is ours to eat. */
+    canReachSnack() {
+        const snack = this.world.snack;
+
+        return Boolean(snack && ! this.visiting && snack.landed && Math.abs(snack.x - this.x) < 30);
+    }
+
     /** Says hello to whoever it has just bumped into. */
     greet(other) {
         this.facing = other.x < this.x ? -1 : 1;
@@ -377,7 +401,34 @@ class Pet {
                     return;
                 }
 
+                if (this.canReachSnack()) {
+                    this.act('eating', 'crouch', EAT_SECONDS);
+
+                    return;
+                }
+
                 this.act('idle', 'idle', random(0.4, 1.4));
+            }
+
+            return;
+        }
+
+        if (this.state === 'eating') {
+            if (! this.perch) {
+                this.y = world.floor();
+            }
+
+            // Chomping: down to the snack and back up, a few times a second.
+            this.pose = Math.floor(this.clock * 6) % 2 ? 'crouch' : 'happy';
+
+            if (world.snack) {
+                world.snack.bite = 1 - Math.max(0, this.think) / EAT_SECONDS;
+            }
+
+            if (this.think <= 0) {
+                world.finishSnack();
+                this.act('happy', 'happy', 1.2);
+                world.emit('fq-pet-fed');
             }
 
             return;
@@ -420,6 +471,17 @@ class Pet {
     decide() {
         const world = this.world;
         const toy = world.toy;
+
+        // Food beats everything, and a visitor does not eat somebody else's.
+        if (world.snack && ! this.visiting) {
+            if (this.canReachSnack()) {
+                this.act('eating', 'crouch', EAT_SECONDS);
+            } else {
+                this.runTo(world.snack.x, CHASE_SPEED);
+            }
+
+            return;
+        }
 
         // The toy, when there is one and it is not already being sat next to.
         if (toy && Math.random() < 0.45) {
@@ -469,6 +531,7 @@ class World {
         this.host = host;
         this.pets = [];
         this.toy = null;
+        this.snack = null;
         this.asleep = false;
         this.width = 0;
     }
@@ -635,6 +698,14 @@ class World {
         }
     }
 
+    /** The snack is eaten: gone from the page. */
+    finishSnack() {
+        if (this.snack) {
+            this.snack.sprite.remove();
+            this.snack = null;
+        }
+    }
+
     emit(name, detail) {
         window.dispatchEvent(new CustomEvent(name, { detail: detail ?? {} }));
     }
@@ -659,6 +730,36 @@ class World {
         if (this.toy) {
             this.toy.step(dt, this);
         }
+
+        if (this.snack) {
+            this.snack.step(dt);
+        }
+    }
+}
+
+/**
+ * Something to eat, dropped beside the pet. It falls to the level the pet is
+ * standing on rather than to whatever is under it, so a pet on a card is never
+ * handed food it would have to jump down to.
+ */
+class Snack {
+    constructor(x, rest, from) {
+        this.x = x;
+        // From where it was dropped — a finger's tap — or from just above.
+        this.y = Math.min(from ?? rest - 220, rest);
+        this.rest = rest;
+        this.vy = 0;
+        this.bite = 0;
+        this.landed = false;
+    }
+
+    step(dt) {
+        if (this.y < this.rest) {
+            this.vy += GRAVITY * dt;
+            this.y = Math.min(this.rest, this.y + this.vy * dt);
+        }
+
+        this.landed = this.y >= this.rest;
     }
 }
 
@@ -690,7 +791,7 @@ class Toy {
 
 class FqPets extends HTMLElement {
     static get observedAttributes() {
-        return ['sheet', 'effect', 'toy', 'asleep', 'drag', 'sheets', 'visitor'];
+        return ['sheet', 'scale', 'effect', 'toy', 'asleep', 'drag', 'sheets', 'visitor'];
     }
 
     connectedCallback() {
@@ -698,15 +799,21 @@ class FqPets extends HTMLElement {
         this.render();
 
         this.onCelebrate = () => this.cheer();
+        this.onFeed = () => this.feed();
+        this.onTap = (event) => this.feedAt(event);
         this.onVisible = () => (document.hidden ? this.pause() : this.play());
 
         window.addEventListener('celebrate', this.onCelebrate);
+        window.addEventListener('fq-pet-feed', this.onFeed);
+        document.addEventListener('click', this.onTap);
         document.addEventListener('visibilitychange', this.onVisible);
     }
 
     disconnectedCallback() {
         this.pause();
         window.removeEventListener('celebrate', this.onCelebrate);
+        window.removeEventListener('fq-pet-feed', this.onFeed);
+        document.removeEventListener('click', this.onTap);
         document.removeEventListener('visibilitychange', this.onVisible);
     }
 
@@ -717,7 +824,7 @@ class FqPets extends HTMLElement {
 
         // The sheet changing is a different pet; everything else is the same
         // pet in a different mood, and must not restart it mid-jump.
-        if (name === 'sheet' || name === 'effect' || name === 'sheets' || name === 'visitor') {
+        if (name === 'sheet' || name === 'scale' || name === 'effect' || name === 'sheets' || name === 'visitor') {
             this.render();
 
             return;
@@ -736,7 +843,7 @@ class FqPets extends HTMLElement {
      * row of them from `sheets` — which is the login door, where each pet is
      * penned around its own kid's tile.
      *
-     * @return array<int, {src: string, effect: ?string, home: ?number, roam: ?number, visiting: ?boolean}>
+     * @return array<int, {src: string, effect: ?string, scale: ?number, home: ?number, roam: ?number, visiting: ?boolean}>
      */
     cast() {
         const read = (name) => {
@@ -757,7 +864,7 @@ class FqPets extends HTMLElement {
         const visitor = read('visitor');
 
         return [
-            mine ? { src: mine, effect: this.getAttribute('effect') } : null,
+            mine ? { src: mine, effect: this.getAttribute('effect'), scale: parseFloat(this.getAttribute('scale')) || 1 } : null,
             visitor && visitor.src ? { ...visitor, visiting: true } : null,
         ].filter(Boolean);
     }
@@ -790,6 +897,11 @@ class FqPets extends HTMLElement {
                 touch-action: none; will-change: transform;
             }
             .toy { width: ${PET_SIZE * 0.5}px; height: ${PET_SIZE * 0.5}px; background-size: 400% 300%; }
+            .snack {
+                position: absolute; width: 30px; height: 30px; font-size: 26px; line-height: 30px;
+                text-align: center; pointer-events: none; transform-origin: 50% 100%;
+                filter: drop-shadow(0 2px 0 rgba(0,0,0,.45));
+            }
         `;
 
         root.append(style);
@@ -816,6 +928,7 @@ class FqPets extends HTMLElement {
                 home: entry.home === undefined || entry.home === null ? null : entry.home * this.world.width,
                 roam: entry.roam ?? Math.max(70, this.world.width * 0.12),
                 visiting: entry.visiting ?? false,
+                scale: entry.scale ?? 1,
             });
 
             this.world.pets.push(pet);
@@ -922,6 +1035,85 @@ class FqPets extends HTMLElement {
         sprite.addEventListener('pointercancel', release);
     }
 
+    /**
+     * Snack time: something to eat drops beside the kid's own pet, and it goes
+     * and eats it. Play and nothing else — it grows nothing and is never owed.
+     * One snack at a time, and none while it sleeps.
+     */
+    feed(at) {
+        if (! this.world || this.reduced || this.world.asleep || this.world.snack) {
+            return;
+        }
+
+        const pet = this.world.pets.find((one) => ! one.visiting);
+
+        if (! pet) {
+            return;
+        }
+
+        const perch = pet.perch;
+        let x = at ? at.x : pet.x + (Math.random() < 0.5 ? -1 : 1) * random(40, 80);
+        let rest = pet.y;
+
+        if (perch && x >= perch.left + 20 && x <= perch.right - 20) {
+            // On the card the pet is sitting on: it lands there, beside it.
+        } else if (perch && ! at) {
+            x = Math.min(Math.max(perch.left + 20, x), perch.right - 20);
+        } else {
+            // Somewhere off its card: the food goes to the floor, and so does
+            // the pet — it hops down after it rather than walking on air.
+            x = this.world.clampX(x);
+            rest = this.world.floor();
+
+            if (perch && ! pet.held) {
+                pet.perch = null;
+                pet.vy = 0;
+                pet.landOn = rest;
+                pet.state = 'falling';
+                pet.pose = 'jump';
+            }
+        }
+
+        const sprite = document.createElement('div');
+        sprite.className = 'snack';
+        sprite.textContent = '🍖';
+        this.shadowRoot.append(sprite);
+
+        this.world.snack = new Snack(x, rest, at ? at.y : undefined);
+        this.world.snack.sprite = sprite;
+
+        // Straight over, unless it is busy in the air or in a hand — then it
+        // finds the food the next time it decides what to do.
+        if (! pet.held && ! pet.leaving && ['idle', 'happy', 'landed', 'playing', 'walking'].includes(pet.state)) {
+            pet.runTo(x, CHASE_SPEED);
+        }
+
+        this.paint();
+    }
+
+    /**
+     * A tap on nothing in particular drops a snack right where it landed.
+     *
+     * Only on a kid's own pages (`feed-on-tap`), and only for a tap that
+     * would otherwise do nothing: anything tappable keeps its tap — see
+     * TAPPABLE — and so does a tap that ends a text selection.
+     */
+    feedAt(event) {
+        if (! this.hasAttribute('feed-on-tap') || event.defaultPrevented || event.button !== 0) {
+            return;
+        }
+
+        const target = event.target instanceof Element ? event.target : null;
+
+        if (! target || target.closest(TAPPABLE) || String(window.getSelection?.() ?? '').length > 0) {
+            return;
+        }
+
+        const box = this.getBoundingClientRect();
+
+        this.feed({ x: event.clientX - box.left, y: event.clientY - box.top });
+    }
+
     /** Something good happened: run over to it and jump about. */
     cheer() {
         if (! this.world || this.reduced || this.world.asleep) {
@@ -1010,13 +1202,24 @@ class FqPets extends HTMLElement {
             }
 
             pet.sprite.style.transformOrigin = origin;
-            pet.sprite.style.transform = 'translate(' + (pet.x - PET_SIZE / 2) + 'px,' + (pet.y - PET_SIZE) + 'px)' + swing + ' scaleX(' + pet.facing + ')' + gait;
+            // Scaled about the same origin as everything else — the feet on the
+            // ground, the scruff in a hand — so a small pet still stands on
+            // the card and still hangs from the finger.
+            const size = pet.scale === 1 ? '' : ' scale(' + pet.scale + ')';
+
+            pet.sprite.style.transform = 'translate(' + (pet.x - PET_SIZE / 2) + 'px,' + (pet.y - PET_SIZE) + 'px)' + size + swing + ' scaleX(' + pet.facing + ')' + gait;
         });
 
         const toy = this.world.toy;
 
         if (toy) {
             toy.sprite.style.transform = 'translate(' + (toy.x - PET_SIZE * 0.25) + 'px,' + (toy.y - PET_SIZE * 0.5) + 'px)';
+        }
+
+        const snack = this.world.snack;
+
+        if (snack) {
+            snack.sprite.style.transform = 'translate(' + (snack.x - 15) + 'px,' + (snack.y - 30) + 'px) scale(' + (1 - snack.bite * 0.8).toFixed(3) + ')';
         }
     }
 }

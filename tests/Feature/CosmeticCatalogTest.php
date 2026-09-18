@@ -116,7 +116,7 @@ class CosmeticCatalogTest extends TestCase
         foreach ($poses as $pose) {
             $this->assertStringContainsStringIgnoringCase(
                 $pose === 'toy' ? 'the toy on its own' : $pose,
-                CosmeticSlot::PET_PROMPT,
+                CosmeticSlot::PET_FAMILY_PROMPT,
                 "The prompt never mentions the {$pose} pose.",
             );
         }
