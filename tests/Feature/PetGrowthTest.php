@@ -673,6 +673,45 @@ class PetGrowthTest extends TestCase
         $disk->assertMissing('cosmetics/1/old.png');
     }
 
+    /**
+     * A grown-up can have a pet too, for testing: free, aged by hand, running
+     * about their own pages — and nothing a kid would notice.
+     */
+    public function test_a_grown_up_takes_a_pet_out_for_free_and_picks_its_age(): void
+    {
+        $tabby = $this->pet('Tabby', ['baby_art_path' => 'x/baby.png', 'young_art_path' => 'x/young.png']);
+        $ticketsBefore = $this->parent->fresh()->bonus_tickets;
+
+        Auth::guard('profile')->login($this->parent);
+
+        Volt::test('parent.cosmetics')
+            ->call('pickListSlot', 'pet')
+            ->assertSee('TAKE OUT')
+            ->call('takeOutPet', $tabby->id)
+            ->assertSee('data-my-pet="'.$tabby->id.'"', false)
+            // On the grown-up's own page, like a kid's pet on theirs.
+            ->assertSee('<fq-pets', false)
+            ->assertSee('feed-on-tap', false)
+            ->assertSee('stage=baby', false)
+            ->call('petAge', 'adult')
+            ->assertSee('scale="'.PetStage::Adult->scale().'"', false);
+
+        $copy = OwnedCosmetic::where('profile_id', $this->parent->id)->where('cosmetic_id', $tabby->id)->firstOrFail();
+        $this->assertSame(0, $copy->tickets_paid);
+        $this->assertSame(PetStage::Adult->startsAt(), $copy->growth);
+        $this->assertSame($ticketsBefore, $this->parent->fresh()->bonus_tickets);
+
+        // Never a visitor on a kid's pages: siblings only.
+        foreach (range(0, 23) as $hour) {
+            $this->travelTo(now()->startOfDay()->addHours($hour));
+            app()->forgetScopedInstances();
+            $this->assertNull(app(CosmeticService::class)->visitingPet($this->kid->fresh()));
+        }
+
+        Volt::test('parent.cosmetics')->call('putAwayPet')->assertDontSee('<fq-pets', false);
+        $this->assertNull($this->parent->fresh()->worn_pet_id);
+    }
+
     public function test_tossing_a_pet_being_tried_out_leaves_nothing_behind(): void
     {
         Auth::guard('profile')->login($this->parent);

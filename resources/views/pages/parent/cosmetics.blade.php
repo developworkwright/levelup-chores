@@ -7,6 +7,7 @@ use App\Enums\CosmeticSlot;
 use App\Enums\CosmeticStock;
 use App\Enums\PetStage;
 use App\Models\Cosmetic;
+use App\Models\OwnedCosmetic;
 use App\Models\Profile;
 use App\Services\CosmeticArt;
 use App\Services\CosmeticService;
@@ -326,6 +327,52 @@ new class extends Component
         app(CosmeticService::class)->forget();
     }
 
+    /**
+     * Takes a pet out for the grown-up — free, for testing, and nothing like a
+     * kid's: no tickets, no growing with chores (the age is picked by hand
+     * with petAge()), and no trades, which are the kids' alone. It starts as
+     * a baby, as a kid's does.
+     */
+    public function takeOutPet(int $id): void
+    {
+        $pet = $this->find($id);
+
+        if (! $pet || ! $pet->isSheet() || $pet->isDraft()) {
+            return;
+        }
+
+        OwnedCosmetic::firstOrCreate(
+            ['profile_id' => $this->profile->id, 'cosmetic_id' => $pet->id],
+            ['household_id' => $this->profile->household_id, 'tickets_paid' => 0, 'growth' => 0],
+        );
+
+        $service = app(CosmeticService::class);
+        $service->forget();
+        $service->wear($this->profile, $pet);
+        $this->flashMessage = "{$pet->name} is out — it follows you round the console.";
+    }
+
+    public function putAwayPet(): void
+    {
+        app(CosmeticService::class)->takeOff($this->profile, CosmeticSlot::Pet);
+        $this->flashMessage = 'Your pet is put away.';
+    }
+
+    /** Straight to an age, since a grown-up's pet never grows by chores. */
+    public function petAge(string $age): void
+    {
+        $stage = PetStage::tryFrom($age);
+        $pet = app(CosmeticService::class)->wornIn($this->profile, CosmeticSlot::Pet);
+
+        if (! $stage || ! $pet) {
+            return;
+        }
+
+        OwnedCosmetic::where('profile_id', $this->profile->id)
+            ->where('cosmetic_id', $pet->id)
+            ->update(['growth' => $stage->startsAt()]);
+    }
+
     /** Stock can change, ownership can't: a pulled item stays on whoever bought it. */
     public function toggleStock(int $id): void
     {
@@ -404,6 +451,9 @@ new class extends Component
             'drafts' => $catalog->filter(fn (Cosmetic $item) => $item->isDraft())->values(),
             'listed' => $catalog->filter(fn (Cosmetic $item) => ! $item->isDraft() && $item->slot->value === $this->listSlot)->values(),
             'inRotation' => $rotation,
+            // The grown-up's own pet, out for testing, and its age.
+            'myPet' => $myPet = $service->wornIn($this->profile, CosmeticSlot::Pet),
+            'myPetAge' => $myPet ? app(App\Services\PetService::class)->stageOf($this->profile, $myPet) : null,
         ];
     }
 }; ?>
@@ -843,6 +893,30 @@ new class extends Component
                     </div>
                     <span class="w-[34px] shrink-0 font-baloo text-[14px] font-extrabold text-fq-lime">{{ $item->isFree() ? 'Free' : $item->cost }}</span>
                     <span class="shrink-0 rounded-full border px-[9px] py-1 font-mono-fq text-[8.5px] tracking-[0.08em] whitespace-nowrap uppercase" style="border-color: {{ $rim }}; color: {{ $ink }}">{{ $item->stock->label() }}</span>
+                    @if ($item->isSheet())
+                        {{-- A grown-up's pet, for testing: free, no trades. --}}
+                        @if ($myPet?->id === $item->id)
+                            <span class="flex shrink-0 items-center gap-[4px]" data-my-pet="{{ $item->id }}">
+                                @foreach (App\Enums\PetStage::cases() as $age)
+                                    @php $on = $myPetAge === $age; @endphp
+                                    <button
+                                        type="button"
+                                        wire:click="petAge('{{ $age->value }}')"
+                                        class="rounded-full border px-[9px] py-[5px] font-mono-fq text-[8.5px] tracking-[0.08em] uppercase"
+                                        style="border-color: {{ $on ? '#54e8d0' : '#3a2360' }}; color: {{ $on ? '#54e8d0' : '#8c7bab' }}"
+                                    >{{ $age === App\Enums\PetStage::Adult ? 'grown' : $age->value }}</button>
+                                @endforeach
+                                <button type="button" wire:click="putAwayPet" class="rounded-[8px] border border-fq-line-2 px-[10px] py-[6px] font-mono-fq text-[9px] tracking-[0.1em] whitespace-nowrap text-fq-text-4">PUT AWAY</button>
+                            </span>
+                        @else
+                            <button
+                                type="button"
+                                wire:click="takeOutPet({{ $item->id }})"
+                                class="shrink-0 rounded-[8px] border px-[11px] py-[6px] font-mono-fq text-[9px] tracking-[0.1em] whitespace-nowrap"
+                                style="border-color: #54e8d0; color: #54e8d0"
+                            ><i class="fa-solid fa-paw mr-[4px] text-[9px]"></i>TAKE OUT</button>
+                        @endif
+                    @endif
                     @unless ($item->isFree())
                         <button
                             type="button"

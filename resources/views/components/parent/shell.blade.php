@@ -100,7 +100,12 @@
     $sheetCount = collect($counts)->reject(fn (int $count, string $key) => in_array($key, $rail, true))->sum();
 @endphp
 
-<div class="mx-auto max-w-[1080px] px-[14px] pb-10">
+@php
+    // A grown-up's own pet, out for testing — see the Cosmetics console.
+    $parentPet = app(App\Services\PetService::class)->spriteFor($profile);
+@endphp
+
+<div class="relative isolate mx-auto max-w-[1080px] px-[14px] pb-10">
     <div class="flex flex-col gap-[9px] pt-[14px] pb-[10px]">
         <div class="flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-fq-line bg-fq-panel p-[12px_14px]">
             <div>
@@ -184,7 +189,21 @@
         </div>
     </div>
 
-    <div class="mt-4">
+    <div class="mt-4" data-fq-page>
         {{ $slot }}
     </div>
+
+    {{-- A grown-up's pet, for trying pets out on real pages: the same layer a
+         kid's runs in, toy always out, draggable and fed by a tap on anything
+         empty. Never keyed to the page, so a round trip can't restart it. --}}
+    @if ($parentPet)
+        <fq-pets
+            sheet="{{ $parentPet['src'] }}"
+            scale="{{ $parentPet['scale'] }}"
+            @if ($parentPet['effect']) effect="{{ $parentPet['effect'] }}" @endif
+            toy
+            drag
+            feed-on-tap
+        ></fq-pets>
+    @endif
 </div>
