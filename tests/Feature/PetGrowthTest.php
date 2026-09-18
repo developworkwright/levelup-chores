@@ -293,7 +293,7 @@ class PetGrowthTest extends TestCase
      *
      * @param  array<string, array<int, int>>  $skip  poses to leave out, by age
      */
-    private function familyPng(int $side = 1200, array $skip = [], bool $youngIsAdult = false, bool $checkerboard = false, bool $touching = false): string
+    private function familyPng(int $side = 1200, array $skip = [], bool $youngIsAdult = false, bool $checkerboard = false, bool $touching = false, bool $crowded = false): string
     {
         $image = imagecreatetruecolor($side, $side);
         imagesavealpha($image, true);
@@ -340,6 +340,18 @@ class PetGrowthTest extends TestCase
         // What a real generator did: the adult idle's feet resting on the head
         // of the adult held below it, so the two rows never have an empty line
         // between them and the two dogs are one piece of art.
+        // Packed the way a real generator packed a kitten: every row touching
+        // the one below it (a bridge down every column-one gap, like the
+        // scruff hand reaching up), and the young sleeping pose's tail curled
+        // against the tossing one beside it.
+        if ($crowded) {
+            foreach (range(1, 5) as $line) {
+                imagefilledrectangle($image, (int) ($cell * 0.47), (int) ($cell * ($line - 0.15)), (int) ($cell * 0.53), (int) ($cell * ($line + 0.35)), $fur);
+            }
+
+            imagefilledrectangle($image, (int) ($cell * 3.6), (int) ($cell * 3.8), (int) ($cell * 4.4), (int) ($cell * 3.84), $fur);
+        }
+
         if ($touching) {
             imagefilledrectangle($image, (int) ($cell * 0.46), (int) ($cell * 4.85), (int) ($cell * 0.54), (int) ($cell * 5.25), $fur);
         }
@@ -415,6 +427,21 @@ class PetGrowthTest extends TestCase
      * Rows a generator let touch are split where the animals sit, and two dogs
      * drawn joined are cut apart where they meet — each whole, in its own cell.
      */
+    /**
+     * A kitten sheet packed so tight no row had a clean gap, with the sleeping
+     * pose's tail against the toss beside it, fell back to even strips and lost
+     * the sleeping kitten into the toss cell.
+     */
+    public function test_a_sheet_where_every_row_touches_still_finds_every_pose(): void
+    {
+        $family = app(CosmeticArt::class)->prepareFamily($this->familyPng(crowded: true, skip: [], youngIsAdult: false));
+        $labels = array_column($family['checks'], 'label');
+
+        $this->assertNotContains('fail', array_column($family['checks'], 'status'), json_encode($family['checks']));
+        $this->assertStringNotContainsString('even strips', $labels[0]);
+        $this->assertNotNull($family['sheets']['young']);
+    }
+
     public function test_two_dogs_drawn_touching_across_a_row_come_out_as_two_poses(): void
     {
         $family = app(CosmeticArt::class)->prepareFamily($this->familyPng(touching: true));

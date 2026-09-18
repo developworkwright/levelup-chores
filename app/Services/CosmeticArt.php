@@ -33,7 +33,7 @@ class CosmeticArt
      * Bumped whenever the way a pet picture is cut or checked changes, so a
      * cut cached under the old rules (see the parent console) is never used.
      */
-    public const CUT_VERSION = 4;
+    public const CUT_VERSION = 5;
 
     /** Past this many pixels nothing is decoded — the decompression-bomb ceiling. */
     private const MAX_PIXELS = 4000000;
@@ -1065,7 +1065,7 @@ class CosmeticArt
 
         // Two animals drawn touching — one's feet on the other's head — are
         // one piece of art. Pull them apart before anything is handed out.
-        $pieces = $this->separate($labels, $pieces, $rows);
+        $pieces = $this->separate($labels, $pieces, array_map(fn (array $row) => $row[1], array_slice($rows, 0, -1)));
 
         // Where each pose roughly is, row by row, in reading order.
         $cells = [];
@@ -1084,6 +1084,10 @@ class CosmeticArt
                 $columns = $this->evenBands($width, $grid['cols']);
             }
 
+            // And two touching side by side — a curled tail against the pose
+            // beside it — the same way.
+            $pieces = $this->separate($labels, $pieces, array_map(fn (array $column) => $column[1], array_slice($columns, 0, -1)), 'x', $row);
+
             foreach ($columns as $column) {
                 $cells[] = ['left' => $column[0], 'top' => $row[0], 'right' => $column[1], 'bottom' => $row[1]];
             }
@@ -1095,7 +1099,7 @@ class CosmeticArt
         $checks = [
             match (true) {
                 ! $found => ['label' => "{$width}×{$height} — cut into even strips; the poses would not come apart cleanly, so check them", 'status' => 'warn'],
-                $touched => ['label' => "{$width}×{$height} — found all 36 poses, but some were touching; check the edges in POSES", 'status' => 'warn'],
+                $touched => ['label' => "{$width}×{$height} — found all 36 poses, but some were touching — check the edges with Try it out", 'status' => 'warn'],
                 default => ['label' => "{$width}×{$height} — found all 36 poses and cut them apart", 'status' => 'pass'],
             },
             ...$checks,
@@ -1311,52 +1315,71 @@ class CosmeticArt
     }
 
     /**
-     * Cuts apart any piece that is really two animals from neighbouring rows
-     * drawn touching — an adult's feet resting on the head of the one below.
+     * Cuts apart any piece that is really two animals drawn touching — an
+     * adult's feet resting on the head of the one below, or a sleeping cat's
+     * tail curled against the one beside it.
      *
-     * A piece counts as two when a good share of it lies on each side of a row
-     * line. It is cut where it is narrowest in its middle stretch, which is the
-     * spot where the two drawings meet, and each half becomes a piece of its
-     * own. One animal that merely dips over a line (a tail, an ear) is never
-     * cut: most of it sits on one side.
+     * A piece counts as two when a good share of it lies on each side of a
+     * line between rows ($axis 'y') or between cells in a row ($axis 'x',
+     * only for pieces whose middle is inside $within). It is cut where it is
+     * narrowest in its middle stretch, which is the spot where the two
+     * drawings meet, and each half becomes a piece of its own. One animal
+     * that merely pokes over a line — a tail, an ear — is never cut: most of
+     * it sits on one side.
      *
      * @param  array{width: int, labels: array<int, int>}  $labels  relabelled in place
      * @param  array<int, array{left: int, top: int, right: int, bottom: int, count: int, x: float, y: float}>  $pieces
-     * @param  array<int, array{0: int, 1: int}>  $rows
+     * @param  array<int, int>  $lines  where one row (or cell) ends and the next begins, along $axis
+     * @param  array{0: int, 1: int}|null  $within  for 'x': the row, top to bottom
+     * @param  int  $depth  how many times round already
      * @return array<int, array{left: int, top: int, right: int, bottom: int, count: int, x: float, y: float}>
      */
-    private function separate(array &$labels, array $pieces, array $rows): array
+    private function separate(array &$labels, array $pieces, array $lines, string $axis = 'y', ?array $within = null, int $depth = 0): array
     {
         $halfWidth = $labels['width'];
+        $cutAny = false;
         $next = $pieces === [] ? 1 : max(array_keys($pieces)) + 1;
-        $lines = array_map(fn (array $row) => $row[1], array_slice($rows, 0, -1));
+        [$from, $to] = $axis === 'y' ? ['top', 'bottom'] : ['left', 'right'];
 
         foreach ($pieces as $id => $piece) {
-            $span = $piece['bottom'] - $piece['top'] + 1;
-            $straddled = array_filter($lines, fn (int $line) => $line - $piece['top'] >= 0.3 * $span && 0.3 * $span <= $piece['bottom'] - $line);
+            if ($within !== null && ($piece['y'] < $within[0] || $piece['y'] > $within[1])) {
+                continue;
+            }
+
+            $span = $piece[$to] - $piece[$from] + 1;
+            $straddled = array_filter($lines, fn (int $line) => $line - $piece[$from] >= 0.3 * $span && 0.3 * $span <= $piece[$to] - $line);
 
             if ($straddled === []) {
                 continue;
             }
 
-            // How wide the piece is on each half-size row of its middle stretch.
             $top = intdiv($piece['top'], 2);
             $bottom = intdiv($piece['bottom'], 2);
             $left = intdiv($piece['left'], 2);
             $right = intdiv($piece['right'], 2);
+            [$first, $last] = $axis === 'y' ? [$top, $bottom] : [$left, $right];
+
+            // How much of the piece crosses each half-size line of its middle
+            // stretch, the long way across it.
             $cut = null;
             $narrowest = PHP_INT_MAX;
 
-            for ($y = $top + (int) (($bottom - $top) * 0.2); $y <= $bottom - (int) (($bottom - $top) * 0.2); $y++) {
+            for ($at = $first + (int) (($last - $first) * 0.2); $at <= $last - (int) (($last - $first) * 0.2); $at++) {
                 $across = 0;
 
-                for ($x = $left; $x <= $right; $x++) {
-                    $across += ($labels['labels'][$y * $halfWidth + $x] ?? null) === $id ? 1 : 0;
+                if ($axis === 'y') {
+                    for ($x = $left; $x <= $right; $x++) {
+                        $across += ($labels['labels'][$at * $halfWidth + $x] ?? null) === $id ? 1 : 0;
+                    }
+                } else {
+                    for ($y = $top; $y <= $bottom; $y++) {
+                        $across += ($labels['labels'][$y * $halfWidth + $at] ?? null) === $id ? 1 : 0;
+                    }
                 }
 
                 if ($across < $narrowest) {
                     $narrowest = $across;
-                    $cut = $y;
+                    $cut = $at;
                 }
             }
 
@@ -1364,9 +1387,10 @@ class CosmeticArt
                 continue;
             }
 
-            $lower = $next++;
+            $second = $next++;
+            $cutAny = true;
             $halves = [$id => ['left' => PHP_INT_MAX, 'top' => PHP_INT_MAX, 'right' => 0, 'bottom' => 0, 'count' => 0, 'x' => 0.0, 'y' => 0.0]];
-            $halves[$lower] = $halves[$id];
+            $halves[$second] = $halves[$id];
 
             for ($y = $top; $y <= $bottom; $y++) {
                 for ($x = $left; $x <= $right; $x++) {
@@ -1376,7 +1400,7 @@ class CosmeticArt
                         continue;
                     }
 
-                    $half = $y > $cut ? $lower : $id;
+                    $half = ($axis === 'y' ? $y : $x) > $cut ? $second : $id;
                     $labels['labels'][$at] = $half;
                     $halves[$half]['left'] = min($halves[$half]['left'], $x);
                     $halves[$half]['top'] = min($halves[$half]['top'], $y);
@@ -1407,7 +1431,12 @@ class CosmeticArt
             }
         }
 
-        return $pieces;
+        // A chain of three or more joined animals — a scruff hand reaching up
+        // into every row — comes apart one cut at a time, so go round again
+        // until nothing straddles a line.
+        return $cutAny && $depth < 10
+            ? $this->separate($labels, $pieces, $lines, $axis, $within, $depth + 1)
+            : $pieces;
     }
 
     /**
@@ -1642,8 +1671,9 @@ class CosmeticArt
             array_splice($runs, $narrowest, 2, [[$runs[$narrowest][0], $runs[$narrowest + 1][1]]]);
         }
 
-        // Only ever a run or two short; more than that is not a grid of animals.
-        while ($runs !== [] && count($runs) < $expected && count($runs) >= $expected - 2) {
+        // However short: rows packed so tight that every one touches the next
+        // come back as a single run, and are divided one gap at a time.
+        while ($runs !== [] && count($runs) < $expected) {
             $widest = 0;
 
             foreach ($runs as $j => $run) {
