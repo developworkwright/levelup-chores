@@ -171,6 +171,8 @@ class CosmeticSurfacesTest extends TestCase
         $this->assertSame(2, substr_count($html, 'cosmetics/art/'));
         // Each pet is penned around its own kid's tile, as a fraction of the row.
         $this->assertStringContainsString('&quot;home&quot;:0.1667', $html);
+        // Every pet has its toy out on the door, powered up or not.
+        $this->assertSame(2, substr_count($html, '&quot;toy&quot;:true'));
         // And nothing can be dragged about on a page anybody can open.
         $this->assertStringNotContainsString('<fq-pets drag', $html);
     }

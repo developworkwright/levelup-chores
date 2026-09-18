@@ -124,6 +124,11 @@ class Pet {
         this.home = settings.home ?? null;
         this.roam = settings.roam ?? 120;
         this.visiting = settings.visiting ?? false;
+        // Its own sheet, and whether its own toy is out — the login door holds
+        // several pets, each with a toy of its own.
+        this.src = settings.src ?? null;
+        this.wantsToy = settings.toy ?? false;
+        this.toy = null;
         // Smaller while it is young — see App\Enums\PetStage.
         this.scale = settings.scale ?? 1;
         this.x = settings.home ?? random(60, Math.max(120, world.width - 60));
@@ -470,7 +475,7 @@ class Pet {
     /** What to do next, when nothing is already happening. */
     decide() {
         const world = this.world;
-        const toy = world.toy;
+        const toy = this.toy;
 
         // Food beats everything, and a visitor does not eat somebody else's.
         if (world.snack && ! this.visiting) {
@@ -530,7 +535,7 @@ class World {
     constructor(host) {
         this.host = host;
         this.pets = [];
-        this.toy = null;
+        this.toys = [];
         this.snack = null;
         this.asleep = false;
         this.width = 0;
@@ -727,9 +732,7 @@ class World {
 
         this.introduce();
 
-        if (this.toy) {
-            this.toy.step(dt, this);
-        }
+        this.toys.forEach((toy) => toy.step(dt, this));
 
         if (this.snack) {
             this.snack.step(dt);
@@ -765,8 +768,8 @@ class Snack {
 
 /** The toy: a sprite that falls, sits, and can be dragged about. */
 class Toy {
-    constructor(world) {
-        this.x = random(80, Math.max(140, world.width - 80));
+    constructor(world, x) {
+        this.x = x ?? random(80, Math.max(140, world.width - 80));
         this.y = -40;
         this.vy = 0;
         this.held = false;
@@ -843,7 +846,7 @@ class FqPets extends HTMLElement {
      * row of them from `sheets` — which is the login door, where each pet is
      * penned around its own kid's tile.
      *
-     * @return array<int, {src: string, effect: ?string, scale: ?number, home: ?number, roam: ?number, visiting: ?boolean}>
+     * @return array<int, {src: string, effect: ?string, scale: ?number, home: ?number, roam: ?number, visiting: ?boolean, toy: ?boolean}>
      */
     cast() {
         const read = (name) => {
@@ -940,6 +943,10 @@ class FqPets extends HTMLElement {
                 roam: entry.roam ?? Math.max(70, this.world.width * 0.12),
                 visiting: entry.visiting ?? false,
                 scale: entry.scale ?? 1,
+                src: entry.src,
+                // A kid's own pages say so with the `toy` attribute; the
+                // login door says so per pet.
+                toy: entry.visiting ? false : (entry.toy ?? this.hasAttribute('toy')),
             });
 
             this.world.pets.push(pet);
@@ -954,34 +961,60 @@ class FqPets extends HTMLElement {
         }
     }
 
-    /** The toy comes and goes with the powered-up day. */
+    /**
+     * Each pet's own toy, dropped beside it: on a kid's pages it comes and goes
+     * with the powered-up day, and on the login door every pet has one.
+     */
     syncToy() {
         if (! this.world || ! this.shadowRoot) {
             return;
         }
 
-        const wanted = this.hasAttribute('toy') && ! this.reduced;
+        this.world.pets.forEach((pet) => {
+            if (! pet.visiting && ! this.sheets()) {
+                pet.wantsToy = this.hasAttribute('toy');
+            }
 
-        if (wanted && ! this.world.toy) {
-            const sprite = document.createElement('div');
-            sprite.className = 'toy';
-            sprite.style.setProperty('--sheet', 'url("' + cssUrl(this.cast()[0].src) + '")');
-            sprite.style.backgroundPosition = posePosition('toy');
+            const wanted = pet.wantsToy && ! this.reduced && pet.src;
 
-            const grab = document.createElement('div');
-            grab.className = 'toy-grab';
-            sprite.append(grab);
-            this.shadowRoot.append(sprite);
+            if (wanted && ! pet.toy) {
+                const sprite = document.createElement('div');
+                sprite.className = 'toy';
+                sprite.style.setProperty('--sheet', 'url("' + cssUrl(pet.src) + '")');
+                sprite.style.backgroundPosition = posePosition('toy');
 
-            this.world.toy = new Toy(this.world);
-            this.world.toy.sprite = sprite;
-            this.bindDrag(grab, this.world.toy);
-        }
+                const grab = document.createElement('div');
+                grab.className = 'toy-grab';
 
-        if (! wanted && this.world.toy) {
-            this.world.toy.sprite.remove();
-            this.world.toy = null;
-        }
+                // Where nothing can be carried about, the toy is only to look
+                // at — and must not sit over a kid's tile catching its taps.
+                if (! this.hasAttribute('drag')) {
+                    grab.style.pointerEvents = 'none';
+                }
+
+                sprite.append(grab);
+                this.shadowRoot.append(sprite);
+
+                const near = pet.home === null ? undefined : pet.home + random(-pet.roam * 0.6, pet.roam * 0.6);
+
+                pet.toy = new Toy(this.world, near);
+                pet.toy.sprite = sprite;
+                pet.toy.owner = pet;
+                this.world.toys.push(pet.toy);
+                this.bindDrag(grab, pet.toy);
+            }
+
+            if (! wanted && pet.toy) {
+                pet.toy.sprite.remove();
+                this.world.toys = this.world.toys.filter((toy) => toy !== pet.toy);
+                pet.toy = null;
+            }
+        });
+    }
+
+    /** Whether this layer is the login door's row of pets. */
+    sheets() {
+        return this.hasAttribute('sheets');
     }
 
     /** Petting, and picking up. A tap is a drag that never went anywhere. */
@@ -1226,15 +1259,13 @@ class FqPets extends HTMLElement {
             pet.sprite.style.transform = 'translate(' + (pet.x - PET_SIZE / 2) + 'px,' + (pet.y - PET_SIZE) + 'px)' + size + swing + ' scaleX(' + pet.facing + ')' + gait;
         });
 
-        const toy = this.world.toy;
-
-        if (toy) {
-            // Shrunk with the kid's own pet, so a baby's toy stays in proportion.
-            const owner = this.world.pets.find((one) => ! one.visiting);
-            const size = owner && owner.scale !== 1 ? ' scale(' + owner.scale + ')' : '';
+        this.world.toys.forEach((toy) => {
+            // Shrunk with its own pet, so a baby's toy stays in proportion.
+            const scale = toy.owner?.scale ?? 1;
+            const size = scale !== 1 ? ' scale(' + scale + ')' : '';
 
             toy.sprite.style.transform = 'translate(' + (toy.x - PET_SIZE / 2) + 'px,' + (toy.y - PET_SIZE) + 'px)' + size;
-        }
+        });
 
         const snack = this.world.snack;
 

@@ -103,6 +103,10 @@ new class extends Component
                     ...$pet,
                     'home' => round(($index + 0.5) / max(1, count($kids)), 4),
                     'roam' => 64,
+                    // Every pet has its toy out on the door. The powered-up
+                    // rule — the toy drops in with the day's first chore — is
+                    // for a kid's own pages, once they are in.
+                    'toy' => true,
                 ])
                 ->filter()
                 ->values(),
