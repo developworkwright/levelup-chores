@@ -84,12 +84,14 @@ new class extends Component
         $slot = CosmeticSlot::tryFrom($this->slot) ?? CosmeticSlot::Frame;
 
         return [
-            'upload' => ['required', 'file', 'mimetypes:image/png', 'extensions:png', 'max:'.$slot->uploadSpec()['max_kb']],
+            // WebP too: an over-size PNG is sent as one by the browser (see
+            // png-shrink.js) and turned back into a PNG on arrival — asPng().
+            'upload' => ['required', 'file', 'mimetypes:image/png,image/webp', 'extensions:png,webp', 'max:'.$slot->uploadSpec()['max_kb']],
             'name' => ['required', 'string', 'max:40'],
             'slot' => ['required', 'in:'.implode(',', array_map(fn (CosmeticSlot $s) => $s->value, CosmeticSlot::uploadable()))],
             'flavor' => ['nullable', 'in:'.implode(',', array_map(fn (CosmeticFlavor $f) => $f->value, CosmeticFlavor::cases()))],
             'cost' => ['required', 'integer', 'min:1', 'max:25'],
-            'stock' => ['required', 'in:'.implode(',', array_map(fn (CosmeticStock $s) => $s->value, CosmeticStock::cases()))],
+            'stock' => ['required', 'in:'.implode(',', array_map(fn (CosmeticStock $s) => $s->value, CosmeticStock::forSlot($slot)))],
             'motion' => ['nullable', 'in:'.implode(',', array_map(fn (CosmeticMotion $m) => $m->value, CosmeticMotion::cases()))],
             'effect' => ['nullable', 'in:'.implode(',', array_map(fn (CosmeticEffect $e) => $e->value, CosmeticEffect::cases()))],
         ];
@@ -124,6 +126,11 @@ new class extends Component
     /** A different slot can have a different cap, so the file is checked again. */
     public function updatedSlot(): void
     {
+        // Egg only is a pet's stock; anything else goes back on the shelf.
+        if ($this->stock === CosmeticStock::Egg->value && $this->slot !== CosmeticSlot::Pet->value) {
+            $this->stock = CosmeticStock::Shelf->value;
+        }
+
         if ($this->upload) {
             $this->validateOnly('upload');
         }
@@ -152,7 +159,7 @@ new class extends Component
 
         $kept = Cache::remember($key, now()->addMinutes(30), function () use ($slot) {
             $art = app(CosmeticArt::class);
-            $raw = (string) $this->upload->get();
+            $raw = $art->asPng((string) $this->upload->get());
 
             if ($slot === CosmeticSlot::Pet && $art->isFamilySheet($raw)) {
                 $family = $art->prepareFamily($raw);
@@ -495,6 +502,7 @@ new class extends Component
         'shelf' => ['#3a2360', '#8c7bab'],
         'weekly' => ['#6a3fb0', '#c9a0ff'],
         'limited' => ['#ffc93d', '#ffe14d'],
+        'egg' => ['#b8ff6a', '#b8ff6a'],
     ];
 @endphp
 
@@ -548,10 +556,19 @@ new class extends Component
                         accept="image/png"
                         class="sr-only"
                         x-data
+                        data-upload-input
                         x-on:change="
                             const file = $event.target.files[0];
                             $event.target.value = '';
-                            if (file) $wire.upload('upload', await window.fqShrinkPng(file, {{ $spec['max_kb'] }}));
+                            if (! file) return;
+                            const ready = await window.fqShrinkPng(file, {{ $spec['max_kb'] }});
+                            // Still too big: say so here, rather than send it
+                            // and have PHP drop it with no reason given.
+                            if (ready.size > {{ $spec['max_kb'] }} * 1024) {
+                                $wire.set('uploadNote', 'That picture is too big to upload even shrunk — export it smaller (under {{ $uploadSlot->uploadLimitLabel() }}) and try again.');
+                                return;
+                            }
+                            $wire.upload('upload', ready);
                         "
                     >
                 </label>
@@ -625,7 +642,8 @@ new class extends Component
                     <div class="flex flex-col gap-[6px]">
                         <span class="{{ $label }}">Stock</span>
                         <div class="flex gap-[6px]">
-                            @foreach (App\Enums\CosmeticStock::cases() as $case)
+                            {{-- Egg only is for pets: it is never sold, only hatched. --}}
+                            @foreach (App\Enums\CosmeticStock::forSlot($uploadSlot) as $case)
                                 @php $on = $stock === $case->value; $gold = $case === App\Enums\CosmeticStock::Limited; @endphp
                                 <button
                                     type="button"

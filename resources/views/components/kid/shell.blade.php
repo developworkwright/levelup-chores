@@ -901,21 +901,33 @@
          itself — only the animal and its toy do — so every button underneath
          still works, and it is never keyed to the page: a Livewire round trip
          must not restart a pet mid-jump. See resources/js/pets.js. --}}
-    @if ($worn['pet'])
-        @php
-            $pets = app(App\Services\PetService::class);
-            $ownPet = $pets->spriteFor($profile);
-        @endphp
+    @php
+        $pets = app(App\Services\PetService::class);
+        // Their pet — or, while they have one, the surprise egg out in its
+        // place. See App\Services\PetService.
+        $ownPet = $pets->spriteFor($profile);
+        // An egg that has hatched since they last looked: the new pet comes
+        // out of it in front of them, once.
+        $justHatched = isset($ownPet['egg']) ? null : $pets->takeHatchReveal($profile);
+    @endphp
 
+    @if ($ownPet)
         <fq-pets
-            sheet="{{ $ownPet['src'] }}"
-            {{-- Drawn smaller while it is young — see App\Enums\PetStage. --}}
+            @if (isset($ownPet['egg']))
+                egg="{{ $ownPet['egg'] }}"
+                egg-hue="{{ $ownPet['hue'] }}"
+            @else
+                sheet="{{ $ownPet['src'] }}"
+                @if ($ownPet['effect']) effect="{{ $ownPet['effect'] }}" @endif
+                {{-- The hatching, in the colour of the egg it came out of. --}}
+                @if ($justHatched) hatch="{{ $justHatched->hue() }}" @endif
+            @endif
+            {{-- Its age's size — see App\Enums\PetStage. --}}
             scale="{{ $ownPet['scale'] }}"
-            @if ($ownPet['effect']) effect="{{ $ownPet['effect'] }}" @endif
             {{-- The toy drops in on the day's first chore and stays out for the
                  rest of it. Never a punishment for the days it isn't there:
                  before then the pet simply wanders. --}}
-            @if ($poweredUpToday) toy @endif
+            @if ($poweredUpToday && ! isset($ownPet['egg'])) toy @endif
             @if ($petAsleep) asleep @endif
             {{-- A sibling's pet, on Home only and only now and again — see
                  CosmeticService::visitingPet(). Home because that is the page a

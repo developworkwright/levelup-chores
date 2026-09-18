@@ -205,6 +205,8 @@ class CosmeticService
             CosmeticStock::Shelf => true,
             CosmeticStock::Rotating => $this->rotationThisWeek($this->householdOf($item))->has($item->id),
             CosmeticStock::Limited => $this->limitedThisWeek($this->householdOf($item))->contains('id', $item->id),
+            // Only ever hatched, never bought — see PetService::hatch().
+            CosmeticStock::Egg => false,
         };
     }
 

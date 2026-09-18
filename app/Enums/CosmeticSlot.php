@@ -195,12 +195,22 @@ enum CosmeticSlot: string
      */
     public const PET_FAMILY_PROMPT = 'A sprite sheet of ONE pet character at three ages — baby, young and adult — [SUBJECT: a stubby three-eyed swamp gremlin with a long tail], rendered as [STYLE: bold flat cartoon with thick dark outlines]. It is the same individual animal growing up: identical colours, identical markings in the same places, the same number of eyes, limbs, ears and tails. Only its proportions and size change.
 
-The pet\'s toy is [TOY: a squeaky rubber bone]. It is the same toy at every age, and it ages with the pet: brand new and shiny with the BABY, chewed and scuffed with the YOUNG pet, ragged, torn and patched with the ADULT — visibly the same toy, visibly well loved. Every cell of one age uses that age\'s toy.
+The pet\'s toy is [TOY: a squeaky rubber bone]. It is the same toy at every age, and it ages with the pet: brand new and shiny with the BABY, chewed and scuffed with the YOUNG pet, ragged, torn and patched with the ADULT — visibly the same toy, visibly well loved.
+
+WHERE THE TOY IS — the toy appears in EXACTLY THREE cells of each age and
+nowhere else: cell 9 (Play), cell 10 (Toss) and cell 12 (the toy on its own).
+Cells 1–8 and 11 have NO toy in them at all — not beside the pet, not at its
+feet, not in its mouth, not in the background. Each age uses its own toy.
 
 GEOMETRY — follow exactly:
 · A SQUARE image, fully transparent background.
 · A grid of 6 columns × 6 rows of equal square cells — 36 cells. Nothing
   crosses a cell edge.
+· EVERY DRAWING IS ITS OWN ISLAND. Each one stays inside the middle 80% of its
+  cell, with clear empty space all around it. No drawing touches or overlaps
+  any other: no tail curling into the next cell, no ear reaching up into the
+  row above, no paw resting on the drawing below. If two drawings would touch,
+  make them smaller — they are cut apart by the empty space between them.
 · Rows 1–2: the BABY. Rows 3–4: the YOUNG pet. Rows 5–6: the ADULT.
 · Each age takes its two rows the same way: the twelve cells below, left to
   right, six in its first row and six in its second. So every column holds the
@@ -229,10 +239,11 @@ THE TWELVE CELLS OF EACH AGE, in order:
 4. Jump — in the air, stretched tall, feet tucked up (may leave the foot line).
 5. Walk — side view facing right, one foot forward.
 6. Happy — eyes squeezed shut, grinning, as if it has just been petted.
-7. Held — hanging in mid-air from the scruff of its neck, the way a mother cat
-   carries a kitten: the scruff at the top of the cell, the body hanging
-   straight down below it, every leg dangling limp, feet off the foot line.
-   Surprised, not upset. NOT sitting, NOT standing.
+7. Held — hanging in mid-air as if lifted by the scruff of its neck: the
+   scruff at the top of the cell, the body hanging straight down below it,
+   every leg dangling limp, feet off the foot line. Surprised, not upset.
+   NOT sitting, NOT standing. Draw NO hand, arm or person holding it —
+   whatever lifts it is off the picture; only the pet is drawn.
 8. Landed — flattened on the foot line as if it has just dropped, dizzy, not
    hurt.
 9. Play — on its back or pouncing, holding the toy. Full size: the body as
@@ -245,9 +256,10 @@ THE TWELVE CELLS OF EACH AGE, in order:
 
 MUST NOT INCLUDE: a background, ground, cast shadow or scenery; grid lines,
 borders, cell outlines or a ruled foot line; text, labels, numerals, "zzz",
-hearts or sound effects; more than one character in a cell; any prop other than
-the toy; motion blur or speed lines; anything touching the left or right edge of
-its cell.';
+hearts or sound effects; more than one character in a cell; a hand, arm or
+person anywhere; the toy in any cell but 9, 10 and 12; any prop other than the
+toy; motion blur or speed lines; any drawing touching another drawing or the
+edge of its cell.';
 
     /**
      * The block the parent console adds to the end of every prompt.

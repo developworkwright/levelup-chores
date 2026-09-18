@@ -20,12 +20,25 @@ enum CosmeticStock: string
     /** On sale for one week, ever, and never restocked. */
     case Limited = 'limited';
 
+    /**
+     * Never sold at all: a pet that only ever comes out of a surprise egg.
+     * Pets only — see App\Services\PetService.
+     */
+    case Egg = 'egg';
+
+    /** The stocks a slot can be given: the egg pool is pets only. */
+    public static function forSlot(CosmeticSlot $slot): array
+    {
+        return array_values(array_filter(self::cases(), fn (self $stock) => $stock !== self::Egg || $slot === CosmeticSlot::Pet));
+    }
+
     public function label(): string
     {
         return match ($this) {
             self::Shelf => 'Shelf',
             self::Rotating => 'Rotating',
             self::Limited => 'Limited',
+            self::Egg => 'Egg only',
         };
     }
 
@@ -36,6 +49,7 @@ enum CosmeticStock: string
             self::Shelf => 'Always there',
             self::Rotating => 'Comes back',
             self::Limited => 'One week, ever',
+            self::Egg => 'Hatches, never sold',
         };
     }
 
@@ -46,6 +60,7 @@ enum CosmeticStock: string
             self::Shelf => 'ON THE SHELF',
             self::Rotating => 'BACK LATER',
             self::Limited => 'NEVER AGAIN',
+            self::Egg => 'FROM AN EGG',
         };
     }
 }

@@ -3,12 +3,15 @@
 namespace Tests\Feature;
 
 use App\Enums\CosmeticSlot;
+use App\Enums\CosmeticStock;
 use App\Enums\PetStage;
+use App\Exceptions\CosmeticUnavailableException;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\Cosmetic;
 use App\Models\Household;
 use App\Models\OwnedCosmetic;
+use App\Models\PetEgg;
 use App\Models\Profile;
 use App\Models\SiblingOffer;
 use App\Notifications\ChoreReviewed;
@@ -543,6 +546,11 @@ class PetGrowthTest extends TestCase
         $this->assertStringContainsString('6 columns × 6 rows', $prompt);
         $this->assertStringContainsString('Rows 1–2: the BABY. Rows 3–4: the YOUNG pet. Rows 5–6: the ADULT.', $prompt);
         $this->assertStringContainsString('NOT sitting', $prompt);
+        // Stray toys, and drawings joined together — a scruff hand reaching
+        // into the row above was one — are what generators got wrong.
+        $this->assertStringContainsString('EXACTLY THREE cells of each age', $prompt);
+        $this->assertStringContainsString('EVERY DRAWING IS ITS OWN ISLAND', $prompt);
+        $this->assertStringContainsString('Draw NO hand, arm or person holding it', $prompt);
         // Generators shrank the second row to fit the toy; one scale per age.
         $this->assertStringContainsString('ONE SCALE PER AGE', $prompt);
         $this->assertStringContainsString('make the toy smaller, never the animal', $prompt);
@@ -710,6 +718,235 @@ class PetGrowthTest extends TestCase
 
         Volt::test('parent.cosmetics')->call('putAwayPet')->assertDontSee('<fq-pets', false);
         $this->assertNull($this->parent->fresh()->worn_pet_id);
+    }
+
+    /**
+     * A picture too heavy for PHP's upload limit is sent by the browser as a
+     * WebP instead, and is a PNG again before anything looks at it.
+     */
+    public function test_a_webp_upload_is_turned_back_into_a_png_and_publishes(): void
+    {
+        $image = imagecreatefromstring($this->familyPng());
+        imagesavealpha($image, true);
+        ob_start();
+        imagewebp($image, null, 95);
+        $webp = (string) ob_get_clean();
+
+        $png = app(CosmeticArt::class)->asPng($webp);
+        $this->assertSame(IMAGETYPE_PNG, getimagesizefromstring($png)[2]);
+        $this->assertSame($webp === $png, false);
+        $this->assertSame('not a picture', app(CosmeticArt::class)->asPng('not a picture'));
+
+        Auth::guard('profile')->login($this->parent);
+
+        Volt::test('parent.cosmetics')
+            ->call('$set', 'slot', 'pet')
+            ->set('upload', UploadedFile::fake()->createWithContent('family.webp', $webp))
+            ->assertHasNoErrors()
+            ->assertSee('found all 36 poses')
+            ->set('name', 'Webby')
+            ->call('publish')
+            ->assertHasNoErrors();
+
+        $pet = Cosmetic::where('name', 'Webby')->firstOrFail();
+
+        foreach ($pet->artPaths() as $path) {
+            $this->assertSame(IMAGETYPE_PNG, getimagesizefromstring(Storage::disk('drawings')->get($path))[2]);
+        }
+    }
+
+    public function test_an_egg_only_pet_is_never_in_the_shop(): void
+    {
+        $surprise = $this->pet('Surprise', ['stock' => 'egg']);
+
+        $this->assertFalse(app(CosmeticService::class)->isForSale($surprise));
+        $this->assertFalse(app(CosmeticService::class)->shelfFor($this->kid, CosmeticSlot::Pet)->contains('id', $surprise->id));
+        $this->assertSame([CosmeticStock::Shelf, CosmeticStock::Rotating, CosmeticStock::Limited], CosmeticStock::forSlot(CosmeticSlot::Frame));
+        $this->assertContains(CosmeticStock::Egg, CosmeticStock::forSlot(CosmeticSlot::Pet));
+    }
+
+    /**
+     * Every egg-only pet is one egg in the shop, in its own colour, and the
+     * first kid to buy it has it — gone for the whole house.
+     */
+    public function test_each_egg_is_one_pet_and_gone_for_everybody_once_bought(): void
+    {
+        $red = $this->pet('Redling', ['stock' => 'egg']);
+        $blue = $this->pet('Bluey', ['stock' => 'egg']);
+        $sibling = Profile::factory()->for($this->household)->create(['bonus_tickets' => 40]);
+        $pets = app(PetService::class);
+
+        $this->assertSame([$red->id, $blue->id], $pets->eggsForSale($this->household)->pluck('id')->all());
+        $this->assertNotSame(PetEgg::hueFor($red->id), PetEgg::hueFor($blue->id));
+
+        $egg = $pets->buyEgg($this->kid, $red);
+
+        $this->assertSame($red->id, $egg->cosmetic_id);
+        $this->assertSame(100 - PetEgg::PRICE, $this->kid->fresh()->bonus_tickets);
+        app()->forgetScopedInstances();
+        $this->assertSame([$blue->id], app(PetService::class)->eggsForSale($this->household)->pluck('id')->all());
+
+        // The sibling can't have the one already bought...
+        try {
+            app(PetService::class)->buyEgg($sibling, $red);
+            $this->fail('Two kids bought the same egg.');
+        } catch (CosmeticUnavailableException $e) {
+            $this->assertSame('Somebody got to that egg first.', $e->getMessage());
+        }
+
+        // ...but can have the other one.
+        app(PetService::class)->buyEgg($sibling, $blue);
+        $this->assertTrue(app(PetService::class)->eggsForSale($this->household)->isEmpty());
+    }
+
+    public function test_a_kid_cracks_one_egg_at_a_time(): void
+    {
+        $red = $this->pet('Redling', ['stock' => 'egg']);
+        $blue = $this->pet('Bluey', ['stock' => 'egg']);
+        app(PetService::class)->buyEgg($this->kid, $red);
+        app()->forgetScopedInstances();
+
+        $this->assertFalse(app(PetService::class)->canBuyEgg($this->kid));
+        $this->expectException(CosmeticUnavailableException::class);
+        app(PetService::class)->buyEgg($this->kid->fresh(), $blue);
+    }
+
+    public function test_chores_crack_the_egg_instead_of_growing_a_pet_and_the_fifth_hatches_the_pet_inside(): void
+    {
+        Notification::fake();
+        $tabby = $this->pet('Tabby');
+        $this->adopt($this->kid, $tabby);
+        $this->pet('Decoy', ['stock' => 'egg']);
+        $surprise = $this->pet('Surprise', ['stock' => 'egg']);
+        app(PetService::class)->buyEgg($this->kid->fresh(), $surprise);
+        app()->forgetScopedInstances();
+
+        $this->approveChores($this->kid, 4);
+
+        $egg = PetEgg::firstOrFail();
+        $this->assertSame(4, $egg->cracks);
+        $this->assertFalse($egg->isHatched());
+        $this->assertSame(0, $this->growthOf($this->kid, $tabby), 'The egg took the chores, not the pet.');
+
+        $this->approveChores($this->kid, 1);
+
+        $egg->refresh();
+        $this->assertTrue($egg->isHatched());
+        $this->assertSame($surprise->id, $egg->hatched_cosmetic_id, 'It hatched the pet in that egg.');
+        $this->assertSame($surprise->id, $this->kid->fresh()->worn_pet_id);
+        $this->assertSame(0, $this->growthOf($this->kid, $surprise), 'It hatches as a baby.');
+
+        $bodies = collect(Notification::sent($this->kid, ChoreReviewed::class))
+            ->map(fn (ChoreReviewed $sent) => (fn () => $this->body)->call($sent));
+        $this->assertStringContainsString('Your egg cracked! 1 more chore and it hatches.', $bodies[3]);
+        $this->assertStringContainsString('Your egg hatched — meet Surprise!', $bodies->last());
+    }
+
+    public function test_the_egg_is_out_on_the_kids_pages_in_its_colour_and_the_hatching_plays_once(): void
+    {
+        $surprise = $this->pet('Surprise', ['stock' => 'egg']);
+        $hue = PetEgg::hueFor($surprise->id);
+        app(PetService::class)->buyEgg($this->kid, $surprise);
+        app()->forgetScopedInstances();
+        $this->approveChores($this->kid, 2);
+
+        Auth::guard('profile')->login($this->kid->fresh());
+        Volt::test('kid.bonus')->assertSee('egg="2"', false)->assertSee('egg-hue="'.$hue.'"', false)->assertDontSee('sheet="', false);
+        Volt::test('kid.locker')->call('pickSlot', 'pet')->assertSee('data-egg-out', false)->assertSee('3 more chores and it hatches');
+
+        $this->approveChores($this->kid, 3);
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        Volt::test('kid.bonus')->assertSee('hatch="'.$hue.'"', false)->assertDontSee('egg="', false);
+        Volt::test('kid.bonus')->assertDontSee('hatch="', false);
+        $this->assertNotNull(PetEgg::firstOrFail()->revealed_at);
+    }
+
+    public function test_an_egg_on_the_login_door_is_drawn_smaller_than_on_the_kids_pages(): void
+    {
+        $surprise = $this->pet('Surprise', ['stock' => 'egg']);
+        app(PetService::class)->buyEgg($this->kid, $surprise);
+        app()->forgetScopedInstances();
+
+        $html = Volt::test('login')->html();
+
+        $this->assertStringContainsString('&quot;egg&quot;:0', $html);
+        $this->assertStringContainsString('&quot;scale&quot;:'.round(PetStage::Baby->scale() * 0.6, 3), $html);
+    }
+
+    public function test_an_egg_bought_hatches_even_if_its_pet_is_pulled_afterwards(): void
+    {
+        $surprise = $this->pet('Surprise', ['stock' => 'egg']);
+        app(PetService::class)->buyEgg($this->kid, $surprise);
+        $surprise->update(['pulled_at' => now()]);
+        app()->forgetScopedInstances();
+
+        $this->approveChores($this->kid, 5);
+
+        $this->assertSame('Surprise', PetEgg::firstOrFail()->hatchedInto->name);
+    }
+
+    /**
+     * A kid who can't afford an egg is told so on the eggs' own card — the
+     * refusal used to land at the top of the page, out of sight.
+     */
+    public function test_a_kid_short_of_tickets_is_told_on_the_egg_card(): void
+    {
+        $surprise = $this->pet('Surprise', ['stock' => 'egg']);
+        $this->kid->update(['bonus_tickets' => 11]);
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        Volt::test('kid.locker')
+            ->call('pickSlot', 'pet')
+            ->assertSee('data-egg-short', false)
+            ->assertSee('4 more tickets')
+            ->call('buyEgg', $surprise->id)
+            ->assertSee('data-egg-note', false)
+            ->assertSee('Not enough tickets — need 4 more.');
+
+        $this->assertSame(0, PetEgg::count());
+    }
+
+    public function test_a_kid_picks_an_egg_by_its_colour_in_the_locker(): void
+    {
+        $red = $this->pet('Redling', ['stock' => 'egg']);
+        $this->pet('Bluey', ['stock' => 'egg']);
+        Auth::guard('profile')->login($this->kid);
+
+        Volt::test('kid.locker')
+            ->call('pickSlot', 'pet')
+            ->assertSee('data-eggs-for-sale', false)
+            ->assertSee('data-egg-colour="'.mb_strtolower(PetEgg::colourName(PetEgg::hueFor($red->id))).'"', false)
+            // Nothing gives away what's inside.
+            ->assertDontSee('Redling')
+            ->call('buyEgg', $red->id)
+            ->assertSee('data-egg-out', false)
+            ->assertSee('Hatch yours first');
+
+        $this->assertSame($red->id, PetEgg::firstOrFail()->cosmetic_id);
+    }
+
+    public function test_a_grown_up_can_make_an_egg_only_pet_but_not_an_egg_only_frame(): void
+    {
+        Auth::guard('profile')->login($this->parent);
+
+        Volt::test('parent.cosmetics')
+            ->call('$set', 'slot', 'pet')
+            ->assertSee('Egg only')
+            ->set('upload', UploadedFile::fake()->createWithContent('family.png', $this->familyPng()))
+            ->set('name', 'Surprise')
+            ->set('stock', 'egg')
+            ->call('publish')
+            ->assertHasNoErrors();
+
+        $this->assertSame(CosmeticStock::Egg, Cosmetic::where('name', 'Surprise')->firstOrFail()->stock);
+
+        Volt::test('parent.cosmetics')
+            ->call('$set', 'slot', 'frame')
+            ->assertDontSee('Egg only')
+            ->set('stock', 'egg')
+            ->call('publish')
+            ->assertHasErrors('stock');
     }
 
     public function test_tossing_a_pet_being_tried_out_leaves_nothing_behind(): void

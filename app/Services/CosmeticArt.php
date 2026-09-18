@@ -913,6 +913,39 @@ class CosmeticArt
     }
 
     /**
+     * A WebP upload as a PNG, alpha and all; anything else untouched.
+     *
+     * The browser sends an over-size PNG as a WebP to get it under PHP's upload
+     * limit (resources/js/png-shrink.js). Turned back here, before anything
+     * looks at it, so every check, cut and stored file only ever deals in PNG.
+     */
+    public function asPng(string $binary): string
+    {
+        $info = @getimagesizefromstring($binary);
+
+        if (! is_array($info) || ($info[2] ?? null) !== IMAGETYPE_WEBP || $info[0] * $info[1] > self::MAX_PIXELS) {
+            return $binary;
+        }
+
+        $image = @imagecreatefromstring($binary);
+
+        if (! $image instanceof GdImage) {
+            return $binary;
+        }
+
+        imagepalettetotruecolor($image);
+        imagealphablending($image, false);
+        imagesavealpha($image, true);
+
+        ob_start();
+        imagepng($image, null, 6);
+        $png = (string) ob_get_clean();
+        imagedestroy($image);
+
+        return $png;
+    }
+
+    /**
      * Whether an upload for a pet is the all-ages sheet rather than one age:
      * square, where one age's sheet is four by three.
      */

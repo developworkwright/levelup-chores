@@ -103,6 +103,44 @@ const TAPPABLE = [
     'fq-pets', 'fq-cosmetic', 'canvas', '[data-fq-no-feed]',
 ].join(',');
 
+/**
+ * A surprise egg, as an SVG: a dark mottled shell with glowing cracks, one
+ * more for every chore — see App\Services\PetService. Drawn here rather than
+ * uploaded, because every egg is the same egg: what hatches is the surprise.
+ * Its bottom sits on the foot line, like a pet's feet.
+ */
+const EGG_CRACKS = [
+    'M50 30 L46 38 L52 44 L47 52',
+    'M47 52 L39 57 L42 64 L35 70',
+    'M52 44 L60 49 L57 57 L65 62',
+    'M47 52 L52 61 L48 69 L54 77',
+    'M65 62 L62 71 L69 76 L64 84',
+];
+
+/**
+ * Every egg in a shop is its own colour — App\Models\PetEgg::hueFor() — so
+ * the shell, its spots and the glow of its cracks all come off one hue. The
+ * default is the purple the first egg was.
+ */
+function eggSvg(cracks, hue) {
+    const h = Number.isFinite(hue) ? hue : 275;
+    const shown = EGG_CRACKS.slice(0, Math.max(0, Math.min(EGG_CRACKS.length, cracks)));
+    const light = 'hsl(' + h + ',100%,72%)';
+    const glow = cracks >= EGG_CRACKS.length ? '<ellipse cx="50" cy="60" rx="24" ry="30" fill="' + light + '" opacity=".2"/>' : '';
+    const spot = 'hsl(' + h + ',42%,32%)';
+
+    return 'data:image/svg+xml,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        + '<path d="M50 20 C71 20 83 46 83 66 C83 85 68 96 50 96 C32 96 17 85 17 66 C17 46 29 20 50 20 Z" fill="hsl(' + h + ',48%,19%)" stroke="#0e0719" stroke-width="3"/>'
+        + '<ellipse cx="38" cy="46" rx="6" ry="4" fill="' + spot + '"/><ellipse cx="62" cy="70" rx="7" ry="5" fill="' + spot + '"/>'
+        + '<ellipse cx="44" cy="80" rx="4" ry="3" fill="' + spot + '"/><ellipse cx="66" cy="42" rx="3" ry="2.5" fill="' + spot + '"/>'
+        + '<path d="M36 32 C40 26 46 24 50 24" stroke="hsl(' + h + ',38%,48%)" stroke-width="3" fill="none" stroke-linecap="round"/>'
+        + glow
+        + shown.map((d) => '<path d="' + d + '" stroke="' + light + '" stroke-width="3.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>').join('')
+        + '</svg>'
+    );
+}
+
 /** Where one pose sits in the sheet, as a background-position pair. */
 function posePosition(pose) {
     const index = Math.max(0, POSES.indexOf(pose));
@@ -383,6 +421,11 @@ class Pet {
     step(dt) {
         const world = this.world;
 
+        // Still in its egg — see FqPets.hatch().
+        if (this.inEgg) {
+            return;
+        }
+
         // Its own clock, for the gait — see FqPets.paint().
         this.clock = (this.clock ?? 0) + dt;
 
@@ -620,6 +663,7 @@ class World {
         this.host = host;
         this.pets = [];
         this.toys = [];
+        this.eggs = [];
         this.snack = null;
         this.asleep = false;
         this.width = 0;
@@ -815,10 +859,14 @@ class World {
 
         if (this.wasScrolling && ! scrolling) {
             this.pets.forEach((pet) => pet.comeBack());
+            this.eggs.forEach((egg) => {
+                egg.y = this.floor();
+            });
         }
 
         this.wasScrolling = scrolling;
         this.pets.forEach((pet) => pet.step(dt));
+        this.eggs.forEach((egg) => egg.step(dt));
 
         // A visitor that has walked off the edge takes its sprite with it.
         this.pets = this.pets.filter((pet) => {
@@ -867,6 +915,77 @@ class Snack {
     }
 }
 
+/**
+ * A surprise egg out on the page in place of a pet. It sits on the floor,
+ * wobbles now and then — and when tapped — and scrolls with the page like a
+ * pet does, settling back on the floor once the scrolling stops.
+ *
+ * Given `hatchIn`, it is the hatching: it shakes hard for that long and then
+ * calls `onHatch`, which bursts it and lets the new pet out.
+ */
+class Egg {
+    constructor(world, sprite, options) {
+        const settings = options ?? {};
+
+        this.world = world;
+        this.sprite = sprite;
+        this.cracks = settings.cracks ?? 0;
+        this.hue = settings.hue;
+        this.scale = settings.scale ?? 1;
+        this.x = settings.x ?? (settings.home ?? random(80, Math.max(140, world.width - 80)));
+        this.y = world.floor();
+        this.clock = 0;
+        this.wobble = 0;
+        this.nextWobble = random(2, 5);
+        this.hatchIn = settings.hatchIn ?? null;
+        this.onHatch = settings.onHatch ?? null;
+    }
+
+    /** Tapped: a wobble, and the egg says so to the page. */
+    poke() {
+        this.wobble = 0.7;
+        this.world.emit('fq-egg-poked', { cracks: this.cracks });
+    }
+
+    step(dt) {
+        const world = this.world;
+
+        this.clock += dt;
+
+        if (! world.scrolling()) {
+            this.y = world.floor();
+        }
+
+        if (this.hatchIn !== null) {
+            this.wobble = 0.7;
+            this.hatchIn -= dt;
+
+            if (this.hatchIn <= 0) {
+                this.hatchIn = null;
+                this.onHatch?.(this);
+            }
+
+            return;
+        }
+
+        this.nextWobble -= dt;
+
+        if (this.nextWobble <= 0) {
+            this.wobble = 0.6;
+            // The more it is cracked, the more it moves: something in there
+            // is nearly out.
+            this.nextWobble = random(2, 7) / (1 + this.cracks * 0.3);
+        }
+
+        this.wobble = Math.max(0, this.wobble - dt);
+    }
+
+    /** How far over it leans this frame, in degrees. */
+    angle() {
+        return this.wobble > 0 ? Math.sin(this.clock * 26) * 10 * Math.min(1, this.wobble / 0.6) : 0;
+    }
+}
+
 /** The toy: a sprite that falls, sits, and can be dragged about. */
 class Toy {
     constructor(world, x) {
@@ -895,7 +1014,7 @@ class Toy {
 
 class FqPets extends HTMLElement {
     static get observedAttributes() {
-        return ['sheet', 'scale', 'effect', 'toy', 'asleep', 'drag', 'sheets', 'visitor'];
+        return ['sheet', 'scale', 'effect', 'toy', 'asleep', 'drag', 'sheets', 'visitor', 'egg', 'egg-hue'];
     }
 
     connectedCallback() {
@@ -935,7 +1054,7 @@ class FqPets extends HTMLElement {
 
         // The sheet changing is a different pet; everything else is the same
         // pet in a different mood, and must not restart it mid-jump.
-        if (name === 'sheet' || name === 'scale' || name === 'effect' || name === 'sheets' || name === 'visitor') {
+        if (name === 'sheet' || name === 'scale' || name === 'effect' || name === 'sheets' || name === 'visitor' || name === 'egg' || name === 'egg-hue') {
             this.render();
 
             return;
@@ -968,14 +1087,16 @@ class FqPets extends HTMLElement {
         const many = read('sheets');
 
         if (Array.isArray(many)) {
-            return many.filter((entry) => entry && entry.src);
+            return many.filter((entry) => entry && (entry.src || Number.isInteger(entry.egg)));
         }
 
         const mine = this.getAttribute('sheet');
         const visitor = read('visitor');
+        const egg = this.hasAttribute('egg') ? parseInt(this.getAttribute('egg'), 10) || 0 : null;
 
         return [
-            mine ? { src: mine, effect: this.getAttribute('effect'), scale: parseFloat(this.getAttribute('scale')) || 1 } : null,
+            egg !== null ? { egg, hue: parseInt(this.getAttribute('egg-hue'), 10), scale: parseFloat(this.getAttribute('scale')) || 1 } : null,
+            egg === null && mine ? { src: mine, effect: this.getAttribute('effect'), scale: parseFloat(this.getAttribute('scale')) || 1 } : null,
             visitor && visitor.src ? { ...visitor, visiting: true } : null,
         ].filter(Boolean);
     }
@@ -1015,6 +1136,20 @@ class FqPets extends HTMLElement {
              * must not swallow taps meant for buttons under it.
              */
             .toy { pointer-events: none; transform-origin: 50% 100%; z-index: 1; }
+            .egg {
+                position: absolute; width: ${PET_SIZE}px; height: ${PET_SIZE}px;
+                background-size: contain; background-repeat: no-repeat;
+                transform-origin: 50% 100%; pointer-events: auto; cursor: pointer;
+                z-index: 2; will-change: transform;
+            }
+            .shell {
+                position: absolute; background-size: contain; background-repeat: no-repeat;
+                pointer-events: none; z-index: 3;
+            }
+            .shell-top { clip-path: inset(0 0 52% 0); animation: fq-shell-top .9s ease-out forwards; }
+            .shell-bottom { clip-path: inset(48% 0 0 0); animation: fq-shell-bottom .9s ease-in forwards; }
+            @keyframes fq-shell-top { to { transform: translate(-30%, -70%) rotate(-70deg); opacity: 0; } }
+            @keyframes fq-shell-bottom { to { transform: translate(25%, 10%) rotate(35deg); opacity: 0; } }
             /* Animals in front of toys: a toy lying on the ground never covers the pet. */
             .pet { z-index: 2; }
             .toy-grab {
@@ -1035,6 +1170,26 @@ class FqPets extends HTMLElement {
         this.world.measure();
 
         cast.forEach((entry) => {
+            // A surprise egg out in place of a pet.
+            if (Number.isInteger(entry.egg)) {
+                const shell = document.createElement('div');
+                shell.className = 'egg';
+                shell.style.backgroundImage = 'url("' + eggSvg(entry.egg, entry.hue) + '")';
+                root.append(shell);
+
+                const egg = new Egg(this.world, shell, {
+                    cracks: entry.egg,
+                    hue: entry.hue,
+                    scale: entry.scale ?? 1,
+                    home: entry.home === undefined || entry.home === null ? undefined : entry.home * this.world.width,
+                });
+
+                this.world.eggs.push(egg);
+                shell.addEventListener('click', () => egg.poke());
+
+                return;
+            }
+
             const sprite = document.createElement('div');
             sprite.className = 'pet ' + (entry.effect || '');
             sprite.style.setProperty('--sheet', 'url("' + cssUrl(entry.src) + '")');
@@ -1064,11 +1219,84 @@ class FqPets extends HTMLElement {
         });
 
         this.syncToy();
+
+        // Just hatched: the first time the kid sees their new pet, it comes
+        // out of its egg in front of them.
+        if (this.hasAttribute('hatch') && ! this.reduced) {
+            const pet = this.world.pets.find((one) => ! one.visiting);
+
+            if (pet) {
+                this.hatch(pet);
+            }
+        }
+
         this.paint();
 
         if (! this.reduced) {
             this.play();
         }
+    }
+
+    /**
+     * The hatching: the new pet hidden inside a fully cracked egg where it
+     * stands, the egg shaking for a moment, then bursting — two halves of
+     * shell flying off — and the pet out, delighted with itself.
+     */
+    hatch(pet) {
+        pet.inEgg = true;
+        pet.sprite.style.visibility = 'hidden';
+
+        if (pet.toy) {
+            pet.toy.sprite.style.visibility = 'hidden';
+        }
+
+        const shell = document.createElement('div');
+        shell.className = 'egg';
+        const hue = parseInt(this.getAttribute('hatch'), 10);
+        shell.style.backgroundImage = 'url("' + eggSvg(EGG_CRACKS.length, hue) + '")';
+        this.shadowRoot.append(shell);
+
+        const egg = new Egg(this.world, shell, {
+            cracks: EGG_CRACKS.length,
+            hue,
+            scale: pet.scale,
+            x: pet.x,
+            hatchIn: 1.6,
+            onHatch: (done) => {
+                this.world.eggs = this.world.eggs.filter((one) => one !== done);
+                done.sprite.remove();
+                this.burst(done);
+
+                pet.inEgg = false;
+                pet.sprite.style.visibility = '';
+
+                if (pet.toy) {
+                    pet.toy.sprite.style.visibility = '';
+                }
+
+                pet.act('happy', 'happy', 1.8);
+                this.world.emit('fq-pet-hatched');
+            },
+        });
+
+        this.world.eggs.push(egg);
+    }
+
+    /** Two halves of shell flying off where an egg burst. */
+    burst(egg) {
+        const size = PET_SIZE * egg.scale * screenZoom();
+
+        ['top', 'bottom'].forEach((half) => {
+            const piece = document.createElement('div');
+            piece.className = 'shell shell-' + half;
+            piece.style.backgroundImage = 'url("' + eggSvg(EGG_CRACKS.length, egg.hue) + '")';
+            piece.style.width = size + 'px';
+            piece.style.height = size + 'px';
+            piece.style.left = (egg.x - size / 2) + 'px';
+            piece.style.top = (egg.y - size) + 'px';
+            piece.addEventListener('animationend', () => piece.remove());
+            this.shadowRoot.append(piece);
+        });
     }
 
     /**
@@ -1394,6 +1622,12 @@ class FqPets extends HTMLElement {
             toy.sprite.style.visibility = toy.owner && toy.owner.state === 'playing' && ! toy.held ? 'hidden' : '';
         });
 
+        this.world.eggs.forEach((egg) => {
+            const scale = egg.scale * zoom;
+
+            egg.sprite.style.transform = 'translate(' + (egg.x - PET_SIZE / 2) + 'px,' + (egg.y - PET_SIZE) + 'px) scale(' + scale.toFixed(3) + ') rotate(' + egg.angle().toFixed(2) + 'deg)';
+        });
+
         const snack = this.world.snack;
 
         if (snack) {
@@ -1401,6 +1635,9 @@ class FqPets extends HTMLElement {
         }
     }
 }
+
+// The same egg on the Locker's card as out on the page.
+window.fqEggSvg = eggSvg;
 
 if (! customElements.get('fq-pets')) {
     customElements.define('fq-pets', FqPets);

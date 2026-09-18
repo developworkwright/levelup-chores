@@ -107,6 +107,9 @@ new class extends Component
                     // rule — the toy drops in with the day's first chore — is
                     // for a kid's own pages, once they are in.
                     'toy' => true,
+                    // An egg is a solid, wide thing, and at a pet's size it sat
+                    // right over its kid's tile. Smaller here, on the door.
+                    ...(isset($pet['egg']) ? ['scale' => round($pet['scale'] * 0.6, 3)] : []),
                 ])
                 ->filter()
                 ->values(),
