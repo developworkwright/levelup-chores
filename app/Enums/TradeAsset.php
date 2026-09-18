@@ -24,10 +24,31 @@ enum TradeAsset: string
 
     case Favour = 'favour';
 
+    /**
+     * One limited cosmetic, named by id rather than counted.
+     *
+     * The only thing in the locker that can change hands, and the reason a
+     * limited is worth chasing: it was on sale for one week ever, so the only
+     * way to get one afterwards is from whoever bought it.
+     */
+    case Cosmetic = 'cosmetic';
+
     /** Whether accepting this side moves a balance rather than a promise. */
     public function isCurrency(): bool
     {
-        return $this !== self::Favour;
+        return $this === self::Points || $this === self::Tickets;
+    }
+
+    /**
+     * Whether this side is one named thing rather than an amount of something.
+     *
+     * A currency has a balance and a number; an item has an id. Both change
+     * hands on accept, which is why this is asked separately from isCurrency()
+     * — a favour is neither, and is legacy besides.
+     */
+    public function isItem(): bool
+    {
+        return $this === self::Cosmetic;
     }
 
     public function label(): string
@@ -36,6 +57,7 @@ enum TradeAsset: string
             self::Points => 'Points',
             self::Tickets => 'Tickets',
             self::Favour => 'A favour',
+            self::Cosmetic => 'An item',
         };
     }
 
@@ -43,7 +65,7 @@ enum TradeAsset: string
     {
         return match ($this) {
             self::Points, self::Tickets => 1,
-            self::Favour => 0,
+            self::Favour, self::Cosmetic => 0,
         };
     }
 
@@ -57,7 +79,7 @@ enum TradeAsset: string
         return match ($this) {
             self::Points => 1000,
             self::Tickets => 25,
-            self::Favour => 0,
+            self::Favour, self::Cosmetic => 0,
         };
     }
 
@@ -68,6 +90,9 @@ enum TradeAsset: string
             self::Points => "{$amount} pts",
             self::Tickets => $amount === 1 ? '1 ticket' : "{$amount} tickets",
             self::Favour => 'a favour',
+            // An item says its own name, which the offer holds rather than
+            // this enum — see SiblingOffer::giveText().
+            self::Cosmetic => 'an item',
         };
     }
 
@@ -78,6 +103,7 @@ enum TradeAsset: string
             self::Points => 'var(--fq-gold)',
             self::Tickets => 'var(--fq-lime)',
             self::Favour => 'var(--fq-text-2)',
+            self::Cosmetic => 'var(--fq-coral)',
         };
     }
 
@@ -89,5 +115,15 @@ enum TradeAsset: string
     public static function currencies(): array
     {
         return [self::Points, self::Tickets];
+    }
+
+    /**
+     * Everything a side of a trade can be today: two currencies and an item.
+     *
+     * @return array<int, self>
+     */
+    public static function tradable(): array
+    {
+        return [self::Points, self::Tickets, self::Cosmetic];
     }
 }

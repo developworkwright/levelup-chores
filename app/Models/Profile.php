@@ -157,7 +157,9 @@ class Profile extends Model implements Authenticatable
         return match ($asset) {
             TradeAsset::Points => $this->points,
             TradeAsset::Tickets => $this->bonus_tickets,
-            TradeAsset::Favour => 0,
+            // Neither is an amount of anything: a favour is legacy, and a
+            // cosmetic is one named item that either is or isn't theirs.
+            TradeAsset::Favour, TradeAsset::Cosmetic => 0,
         };
     }
 

@@ -34,6 +34,15 @@ const WALK_SPEED = 46;
 const CHASE_SPEED = 96;
 const GRAVITY = 2200;
 
+/**
+ * How long a sibling's pet stays before letting itself out.
+ *
+ * Long enough to be a visit rather than a glimpse, short enough that a kid who
+ * leaves Home open all afternoon does not end up with a lodger. Whether one
+ * turns up at all is the server's call — see CosmeticService::visitingPet().
+ */
+const VISIT_SECONDS = 300;
+
 /** Where one pose sits in the sheet, as a background-position pair. */
 function posePosition(pose) {
     const index = Math.max(0, POSES.indexOf(pose));
@@ -157,6 +166,20 @@ class Pet {
         return Math.min(Math.max(this.home - this.roam, x), this.home + this.roam);
     }
 
+    /**
+     * Time to go home: off the nearest edge, and gone once it gets there.
+     *
+     * It comes down off whatever it was sitting on first, so a visitor never
+     * exits along a card and vanishes halfway across the page.
+     */
+    leave() {
+        const world = this.world;
+
+        this.leaving = true;
+        this.perch = null;
+        this.runTo(this.x < world.width / 2 ? -(world.margin() + PET_SIZE) : world.width + world.margin() + PET_SIZE, WALK_SPEED * 1.3);
+    }
+
     /** Says hello to whoever it has just bumped into. */
     greet(other) {
         this.facing = other.x < this.x ? -1 : 1;
@@ -171,6 +194,16 @@ class Pet {
 
         if (this.held) {
             return;
+        }
+
+        // A visitor sees itself out. The clock only runs while it is loose, so
+        // a pet being carried about is never whisked away mid-drag.
+        if (this.visiting && ! this.leaving) {
+            this.visit = (this.visit ?? VISIT_SECONDS) - dt;
+
+            if (this.visit <= 0) {
+                this.leave();
+            }
         }
 
         if (world.asleep) {
@@ -243,6 +276,12 @@ class Pet {
             }
 
             if (Math.abs(distance) < 4) {
+                if (this.leaving) {
+                    this.gone = true;
+
+                    return;
+                }
+
                 this.act('idle', 'idle', random(0.4, 1.4));
             }
 
@@ -508,6 +547,18 @@ class World {
     step(dt) {
         this.measure();
         this.pets.forEach((pet) => pet.step(dt));
+
+        // A visitor that has walked off the edge takes its sprite with it.
+        this.pets = this.pets.filter((pet) => {
+            if (! pet.gone) {
+                return true;
+            }
+
+            pet.sprite.remove();
+
+            return false;
+        });
+
         this.introduce();
 
         if (this.toy) {
@@ -737,8 +788,16 @@ class FqPets extends HTMLElement {
 
             if (moved && thing.held) {
                 const box = this.getBoundingClientRect();
-                thing.x = event.clientX - box.left;
-                thing.y = event.clientY - box.top + PET_SIZE / 2;
+
+                // Kept inside what the kid can see. A finger dragged up into
+                // the header would otherwise carry the pet off the top of the
+                // layer, where it is still being held and no longer anywhere.
+                thing.x = this.world.clampX(event.clientX - box.left);
+                thing.y = Math.min(
+                    Math.max(event.clientY - box.top + PET_SIZE / 2, this.world.ceiling()),
+                    this.world.floor(),
+                );
+
                 this.paint();
             }
         });
@@ -824,6 +883,9 @@ class FqPets extends HTMLElement {
              * even though the legs never move.
              */
             let gait = '';
+            // Feet for anything standing on the ground; the scruff for a pet
+            // dangling from a finger, so it swings from where it is held.
+            let origin = '50% 100%';
 
             if (pet.state === 'walking') {
                 const stride = pet.clock * (pet.speed > WALK_SPEED ? 13 : 9);
@@ -833,7 +895,18 @@ class FqPets extends HTMLElement {
                 gait = ' translateY(' + bob.toFixed(2) + 'px) scaleY(' + squash.toFixed(3) + ')';
             }
 
-            pet.sprite.style.transformOrigin = '50% 100%';
+            if (pet.held) {
+                // Wriggling to get down: a swing from the scruff with a faster
+                // kick on top of it, so it reads as a live animal being carried
+                // rather than a sticker following a finger.
+                const swing = Math.sin(pet.clock * 7.5) * 8;
+                const kick = Math.sin(pet.clock * 17) * 1.6;
+
+                gait = ' rotate(' + swing.toFixed(2) + 'deg) translateY(' + kick.toFixed(2) + 'px)';
+                origin = '50% 14%';
+            }
+
+            pet.sprite.style.transformOrigin = origin;
             pet.sprite.style.transform = 'translate(' + (pet.x - PET_SIZE / 2) + 'px,' + (pet.y - PET_SIZE) + 'px) scaleX(' + pet.facing + ')' + gait;
         });
 

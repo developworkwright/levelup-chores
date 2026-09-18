@@ -12,6 +12,7 @@ use App\Models\Bounty;
 use App\Models\Profile;
 use App\Models\SiblingOffer;
 use App\Services\BountyService;
+use App\Services\CosmeticService;
 use App\Services\SiblingOfferService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
@@ -56,6 +57,15 @@ new class extends Component
     public string $getAsset = 'tickets';
 
     public string $getAmount = '';
+
+    /**
+     * Which limited item is on each side, when that side is an item rather
+     * than an amount. A kid can only put up their own and only ask for one a
+     * sibling actually holds — see CosmeticService::tradableFor().
+     */
+    public ?int $giveCosmeticId = null;
+
+    public ?int $getCosmeticId = null;
 
     public string $jobDescription = '';
 
@@ -103,23 +113,31 @@ new class extends Component
     public function setGiveAsset(string $asset): void
     {
         $this->giveAsset = TradeAsset::tryFrom($asset)?->value ?? TradeAsset::Points->value;
-
-        if ($this->getAsset === $this->giveAsset) {
-            $this->getAsset = $this->giveAsset === TradeAsset::Points->value
-                ? TradeAsset::Tickets->value
-                : TradeAsset::Points->value;
-        }
+        $this->getAsset = $this->otherSide($this->giveAsset, $this->getAsset);
     }
 
     public function setGetAsset(string $asset): void
     {
         $this->getAsset = TradeAsset::tryFrom($asset)?->value ?? TradeAsset::Tickets->value;
+        $this->giveAsset = $this->otherSide($this->getAsset, $this->giveAsset);
+    }
 
-        if ($this->giveAsset === $this->getAsset) {
-            $this->giveAsset = $this->getAsset === TradeAsset::Points->value
-                ? TradeAsset::Tickets->value
-                : TradeAsset::Points->value;
+    /**
+     * Keeps the far side of the swap from matching the near one.
+     *
+     * Two items is a real trade — a crown for a skull — so that pairing is left
+     * alone and the two pickers sort out which items. Two of the same currency
+     * is handing money back and forth, so the far side moves.
+     */
+    private function otherSide(string $near, string $far): string
+    {
+        if ($near !== $far || $near === TradeAsset::Cosmetic->value) {
+            return $far;
         }
+
+        return $near === TradeAsset::Points->value
+            ? TradeAsset::Tickets->value
+            : TradeAsset::Points->value;
     }
 
     public function setJobAsset(string $asset): void
@@ -158,7 +176,28 @@ new class extends Component
             return;
         }
 
-        $this->run(function () use ($sibling, $giveAsset, $getAsset) {
+        // An item is named by id, and the one being asked for belongs to
+        // whoever it belongs to — picking Westin's crown and then sending it to
+        // Ada is a mistake worth catching here rather than in the service.
+        $mine = app(CosmeticService::class)->tradableFor($this->profile);
+        $theirs = app(CosmeticService::class)->tradableFor($sibling);
+
+        $giveCosmetic = $giveAsset->isItem() ? $mine->firstWhere('id', $this->giveCosmeticId) : null;
+        $getCosmetic = $getAsset->isItem() ? $theirs->firstWhere('id', $this->getCosmeticId) : null;
+
+        if ($giveAsset->isItem() && ! $giveCosmetic) {
+            $this->errorMessage = 'Pick one of your own limited items to put up.';
+
+            return;
+        }
+
+        if ($getAsset->isItem() && ! $getCosmetic) {
+            $this->errorMessage = "Pick something {$sibling->name} has got.";
+
+            return;
+        }
+
+        $this->run(function () use ($sibling, $giveAsset, $getAsset, $giveCosmetic, $getCosmetic) {
             app(SiblingOfferService::class)->offer(
                 $this->profile,
                 $sibling,
@@ -166,9 +205,11 @@ new class extends Component
                 (int) $this->giveAmount,
                 $getAsset,
                 (int) $this->getAmount,
+                $giveCosmetic,
+                $getCosmetic,
             );
 
-            $this->reset('giveAmount', 'getAmount');
+            $this->reset('giveAmount', 'getAmount', 'giveCosmeticId', 'getCosmeticId');
             $this->mode = null;
             $this->flashMessage = "Sent to {$sibling->name}. They have a day to answer.";
             $this->profile->refresh();
@@ -401,7 +442,15 @@ new class extends Component
                 ->latest('settled_at')
                 ->limit(4)
                 ->get(),
+            // The item chip only appears for a kid who has something to put up,
+            // and the far side's only when a sibling has. An empty picker is a
+            // dead end that reads as the app being broken.
             'assets' => TradeAsset::currencies(),
+            'myItems' => app(CosmeticService::class)->tradableFor($this->profile),
+            'siblingItems' => $this->profile->siblings()
+                ->flatMap(fn (Profile $sibling) => app(CosmeticService::class)
+                    ->tradableFor($sibling)
+                    ->map(fn ($item) => ['item' => $item, 'owner' => $sibling])),
         ];
     }
 }; ?>
@@ -485,7 +534,10 @@ new class extends Component
 
             @if ($composeMode === 'swap')
                 <div class="mt-4 grid gap-4 sm:grid-cols-2">
-                    @foreach ([['You give', 'giveAsset', 'giveAmount', $giveAsset], ['You want', 'getAsset', 'getAmount', $getAsset]] as [$label, $assetProperty, $amountProperty, $current])
+                    @foreach ([
+                        ['You give', 'giveAsset', 'giveAmount', $giveAsset, 'giveCosmeticId', $myItems, false],
+                        ['You want', 'getAsset', 'getAmount', $getAsset, 'getCosmeticId', $siblingItems, true],
+                    ] as [$label, $assetProperty, $amountProperty, $current, $itemProperty, $items, $named])
                         <div wire:key="swap-{{ $assetProperty }}">
                             <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">{{ $label }}</p>
                             <div class="mt-2 flex flex-wrap items-center gap-2">
@@ -497,17 +549,49 @@ new class extends Component
                                         class="rounded-[13px] border px-4 py-[10px] text-[13px] font-semibold transition {{ $current === $asset->value ? 'border-fq-lime text-fq-lime' : 'border-fq-line-2 text-fq-text-3 hover:text-fq-text' }}"
                                     >{{ $asset->label() }}</button>
                                 @endforeach
-                                <input
-                                    type="number"
-                                    wire:model="{{ $amountProperty }}"
-                                    min="{{ TradeAsset::from($current)->minAmount() }}"
-                                    max="{{ TradeAsset::from($current)->maxAmount() }}"
-                                    placeholder="0"
-                                    class="w-[100px] rounded-[14px] border border-fq-line-2 bg-fq-sunk px-4 py-[10px] text-sm outline-none focus:border-fq-cyan"
-                                >
+
+                                {{-- The item chip only shows when there is
+                                     something to pick: an empty picker is a dead
+                                     end that reads as the app being broken. --}}
+                                @if ($items->isNotEmpty())
+                                    <button
+                                        type="button"
+                                        wire:key="{{ $assetProperty }}-item"
+                                        wire:click="set{{ ucfirst($assetProperty) }}('cosmetic')"
+                                        class="rounded-[13px] border px-4 py-[10px] text-[13px] font-semibold transition {{ $current === 'cosmetic' ? 'border-fq-coral text-fq-coral' : 'border-fq-line-2 text-fq-text-3 hover:text-fq-text' }}"
+                                    >An item</button>
+                                @endif
+
+                                @if ($current === 'cosmetic')
+                                    <select
+                                        wire:model.live="{{ $itemProperty }}"
+                                        class="min-w-[170px] rounded-[14px] border border-fq-line-2 bg-fq-sunk px-3 py-[10px] text-sm outline-none focus:border-fq-cyan"
+                                    >
+                                        <option value="">Which one?</option>
+                                        @foreach ($items as $entry)
+                                            @php $item = $named ? $entry['item'] : $entry; @endphp
+                                            <option value="{{ $item->id }}">{{ $named ? $entry['owner']->name.' · '.$item->name : $item->name }}</option>
+                                        @endforeach
+                                    </select>
+                                @else
+                                    <input
+                                        type="number"
+                                        wire:model="{{ $amountProperty }}"
+                                        min="{{ TradeAsset::from($current)->minAmount() }}"
+                                        max="{{ TradeAsset::from($current)->maxAmount() }}"
+                                        placeholder="0"
+                                        class="w-[100px] rounded-[14px] border border-fq-line-2 bg-fq-sunk px-4 py-[10px] text-sm outline-none focus:border-fq-cyan"
+                                    >
+                                @endif
                             </div>
                         </div>
                     @endforeach
+
+                    @if ($myItems->isNotEmpty() || $siblingItems->isNotEmpty())
+                        <p class="text-[12px] text-fq-text-4 sm:col-span-2">
+                            Only limited items can be swapped &mdash; they were on sale for one week, ever, so a sibling is the only place left to get one.
+                        </p>
+                    @endif
                 </div>
             @else
                 <p class="mt-4 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">

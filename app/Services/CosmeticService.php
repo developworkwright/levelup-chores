@@ -411,6 +411,51 @@ class CosmeticService
     }
 
     /**
+     * What this kid could put up in a trade.
+     *
+     * Limiteds only, and only ones they bought. A shelf item is no more use to
+     * a sibling than the shop is, and the free house items belong to everybody
+     * — trading either would be trading nothing. A limited is the one thing in
+     * the locker that cannot be bought again at any price, which is exactly
+     * what makes it worth swapping.
+     *
+     * @return Collection<int, Cosmetic>
+     */
+    public function tradableFor(Profile $profile): Collection
+    {
+        $owned = $this->ownedIds($profile);
+
+        return $this->catalog($profile->household)
+            ->filter(fn (Cosmetic $item) => $item->isLimited() && ! $item->isDraft() && $owned->contains($item->id))
+            ->values();
+    }
+
+    /**
+     * Hands one item from one kid to another.
+     *
+     * Ownership moves rather than being copied, so a limited stays as rare as
+     * it was minted: one row, one owner. If the giver was wearing it, they
+     * stop — you cannot wear what you no longer have.
+     *
+     * Nothing here decides whether the trade is allowed; that is
+     * SiblingOfferService, which owns both halves of a deal.
+     */
+    public function handOver(Cosmetic $item, Profile $from, Profile $to): void
+    {
+        DB::transaction(function () use ($item, $from, $to) {
+            OwnedCosmetic::where('profile_id', $from->id)
+                ->where('cosmetic_id', $item->id)
+                ->update(['profile_id' => $to->id]);
+
+            if ($from->getAttribute($item->slot->wornColumn()) === $item->id) {
+                $from->forceFill([$item->slot->wornColumn() => null])->save();
+            }
+        });
+
+        unset($this->owned[$from->id], $this->owned[$to->id]);
+    }
+
+    /**
      * A sibling's pet, come to visit — or null, which is most of the time.
      *
      * Worked out from the kid, the day and the hour rather than rolled, so a

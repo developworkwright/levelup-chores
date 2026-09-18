@@ -22,8 +22,10 @@ class SiblingOffer extends Model
         'to_profile_id',
         'give_asset',
         'give_amount',
+        'give_cosmetic_id',
         'get_asset',
         'get_amount',
+        'get_cosmetic_id',
         'description',
         'status',
         'expires_at',
@@ -58,6 +60,18 @@ class SiblingOffer extends Model
         return $this->belongsTo(Profile::class, 'to_profile_id');
     }
 
+    /** The item the sender put up, when their side is one rather than an amount. */
+    public function giveCosmetic(): BelongsTo
+    {
+        return $this->belongsTo(Cosmetic::class, 'give_cosmetic_id');
+    }
+
+    /** The item the sender asked for. */
+    public function getCosmetic(): BelongsTo
+    {
+        return $this->belongsTo(Cosmetic::class, 'get_cosmetic_id');
+    }
+
     /**
      * Still answerable. Every read path goes through this rather than checking
      * the status alone, so a row the expiry sweep has not reached yet can never
@@ -84,17 +98,21 @@ class SiblingOffer extends Model
     /** What the sender puts up, as it reads on a card. */
     public function giveText(): string
     {
-        return $this->give_asset === TradeAsset::Favour
-            ? (string) $this->description
-            : $this->give_asset->format($this->give_amount);
+        return match (true) {
+            $this->give_asset === TradeAsset::Favour => (string) $this->description,
+            $this->give_asset->isItem() => $this->giveCosmetic?->name ?? 'an item',
+            default => $this->give_asset->format($this->give_amount),
+        };
     }
 
     /** What the sender wants back, as it reads on a card. */
     public function getText(): string
     {
-        return $this->get_asset === TradeAsset::Favour
-            ? (string) $this->description
-            : $this->get_asset->format($this->get_amount);
+        return match (true) {
+            $this->get_asset === TradeAsset::Favour => (string) $this->description,
+            $this->get_asset->isItem() => $this->getCosmetic?->name ?? 'an item',
+            default => $this->get_asset->format($this->get_amount),
+        };
     }
 
     /**

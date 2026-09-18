@@ -9,6 +9,7 @@ use App\Enums\TradeAsset;
 use App\Exceptions\InsufficientPointsException;
 use App\Exceptions\InsufficientTicketsException;
 use App\Exceptions\OfferUnavailableException;
+use App\Models\Cosmetic;
 use App\Models\Household;
 use App\Models\Profile;
 use App\Models\SiblingOffer;
@@ -44,8 +45,16 @@ class SiblingOfferService
         private LedgerService $ledger,
         private TicketService $tickets,
         private BadgeService $badges,
+        private CosmeticService $cosmetics,
     ) {}
 
+    /**
+     * A swap of two sides, each an amount of a currency or one named item.
+     *
+     * An item side names a cosmetic with $giveCosmetic / $getCosmetic, and its
+     * amount is ignored. Only limiteds can be put up, and only by whoever owns
+     * them — see CosmeticService::tradableFor().
+     */
     public function offer(
         Profile $from,
         Profile $to,
@@ -53,6 +62,8 @@ class SiblingOfferService
         int $giveAmount,
         TradeAsset $getAsset,
         int $getAmount,
+        ?Cosmetic $giveCosmetic = null,
+        ?Cosmetic $getCosmetic = null,
     ): SiblingOffer {
         if (! $from->isKid() || ! $to->isKid()) {
             throw new InvalidArgumentException('Sibling trades are between kids.');
@@ -62,16 +73,21 @@ class SiblingOfferService
             throw new InvalidArgumentException('Pick a sibling to send this to.');
         }
 
-        // A swap moves two balances. Anything involving work belongs on the
-        // bounty board, which is the only place a job is claimed and signed
+        // A swap moves balances and items. Anything involving *work* belongs on
+        // the bounty board, which is the only place a job is claimed and signed
         // off rather than paid on trust — see the class docblock.
-        if (! $giveAsset->isCurrency() || ! $getAsset->isCurrency()) {
-            throw new InvalidArgumentException('Swap points or tickets. To trade a job, post it on the board.');
+        if (! in_array($giveAsset, TradeAsset::tradable(), true) || ! in_array($getAsset, TradeAsset::tradable(), true)) {
+            throw new InvalidArgumentException('Swap points, tickets or a limited item. To trade a job, post it on the board.');
         }
 
-        if ($giveAsset === $getAsset) {
+        // Two items is a fair trade as long as they are different items; two of
+        // the same currency is just handing money back and forth.
+        if ($giveAsset === $getAsset && ! ($giveAsset->isItem() && $giveCosmetic?->id !== $getCosmetic?->id)) {
             throw new InvalidArgumentException('Trade for something different from what you are putting up.');
         }
+
+        $this->assertCanPutUp($from, $giveAsset, $giveCosmetic);
+        $this->assertCanBeAskedFor($to, $getAsset, $getCosmetic);
 
         $this->assertAmountInRange($giveAsset, $giveAmount);
         $this->assertAmountInRange($getAsset, $getAmount);
@@ -79,15 +95,17 @@ class SiblingOfferService
         // Only the sender's side is held now — see the class docblock.
         $this->assertCanAfford($from, $giveAsset, $giveAmount);
 
-        $offer = DB::transaction(function () use ($from, $to, $giveAsset, $giveAmount, $getAsset, $getAmount) {
+        $offer = DB::transaction(function () use ($from, $to, $giveAsset, $giveAmount, $getAsset, $getAmount, $giveCosmetic, $getCosmetic) {
             $offer = SiblingOffer::create([
                 'household_id' => $from->household_id,
                 'from_profile_id' => $from->id,
                 'to_profile_id' => $to->id,
                 'give_asset' => $giveAsset,
                 'give_amount' => $giveAsset->isCurrency() ? $giveAmount : 0,
+                'give_cosmetic_id' => $giveAsset->isItem() ? $giveCosmetic?->id : null,
                 'get_asset' => $getAsset,
                 'get_amount' => $getAsset->isCurrency() ? $getAmount : 0,
+                'get_cosmetic_id' => $getAsset->isItem() ? $getCosmetic?->id : null,
                 // Nothing to say about a swap that the two amounts don't
                 // already say. The column stays for the favour trades written
                 // before jobs moved to the bounty board.
@@ -135,6 +153,12 @@ class SiblingOfferService
             $this->assertCanAfford($recipient, $offer->get_asset, $offer->get_amount);
         }
 
+        // Items are not escrowed — a kid keeps wearing what they put up until
+        // somebody says yes — so both sides are checked again here. In between,
+        // either item could have gone in another trade.
+        $this->assertStillOwned($offer->giveCosmetic, $sender, $offer->give_asset);
+        $this->assertStillOwned($offer->getCosmetic, $recipient, $offer->get_asset);
+
         DB::transaction(function () use ($offer, $sender, $recipient) {
             $label = "{$sender->name} → {$recipient->name}: {$offer->summary()}";
 
@@ -144,6 +168,16 @@ class SiblingOfferService
 
             $this->move($offer, $recipient, $offer->get_asset, -$offer->get_amount, $label);
             $this->move($offer, $sender, $offer->get_asset, $offer->get_amount, $label);
+
+            // The items themselves. Ownership moves; a limited stays one row
+            // with one owner, however many hands it passes through.
+            if ($offer->give_asset->isItem() && $offer->giveCosmetic) {
+                $this->cosmetics->handOver($offer->giveCosmetic, $sender, $recipient);
+            }
+
+            if ($offer->get_asset->isItem() && $offer->getCosmetic) {
+                $this->cosmetics->handOver($offer->getCosmetic, $recipient, $sender);
+            }
 
             $offer->status = SiblingOfferStatus::Accepted;
             $offer->responded_at = now();
@@ -229,6 +263,9 @@ class SiblingOfferService
      */
     private function move(SiblingOffer $offer, Profile $profile, TradeAsset $asset, int $amount, string $label): void
     {
+        // An item has no balance to move and is never escrowed, so both the
+        // hold and the refund are no-ops for it — see accept(), which hands it
+        // over itself.
         if (! $asset->isCurrency() || $amount === 0) {
             return;
         }
@@ -251,7 +288,7 @@ class SiblingOfferService
             ),
             // Unreachable: guarded above. Here so a new asset can't slip
             // through as a silent no-op.
-            TradeAsset::Favour => throw new LogicException('A favour has no balance to move.'),
+            TradeAsset::Favour, TradeAsset::Cosmetic => throw new LogicException('That side has no balance to move.'),
         };
     }
 
@@ -260,6 +297,10 @@ class SiblingOfferService
      */
     private function assertCanAfford(Profile $profile, TradeAsset $asset, int $amount): void
     {
+        if (! $asset->isCurrency()) {
+            return;
+        }
+
         $shortfall = $amount - $profile->balanceOf($asset);
 
         if ($shortfall <= 0) {
@@ -269,6 +310,66 @@ class SiblingOfferService
         throw $asset === TradeAsset::Tickets
             ? new InsufficientTicketsException($shortfall)
             : new InsufficientPointsException($shortfall);
+    }
+
+    /**
+     * Whether this kid can put this item up.
+     *
+     * Only a limited they own, and only one that is not already promised in
+     * another live offer — otherwise the same item could be promised twice and
+     * the second kid would accept a trade that hands over nothing.
+     */
+    private function assertCanPutUp(Profile $owner, TradeAsset $asset, ?Cosmetic $item): void
+    {
+        if (! $asset->isItem()) {
+            return;
+        }
+
+        if (! $item || ! $this->cosmetics->tradableFor($owner)->contains('id', $item->id)) {
+            throw new InvalidArgumentException('Put up one of your own limited items.');
+        }
+
+        if ($this->isPromised($item)) {
+            throw new InvalidArgumentException("{$item->name} is already up in another trade.");
+        }
+    }
+
+    /** The same questions about the item being *asked for*, of whoever holds it. */
+    private function assertCanBeAskedFor(Profile $holder, TradeAsset $asset, ?Cosmetic $item): void
+    {
+        if (! $asset->isItem()) {
+            return;
+        }
+
+        if (! $item || ! $this->cosmetics->tradableFor($holder)->contains('id', $item->id)) {
+            throw new InvalidArgumentException("{$holder->name} hasn't got that one.");
+        }
+
+        if ($this->isPromised($item)) {
+            throw new InvalidArgumentException("{$item->name} is already up in another trade.");
+        }
+    }
+
+    /** Whether an item is spoken for by a trade nobody has answered yet. */
+    private function isPromised(Cosmetic $item): bool
+    {
+        return SiblingOffer::live()
+            ->where(fn ($query) => $query->where('give_cosmetic_id', $item->id)->orWhere('get_cosmetic_id', $item->id))
+            ->exists();
+    }
+
+    /**
+     * @throws OfferUnavailableException when the item has changed hands since
+     */
+    private function assertStillOwned(?Cosmetic $item, Profile $holder, TradeAsset $asset): void
+    {
+        if (! $asset->isItem()) {
+            return;
+        }
+
+        if (! $item || ! $this->cosmetics->tradableFor($holder)->contains('id', $item->id)) {
+            throw new OfferUnavailableException('That item is not where it was when this trade was offered.');
+        }
     }
 
     private function assertAmountInRange(TradeAsset $asset, int $amount): void
