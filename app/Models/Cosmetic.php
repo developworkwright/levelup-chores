@@ -153,13 +153,13 @@ class Cosmetic extends Model
     }
 
     /**
-     * How much to shrink a pet at this stage when it is drawn: not at all on
-     * its own sheet, which is drawn at its true size, and down to size when it
-     * is borrowing an older stage's.
+     * How much to shrink a pet at this stage when it is drawn. Every sheet is
+     * cut at the same full size, whichever age it is — so it is the age alone,
+     * PetStage::pixels(), that says how big the pet is.
      */
     public function drawScale(PetStage $stage): float
     {
-        return round($stage->scale() / $this->drawnStage($stage)->scale(), 3);
+        return $stage->scale();
     }
 
     /** Where this stage's art is stored, falling back the same way. */

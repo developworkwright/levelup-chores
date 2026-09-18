@@ -33,7 +33,7 @@ class CosmeticArt
      * Bumped whenever the way a pet picture is cut or checked changes, so a
      * cut cached under the old rules (see the parent console) is never used.
      */
-    public const CUT_VERSION = 2;
+    public const CUT_VERSION = 4;
 
     /** Past this many pixels nothing is decoded — the decompression-bomb ceiling. */
     private const MAX_PIXELS = 4000000;
@@ -985,9 +985,9 @@ class CosmeticArt
                 continue;
             }
 
-            $checks[] = $this->standingHeight($sheets[$stage->value]) >= 0.92 * $this->standingHeight($olderSheet)
-                ? ['label' => "{$name} is drawn as big as the age above — check it is really younger", 'status' => 'warn']
-                : ['label' => "{$name}: all ".count(CosmeticSlot::PET_POSES).' poses, and smaller than the age above', 'status' => 'pass'];
+            // No size check: every age is cut to the same size, and how big
+            // each looks is PetStage::pixels(), not the drawing.
+            $checks[] = ['label' => "{$name}: all ".count(CosmeticSlot::PET_POSES).' poses, drawn at '.$stage->pixels().'px', 'status' => 'pass'];
         }
 
         return ['sheets' => $sheets, 'checks' => $checks];
@@ -1108,39 +1108,56 @@ class CosmeticArt
         $posesPerAge = count(CosmeticSlot::PET_POSES);
 
         /*
-         * One scale for the whole picture: the adult's idle pose stands at 70%
-         * of a cell, which is what a four-by-three sheet asks for, and nothing
-         * may grow past the cell. The same scale for every age is what keeps a
-         * baby baby-sized.
+         * Every pose drawn at the same animal size, whatever the generator did.
+         *
+         * Generators do not keep one scale across a picture: the second row of
+         * an age comes back smaller than the first, and the ages are sized by
+         * whim. So each pose is sized on its own, by how much animal is in it —
+         * the area of its biggest piece. A dog curled up asleep covers about
+         * as much as the same dog standing, so area is a size that does not
+         * care about the pose, where height would call every sleeping dog tiny.
+         *
+         * Every age is cut at the same FULL size: its own idle pose stands 70%
+         * of a cell tall, as a four-by-three sheet asks for, and every other
+         * pose of that age has the idle's area. How big an age then looks on
+         * screen is not the art's business at all — it is PetStage::pixels().
+         * The toy on its own has no animal to measure, so it takes the scale
+         * its row was corrected by, which is the scale it was drawn at.
          */
-        $adultIdle = $figures[2 * $posesPerAge];
-        $scale = 0.7 * $cell / max(1, $adultIdle['bottom'] - $adultIdle['top'] + 1);
-
-        foreach ($figures as $figure) {
-            $scale = min($scale, 0.94 * $cell / max(1, $figure['right'] - $figure['left'] + 1, $figure['bottom'] - $figure['top'] + 1));
-        }
-
-        /*
-         * A floor under the younger ages. Generators draw babies tiny — a
-         * third of the adult — and at a 78px pet that is a speck nobody can
-         * tap. So no age stands shorter than PetStage::scale() of the adult:
-         * the same size an age is shrunk to when it borrows an older sheet, so
-         * a pet is the same size at every age whichever sheet it comes from.
-         * A younger age drawn bigger than that keeps its own size.
-         */
-        $idleHeight = fn (array $figure) => max(1, $figure['bottom'] - $figure['top'] + 1);
-        $ageScale = [];
+        $mass = fn (array $figure) => max(1, ...array_map(fn (int $id) => $pieces[$id]['count'], $figure['pieces'] ?? [0 => -1]) ?: [1]);
+        $toyIndex = array_search('toy', CosmeticSlot::PET_POSES, true);
+        $scales = [];
 
         foreach ([PetStage::Baby, PetStage::Young, PetStage::Adult] as $band => $stage) {
-            $mine = array_slice($figures, $band * $posesPerAge, $posesPerAge);
-            $grow = max(1.0, $stage->scale() * $idleHeight($adultIdle) / $idleHeight($mine[0]));
+            $idle = $figures[$band * $posesPerAge];
+            $unit = 0.7 * $cell / max(1, $idle['bottom'] - $idle['top'] + 1);
 
-            // Never past the edge of a cell, however far it has to grow.
-            foreach ($mine as $figure) {
-                $grow = min($grow, max(1.0, 0.94 * $cell / ($scale * max(1, $figure['right'] - $figure['left'] + 1, $figure['bottom'] - $figure['top'] + 1))));
+            foreach (array_keys(CosmeticSlot::PET_POSES) as $index) {
+                $number = $band * $posesPerAge + $index;
+                $figure = $figures[$number];
+
+                if ($index === $toyIndex || ($figure['empty'] ?? false)) {
+                    continue;
+                }
+
+                $scales[$number] = $unit * sqrt($mass($idle) / $mass($figure));
             }
 
-            $ageScale[$band] = $scale * $grow;
+            // The toy: the scale of the poses in its own row, which were drawn
+            // at the same size it was.
+            $row = intdiv($toyIndex, $grid['cols']) * $grid['cols'];
+            $neighbours = array_filter(
+                array_map(fn (int $index) => $scales[$band * $posesPerAge + $index] ?? null, range($row, $toyIndex - 1)),
+                fn (?float $scale) => $scale !== null,
+            );
+            sort($neighbours);
+            $scales[$band * $posesPerAge + $toyIndex] = $neighbours === [] ? $unit : $neighbours[intdiv(count($neighbours), 2)];
+        }
+
+        // Nothing grows past its cell.
+        foreach ($scales as $number => $scale) {
+            $figure = $figures[$number];
+            $scales[$number] = min($scale, 0.94 * $cell / max(1, $figure['right'] - $figure['left'] + 1, $figure['bottom'] - $figure['top'] + 1));
         }
 
         $sheets = [];
@@ -1166,11 +1183,11 @@ class CosmeticArt
                 sort($bottoms);
                 $floor = $bottoms[intdiv(count($bottoms), 2)];
 
-                $drawWidth = (int) round(($figure['right'] - $figure['left'] + 1) * $ageScale[$band]);
-                $drawHeight = (int) round(($figure['bottom'] - $figure['top'] + 1) * $ageScale[$band]);
+                $drawWidth = (int) round(($figure['right'] - $figure['left'] + 1) * $scales[$number]);
+                $drawHeight = (int) round(($figure['bottom'] - $figure['top'] + 1) * $scales[$number]);
                 $cellLeft = ($index % $sheetGrid['cols']) * $cell;
                 $cellTop = intdiv($index, $sheetGrid['cols']) * $cell;
-                $top = (int) round($cellTop + $foot - ($floor - $figure['bottom']) * $ageScale[$band] - $drawHeight);
+                $top = (int) round($cellTop + $foot - ($floor - $figure['bottom']) * $scales[$number] - $drawHeight);
                 $top = max($cellTop + 2, min($top, $cellTop + $cell - 2 - $drawHeight));
 
                 $lifted = $this->lift($source, $labels, $figure);
@@ -1664,73 +1681,76 @@ class CosmeticArt
 
     /**
      * Whether two sheets are the same drawing — what a generator does when it
-     * gives up on an age and repeats the one next to it. Compared small, so a
-     * resampling difference is not mistaken for a new drawing.
+     * gives up on an age and repeats the one next to it.
+     *
+     * Compared pose by pose, each animal lifted out of its cell and squared up
+     * to the same small size first. The ages are resized differently on the
+     * way through the cut, so a copy is not the same pixels in the same place —
+     * but it is the same shape, and shrunk to 48px a resample cannot hide it.
      */
     private function looksTheSame(string $one, string $other): bool
     {
-        $shrink = function (string $binary): ?GdImage {
-            $image = @imagecreatefromstring($binary);
+        [$a, $b] = [@imagecreatefromstring($one), @imagecreatefromstring($other)];
 
-            if (! $image instanceof GdImage) {
+        if (! $a instanceof GdImage || ! $b instanceof GdImage) {
+            return false;
+        }
+
+        $grid = CosmeticSlot::Pet->poseGrid();
+        $cell = (int) (imagesx($a) / $grid['cols']);
+        $side = 48;
+
+        $lift = function (GdImage $sheet, int $index) use ($grid, $cell, $side): ?GdImage {
+            $left = ($index % $grid['cols']) * $cell;
+            $top = intdiv($index, $grid['cols']) * $cell;
+            $box = $this->boundingBox($sheet, $left, $top, $cell, $cell);
+
+            if ($box === null) {
                 return null;
             }
 
-            $small = imagecreatetruecolor(128, 96);
+            $small = imagecreatetruecolor($side, $side);
             imagealphablending($small, false);
             imagesavealpha($small, true);
-            imagecopyresampled($small, $image, 0, 0, 0, 0, 128, 96, imagesx($image), imagesy($image));
-            imagedestroy($image);
+            imagefill($small, 0, 0, imagecolorallocatealpha($small, 0, 0, 0, 127));
+            imagecopyresampled($small, $sheet, 0, 0, $box['left'], $box['top'], $side, $side, $box['right'] - $box['left'] + 1, $box['bottom'] - $box['top'] + 1);
 
             return $small;
         };
 
-        [$a, $b] = [$shrink($one), $shrink($other)];
-
-        if (! $a || ! $b) {
-            return false;
-        }
-
         $difference = 0;
         $compared = 0;
 
-        for ($y = 0; $y < 96; $y++) {
-            for ($x = 0; $x < 128; $x++) {
-                $pa = imagecolorat($a, $x, $y);
-                $pb = imagecolorat($b, $x, $y);
-                $alphaA = ($pa >> 24) & 0x7F;
-                $alphaB = ($pb >> 24) & 0x7F;
+        foreach (array_keys(CosmeticSlot::PET_POSES) as $index) {
+            [$pa, $pb] = [$lift($a, $index), $lift($b, $index)];
 
-                // Empty in both is not evidence of anything.
-                if ($alphaA >= 110 && $alphaB >= 110) {
-                    continue;
+            if ($pa && $pb) {
+                for ($y = 0; $y < $side; $y++) {
+                    for ($x = 0; $x < $side; $x++) {
+                        $ca = imagecolorat($pa, $x, $y);
+                        $cb = imagecolorat($pb, $x, $y);
+                        $alphaA = ($ca >> 24) & 0x7F;
+                        $alphaB = ($cb >> 24) & 0x7F;
+
+                        // Empty in both is not evidence of anything.
+                        if ($alphaA >= 110 && $alphaB >= 110) {
+                            continue;
+                        }
+
+                        $difference += $this->distance($ca, $cb) + abs($alphaA - $alphaB) * 2;
+                        $compared++;
+                    }
                 }
-
-                $difference += $this->distance($pa, $pb) + abs($alphaA - $alphaB) * 2;
-                $compared++;
             }
+
+            $pa && imagedestroy($pa);
+            $pb && imagedestroy($pb);
         }
 
         imagedestroy($a);
         imagedestroy($b);
 
         return $compared > 0 && $difference / $compared < 12;
-    }
-
-    /** How tall the idle pose stands in a sheet, in pixels — the age's size. */
-    private function standingHeight(string $binary): int
-    {
-        $image = @imagecreatefromstring($binary);
-
-        if (! $image instanceof GdImage) {
-            return 0;
-        }
-
-        $cell = (int) (imagesx($image) / CosmeticSlot::Pet->poseGrid()['cols']);
-        $box = $this->boundingBox($image, 0, 0, $cell, $cell);
-        imagedestroy($image);
-
-        return $box === null ? 0 : $box['bottom'] - $box['top'];
     }
 
     /**

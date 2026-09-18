@@ -55,21 +55,28 @@ enum PetStage: string
     }
 
     /**
-     * The smallest this age is ever drawn, as a share of the adult's height —
-     * the floor CosmeticArt::splitFamily() lifts a tiny drawing to, and the
-     * shrink for an age borrowing an older sheet.
+     * How big a pet of this age is on screen, in CSS pixels — the box one pose
+     * is drawn in. THE place to change how big pets are.
      *
-     * Deliberately close to the adult. A pet is only 78px at full size, and
-     * at the true-to-life 60% a baby was a speck too small to tap or to read
-     * as a puppy; the difference in the drawing does the rest of the work.
+     * Fixed numbers, not ratios worked out from the art: generators draw each
+     * age at whatever size they like, so every age's sheet is cut at the same
+     * full size (see CosmeticArt::splitFamily()) and it is these three numbers
+     * alone that make a baby small. The adult is the engine's own PET_SIZE in
+     * resources/js/pets.js.
      */
-    public function scale(): float
+    public function pixels(): int
     {
         return match ($this) {
-            self::Baby => 0.8,
-            self::Young => 0.9,
-            self::Adult => 1.0,
+            self::Baby => 52,
+            self::Young => 64,
+            self::Adult => 78,
         };
+    }
+
+    /** pixels() as a share of the adult's, which is what the pet layer takes. */
+    public function scale(): float
+    {
+        return round($this->pixels() / self::Adult->pixels(), 3);
     }
 
     /** The cosmetics column that holds this stage's own sheet. */

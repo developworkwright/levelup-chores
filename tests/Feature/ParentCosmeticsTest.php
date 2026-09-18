@@ -136,7 +136,9 @@ class ParentCosmeticsTest extends TestCase
             ->assertHasErrors('upload')
             ->call('toss')
             ->assertSet('upload', null)
-            ->assertSee('Tossed.');
+            // Said under the upload box, where the grown-up is looking.
+            ->assertSee('data-upload-note', false)
+            ->assertSee('Discarded — nothing was saved.');
 
         $this->assertSame(0, Cosmetic::where('name', 'Face Already In It')->count());
     }

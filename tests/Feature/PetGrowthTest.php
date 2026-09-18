@@ -243,29 +243,26 @@ class PetGrowthTest extends TestCase
         $this->assertSame(PetStage::Young, app(PetService::class)->stageOf($sibling, $tabby));
     }
 
-    public function test_a_young_pet_is_drawn_smaller_and_from_its_own_sheet_when_it_has_one(): void
+    /** Three fixed sizes, one per age — the art has no say in how big a pet is. */
+    public function test_each_age_is_drawn_at_its_own_fixed_size(): void
     {
-        $tabby = $this->pet('Tabby');
+        $this->assertSame([52, 64, 78], array_map(fn (PetStage $stage) => $stage->pixels(), PetStage::cases()));
+        $this->assertSame(0.667, PetStage::Baby->scale());
+        $this->assertSame(0.821, PetStage::Young->scale());
+        $this->assertSame(1.0, PetStage::Adult->scale());
+
+        $tabby = $this->pet('Tabby', ['baby_art_path' => 'cosmetics/'.$this->household->id.'/tabby-baby.png']);
         $this->adopt($this->kid, $tabby);
-
-        // No baby art yet: the adult sheet, drawn at baby size.
-        $sprite = app(PetService::class)->spriteFor($this->kid->fresh());
-        $this->assertSame(0.8, $sprite['scale']);
-        $this->assertStringNotContainsString('stage=', $sprite['src']);
-
-        Auth::guard('profile')->login($this->kid->fresh());
-        Volt::test('kid.bonus')->assertSee('scale="0.8"', false);
-
-        // Its own sheet is drawn at its true size already, so it is not shrunk again.
-        $tabby->update(['baby_art_path' => 'cosmetics/'.$this->household->id.'/tabby-baby.png']);
-        app()->forgetScopedInstances();
 
         $sprite = app(PetService::class)->spriteFor($this->kid->fresh());
         $this->assertStringContainsString('stage=baby', $sprite['src']);
-        $this->assertSame(1.0, $sprite['scale']);
+        $this->assertSame(0.667, $sprite['scale']);
 
-        // Borrowing the young sheet, it shrinks only by the difference.
-        $this->assertSame(0.889, $this->pet('Gremlin', ['young_art_path' => 'x/young.png'])->drawScale(PetStage::Baby));
+        Auth::guard('profile')->login($this->kid->fresh());
+        Volt::test('kid.bonus')->assertSee('scale="0.667"', false);
+
+        // The same size whichever sheet it is drawn from.
+        $this->assertSame(0.667, $this->pet('Gremlin', ['young_art_path' => 'x/young.png'])->drawScale(PetStage::Baby));
     }
 
     public function test_a_young_pet_with_only_baby_art_uses_the_adult_sheet(): void
@@ -317,6 +314,12 @@ class PetGrowthTest extends TestCase
         }
 
         $fur = imagecolorallocate($image, 168, 116, 72);
+        // Each age its own coat, as real art is: a copied age is the adult's coat again.
+        $coats = [
+            'baby' => imagecolorallocate($image, 236, 196, 140),
+            'young' => imagecolorallocate($image, 204, 150, 96),
+            'adult' => $fur,
+        ];
         $cell = $side / 6;
         $heights = ['baby' => 0.40, 'young' => $youngIsAdult ? 0.70 : 0.55, 'adult' => 0.70];
 
@@ -330,7 +333,7 @@ class PetGrowthTest extends TestCase
                 $left = ($index % 6) * $cell;
                 $bottom = ($band * 2 + intdiv($index, 6)) * $cell + $cell * 0.9;
 
-                imagefilledellipse($image, (int) ($left + $cell / 2), (int) ($bottom - $height / 2), (int) ($height * 0.8), (int) $height, $fur);
+                imagefilledellipse($image, (int) ($left + $cell / 2), (int) ($bottom - $height / 2), (int) ($height * 0.8), (int) $height, $coats[$youngIsAdult && $age === 'young' ? 'adult' : $age]);
             }
         }
 
@@ -390,13 +393,12 @@ class PetGrowthTest extends TestCase
             $this->assertSame([1024, 768], array_slice(getimagesizefromstring($family['sheets'][$age]), 0, 2));
         }
 
-        // Each age keeps its true size, so the young one really is smaller.
-        $this->assertLessThan($this->standingHeight($family['sheets']['young']), $this->standingHeight($family['sheets']['baby']));
-        $this->assertLessThan($this->standingHeight($family['sheets']['adult']), $this->standingHeight($family['sheets']['young']));
-
-        // Drawn at 40% of the cell against the adult's 70%, the baby is lifted
-        // to the floor: never under 80% of the adult's height.
-        $this->assertGreaterThanOrEqual(0.78, $this->standingHeight($family['sheets']['baby']) / $this->standingHeight($family['sheets']['adult']));
+        // Every age is cut at the same full size — the baby drawn at 40% of
+        // the cell comes out as tall as the adult drawn at 70%, because how
+        // big each age looks is PetStage::pixels(), not the drawing.
+        foreach (['baby', 'young', 'adult'] as $age) {
+            $this->assertEqualsWithDelta(0.7 * 256, $this->standingHeight($family['sheets'][$age]), 8, $age);
+        }
     }
 
     public function test_a_big_sheet_with_the_checkerboard_painted_in_is_cleaned_and_cut(): void
@@ -487,7 +489,7 @@ class PetGrowthTest extends TestCase
         }
 
         $this->assertCount(3, $pet->artPaths());
-        $this->assertSame(1.0, $pet->drawScale(PetStage::Baby));
+        $this->assertSame(PetStage::Baby->scale(), $pet->drawScale(PetStage::Baby));
     }
 
     /** A single four-by-three sheet is one age, and a pet needs all three. */
@@ -578,8 +580,8 @@ class PetGrowthTest extends TestCase
             ->call('tryOut', 'baby')
             ->assertSee('data-pet-trial="baby"', false)
             ->assertSee('sheet="data:image/png;base64,', false)
-            // Its own baby art, drawn at its true size.
-            ->assertSee('scale="1"', false)
+            // Drawn at the baby's size, as a kid would see it.
+            ->assertSee('scale="0.667"', false)
             ->call('tryOut', 'adult')
             ->assertSee('data-pet-trial="adult"', false);
 

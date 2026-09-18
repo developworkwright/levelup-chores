@@ -63,6 +63,13 @@ new class extends Component
 
     public ?string $flashMessage = null;
 
+    /**
+     * Said under the upload box rather than at the top of the page: Toss is
+     * pressed down by the form, and a confirmation up at the top — scrolled
+     * out of sight — left the page looking as if it had simply reloaded.
+     */
+    public ?string $uploadNote = null;
+
     public function mount(): void
     {
         $this->profile = Auth::guard('profile')->user();
@@ -109,6 +116,7 @@ new class extends Component
     public function updatedUpload(): void
     {
         $this->trialAge = null;
+        $this->uploadNote = null;
         $this->validateOnly('upload');
     }
 
@@ -201,7 +209,7 @@ new class extends Component
 
         $this->reset('upload', 'trialAge', 'motion', 'effect');
         $this->resetErrorBag();
-        $this->flashMessage = 'Tossed. Upload another picture when you have one.';
+        $this->uploadNote = 'Discarded — nothing was saved. Choose another picture when you have one.';
     }
 
     /**
@@ -220,7 +228,7 @@ new class extends Component
         $younger = array_filter(['baby' => $prepared['sheets']['baby'] ?? null, 'young' => $prepared['sheets']['young'] ?? null]);
 
         if ($binary === null || collect($checks)->contains('status', 'fail')) {
-            $this->addError('upload', 'It didn\'t pass the checks — toss it and try another picture.');
+            $this->addError('upload', 'It didn\'t pass the checks — discard it and try another picture.');
 
             return;
         }
@@ -373,7 +381,7 @@ new class extends Component
                 $trial = $sheet === null ? null : [
                     'age' => $age,
                     'src' => 'data:image/png;base64,'.base64_encode($sheet),
-                    'scale' => round($age->scale() / $drawn->scale(), 3),
+                    'scale' => $age->scale(),
                     'borrowed' => $drawn === $age ? null : $drawn,
                     'own' => collect(PetStage::cases())->mapWithKeys(fn (PetStage $one) => [$one->value => ($prepared['sheets'][$one->value] ?? null) !== null])->all(),
                     'passes' => collect($checks)->doesntContain('status', 'fail'),
@@ -504,6 +512,12 @@ new class extends Component
                 @endif
                 @error('upload') <p class="text-[12.5px] text-fq-danger">{{ $message }}</p> @enderror
 
+                @if ($uploadNote && ! $upload)
+                    <p class="flex items-center gap-[7px] rounded-[11px] border border-fq-line-2 bg-fq-sunk px-3 py-[9px] text-[12.5px] text-fq-text-2" data-upload-note>
+                        <i class="fa-solid fa-trash-can text-[11px] text-fq-text-4"></i>{{ $uploadNote }}
+                    </p>
+                @endif
+
                 {{-- Chips rather than a dropdown: all six kinds of upload are on
                      screen at once, so nobody has to open a menu to find out a
                      background can be uploaded at all. --}}
@@ -628,7 +642,7 @@ new class extends Component
                             wire:click="toss"
                             wire:loading.attr="disabled"
                             class="rounded-[12px] border border-fq-line-3 px-[18px] py-3 text-center font-baloo text-[15px] font-extrabold text-fq-text-3"
-                        >Toss it</button>
+                        >Discard</button>
                     @endif
                 </div>
             </div>
@@ -910,7 +924,7 @@ new class extends Component
                     title="{{ $name === '' ? 'Give it a name first' : '' }}"
                 >Publish</button>
 
-                <button type="button" wire:click="toss" class="rounded-[10px] border border-fq-line-2 px-[11px] py-[7px] font-baloo text-[13px] font-extrabold text-fq-text-3">Toss</button>
+                <button type="button" wire:click="toss" class="rounded-[10px] border border-fq-line-2 px-[11px] py-[7px] font-baloo text-[13px] font-extrabold text-fq-text-3">Discard</button>
                 <button type="button" wire:click="stopTrying" aria-label="Put it away" class="px-[6px] py-[7px] text-[13px] text-fq-text-4"><i class="fa-solid fa-xmark"></i></button>
             </div>
         </div>

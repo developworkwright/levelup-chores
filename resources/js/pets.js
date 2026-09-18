@@ -896,7 +896,18 @@ class FqPets extends HTMLElement {
                 background-repeat: no-repeat; pointer-events: auto; cursor: grab;
                 touch-action: none; will-change: transform;
             }
-            .toy { width: ${PET_SIZE * 0.5}px; height: ${PET_SIZE * 0.5}px; background-size: 400% 300%; }
+            /*
+             * The toy's cell at the pet's own size: the sheet draws the toy at
+             * the scale it is in the pet's paws, so this is how big it really
+             * is next to the animal. The cell is mostly empty, so only the
+             * patch where the toy sits takes a finger — the rest of the box
+             * must not swallow taps meant for buttons under it.
+             */
+            .toy { pointer-events: none; transform-origin: 50% 100%; }
+            .toy-grab {
+                position: absolute; left: 22%; right: 22%; bottom: 4%; height: 46%;
+                pointer-events: auto; cursor: grab; touch-action: none;
+            }
             .snack {
                 position: absolute; width: 30px; height: 30px; font-size: 26px; line-height: 30px;
                 text-align: center; pointer-events: none; transform-origin: 50% 100%;
@@ -956,11 +967,15 @@ class FqPets extends HTMLElement {
             sprite.className = 'toy';
             sprite.style.setProperty('--sheet', 'url("' + cssUrl(this.cast()[0].src) + '")');
             sprite.style.backgroundPosition = posePosition('toy');
+
+            const grab = document.createElement('div');
+            grab.className = 'toy-grab';
+            sprite.append(grab);
             this.shadowRoot.append(sprite);
 
             this.world.toy = new Toy(this.world);
             this.world.toy.sprite = sprite;
-            this.bindDrag(sprite, this.world.toy);
+            this.bindDrag(grab, this.world.toy);
         }
 
         if (! wanted && this.world.toy) {
@@ -1002,8 +1017,9 @@ class FqPets extends HTMLElement {
                 // layer, where it is still being held and no longer anywhere.
                 // A pet is held by the scruff, so the finger sits near the top
                 // of its head and the body hangs below — that is the pivot the
-                // swing turns on. The toy is just held in the middle.
-                const grip = thing instanceof Pet ? PET_SIZE * (1 - SCRUFF) : PET_SIZE / 2;
+                // swing turns on. The toy sits low in its cell, on the foot
+                // line, so it is held a quarter of the way up.
+                const grip = thing instanceof Pet ? PET_SIZE * (1 - SCRUFF) : PET_SIZE * 0.25;
 
                 thing.x = this.world.clampX(event.clientX - box.left);
                 thing.y = Math.min(
@@ -1213,7 +1229,11 @@ class FqPets extends HTMLElement {
         const toy = this.world.toy;
 
         if (toy) {
-            toy.sprite.style.transform = 'translate(' + (toy.x - PET_SIZE * 0.25) + 'px,' + (toy.y - PET_SIZE * 0.5) + 'px)';
+            // Shrunk with the kid's own pet, so a baby's toy stays in proportion.
+            const owner = this.world.pets.find((one) => ! one.visiting);
+            const size = owner && owner.scale !== 1 ? ' scale(' + owner.scale + ')' : '';
+
+            toy.sprite.style.transform = 'translate(' + (toy.x - PET_SIZE / 2) + 'px,' + (toy.y - PET_SIZE) + 'px)' + size;
         }
 
         const snack = this.world.snack;
