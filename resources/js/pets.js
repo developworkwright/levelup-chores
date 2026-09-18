@@ -246,6 +246,11 @@ class Pet {
         this.pose = 'jump';
         this.vy = 0;
 
+        // It was drawn scaled from the scruff while held, and is drawn scaled
+        // from its feet from now on. Moved to match, so it lets go from
+        // exactly where it hung instead of jumping, and falls from there.
+        this.y += PET_SIZE * (1 - SCRUFF) * (this.scale * screenZoom() - 1);
+
         const onto = this.world.perches()
             .filter((perch) => this.x >= perch.left && this.x <= perch.right && perch.top - this.y > -40 && perch.top - this.y < 160)
             .sort((a, b) => Math.abs(a.top - this.y) - Math.abs(b.top - this.y))[0];
@@ -1009,7 +1014,9 @@ class FqPets extends HTMLElement {
              * patch where the toy sits takes a finger — the rest of the box
              * must not swallow taps meant for buttons under it.
              */
-            .toy { pointer-events: none; transform-origin: 50% 100%; }
+            .toy { pointer-events: none; transform-origin: 50% 100%; z-index: 1; }
+            /* Animals in front of toys: a toy lying on the ground never covers the pet. */
+            .pet { z-index: 2; }
             .toy-grab {
                 position: absolute; left: 22%; right: 22%; bottom: 4%; height: 46%;
                 pointer-events: auto; cursor: grab; touch-action: none;
@@ -1354,6 +1361,13 @@ class FqPets extends HTMLElement {
 
             if (pet.theta) {
                 swing = ' rotate(' + (pet.theta * 180 / Math.PI).toFixed(2) + 'deg)';
+            }
+
+            // Only while it is actually in a hand. Scaled from the scruff, a
+            // big pet stretches downwards — right for one dangling from a
+            // finger, and wrong for one let go: it sank below the floor until
+            // its swing died away and then jumped back up onto its feet.
+            if (pet.held) {
                 origin = '50% ' + (SCRUFF * 100) + '%';
             }
 
@@ -1373,6 +1387,11 @@ class FqPets extends HTMLElement {
             const size = scale !== 1 ? ' scale(' + scale.toFixed(3) + ')' : '';
 
             toy.sprite.style.transform = 'translate(' + (toy.x - PET_SIZE / 2) + 'px,' + (toy.y - PET_SIZE) + 'px)' + size;
+
+            // The play and toss poses have the toy drawn in the pet's paws, so
+            // while its own pet is playing the loose one is put away — two of
+            // the same toy side by side reads as a glitch.
+            toy.sprite.style.visibility = toy.owner && toy.owner.state === 'playing' && ! toy.held ? 'hidden' : '';
         });
 
         const snack = this.world.snack;
