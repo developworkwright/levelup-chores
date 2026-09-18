@@ -64,14 +64,14 @@ enum PetStage: string
      * alone that make a baby small.
      *
      * These are phone sizes. Past a 900px-wide window the pet layer grows them
-     * further, up to one and a half times — see screenZoom() in pets.js.
+     * further, up to 1.6 times — see screenZoom() in pets.js.
      */
     public function pixels(): int
     {
         return match ($this) {
-            self::Baby => 64,
-            self::Young => 80,
-            self::Adult => 96,
+            self::Baby => 80,
+            self::Young => 100,
+            self::Adult => 120,
         };
     }
 

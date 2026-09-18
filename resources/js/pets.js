@@ -31,10 +31,10 @@ const PET_SIZE = 78;
  * How much bigger everything is drawn on a big screen. A pet's size is set for
  * a phone (App\Enums\PetStage::pixels()), which is a speck on a desktop
  * monitor, so past a 900px-wide window the pet grows with the window, up to
- * half as big again. A phone or a tablet held upright never sees any of it.
+ * 1.6 times as big. A phone or a tablet held upright never sees any of it.
  */
 const ZOOM_FROM = 900;
-const ZOOM_MAX = 1.5;
+const ZOOM_MAX = 1.6;
 
 function screenZoom() {
     return Math.min(ZOOM_MAX, Math.max(1, (window.innerWidth || 0) / ZOOM_FROM));
