@@ -61,22 +61,30 @@ enum PetStage: string
      * Fixed numbers, not ratios worked out from the art: generators draw each
      * age at whatever size they like, so every age's sheet is cut at the same
      * full size (see CosmeticArt::splitFamily()) and it is these three numbers
-     * alone that make a baby small. The adult is the engine's own PET_SIZE in
-     * resources/js/pets.js.
+     * alone that make a baby small.
+     *
+     * These are phone sizes. Past a 900px-wide window the pet layer grows them
+     * further, up to one and a half times — see screenZoom() in pets.js.
      */
     public function pixels(): int
     {
         return match ($this) {
-            self::Baby => 52,
-            self::Young => 64,
-            self::Adult => 78,
+            self::Baby => 64,
+            self::Young => 80,
+            self::Adult => 96,
         };
     }
 
-    /** pixels() as a share of the adult's, which is what the pet layer takes. */
+    /**
+     * The box the pet layer draws one pose in, before any scaling —
+     * PET_SIZE in resources/js/pets.js. The two must agree.
+     */
+    public const ENGINE_BOX = 78;
+
+    /** pixels() as a scale on the pet layer's box, which is what it takes. */
     public function scale(): float
     {
-        return round($this->pixels() / self::Adult->pixels(), 3);
+        return round($this->pixels() / self::ENGINE_BOX, 3);
     }
 
     /** The cosmetics column that holds this stage's own sheet. */

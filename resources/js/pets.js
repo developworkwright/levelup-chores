@@ -27,6 +27,19 @@
 /** How big the pet is drawn, in CSS pixels. One cell of the sheet. */
 const PET_SIZE = 78;
 
+/*
+ * How much bigger everything is drawn on a big screen. A pet's size is set for
+ * a phone (App\Enums\PetStage::pixels()), which is a speck on a desktop
+ * monitor, so past a 900px-wide window the pet grows with the window, up to
+ * half as big again. A phone or a tablet held upright never sees any of it.
+ */
+const ZOOM_FROM = 900;
+const ZOOM_MAX = 1.5;
+
+function screenZoom() {
+    return Math.min(ZOOM_MAX, Math.max(1, (window.innerWidth || 0) / ZOOM_FROM));
+}
+
 /** The poses, in the order the sheet draws them. Mirrors CosmeticSlot::PET_POSES. */
 const POSES = ['idle', 'blink', 'crouch', 'jump', 'walk', 'happy', 'held', 'landed', 'play', 'toss', 'sleep', 'toy'];
 
@@ -292,6 +305,70 @@ class Pet {
         return Boolean(snack && ! this.visiting && snack.landed && Math.abs(snack.x - this.x) < 30);
     }
 
+    /**
+     * The page has stopped scrolling: come and find the kid.
+     *
+     * Still in view, it hops down to the bottom of the screen. Scrolled off
+     * the top, it drops back in from the top edge; off the bottom, it pops up
+     * from under it. A pet sitting on a card that is still on screen stays
+     * put, one mid-air or in a hand is left to finish, and one asleep is just
+     * quietly moved.
+     */
+    comeBack() {
+        const world = this.world;
+
+        if (this.held || this.leaving || ['falling', 'jumping', 'crouch'].includes(this.state)) {
+            return;
+        }
+
+        const floor = world.floor();
+        const top = world.ceiling();
+        const inView = this.y >= top + PET_SIZE * 0.5 && this.y <= floor + 2;
+
+        if (this.perch && inView) {
+            return;
+        }
+
+        if (world.asleep) {
+            if (! inView) {
+                this.perch = null;
+                this.y = floor;
+            }
+
+            return;
+        }
+
+        if (! this.perch && Math.abs(this.y - floor) < 3) {
+            return;
+        }
+
+        this.perch = null;
+        this.vx = 0;
+        this.vy = 0;
+
+        if (inView) {
+            this.jumpTo = { x: this.x, y: floor };
+            this.hop();
+
+            return;
+        }
+
+        if (this.y < floor) {
+            // Off the top: it drops in.
+            this.y = top - 10;
+            this.landOn = floor;
+            this.state = 'falling';
+            this.pose = 'jump';
+
+            return;
+        }
+
+        // Off the bottom: it springs up from under the edge.
+        this.y = floor + PET_SIZE;
+        this.jumpTo = { x: this.x, y: floor };
+        this.hop();
+    }
+
     /** Says hello to whoever it has just bumped into. */
     greet(other) {
         this.facing = other.x < this.x ? -1 : 1;
@@ -394,8 +471,10 @@ class Pet {
             this.x += Math.sign(distance) * Math.min(Math.abs(distance), this.speed * dt);
             this.pose = 'walk';
 
-            // Following the floor as the page scrolls under it.
-            if (! this.perch) {
+            // On the floor. Not while the page is scrolling: then the pet
+            // stays where it is on the page and scrolls away with it, and
+            // comes back once the scrolling stops — see comeBack().
+            if (! this.perch && ! world.scrolling()) {
                 this.y = world.floor();
             }
 
@@ -419,7 +498,7 @@ class Pet {
         }
 
         if (this.state === 'eating') {
-            if (! this.perch) {
+            if (! this.perch && ! world.scrolling()) {
                 this.y = world.floor();
             }
 
@@ -455,7 +534,7 @@ class Pet {
         }
 
         if (this.state === 'idle' || this.state === 'happy' || this.state === 'landed' || this.state === 'playing') {
-            if (! this.perch) {
+            if (! this.perch && ! world.scrolling()) {
                 this.y = world.floor();
             }
 
@@ -608,7 +687,7 @@ class World {
             const box = element.getBoundingClientRect();
             // Room above it for the animal, or the pet perches with its head off
             // the top of the screen.
-            const onScreen = box.bottom > 0 && box.top < window.innerHeight - 20 && box.top > PET_SIZE;
+            const onScreen = box.bottom > 0 && box.top < window.innerHeight - 20 && box.top > PET_SIZE * screenZoom();
             const radius = parseFloat(getComputedStyle(element).borderTopLeftRadius) || 0;
             const isCard = element.hasAttribute('data-fq-perch') || (radius >= 10 && box.height >= 48);
 
@@ -715,8 +794,25 @@ class World {
         window.dispatchEvent(new CustomEvent(name, { detail: detail ?? {} }));
     }
 
+    /**
+     * Whether the page scrolled a moment ago. The pets and toys stay where
+     * they are on the page while it does, rather than chasing the bottom of
+     * the screen frame by frame.
+     */
+    scrolling() {
+        return performance.now() - (this.scrolledAt ?? -Infinity) < 350;
+    }
+
     step(dt) {
         this.measure();
+
+        const scrolling = this.scrolling();
+
+        if (this.wasScrolling && ! scrolling) {
+            this.pets.forEach((pet) => pet.comeBack());
+        }
+
+        this.wasScrolling = scrolling;
         this.pets.forEach((pet) => pet.step(dt));
 
         // A visitor that has walked off the edge takes its sprite with it.
@@ -776,7 +872,7 @@ class Toy {
     }
 
     step(dt, world) {
-        if (this.held) {
+        if (this.held || world.scrolling()) {
             return;
         }
 
@@ -804,11 +900,17 @@ class FqPets extends HTMLElement {
         this.onCelebrate = () => this.cheer();
         this.onFeed = () => this.feed();
         this.onTap = (event) => this.feedAt(event);
+        this.onScroll = () => {
+            if (this.world) {
+                this.world.scrolledAt = performance.now();
+            }
+        };
         this.onVisible = () => (document.hidden ? this.pause() : this.play());
 
         window.addEventListener('celebrate', this.onCelebrate);
         window.addEventListener('fq-pet-feed', this.onFeed);
         document.addEventListener('click', this.onTap);
+        window.addEventListener('scroll', this.onScroll, { passive: true });
         document.addEventListener('visibilitychange', this.onVisible);
     }
 
@@ -817,6 +919,7 @@ class FqPets extends HTMLElement {
         window.removeEventListener('celebrate', this.onCelebrate);
         window.removeEventListener('fq-pet-feed', this.onFeed);
         document.removeEventListener('click', this.onTap);
+        window.removeEventListener('scroll', this.onScroll);
         document.removeEventListener('visibilitychange', this.onVisible);
     }
 
@@ -1213,6 +1316,10 @@ class FqPets extends HTMLElement {
             return;
         }
 
+        // Every sprite is scaled about its feet (or the scruff, when held),
+        // so a bigger pet still stands on the card and hangs from the finger.
+        const zoom = screenZoom();
+
         this.world.pets.forEach((pet) => {
             pet.sprite.style.backgroundPosition = posePosition(pet.pose);
 
@@ -1254,15 +1361,16 @@ class FqPets extends HTMLElement {
             // Scaled about the same origin as everything else — the feet on the
             // ground, the scruff in a hand — so a small pet still stands on
             // the card and still hangs from the finger.
-            const size = pet.scale === 1 ? '' : ' scale(' + pet.scale + ')';
+            const scale = pet.scale * zoom;
+            const size = scale === 1 ? '' : ' scale(' + scale.toFixed(3) + ')';
 
             pet.sprite.style.transform = 'translate(' + (pet.x - PET_SIZE / 2) + 'px,' + (pet.y - PET_SIZE) + 'px)' + size + swing + ' scaleX(' + pet.facing + ')' + gait;
         });
 
         this.world.toys.forEach((toy) => {
             // Shrunk with its own pet, so a baby's toy stays in proportion.
-            const scale = toy.owner?.scale ?? 1;
-            const size = scale !== 1 ? ' scale(' + scale + ')' : '';
+            const scale = (toy.owner?.scale ?? 1) * zoom;
+            const size = scale !== 1 ? ' scale(' + scale.toFixed(3) + ')' : '';
 
             toy.sprite.style.transform = 'translate(' + (toy.x - PET_SIZE / 2) + 'px,' + (toy.y - PET_SIZE) + 'px)' + size;
         });
@@ -1270,7 +1378,7 @@ class FqPets extends HTMLElement {
         const snack = this.world.snack;
 
         if (snack) {
-            snack.sprite.style.transform = 'translate(' + (snack.x - 15) + 'px,' + (snack.y - 30) + 'px) scale(' + (1 - snack.bite * 0.8).toFixed(3) + ')';
+            snack.sprite.style.transform = 'translate(' + (snack.x - 15) + 'px,' + (snack.y - 30) + 'px) scale(' + ((1 - snack.bite * 0.8) * zoom).toFixed(3) + ')';
         }
     }
 }

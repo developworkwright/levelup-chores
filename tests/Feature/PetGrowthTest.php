@@ -246,23 +246,24 @@ class PetGrowthTest extends TestCase
     /** Three fixed sizes, one per age — the art has no say in how big a pet is. */
     public function test_each_age_is_drawn_at_its_own_fixed_size(): void
     {
-        $this->assertSame([52, 64, 78], array_map(fn (PetStage $stage) => $stage->pixels(), PetStage::cases()));
-        $this->assertSame(0.667, PetStage::Baby->scale());
-        $this->assertSame(0.821, PetStage::Young->scale());
-        $this->assertSame(1.0, PetStage::Adult->scale());
+        $this->assertSame([64, 80, 96], array_map(fn (PetStage $stage) => $stage->pixels(), PetStage::cases()));
+        // Scales on the pet layer's 78px box.
+        $this->assertSame(0.821, PetStage::Baby->scale());
+        $this->assertSame(1.026, PetStage::Young->scale());
+        $this->assertSame(1.231, PetStage::Adult->scale());
 
         $tabby = $this->pet('Tabby', ['baby_art_path' => 'cosmetics/'.$this->household->id.'/tabby-baby.png']);
         $this->adopt($this->kid, $tabby);
 
         $sprite = app(PetService::class)->spriteFor($this->kid->fresh());
         $this->assertStringContainsString('stage=baby', $sprite['src']);
-        $this->assertSame(0.667, $sprite['scale']);
+        $this->assertSame(0.821, $sprite['scale']);
 
         Auth::guard('profile')->login($this->kid->fresh());
-        Volt::test('kid.bonus')->assertSee('scale="0.667"', false);
+        Volt::test('kid.bonus')->assertSee('scale="0.821"', false);
 
         // The same size whichever sheet it is drawn from.
-        $this->assertSame(0.667, $this->pet('Gremlin', ['young_art_path' => 'x/young.png'])->drawScale(PetStage::Baby));
+        $this->assertSame(0.821, $this->pet('Gremlin', ['young_art_path' => 'x/young.png'])->drawScale(PetStage::Baby));
     }
 
     public function test_a_young_pet_with_only_baby_art_uses_the_adult_sheet(): void
@@ -608,7 +609,7 @@ class PetGrowthTest extends TestCase
             ->assertSee('data-pet-trial="baby"', false)
             ->assertSee('sheet="data:image/png;base64,', false)
             // Drawn at the baby's size, as a kid would see it.
-            ->assertSee('scale="0.667"', false)
+            ->assertSee('scale="0.821"', false)
             ->call('tryOut', 'adult')
             ->assertSee('data-pet-trial="adult"', false);
 

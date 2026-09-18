@@ -574,7 +574,7 @@ new class extends Component
 
             <div wire:key="pet-out-{{ $petOut['item']->id }}" class="flex flex-wrap items-center gap-[13px] rounded-[18px] border border-fq-line-2 bg-fq-panel p-[13px]" data-pet-out>
                 <span class="relative grid h-[64px] w-[64px] shrink-0 place-items-end overflow-hidden rounded-[14px] bg-fq-bg">
-                    <span class="relative block" style="width: {{ round(64 * $petOut['item']->drawScale($stageNow)) }}px; height: {{ round(64 * $petOut['item']->drawScale($stageNow)) }}px; margin: 0 auto">
+                    <span class="relative block" style="width: {{ round(64 * $stageNow->pixels() / App\Enums\PetStage::Adult->pixels()) }}px; height: {{ round(64 * $stageNow->pixels() / App\Enums\PetStage::Adult->pixels()) }}px; margin: 0 auto">
                         <x-cosmetic.art :item="$petOut['item']" :stage="$stageNow" mode="fill" class="absolute inset-0" />
                     </span>
                 </span>
