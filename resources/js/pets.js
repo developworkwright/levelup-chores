@@ -34,6 +34,38 @@ const WALK_SPEED = 46;
 const CHASE_SPEED = 96;
 const GRAVITY = 2200;
 
+/*
+ * The swing of a pet held by the scruff: a damped pendulum hanging from the
+ * finger. The length is roughly scruff to middle of body — it sets how fast the
+ * swing is (about a second a swing), and the damping sets how soon it settles.
+ */
+const SWING_LENGTH = 55;
+const SWING_DAMPING = 3.2;
+
+/**
+ * How much of the finger's acceleration reaches the body. Under one, because a
+ * pet is not a point mass on a string and at full strength a quick flick slams
+ * it straight to the limit.
+ */
+const SWING_DRIVE = 0.4;
+
+/*
+ * Past SWING_SOFT the swing is pushed back progressively rather than stopped:
+ * a hard stop at a fixed angle reads as a hinge hitting its end. SWING_LIMIT is
+ * only a backstop and should rarely be reached.
+ */
+const SWING_SOFT = 0.7;
+const SWING_LIMIT = 1.25;
+
+/**
+ * Where a held pet is gripped, as a fraction of its height from the top.
+ *
+ * Right at the top, because the held pose is drawn dangling from a tuft at the
+ * very top of its cell — the prompt asks for exactly that. Gripping any lower
+ * put the finger on the pet's face.
+ */
+const SCRUFF = 0.04;
+
 /**
  * How long a sibling's pet stays before letting itself out.
  *
@@ -112,6 +144,57 @@ class Pet {
         this.vx = 0;
         this.vy = 0;
         this.act('held', 'held', 0);
+
+        // Picked up hanging straight, and still.
+        this.theta = 0;
+        this.omega = 0;
+        this.lastX = null;
+        this.lastVx = 0;
+        this.pivotAx = 0;
+    }
+
+    /**
+     * The swing, while it dangles from a finger.
+     *
+     * A pendulum whose pivot is the finger. Gravity pulls it back to hanging
+     * straight; the finger's sideways *acceleration* is what swings it — whip
+     * the pet right and its body lags left, stop dead and it swings on past —
+     * and damping bleeds the motion away. That is the whole difference from a
+     * scripted sway, which looks the same however you move.
+     *
+     * theta is the angle from hanging straight down, positive when the body
+     * has swung left of the finger.
+     */
+    swing(dt) {
+        if (dt <= 0) {
+            return;
+        }
+
+        // The finger's own motion, from where it put the pet this frame. The
+        // acceleration is smoothed: pointer events arrive unevenly, and a raw
+        // second difference of them is mostly noise.
+        const vx = this.lastX === null ? 0 : (this.x - this.lastX) / dt;
+        const ax = (vx - this.lastVx) / dt;
+
+        this.lastX = this.x;
+        this.lastVx = vx;
+        this.pivotAx = this.pivotAx * 0.55 + ax * 0.45;
+
+        const beyond = Math.max(0, Math.abs(this.theta) - SWING_SOFT);
+
+        const alpha = -(GRAVITY / SWING_LENGTH) * Math.sin(this.theta)
+            - SWING_DAMPING * this.omega
+            + (this.pivotAx * SWING_DRIVE / SWING_LENGTH) * Math.cos(this.theta)
+            - Math.sign(this.theta) * beyond * 160;
+
+        this.omega += alpha * dt;
+        this.theta = Math.max(-SWING_LIMIT, Math.min(SWING_LIMIT, this.theta + this.omega * dt));
+
+        // Held still, it still wriggles now and then — a live animal, not a
+        // weight on a string.
+        if (Math.abs(this.omega) < 0.25 && Math.random() < dt * 1.1) {
+            this.omega += (Math.random() < 0.5 ? -1 : 1) * random(1.2, 2.2);
+        }
     }
 
     /**
@@ -193,7 +276,19 @@ class Pet {
         this.clock = (this.clock ?? 0) + dt;
 
         if (this.held) {
+            this.swing(dt);
+
             return;
+        }
+
+        // Let go mid-swing, it carries the angle into the fall and straightens
+        // out on the way down instead of snapping upright the instant it drops.
+        if (this.theta) {
+            this.theta *= Math.pow(0.02, dt);
+
+            if (Math.abs(this.theta) < 0.01) {
+                this.theta = 0;
+            }
         }
 
         // A visitor sees itself out. The clock only runs while it is loose, so
@@ -792,9 +887,14 @@ class FqPets extends HTMLElement {
                 // Kept inside what the kid can see. A finger dragged up into
                 // the header would otherwise carry the pet off the top of the
                 // layer, where it is still being held and no longer anywhere.
+                // A pet is held by the scruff, so the finger sits near the top
+                // of its head and the body hangs below — that is the pivot the
+                // swing turns on. The toy is just held in the middle.
+                const grip = thing instanceof Pet ? PET_SIZE * (1 - SCRUFF) : PET_SIZE / 2;
+
                 thing.x = this.world.clampX(event.clientX - box.left);
                 thing.y = Math.min(
-                    Math.max(event.clientY - box.top + PET_SIZE / 2, this.world.ceiling()),
+                    Math.max(event.clientY - box.top + grip, this.world.ceiling()),
                     this.world.floor(),
                 );
 
@@ -895,19 +995,22 @@ class FqPets extends HTMLElement {
                 gait = ' translateY(' + bob.toFixed(2) + 'px) scaleY(' + squash.toFixed(3) + ')';
             }
 
-            if (pet.held) {
-                // Wriggling to get down: a swing from the scruff with a faster
-                // kick on top of it, so it reads as a live animal being carried
-                // rather than a sticker following a finger.
-                const swing = Math.sin(pet.clock * 7.5) * 8;
-                const kick = Math.sin(pet.clock * 17) * 1.6;
+            /*
+             * The swing — see Pet.swing(). Pivoting on the scruff, which is
+             * where the finger is holding it. Written before the facing flip
+             * in the transform, so a pet facing left swings the same way in
+             * the world as one facing right; after it, the mirror would reverse
+             * every swing.
+             */
+            let swing = '';
 
-                gait = ' rotate(' + swing.toFixed(2) + 'deg) translateY(' + kick.toFixed(2) + 'px)';
-                origin = '50% 14%';
+            if (pet.theta) {
+                swing = ' rotate(' + (pet.theta * 180 / Math.PI).toFixed(2) + 'deg)';
+                origin = '50% ' + (SCRUFF * 100) + '%';
             }
 
             pet.sprite.style.transformOrigin = origin;
-            pet.sprite.style.transform = 'translate(' + (pet.x - PET_SIZE / 2) + 'px,' + (pet.y - PET_SIZE) + 'px) scaleX(' + pet.facing + ')' + gait;
+            pet.sprite.style.transform = 'translate(' + (pet.x - PET_SIZE / 2) + 'px,' + (pet.y - PET_SIZE) + 'px)' + swing + ' scaleX(' + pet.facing + ')' + gait;
         });
 
         const toy = this.world.toy;
