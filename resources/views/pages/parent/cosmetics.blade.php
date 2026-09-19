@@ -16,6 +16,7 @@ use App\Services\CosmeticArt;
 use App\Services\CosmeticService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use Livewire\Attributes\Locked;
 use Livewire\Volt\Component;
 use Livewire\WithFileUploads;
 
@@ -92,11 +93,65 @@ new class extends Component
      */
     public ?int $replacing = null;
 
-    public function mount(): void
+    /**
+     * Which page this console is being: 'items' is Cosmetics, everything a
+     * kid wears; 'pets' is Pets, reached at /parent/pets. One component so a
+     * pet's art goes through the one upload pipeline — the cut, the checks,
+     * Try it out and New Art — rather than a copy of it. Pets mode shows only
+     * pets, plus how every kid's pet is doing; items mode shows no pets.
+     */
+    #[Locked]
+    public string $mode = 'items';
+
+    public function mount(string $mode = 'items'): void
     {
         $this->profile = Auth::guard('profile')->user();
 
         abort_unless($this->profile->isParent(), 403);
+
+        if ($mode === 'pets' || request()->routeIs('parent.pets')) {
+            $this->mode = 'pets';
+            $this->slot = CosmeticSlot::Pet->value;
+            $this->listSlot = CosmeticSlot::Pet->value;
+        }
+    }
+
+    private function petsMode(): bool
+    {
+        return $this->mode === 'pets';
+    }
+
+    /**
+     * Every kid's pet, for the Pets page: the one out and how grown it is,
+     * its knack and what's left of it — or the egg in its place.
+     *
+     * @return array<int, array{kid: Profile, pet: ?Cosmetic, stage: ?PetStage, toGo: ?int, knack: ?array, egg: ?App\Models\PetEgg, owned: int}>
+     */
+    private function kidsPets(): array
+    {
+        $pets = app(App\Services\PetService::class);
+        $knacks = app(App\Services\KnackService::class);
+        $cosmetics = app(CosmeticService::class);
+
+        return Profile::where('household_id', $this->profile->household_id)
+            ->where('role', App\Enums\ProfileRole::Kid)
+            ->orderBy('id')
+            ->get()
+            ->map(function (Profile $kid) use ($pets, $knacks, $cosmetics) {
+                $egg = $pets->eggFor($kid);
+                $pet = $egg ? null : $cosmetics->wornIn($kid, CosmeticSlot::Pet);
+
+                return [
+                    'kid' => $kid,
+                    'pet' => $pet,
+                    'stage' => $pet ? $pets->stageOf($kid, $pet) : null,
+                    'toGo' => $pet ? $pets->choresToGrow($kid, $pet) : null,
+                    'knack' => $pet ? $knacks->stateFor($kid) : null,
+                    'egg' => $egg,
+                    'owned' => count($pets->stagesFor($kid)),
+                ];
+            })
+            ->all();
     }
 
     /** @return array<string, mixed> */
@@ -621,10 +676,12 @@ new class extends Component
             'previewIsFamily' => $previewIsFamily,
             'trial' => $trial,
             'replacingPet' => $this->replacing === null ? null : $this->find($this->replacing),
+            'petsMode' => $this->petsMode(),
+            'kidsPets' => $this->petsMode() ? $this->kidsPets() : [],
             // A real face under the preview, since a frame is judged by how it
             // sits round one.
             'previewFace' => $catalog->first(fn (Cosmetic $item) => $item->slot === CosmeticSlot::Avatar && ! $item->isDraft()),
-            'drafts' => $catalog->filter(fn (Cosmetic $item) => $item->isDraft())->values(),
+            'drafts' => $catalog->filter(fn (Cosmetic $item) => $item->isDraft() && $item->isSheet() === $this->petsMode())->values(),
             'listed' => $catalog->filter(fn (Cosmetic $item) => ! $item->isDraft() && $item->slot->value === $this->listSlot)->values(),
             'inRotation' => $rotation,
             // The grown-up's own pet, out for testing, and its age.
@@ -663,7 +720,13 @@ new class extends Component
 
         ->all();
 
+    // Pets mode is pets only; Cosmetics is everything else.
+    $modeSlots = collect(App\Enums\CosmeticSlot::cases())
+        ->filter(fn (App\Enums\CosmeticSlot $case) => ($case === App\Enums\CosmeticSlot::Pet) === $petsMode)
+        ->values();
+
     $promptTabs = collect(App\Enums\CosmeticSlot::uploadable())
+        ->filter(fn (App\Enums\CosmeticSlot $case) => $modeSlots->contains($case))
         ->mapWithKeys(fn (App\Enums\CosmeticSlot $case) => [$case->value => [$case->label(), $promptNotes[$case->value]]])
         ->all();
 
@@ -675,12 +738,12 @@ new class extends Component
     ];
 @endphp
 
-<x-parent.shell :profile="$profile" active="cosmetics">
+<x-parent.shell :profile="$profile" :active="$petsMode ? 'pets' : 'cosmetics'">
     <div class="flex flex-col gap-4 rounded-[24px] border border-fq-nav-line bg-fq-bg p-[14px] md:p-[18px]">
         <div class="flex flex-wrap items-end justify-between gap-[14px] border-b border-fq-track pb-[13px]">
             <div>
-                <h2 class="font-baloo text-[24px] font-extrabold">Cosmetics</h2>
-                <p class="mt-[2px] text-[12.5px] text-fq-text-4">What the kids can buy with tickets</p>
+                <h2 class="font-baloo text-[24px] font-extrabold">{{ $petsMode ? 'Pets' : 'Cosmetics' }}</h2>
+                <p class="mt-[2px] text-[12.5px] text-fq-text-4">{{ $petsMode ? 'Making pets, what they can do, and how every kid\'s is doing' : 'What the kids can buy with tickets' }}</p>
             </div>
 
             <div class="flex flex-wrap gap-2">
@@ -694,6 +757,66 @@ new class extends Component
 
         @if ($flashMessage)
             <div class="rounded-[14px] border border-fq-line-2 bg-fq-sunk px-4 py-3 text-sm text-fq-text-2">{{ $flashMessage }}</div>
+        @endif
+
+        {{-- Pets mode: how every kid's pet is doing — the one out, how grown,
+             its knack and what's left of it, or the egg in its place. --}}
+        @if ($petsMode)
+            <div class="flex flex-col gap-[8px]" data-kids-pets>
+                <p class="font-mono-fq text-[9.5px] tracking-[0.16em] text-fq-text-4 uppercase">The kids' pets</p>
+
+                <div class="grid gap-[8px] sm:grid-cols-2">
+                    @forelse ($kidsPets as $row)
+                        <div wire:key="kid-pet-{{ $row['kid']->id }}" class="flex items-center gap-[11px] rounded-[14px] border border-fq-line bg-fq-panel px-[12px] py-[10px]" data-kid-pet="{{ $row['kid']->id }}">
+                            <span class="relative h-[44px] w-[44px] shrink-0 overflow-hidden rounded-[11px] bg-fq-bg">
+                                @if ($row['pet'])
+                                    <x-cosmetic.art :item="$row['pet']" :stage="$row['stage']" still class="absolute inset-0" />
+                                @elseif ($row['egg'])
+                                    <img x-data :src="window.fqEggSvg?.({{ $row['egg']->cracks }}, {{ $row['egg']->hue() }}, '{{ App\Models\PetEgg::patternFor($row['egg']->pet) }}')" alt="" class="absolute inset-0 h-full w-full">
+                                @endif
+                            </span>
+
+                            <div class="min-w-0 flex-1">
+                                <p class="text-[13px] font-semibold">
+                                    {{ $row['kid']->name }}
+                                    <span class="font-mono-fq text-[9px] tracking-[0.08em] text-fq-text-5 uppercase">· {{ $row['owned'] }} {{ Str::plural('pet', $row['owned']) }}</span>
+                                </p>
+
+                                @if ($row['pet'])
+                                    <p class="text-[11.5px] text-fq-text-3">
+                                        {{ $row['pet']->name }} · {{ $row['stage']->label() }}
+                                        @if ($row['toGo'] !== null) <span class="text-fq-text-5">({{ $row['toGo'] }} to grow)</span> @endif
+                                        · <span style="color: {{ $row['pet']->rarity()->color() }}">{{ $row['pet']->rarity()->label() }}</span>
+                                        @if ($row['pet']->pet_style) · {{ $row['pet']->pet_style->label() }} @endif
+                                    </p>
+                                    @if ($row['knack'])
+                                        <p class="text-[11px] text-fq-text-4">
+                                            <i class="fa-solid {{ $row['knack']['knack']->icon() }} mr-[3px]"></i>{{ $row['knack']['knack']->label() }}:
+                                            @if (! $row['knack']['unlocked'])
+                                                still learning
+                                            @elseif ($row['knack']['uses'] === null)
+                                                always on{{ $row['knack']['doubled'] ? ', doubled today' : '' }}
+                                            @else
+                                                {{ $row['knack']['left'] }} left{{ $row['knack']['treats'] > 0 ? ' ('.$row['knack']['treats'].' from treats)' : '' }}
+                                            @endif
+                                        </p>
+                                    @endif
+                                @elseif ($row['egg'])
+                                    <p class="text-[11.5px] text-fq-text-3">An egg — {{ $row['egg']->cracks }} of {{ App\Models\PetEgg::CRACKS_TO_HATCH }} cracks</p>
+                                @else
+                                    <p class="text-[11.5px] text-fq-text-5">No pet out</p>
+                                @endif
+                            </div>
+                        </div>
+                    @empty
+                        <p class="text-[12px] text-fq-text-5">No kids yet.</p>
+                    @endforelse
+                </div>
+            </div>
+        @else
+            <a href="{{ route('parent.pets') }}" wire:navigate class="flex items-center gap-[8px] self-start rounded-[11px] border border-fq-line-2 px-[12px] py-[7px] text-[12px] text-fq-text-3 hover:border-fq-line-focus" data-pets-link>
+                <i class="fa-solid fa-paw text-fq-green"></i>Pets have their own page now →
+            </a>
         @endif
 
 
@@ -777,7 +900,7 @@ new class extends Component
                 <div class="flex flex-col gap-[6px]">
                     <span class="{{ $label }}">What is it?</span>
                     <div class="flex flex-wrap gap-[6px]" role="radiogroup" aria-label="Slot">
-                        @foreach (App\Enums\CosmeticSlot::uploadable() as $case)
+                        @foreach (array_filter(App\Enums\CosmeticSlot::uploadable(), fn ($case) => $modeSlots->contains($case)) as $case)
                             @php $on = $uploadSlot === $case; @endphp
                             <button
                                 type="button"
@@ -1034,7 +1157,7 @@ new class extends Component
              ends the attribute early and kills the whole component. --}}
         <div
             x-data="{
-                promptKind: 'frame',
+                promptKind: '{{ $petsMode ? 'pet' : 'frame' }}',
                 promptCopied: false,
                 own: {{ Js::from($ownPrompts) }},
                 outputs: {{ Js::from($promptOutputs) }},
@@ -1083,7 +1206,7 @@ new class extends Component
             <div class="flex items-start gap-[9px]">
                 <i class="fa-solid fa-lightbulb mt-[2px] text-[12px] text-fq-gold"></i>
                 @foreach ($promptTabs as $kind => [$tab, $note])
-                    <span class="flex-1 text-[11.5px] text-fq-text-4" x-show="promptKind === '{{ $kind }}'" @if ($kind !== 'frame') x-cloak @endif>{{ $note }}</span>
+                    <span class="flex-1 text-[11.5px] text-fq-text-4" x-show="promptKind === '{{ $kind }}'" @if ($kind !== ($petsMode ? 'pet' : 'frame')) x-cloak @endif>{{ $note }}</span>
                 @endforeach
             </div>
         </div>
@@ -1129,7 +1252,7 @@ new class extends Component
         </div>
 
         <div class="flex flex-wrap gap-[6px]">
-            @foreach (App\Enums\CosmeticSlot::cases() as $case)
+            @foreach ($modeSlots as $case)
                 @php $on = $listSlot === $case->value; @endphp
                 <button
                     type="button"

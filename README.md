@@ -90,6 +90,7 @@ The board also **moves on the claim, not the approval** — a chore locks for th
 | 📋 | **Quests** | Search, add and edit chores — points, cadence, minimum age, quest eligibility, and the mystery hint. Plus the two ways to say something is urgent: a deadline to beat, and the Help Wanted flag. |
 | 🎁 | **Loot Shop** | Manage the reward catalog and pricing, plus perk pricing and which perks are switched on. |
 | 👹 | **Monsters** | Name what the monster is guarding, price it, set its health, swap its face or its weak chore, and nudge the bar by hand. Plus the trophy shelf of everything the family has put down. |
+| 🐾 | **Pets** | Make pets from one generated picture (the prompt is on the page), try each age out on your own screen, set each pet's rarity, style and knack, give old pets new art — and see every kid's pet, how grown it is and what its knack has left. |
 | 👨‍👩‍👧 | **Kids & Points** | Balances, tickets, levels, manual adjustments, cash-in/payout, PIN resets, per-kid spin reset, quest swap, and today's Mystery Chore. |
 | 📜 | **Activity** | The full append-only points ledger, plus a separate card for ticket activity. |
 
@@ -211,7 +212,7 @@ One spin per kid per day. The result is genuinely random. The *wheel itself* is 
 |---|---|
 | Rare | Coin Sniffer (bonus tokens on new rungs) · Big Pockets (a bigger daily token cap) · Fetch (re-rolls a 2x wheel boost) · Sniffer (narrows the Mystery Chore to 5, or 3 grown — never gives it away) |
 | Epic | Paw Nudge (bats the wheel one chore over) · Second Look (spins again) · Lucky Tail (charges the week's first spin) · Good Luck Charm (a Quest Charm) · Digger (a free Lucky Block hit) |
-| Legendary | Guard Dog (saves a streak) · Night Owl (saves a bedtime run) · Sidekick (chores hit the monster harder) — *designed, not built yet* |
+| Legendary | Guard Dog (saves a streak broken by one missed day) · Night Owl (saves a bedtime run after a night out of their own bed) · Sidekick (chores hit the monster 5–10% harder — damage only, never points) |
 
 A knack grows with the pet: a baby is still learning it, a young pet does it at **half strength** — usually a weaker version (a young Paw Nudge picks its own direction) — and a grown pet does it properly. Uses come back on a rolling window rather than resetting on a schedule, and are counted per kid, so two pets with the same knack don't double it. Grown-ups' pets have no knacks and no styles.
 
@@ -236,7 +237,7 @@ Every ranked game has its own board, its own ladder and its own weekly prize —
    - An effect that **changes the score belongs to that one game only**. Anything that works across every game pays tokens, never score.
    - Styles work at every age and every rarity, for a kid's own pet — never a grown-up's.
 
-   `ArcadePetStyleTest` fails for a ranked game with no styles. Grand Tour and Penguin Launch are the only games still waiting for theirs.
+   `ArcadePetStyleTest` fails for a ranked game with no styles — every game has all four today. Balance them by measurement, not by feel: run each style a hundred-odd times in the browser against no style and compare medians (a few runaway runs make averages useless).
 3. **A payout that ends the run** — the page posts the score when the game says it's over, and `TokenService` pays it.
 
 </details>

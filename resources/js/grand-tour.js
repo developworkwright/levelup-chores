@@ -75,6 +75,16 @@ const GUST_MAX = 340;
 
 const CLEAN = 26;
 
+/*
+ * A pet's style in the tour — see GrandTour. How much softer a Steady pet makes
+ * the wind; how much wider a Big pet makes the gaps, and over how long that
+ * eases back; how far a Quick pet flies the plane before handing it over.
+ */
+const STEADY_WIND = 0.65;
+const BIG_GAP = 30;
+const BIG_FADE = 60;
+const QUICK_KM = 20;
+
 /** Points. Kilometres are the honest part; the bonus is the flourish. */
 const PER_KM = 1;
 const PER_MARK = 4;
@@ -170,7 +180,17 @@ const Sfx = {
  * ------------------------------------------------------------------ */
 
 class GrandTour {
-    constructor(canvas) {
+    /*
+     * `style` is the kid's pet's style, or null — App\Enums\PetStyle, and
+     * ArcadeGame::styleHelp() for what the kid is told each one does here:
+     *
+     *   steady  the crosswinds blow STEADY_WIND as hard, all run
+     *   big     every gap BIG_GAP wider at the start, easing out over BIG_FADE s
+     *   quick   the pet flies the first QUICK_KM km, then hands over
+     *   lucky   the first crash — ground or wall — bounces instead of ending it
+     */
+    constructor(canvas, style) {
+        this.style = style || null;
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
         this.scale = 1;
@@ -198,6 +218,9 @@ class GrandTour {
         this.birds = [];
         this.pops = [];
         this.nextAt = 260;
+        // A Quick pet flying, and a Lucky pet's catch not yet used.
+        this.autopilot = this.style === 'quick';
+        this.caught = false;
 
         for (let i = 0; i < 26; i++) {
             this.birds.push({
@@ -320,6 +343,18 @@ class GrandTour {
             this.bump();
         }
 
+        // A Quick pet flies the plane: it eases through the middle of each
+        // gap until the handover, and a tap does nothing until then.
+        if (this.autopilot) {
+            this.press = -1;
+
+            if (this.km >= QUICK_KM) {
+                this.autopilot = false;
+                this.vy = 0;
+                this.petPop('YOUR TURN!');
+            }
+        }
+
         if (this.press >= 0) {
             this.press += dt;
 
@@ -344,8 +379,16 @@ class GrandTour {
             }
         }
 
-        this.vy = clamp(this.vy + (GRAVITY + this.gust()) * dt, -900, FALL_MAX);
-        this.y += this.vy * dt;
+        if (this.autopilot) {
+            const ahead = this.lines.find((l) => ! l.done);
+            const target = ahead ? ahead.gapY : (SKY_TOP + FLOOR) / 2;
+
+            this.vy = (target - this.y) * 4;
+            this.y += this.vy * dt;
+        } else {
+            this.vy = clamp(this.vy + (GRAVITY + this.gust()) * dt, -900, FALL_MAX);
+            this.y += this.vy * dt;
+        }
 
         // The ceiling bonks. Killing a kid for flapping too much is a bad
         // lesson to teach with the only button in the game.
@@ -364,12 +407,52 @@ class GrandTour {
         this.spin = clamp(this.vy / 900, -0.5, 0.9);
 
         this.spawn(speed, dt);
-        this.hit();
+
+        if (! this.autopilot) {
+            this.hit();
+        }
 
         if (this.y > FLOOR - PLANE_R) {
             this.y = FLOOR - PLANE_R;
-            this.over();
+
+            if (! this.lucky()) {
+                this.over();
+            }
         }
+    }
+
+    /**
+     * A Lucky pet's catch: the first crash of the run bounces the plane back
+     * up instead of ending it. Any wall it was inside is waved through, so the
+     * bounce cannot land it straight back on the same one.
+     *
+     * @returns {boolean} whether it caught this one
+     */
+    lucky() {
+        if (this.style !== 'lucky' || this.caught) {
+            return false;
+        }
+
+        this.caught = true;
+        this.vy = FLAP * 1.1;
+        this.shake = Math.max(this.shake, 0.3);
+
+        for (const l of this.lines) {
+            if (l.x <= PLANE_X + PLANE_R + 40 && l.x + 18 >= PLANE_X - PLANE_R - 10) {
+                l.waved = true;
+            }
+        }
+
+        this.petPop('LUCKY!');
+        Sfx.climb();
+
+        return true;
+    }
+
+    /** The pet stepping in: a word over the plane, and a chirp. */
+    petPop(text) {
+        this.pops.push({ x: PLANE_X, y: this.y - 26, vx: 0, vy: -26, r: 0, life: 1.3, text: '🐾 ' + text });
+        Sfx.pass(true);
     }
 
     /** Lint in the air, moving with the room. Free sense of speed. */
@@ -398,7 +481,7 @@ class GrandTour {
 
         const ease = clamp((this.t - GUST_AFTER) / 20, 0, 1);
 
-        return Math.sin(this.t * 0.55) * GUST_MAX * ease;
+        return Math.sin(this.t * 0.55) * GUST_MAX * ease * (this.style === 'steady' ? STEADY_WIND : 1);
     }
 
     spawn(speed, dt) {
@@ -430,7 +513,8 @@ class GrandTour {
             return;
         }
 
-        const gap = lerp(GAP_0, GAP_1, this.ramp);
+        const gap = lerp(GAP_0, GAP_1, this.ramp)
+            + (this.style === 'big' ? BIG_GAP * (1 - clamp(this.t / BIG_FADE, 0, 1)) : 0);
         const pad = gap / 2 + 26;
         const last = this.lines.length ? this.lines[this.lines.length - 1].gapY : (SKY_TOP + FLOOR) / 2;
 
@@ -453,7 +537,7 @@ class GrandTour {
     /** Circle vs the two cloth rects. Cloth is 18 wide, walls are hard. */
     hit() {
         for (const l of this.lines) {
-            if (l.x > PLANE_X + PLANE_R || l.x + 18 < PLANE_X - PLANE_R) {
+            if (l.waved || l.x > PLANE_X + PLANE_R || l.x + 18 < PLANE_X - PLANE_R) {
                 continue;
             }
 
@@ -461,7 +545,9 @@ class GrandTour {
             const bot = l.gapY + l.gap / 2;
 
             if (this.y - PLANE_R < top || this.y + PLANE_R > bot) {
-                this.over();
+                if (! this.lucky()) {
+                    this.over();
+                }
 
                 return;
             }
@@ -543,6 +629,17 @@ class GrandTour {
 
         for (const p of this.pops) {
             ctx.globalAlpha = clamp(p.life * 2.2, 0, 1);
+
+            // A pet stepping in says so, in words.
+            if (p.text) {
+                ctx.fillStyle = '#7dffb0';
+                ctx.font = '800 15px "Baloo 2", system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(p.text, p.x + 40, p.y);
+
+                continue;
+            }
+
             ctx.fillStyle = '#e6dcf5';
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
@@ -837,7 +934,8 @@ class GrandTourElement extends HTMLElement {
         wrap.appendChild(canvas);
         this.appendChild(wrap);
 
-        this.game = new GrandTour(canvas);
+        // The kid's pet's style, set by the page — see the arcade view.
+        this.game = new GrandTour(canvas, this.getAttribute('pet-style'));
         this.game.mount();
 
         wrap.appendChild(this.buildPad());

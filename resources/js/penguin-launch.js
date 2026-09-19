@@ -111,6 +111,17 @@ const CHAIN_WINDOW = 1.4;
 const MINE_R = 17;
 const MINE_POP = 700;
 
+/*
+ * A pet's style on the ice — see PenguinLaunch. How much of the speed a rough
+ * landing costs a Steady pet's penguin; how much bigger a Big pet makes rings
+ * and mines; how much harder a Quick pet's sling fires.
+ */
+const STEADY_LANDING = 0.5;
+const BIG_REACH = 1.6;
+const QUICK_SLING = 1.06;
+/** A Lucky pet's pop, as a share of a mine's: a rescue, not a jackpot. */
+const LUCKY_POP = 0.6;
+
 /** Power-ups, both timed. */
 const BALLOON_TIME = 3.4;
 const BALLOON_GRAVITY = 0.34;
@@ -262,7 +273,17 @@ const Sfx = {
  * ------------------------------------------------------------------ */
 
 class PenguinLaunch {
-    constructor(canvas) {
+    /*
+     * `style` is the kid's pet's style, or null — App\Enums\PetStyle, and
+     * ArcadeGame::styleHelp() for what the kid is told each one does here:
+     *
+     *   steady  a rough landing costs STEADY_LANDING as much speed
+     *   big     rings and mines BIG_REACH bigger — drawn bigger and hit bigger
+     *   quick   the sling fires QUICK_SLING as hard
+     *   lucky   the first time the run would end, a pop back into the air
+     */
+    constructor(canvas, style) {
+        this.style = style || null;
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
         this.scale = 1;
@@ -299,6 +320,7 @@ class PenguinLaunch {
         this.magnet = 0;
         this.still = 0;
         this.onSlick = false;
+        this.caught = false;
         this.shake = 0;
         this.t = 0;
         this.flash = null;
@@ -489,7 +511,7 @@ class PenguinLaunch {
 
     launch() {
         const len = Math.hypot(this.pull.x, this.pull.y) || 1;
-        const speed = SPEED_MIN + this.power * (SPEED_MAX - SPEED_MIN);
+        const speed = (SPEED_MIN + this.power * (SPEED_MAX - SPEED_MIN)) * (this.style === 'quick' ? QUICK_SLING : 1);
 
         this.vx = (-this.pull.x / len) * speed;
         this.vy = (-this.pull.y / len) * speed;
@@ -615,7 +637,7 @@ class PenguinLaunch {
         if (this.grounded && this.vx < DEAD_SPEED) {
             this.still += dt;
 
-            if (this.still > DEAD_TIME) {
+            if (this.still > DEAD_TIME && ! this.lucky()) {
                 this.over();
             }
         } else {
@@ -676,7 +698,7 @@ class PenguinLaunch {
                 this.shake = Math.max(this.shake, clamp(impact / 1400, 0, 0.4));
             }
 
-            vt *= 1 - clamp(impact / 9000, 0, 0.18);
+            vt *= 1 - clamp(impact / 9000, 0, 0.18) * (this.style === 'steady' ? STEADY_LANDING : 1);
             this.vx = tx * vt + nx * out;
             this.vy = ty * vt + ny * out;
 
@@ -730,6 +752,30 @@ class PenguinLaunch {
                 }
             }
         }
+    }
+
+    /**
+     * A Lucky pet's catch: the first time the slide dies, a pop back into
+     * the air — a mine's worth, from nowhere — and the run carries on.
+     *
+     * @returns {boolean} whether it caught this one
+     */
+    lucky() {
+        if (this.style !== 'lucky' || this.caught) {
+            return false;
+        }
+
+        this.caught = true;
+        this.still = 0;
+        this.vy = -MINE_POP * LUCKY_POP;
+        this.vx = Math.max(this.vx, 160);
+        this.grounded = false;
+        this.shake = 0.4;
+        Sfx.mine();
+        this.burst(this.x, this.y, 16, GOLD);
+        this.flash = { t: 0.9, text: '🐾 LUCKY!' };
+
+        return true;
     }
 
     /** The glare-ice patch under a given x, if any. */
@@ -857,7 +903,7 @@ class PenguinLaunch {
                 }
             }
 
-            const reach = it.kind === 'ring' ? RING_R : MINE_R + 4;
+            const reach = (it.kind === 'ring' ? RING_R : MINE_R + 4) * (this.style === 'big' ? BIG_REACH : 1);
 
             if (Math.hypot(this.x - it.x, this.y - it.y) > reach + PENGUIN_R - 6) {
                 continue;
@@ -1529,6 +1575,16 @@ class PenguinLaunch {
                 continue;
             }
 
+            // A Big pet's rings and mines: drawn as big as they now are to hit.
+            const grown = this.style === 'big' && (it.kind === 'ring' || it.kind === 'mine');
+
+            if (grown) {
+                ctx.save();
+                ctx.translate(it.x, it.y);
+                ctx.scale(BIG_REACH, BIG_REACH);
+                ctx.translate(-it.x, -it.y);
+            }
+
             if (it.kind === 'ring') {
                 const bob = Math.sin(this.t * 2 + it.x * 0.01) * 3;
                 const y = it.y + bob;
@@ -1564,6 +1620,10 @@ class PenguinLaunch {
                 ctx.beginPath();
                 ctx.arc(it.x, y, RING_R - 5, 0, Math.PI * 2);
                 ctx.stroke();
+
+                if (grown) {
+                    ctx.restore();
+                }
 
                 continue;
             }
@@ -1612,6 +1672,10 @@ class PenguinLaunch {
                 ctx.arc(it.x, it.y, 4.5, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.globalAlpha = 1;
+
+                if (grown) {
+                    ctx.restore();
+                }
 
                 continue;
             }
@@ -2194,7 +2258,8 @@ class PenguinLaunchElement extends HTMLElement {
         wrap.appendChild(canvas);
         this.appendChild(wrap);
 
-        this.game = new PenguinLaunch(canvas);
+        // The kid's pet's style, set by the page — see the arcade view.
+        this.game = new PenguinLaunch(canvas, this.getAttribute('pet-style'));
         this.game.mount();
 
         wrap.appendChild(this.buildPad());

@@ -609,7 +609,8 @@ class PetGrowthTest extends TestCase
 
         Auth::guard('profile')->login($this->parent);
 
-        Volt::test('parent.cosmetics')
+        // A pet's draft is on the Pets page — the console in pets mode.
+        Volt::test('parent.cosmetics', ['mode' => 'pets'])
             ->assertSee('CHECK AGAIN')
             ->call('publishDraft', $draft->id)
             ->assertSee('Cosmo is in the shop.');

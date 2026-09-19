@@ -971,7 +971,7 @@ new class extends Component
                                 class="mb-2 text-right font-mono-fq text-[9px] tracking-[0.14em] text-fq-lime uppercase"
                             ><span x-text="score"></span> points &middot; on the board &#10003;</p>
 
-                            <grand-tour aria-label="Grand Tour — tap or press space to climb"></grand-tour>
+                            <grand-tour @if ($petStyle) pet-style="{{ $petStyle->value }}" @endif aria-label="Grand Tour — tap or press space to climb"></grand-tour>
                         </div>
                     @elseif ($game === ArcadeGame::PenguinLaunch)
                         {{-- Westin's Whacky Game, and the same arrangement as
@@ -999,7 +999,7 @@ new class extends Component
                                 class="mb-2 text-right font-mono-fq text-[9px] tracking-[0.14em] text-fq-lime uppercase"
                             ><span x-text="score"></span> metres &middot; on the board &#10003;</p>
 
-                            <penguin-launch aria-label="Westin's Whacky Game — drag the penguin back into the sling and let go"></penguin-launch>
+                            <penguin-launch @if ($petStyle) pet-style="{{ $petStyle->value }}" @endif aria-label="Westin's Whacky Game — drag the penguin back into the sling and let go"></penguin-launch>
                         </div>
                     @else
                         {{-- The toy. There is no listener here and that is the whole

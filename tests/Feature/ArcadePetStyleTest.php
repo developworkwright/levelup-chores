@@ -74,8 +74,7 @@ class ArcadePetStyleTest extends TestCase
             $this->assertCount(4, array_unique($helps), $game->value);
         }
 
-        // Games not given styles yet give none, rather than one style something.
-        $this->assertNull(ArcadeGame::GrandTour->styleHelp(PetStyle::Quick));
+        // The toy keeps no score, so a pet has nothing to help with there.
         $this->assertNull(ArcadeGame::SlimeTime->styleHelp(PetStyle::Lucky));
     }
 
@@ -84,7 +83,7 @@ class ArcadePetStyleTest extends TestCase
      * when it gets them — and never add a new one to it: a new game ships
      * with all four, or this test fails.
      */
-    private const WITHOUT_STYLES_YET = [ArcadeGame::GrandTour, ArcadeGame::PenguinLaunch];
+    private const WITHOUT_STYLES_YET = [];
 
     public function test_every_ranked_game_gives_every_style_its_own_help(): void
     {
@@ -144,15 +143,41 @@ class ArcadePetStyleTest extends TestCase
             ->assertSee('4 lanes instead of 3');
     }
 
-    /** A game with no styles yet says nothing about the pet at all. */
+    /** The toy has no styles, so it says nothing about the pet at all. */
     public function test_a_game_without_styles_mentions_no_pet(): void
     {
         $kid = $this->withPet(Profile::factory()->for($this->household)->create(), PetStyle::Quick);
         Auth::guard('profile')->login($kid);
 
         Volt::test('arcade')
-            ->call('switchTo', ArcadeGame::GrandTour->value)
+            ->call('switchTo', ArcadeGame::SlimeTime->value)
             ->assertDontSee('data-pet-style-help', false);
+    }
+
+    public function test_the_penguin_is_handed_the_style(): void
+    {
+        $kid = $this->withPet(Profile::factory()->for($this->household)->create(), PetStyle::Big);
+        Auth::guard('profile')->login($kid);
+
+        $html = Volt::test('arcade')
+            ->call('switchTo', ArcadeGame::PenguinLaunch->value)
+            ->assertSee('rings and mines bigger')
+            ->html();
+
+        $this->assertMatchesRegularExpression('/<penguin-launch\s+pet-style="big"/', $html);
+    }
+
+    public function test_the_tour_is_handed_the_style(): void
+    {
+        $kid = $this->withPet(Profile::factory()->for($this->household)->create(), PetStyle::Lucky);
+        Auth::guard('profile')->login($kid);
+
+        $html = Volt::test('arcade')
+            ->call('switchTo', ArcadeGame::GrandTour->value)
+            ->assertSee('catches your first crash')
+            ->html();
+
+        $this->assertMatchesRegularExpression('/<grand-tour\s+pet-style="lucky"/', $html);
     }
 
     public function test_a_grown_ups_pet_gives_their_games_nothing(): void

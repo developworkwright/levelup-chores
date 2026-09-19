@@ -8,6 +8,7 @@ use App\Enums\PetKnack;
 use App\Enums\PetRarity;
 use App\Enums\PetStage;
 use App\Enums\PetStyle;
+use App\Enums\SleepOutcome;
 use App\Exceptions\PerkUnavailableException;
 use App\Models\BonusPerk;
 use App\Models\Chore;
@@ -29,8 +30,11 @@ use App\Services\CosmeticService;
 use App\Services\HouseholdClock;
 use App\Services\KnackService;
 use App\Services\LuckyBlockService;
+use App\Services\MonsterService;
 use App\Services\PetService;
+use App\Services\SleepService;
 use App\Services\SpinService;
+use App\Services\StreakService;
 use App\Services\TokenService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -568,6 +572,39 @@ class PetKnackTest extends TestCase
     }
 
     /* ------------------------------------------------------------------ *
+     * The parent's Pets page
+     * ------------------------------------------------------------------ */
+
+    /** Pets split out of Cosmetics for grown-ups too: the same console, pets only. */
+    public function test_the_parent_pets_page_shows_only_pets_and_every_kids_pet(): void
+    {
+        $sniffy = $this->pet('Sniffy', ['pet_rarity' => 'rare', 'pet_knack' => 'sniffer']);
+        $this->outOn($this->kid, $sniffy, 12);
+        $sibling = Profile::factory()->for($this->household)->create(['name' => 'Mae']);
+        PetEgg::create(['household_id' => $this->household->id, 'profile_id' => $sibling->id, 'tickets_paid' => 15, 'cracks' => 2]);
+
+        Auth::guard('profile')->login($this->parent);
+
+        $this->get(route('parent.pets'))->assertOk()->assertSee("The kids' pets", false);
+
+        Volt::test('parent.cosmetics', ['mode' => 'pets'])
+            ->assertSet('slot', 'pet')
+            ->assertSee('data-kid-pet="'.$this->kid->id.'"', false)
+            ->assertSee('Sniffy · Young')
+            ->assertSee('Sniffer:')
+            ->assertSee('1 left')
+            ->assertSee('An egg — 2 of 5 cracks')
+            ->assertSee('data-pet-row-traits="'.$sniffy->id.'"', false)
+            ->assertDontSee("\$set('slot', 'frame')", false);
+
+        // And Cosmetics has no pets, only the way to them.
+        Volt::test('parent.cosmetics')
+            ->assertSee('data-pets-link', false)
+            ->assertDontSee('data-kids-pets', false)
+            ->assertDontSee("\$set('slot', 'pet')", false);
+    }
+
+    /* ------------------------------------------------------------------ *
      * The Epic knacks
      * ------------------------------------------------------------------ */
 
@@ -733,6 +770,109 @@ class PetKnackTest extends TestCase
         $hit = LuckyHit::sole();
         $this->assertSame(0, $hit->tickets_spent);
         $this->assertSame(100, $this->kid->fresh()->bonus_tickets, 'A dug hit costs nothing.');
+    }
+
+    /* ------------------------------------------------------------------ *
+     * The Legendary knacks
+     * ------------------------------------------------------------------ */
+
+    /** Two days earned, then a day missed: standing on the day after it. */
+    private function brokenStreak(): void
+    {
+        $chore = Chore::factory()->for($this->household)->create(['points' => 0]);
+        $chores = app(ChoreService::class);
+
+        foreach ([0, 1] as $ignored) {
+            $chores->approve($chores->claim($this->kid->fresh(), $chore), $this->parent);
+            $this->travel(1)->days();
+        }
+
+        $this->travel(1)->days();
+    }
+
+    /** Guard Dog saves the streak by itself, on the way in — and Home says so, once. */
+    public function test_guard_dog_saves_a_broken_streak_on_the_way_in(): void
+    {
+        $rex = $this->pet('Rex', ['pet_rarity' => 'legendary', 'pet_knack' => 'guard_dog']);
+        $this->outOn($this->kid, $rex, 30);
+        $this->brokenStreak();
+
+        $this->actingAs($this->kid->fresh(), 'profile')
+            ->get(route('kid.home'))
+            ->assertOk()
+            ->assertSee('Rex guarded your streak');
+
+        $this->assertSame(3, $this->kid->fresh()->streak);
+        $this->assertSame(0, $this->knacks()->stateFor($this->kid->fresh())['left']);
+
+        // Told once.
+        $this->actingAs($this->kid->fresh(), 'profile')->get(route('kid.home'))->assertDontSee('Rex guarded your streak');
+    }
+
+    public function test_guard_dog_does_nothing_without_a_use_left(): void
+    {
+        $rex = $this->pet('Rex', ['pet_rarity' => 'legendary', 'pet_knack' => 'guard_dog']);
+        $this->outOn($this->kid, $rex, 12);
+        // A young Guard Dog has one every other month — spent already.
+        $this->knacks()->use($this->kid->fresh(), PetKnack::GuardDog);
+        $this->brokenStreak();
+
+        $this->assertFalse($this->knacks()->guardStreak($this->kid->fresh()));
+
+        app(StreakService::class)->syncStreak($this->kid->fresh());
+        $this->assertSame(0, $this->kid->fresh()->streak);
+    }
+
+    /** Night Owl saves the bedtime run the moment the night is answered. */
+    public function test_night_owl_saves_the_bedtime_run(): void
+    {
+        $this->household->update(['sleep_card_enabled' => true]);
+        $this->kid->update(['sleep_card_enabled' => true, 'age' => 6]);
+        $owl = $this->pet('Hoot', ['pet_rarity' => 'legendary', 'pet_knack' => 'night_owl']);
+        $this->outOn($this->kid, $owl, 30);
+        $this->travelTo(now()->setTime(9, 0));
+
+        $sleep = app(SleepService::class);
+
+        foreach (range(1, 3) as $ignored) {
+            $sleep->record($this->kid->fresh(), SleepOutcome::OwnBed);
+            $this->travel(1)->days();
+        }
+
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        Volt::test('kid.quests')
+            ->call('answerSleep', SleepOutcome::Visited->value)
+            ->assertDispatched('celebrate', fn (string $name, array $params) => str_contains($params['message'], 'Hoot saved your run'));
+
+        $this->assertSame(4, $this->kid->fresh()->sleep_run);
+        // Said in the moment, so Home need not say it again.
+        $this->assertSame([], $this->knacks()->takeRescues($this->kid->fresh()));
+    }
+
+    public function test_sidekick_makes_chores_hit_the_monster_harder(): void
+    {
+        $monster = app(MonsterService::class)->spawn($this->household, 'Weekend away', 10000);
+        $buddy = $this->pet('Buddy', ['pet_rarity' => 'legendary', 'pet_knack' => 'sidekick']);
+        $this->outOn($this->kid, $buddy, 30);
+
+        $this->assertSame(10, $this->knacks()->sidekickPercentFor($this->kid->fresh()));
+
+        $chore = Chore::factory()->for($this->household)->create(['points' => 100]);
+        $chores = app(ChoreService::class);
+        $completion = $chores->claim($this->kid->fresh(), $chore);
+        $chores->approve($completion, $this->parent);
+
+        // A tenth harder than the chore would have hit for — its payout,
+        // doubled when it is the monster's weak point (the only chore here is).
+        $awarded = $completion->fresh()->points_awarded;
+        $base = $awarded * ($completion->fresh()->struck_weak_point ? MonsterService::WEAK_MULTIPLIER : 1);
+        $this->assertSame((int) round($base * 1.1), (int) $monster->fresh()->hits()->sum('damage'));
+        $this->assertSame($awarded, (int) $this->kid->fresh()->points, 'The kid\'s own points are untouched.');
+
+        // A treat doubles it for the day.
+        $this->knacks()->buyTreat($this->kid->fresh());
+        $this->assertSame(20, $this->knacks()->sidekickPercentFor($this->kid->fresh()));
     }
 
     /* ------------------------------------------------------------------ *

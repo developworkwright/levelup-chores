@@ -278,6 +278,10 @@ new class extends Component
             return;
         }
 
+        // A pet with Night Owl saves the run right here — said in the same
+        // breath, so Home need not say it again.
+        $owl = app(KnackService::class)->nightOwl($this->profile, announced: true);
+
         $this->profile->refresh();
 
         $this->dispatch(
@@ -286,7 +290,7 @@ new class extends Component
             // plain good night still says what it paid, because that is the
             // reward for pressing the button at all. A tapered-out household
             // pays nothing, and "+0 pts" would read as being shortchanged.
-            message: match (true) {
+            message: ($owl ? "🐾 {$owl} saved your run! " : '').match (true) {
                 $result['constellation'] && $result['constellationPoints'] > 0 => $result['constellation']->label()
                     .' complete! +'.number_format($result['constellationPoints'] + $result['nightPoints']).' pts',
                 (bool) $result['constellation'] => $result['constellation']->label().' complete!',
@@ -321,6 +325,8 @@ new class extends Component
             return;
         }
 
+        $owl = app(KnackService::class)->nightOwl($this->profile, announced: true);
+
         $this->profile->refresh();
 
         $this->dispatch(
@@ -328,10 +334,10 @@ new class extends Component
             // Hearts rather than coins on the nights that didn't pay: a kid who
             // slept badly and said so has still done the thing this card is
             // for, and "+0 pts" would read as being shortchanged for it.
-            message: $result['nightPoints'] > 0
+            message: ($owl ? "🐾 {$owl} saved your run! " : '').($result['nightPoints'] > 0
                 ? $result['band']->label().' — '.SleepBand::say($result['minutes'])
                     .'! +'.number_format($result['nightPoints']).' pts'
-                : $result['band']->response(),
+                : $result['band']->response()),
             style: $result['nightPoints'] > 0 ? 'money' : 'heart',
             motion: 'burst',
             origin: 'tap',

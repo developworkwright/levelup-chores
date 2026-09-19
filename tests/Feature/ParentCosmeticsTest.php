@@ -249,14 +249,19 @@ class ParentCosmeticsTest extends TestCase
     {
         Auth::guard('profile')->login($this->parent);
 
-        $page = Volt::test('parent.cosmetics');
+        // Pets are on their own page — the same console in pets mode.
+        $cosmetics = Volt::test('parent.cosmetics');
+        $pets = Volt::test('parent.cosmetics', ['mode' => 'pets']);
 
         foreach (CosmeticSlot::uploadable() as $slot) {
+            $page = $slot === CosmeticSlot::Pet ? $pets : $cosmetics;
+
             $page->assertSee("wire:click=\"\$set('slot', '{$slot->value}')\"", false)
                 ->assertSee("\$wire.set('slot', '{$slot->value}')", false);
         }
 
-        $page->assertSee('Home pattern')->assertDontSee('>Background<', false);
+        $cosmetics->assertDontSee("\$set('slot', 'pet')", false);
+        $cosmetics->assertSee('Home pattern')->assertDontSee('>Background<', false);
     }
 
     /** A 512px PNG of pure noise — incompressible, so it weighs about 800 KB. */

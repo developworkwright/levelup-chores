@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\Profile;
+use App\Services\KnackService;
 use App\Services\StreakService;
 use Closure;
 use Illuminate\Http\Request;
@@ -30,6 +31,14 @@ class SyncStreak
         $profile = $request->user();
 
         if ($profile instanceof Profile && $profile->isKid()) {
+            // A pet's Guard Dog and Night Owl go off here, before the streak
+            // can be dropped: a broken streak or bedtime run is noticed on the
+            // way in, so this is where a pet gets to save it. See
+            // KnackService::guardStreak() and nightOwl().
+            $knacks = app(KnackService::class);
+            $knacks->guardStreak($profile);
+            $knacks->nightOwl($profile);
+
             $this->streaks->syncStreak($profile);
         }
 

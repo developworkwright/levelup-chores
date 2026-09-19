@@ -129,11 +129,22 @@ new class extends Component
     /** Why the suggested job couldn't be taken, when a tap on it bounces. */
     public ?string $workMessage = null;
 
+    /**
+     * What a pet saved while nobody was looking — a Guard Dog's streak, a
+     * Night Owl's run — told once, on the visit after it happened. Taken at
+     * mount so a round trip does not lose it. See KnackService::takeRescues().
+     *
+     * @var array<int, string>
+     */
+    public array $petRescues = [];
+
     public function mount(): void
     {
         $this->profile = Auth::guard('profile')->user();
 
         abort_unless($this->profile->isKid(), 403);
+
+        $this->petRescues = app(App\Services\KnackService::class)->takeRescues($this->profile);
 
         $this->feelingsAnsweredOnArrival = app(FeelingService::class)->hasAnswered($this->profile);
         // A link that names a row opens it — the Journal's "write today's", the
@@ -771,6 +782,19 @@ new class extends Component
 }; ?>
 
 <x-kid.shell :profile="$profile" active="home">
+    {{-- A pet's rescue, told once: Guard Dog and Night Owl go off by
+         themselves, usually overnight. --}}
+    @foreach ($petRescues as $rescue)
+        <div
+            class="mb-[11px] flex items-center gap-[10px] rounded-[16px] border-2 border-fq-green px-[14px] py-[11px]"
+            style="background: color-mix(in srgb, var(--fq-green) 10%, var(--fq-panel)); animation: fq-pop .35s ease both"
+            data-pet-rescue
+        >
+            <i class="fa-solid fa-shield-dog text-[18px] text-fq-green"></i>
+            <span class="flex-1 font-baloo text-[16px] leading-tight font-extrabold">{{ $rescue }}</span>
+        </div>
+    @endforeach
+
     {{-- A celebration day, on the two or three days a year there is one. Above
          both columns, because for as long as it is on the page it is the thing
          the page is about. --}}

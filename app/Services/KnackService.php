@@ -19,6 +19,7 @@ use App\Models\Spin;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 /**
  * What the pet a kid has out can do for them, and how much of it is left.
@@ -672,5 +673,121 @@ class KnackService
         }
 
         return app(LuckyBlockService::class)->hit($kid, free: true);
+    }
+
+    /* ------------------------------------------------------------------ *
+     * The Legendary knacks
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Guard Dog: a streak about to be lost over one missed day is saved, by
+     * itself, the moment it is noticed — on the way in, before any page shows
+     * a streak of nothing (see the SyncStreak middleware). A kid who missed a
+     * day is not around to tap anything, and "you had it and forgot to use
+     * it" is a bad thing to hand them. The same rescue the Streak Restore perk
+     * buys; the kid hears about it on Home (takeRescues()).
+     */
+    public function guardStreak(Profile $kid): bool
+    {
+        $streaks = app(StreakService::class);
+
+        if (! $kid->isKid() || $streaks->repairableStreakDate($kid) === null || ! $this->available($kid, PetKnack::GuardDog)) {
+            return false;
+        }
+
+        try {
+            return DB::transaction(function () use ($kid, $streaks) {
+                $date = $streaks->repairableStreakDate($kid);
+
+                if ($date === null || ! $this->use($kid, PetKnack::GuardDog, ['date' => $date->toDateString(), 'seen' => false])) {
+                    return false;
+                }
+
+                // Spent and saved together, or neither.
+                if ($streaks->repairStreak($kid) === null) {
+                    throw new RuntimeException('Nothing to guard.');
+                }
+
+                return true;
+            });
+        } catch (RuntimeException) {
+            return false;
+        }
+    }
+
+    /**
+     * Night Owl: a bedtime run broken by a night out of their own bed is saved
+     * by itself — right after the answer, or on the way in. The same save the
+     * Night Saver perk buys.
+     *
+     * @param  bool  $announced  whether the kid is being told right now, so Home need not say it again
+     * @return string|null the pet's name, when it saved the run
+     */
+    public function nightOwl(Profile $kid, bool $announced = false): ?string
+    {
+        $sleep = app(SleepService::class);
+
+        if (! $kid->isKid() || $sleep->saveReason($kid) !== null || ! $this->available($kid, PetKnack::NightOwl)) {
+            return null;
+        }
+
+        $pet = $this->stateFor($kid)['pet'];
+
+        try {
+            return DB::transaction(function () use ($kid, $sleep, $announced, $pet) {
+                if (! $this->use($kid, PetKnack::NightOwl, ['seen' => $announced])) {
+                    return null;
+                }
+
+                if (! $sleep->saveNight($kid)) {
+                    throw new RuntimeException('No night to save.');
+                }
+
+                return $pet->name;
+            });
+        } catch (RuntimeException) {
+            return null;
+        }
+    }
+
+    /**
+     * Rescues the kid has not been told about yet — Guard Dog and Night Owl
+     * go off while nobody is looking — as lines for Home, each told once.
+     *
+     * @return array<int, string>
+     */
+    public function takeRescues(Profile $kid): array
+    {
+        $uses = PetKnackUse::where('profile_id', $kid->id)
+            ->whereIn('knack', [PetKnack::GuardDog->value, PetKnack::NightOwl->value])
+            ->where('payload->seen', false)
+            ->orderBy('used_at')
+            ->get();
+
+        $names = Cosmetic::whereIn('id', $uses->pluck('cosmetic_id'))->pluck('name', 'id');
+
+        return $uses->map(function (PetKnackUse $use) use ($names) {
+            $use->update(['payload' => [...$use->payload, 'seen' => true]]);
+            $pet = $names[$use->cosmetic_id] ?? 'Your pet';
+
+            return $use->knack === PetKnack::GuardDog
+                ? "{$pet} guarded your streak — the day you missed still counts!"
+                : "{$pet} saved your bedtime run — it's still going!";
+        })->all();
+    }
+
+    /**
+     * Sidekick: how much harder this kid's chores hit the monster, as a
+     * percentage — 5 young, 10 grown, doubled on a Power Treat day.
+     */
+    public function sidekickPercentFor(Profile $kid): int
+    {
+        $percent = match ($this->strengthFor($kid, PetKnack::Sidekick)) {
+            PetStage::Adult => 10,
+            PetStage::Young => 5,
+            default => 0,
+        };
+
+        return $percent * ($percent > 0 && $this->doubledToday($kid, PetKnack::Sidekick) ? 2 : 1);
     }
 }

@@ -333,6 +333,18 @@ enum ArcadeGame: string
                 PetStyle::Quick => 'makes every super fart go 4 lanes instead of 3.',
                 PetStyle::Lucky => 'is your spare dog — the first time you get got, you are back on the last safe lane.',
             },
+            self::GrandTour => match ($style) {
+                PetStyle::Steady => 'holds the plane steady — the crosswinds blow a third softer.',
+                PetStyle::Big => 'makes the gaps wider for your first minute of flying.',
+                PetStyle::Quick => 'flies the first 20 km for you, then hands you the plane.',
+                PetStyle::Lucky => 'catches your first crash — the plane bounces back up and keeps going.',
+            },
+            self::PenguinLaunch => match ($style) {
+                PetStyle::Steady => 'softens your landings — a bumpy one costs half the speed.',
+                PetStyle::Big => 'makes the rings and mines bigger and easier to hit.',
+                PetStyle::Quick => 'pulls the sling tighter — every launch flies a little further.',
+                PetStyle::Lucky => 'pops you back into the air the first time you slide to a stop.',
+            },
             default => null,
         };
     }

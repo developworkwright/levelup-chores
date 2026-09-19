@@ -351,6 +351,14 @@ class MonsterService
         $damage = $completion->points_awarded
             * ($completion->struck_weak_point ? self::WEAK_MULTIPLIER : 1);
 
+        // A pet with Sidekick jumps in: its kid's chores hit a little harder.
+        // Damage only — the chore's points are the kid's, and untouched.
+        $sidekick = app(KnackService::class)->sidekickPercentFor($completion->profile);
+
+        if ($sidekick > 0) {
+            $damage = (int) round($damage * (100 + $sidekick) / 100);
+        }
+
         if ($this->land($monster, $damage, $completion->profile, $completion) > 0) {
             $this->settle($monster, $completion->profile);
         }

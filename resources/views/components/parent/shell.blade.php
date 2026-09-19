@@ -25,6 +25,10 @@
         // What the kids can buy with tickets and wear. Shares the kids' Locker
         // icon for the reason Quests shares the flag.
         'cosmetics' => ['label' => 'Cosmetics', 'icon' => 'fa-shirt', 'route' => 'parent.cosmetics', 'accent' => 'var(--fq-coral)'],
+        // Pets, split out of Cosmetics like the kids' side: making them, their
+        // rarity, style and knack, and how every kid's pet is doing. The same
+        // console underneath, in pets mode — one upload pipeline, not two.
+        'pets' => ['label' => 'Pets', 'icon' => 'fa-paw', 'route' => 'parent.pets', 'accent' => 'var(--fq-green)'],
         // The sweets on the arcade's prize counter, and the ones waiting to be
         // handed over.
         'candy' => ['label' => 'Candy', 'icon' => 'fa-candy-cane', 'route' => 'parent.candy', 'accent' => 'var(--fq-coral)'],
@@ -66,7 +70,7 @@
      */
     $sheetGroups = [
         'Every day' => ['home', 'chores', 'kids', 'activity'],
-        'Set up the game' => ['loot', 'lucky', 'monsters', 'cosmetics', 'candy'],
+        'Set up the game' => ['loot', 'lucky', 'monsters', 'cosmetics', 'pets', 'candy'],
         'Now and then' => [],
     ];
 

@@ -120,6 +120,9 @@ Route::middleware(['auth:profile', 'role:parent', 'arcade-last-call'])->prefix('
     // The locker's catalog: upload, preview and publish, and pull stock. See
     // CosmeticArt for the checks and CosmeticService for the rotation.
     Volt::route('/cosmetics', 'parent.cosmetics')->name('parent.cosmetics');
+    // The same console, in pets mode: one upload pipeline for a pet's art,
+    // shown on a page of its own. See the component's $mode.
+    Volt::route('/pets', 'parent.cosmetics')->name('parent.pets');
     // The one parent screen that isn't administration: it writes to a log the
     // kids read rather than to anything they can spend.
     Volt::route('/quotes', 'parent.quotes')->name('parent.quotes');
