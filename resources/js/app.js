@@ -25,6 +25,19 @@ import './cosmetics.js';
 import './cosmetic-elements.js';
 
 /*
+ * The arcade prize counter's artwork — pet snacks, toys and beds, sweets and
+ * the token itself, as `window.FQPrizes`. Shipped verbatim from
+ * handoff/design_handoff_arcade_tokens, the same arrangement as cosmetics.js;
+ * `PrizeCatalogTest` holds App\Enums\PrizeSlot to its catalog. Loaded before
+ * pets.js, which draws the pet's snack, toy and bed with it, and before
+ * `<fq-prize>`, which draws it everywhere else. `fqCounter` is the counter's
+ * Alpine component — the keeper's lines and the tray.
+ */
+import './prizes.js';
+import './prize-elements.js';
+import './arcade-counter.js';
+
+/*
  * `window.fqShrinkPng`: the parent console's cosmetic uploads are shrunk in
  * the browser when a generator hands back more than PHP will accept.
  */

@@ -25,6 +25,9 @@
         // What the kids can buy with tickets and wear. Shares the kids' Locker
         // icon for the reason Quests shares the flag.
         'cosmetics' => ['label' => 'Cosmetics', 'icon' => 'fa-shirt', 'route' => 'parent.cosmetics', 'accent' => 'var(--fq-coral)'],
+        // The sweets on the arcade's prize counter, and the ones waiting to be
+        // handed over.
+        'candy' => ['label' => 'Candy', 'icon' => 'fa-candy-cane', 'route' => 'parent.candy', 'accent' => 'var(--fq-coral)'],
         'standings' => ['label' => 'Standings', 'icon' => 'fa-ranking-star', 'route' => 'parent.standings', 'accent' => 'var(--fq-green)'],
         'quotes' => ['label' => 'Quotes', 'icon' => 'fa-quote-left', 'route' => 'parent.quotes', 'accent' => 'var(--fq-green)'],
         'arcade' => ['label' => 'Arcade', 'icon' => 'fa-gamepad', 'route' => 'parent.arcade', 'accent' => 'var(--fq-green)'],
@@ -63,7 +66,7 @@
      */
     $sheetGroups = [
         'Every day' => ['home', 'chores', 'kids', 'activity'],
-        'Set up the game' => ['loot', 'lucky', 'monsters', 'cosmetics'],
+        'Set up the game' => ['loot', 'lucky', 'monsters', 'cosmetics', 'candy'],
         'Now and then' => [],
     ];
 
@@ -92,6 +95,11 @@
             // A Lucky Block win is a promise until somebody keeps it, so it
             // counts here exactly as a cash-out does.
             + \App\Models\LuckyHit::where('household_id', $profile->household_id)->pending()->count(),
+        // Sweets bought at the arcade counter, waiting to be handed over. On
+        // their own page rather than Home, so the ☰ lights for them.
+        'candy' => \App\Models\CandyOrder::where('household_id', $profile->household_id)
+            ->where('status', \App\Enums\CandyOrderStatus::Waiting)
+            ->count(),
     ];
 
     // Anything waiting on a page the rail doesn't show. Nothing does today —

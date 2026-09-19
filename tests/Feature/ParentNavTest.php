@@ -78,7 +78,7 @@ class ParentNavTest extends TestCase
         foreach ([
             'parent.loot', 'parent.lucky', 'parent.monsters',
             'parent.standings', 'parent.quotes', 'parent.arcade', 'parent.music',
-            'parent.meals',
+            'parent.meals', 'parent.candy',
         ] as $route) {
             $this->assertStringNotContainsString(route($route), $rail, $route.' should be a sheet row, not a rail button.');
         }
@@ -92,7 +92,7 @@ class ParentNavTest extends TestCase
             'parent.home', 'parent.chores', 'parent.kids', 'parent.activity',
             'parent.loot', 'parent.lucky', 'parent.monsters',
             'parent.standings', 'parent.quotes', 'parent.arcade', 'parent.music',
-            'parent.meals',
+            'parent.meals', 'parent.candy',
         ] as $route) {
             $test->assertSee(route($route), false);
         }

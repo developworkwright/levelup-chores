@@ -25,6 +25,9 @@ class ArcadeWeekPrize extends Model
         'profile_id',
         'score',
         'tickets',
+        'tokens',
+        'paid_profile_id',
+        'seen_at',
     ];
 
     protected function casts(): array
@@ -33,7 +36,18 @@ class ArcadeWeekPrize extends Model
             'game' => ArcadeGame::class,
             'score' => 'integer',
             'tickets' => 'integer',
+            'tokens' => 'integer',
+            'seen_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Who the week's tokens went to. Usually the winner; the best-placed kid
+     * below them when a grown-up took the week. Null when nobody was paid.
+     */
+    public function paidProfile(): BelongsTo
+    {
+        return $this->belongsTo(Profile::class, 'paid_profile_id');
     }
 
     public function household(): BelongsTo

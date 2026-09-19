@@ -4,7 +4,7 @@ namespace App\Services;
 
 use App\Enums\ArcadeGame;
 use App\Enums\ProfileRole;
-use App\Enums\TicketKind;
+use App\Enums\TokenKind;
 use App\Models\ArcadeScore;
 use App\Models\ArcadeWeekPrize;
 use App\Models\Household;
@@ -52,19 +52,24 @@ class ArcadeService
     public function __construct(private StreakService $streaks) {}
 
     /**
-     * What topping a finished week is worth.
+     * What topping a finished week is worth, in arcade tokens.
      *
-     * Three, which is a Bonus Shop perk and change — enough that the board is
-     * worth trying to win, not so much that the fastest thumbs in the house
-     * out-earn a week of actual chores. Paid to kids only: a grown-up who tops
-     * the week wins the week and nothing else, which is the joke and also the
-     * rule that keeps the prize pointing at the people it is for.
+     * It was three bonus tickets until the prize counter arrived. Thirty tokens
+     * is the same three tickets at the counter's rate, or a frisbee, and it
+     * lands *outside* the daily cap — a week's work must not be eaten by one
+     * day's ceiling. See TokenService::WEEKLY_PRIZE.
+     *
+     * Paid to kids only. A grown-up who tops the week still wins it — the board
+     * and the "last champion" line say so — and the tokens go to the best-placed
+     * kid below them instead, so beating a parent is not the only way a kid can
+     * be paid. That was the user's call when the prize moved to tokens; before
+     * it, a parent's week paid nobody.
      *
      * Paid *per game*. One prize across all the games would make each new
      * game pointless for everybody who is not already best at the first, which
      * is the opposite of the reason it was added.
      */
-    public const PRIZE_TICKETS = 3;
+    public const PRIZE_TOKENS = TokenService::WEEKLY_PRIZE;
 
     /**
      * How long a player is left alone after being told they lost a lead, on
@@ -705,7 +710,7 @@ class ArcadeService
     }
 
     /**
-     * The number on the "beat NN for 3 tickets" strip.
+     * The number on the "beat NN for 30 tokens" strip.
      *
      * One more than the leader, because a tie keeps the incumbent — that is the
      * tiebreak `boardFor()` applies, so a target of "equal it" would be a lie.
@@ -901,22 +906,27 @@ class ArcadeService
      * Settle one finished week of one game, or return null if somebody else
      * got there first.
      *
-     * The row is written *before* the tickets are minted, and the unique key on
+     * The row is written *before* the tokens are paid, and the unique key on
      * (household, week, game) is what makes this exactly-once: two kids opening
      * the arcade at the same moment on a Monday both find the week unpaid, and
      * the second one's insert fails rather than paying it twice. The cost of
-     * that order is that a crash between the two lines loses a payout — three
-     * tickets, once, in a case that needs the process to die inside a
+     * that order is that a crash between the two lines loses a payout — one
+     * week's prize, once, in a case that needs the process to die inside a
      * millisecond — which is the better way round to be wrong.
+     *
+     * `tickets` stays on the row at zero: the older rows are what it describes.
      */
     private function settleWeek(Household $household, ArcadeGame $game, string $week): ?ArcadeWeekPrize
     {
-        $winner = $this->boardFor($household, $game, $week, 1)->first();
+        $board = $this->boardFor($household, $game, $week, 50);
+        $winner = $board->first();
         $profile = $winner?->profile;
 
-        // Kids only. A parent still wins the week — the row records it, and the
-        // board still says so — they just do not get paid for it.
-        $tickets = $profile?->isKid() ? self::PRIZE_TICKETS : 0;
+        // Kids only. A grown-up still wins the week — the row records it, and
+        // the board still says so — and the tokens go to the best run a kid put
+        // on that board instead.
+        $paidRun = $board->first(fn (ArcadeScore $run) => $run->profile?->isKid() === true);
+        $paid = $paidRun?->profile;
 
         try {
             $prize = ArcadeWeekPrize::create([
@@ -925,7 +935,9 @@ class ArcadeService
                 'game' => $game,
                 'profile_id' => $profile?->id,
                 'score' => $winner?->score,
-                'tickets' => $tickets,
+                'tickets' => 0,
+                'tokens' => $paid !== null ? self::PRIZE_TOKENS : 0,
+                'paid_profile_id' => $paid?->id,
             ]);
         } catch (QueryException $e) {
             // The unique key doing its job: another request settled this week
@@ -933,17 +945,53 @@ class ArcadeService
             return null;
         }
 
-        if ($tickets > 0 && $profile !== null) {
-            app(TicketService::class)->record(
-                $profile,
-                TicketKind::Arcade,
-                $tickets,
-                $game->prizeReason($winner->score),
-                $winner,
+        if ($paid !== null) {
+            app(TokenService::class)->record(
+                $paid,
+                TokenKind::WeeklyPrize,
+                self::PRIZE_TOKENS,
+                $game->prizeReason($paidRun->score),
+                $game,
+                $prize,
+            );
+
+            // Into the family room too, the way a new personal best goes — the
+            // house is the audience for a week won. A grown-up's win is said as
+            // the handing-down it is, so nobody reads it as the kid topping them.
+            app(FeedService::class)->event(
+                $paid,
+                $paid->is($profile)
+                    ? '🏆 '.$paid->name.' took the '.$game->label().' board — «+'.self::PRIZE_TOKENS.' tokens»'
+                    : '🏆 '.$winner->displayName().' topped '.$game->label().', so '.$paid->name.' gets «+'.self::PRIZE_TOKENS.' tokens»',
+                $prize,
             );
         }
 
         return $prize;
+    }
+
+    /**
+     * The newest week this kid was paid for and has not yet been shown, on any
+     * game — the win announced on the arcade page. Null when there is none.
+     */
+    public function unseenWinFor(Profile $kid): ?ArcadeWeekPrize
+    {
+        return ArcadeWeekPrize::query()
+            ->with('profile')
+            ->where('paid_profile_id', $kid->id)
+            ->whereNull('seen_at')
+            ->orderByDesc('week')
+            ->orderByDesc('id')
+            ->first();
+    }
+
+    /** Every win this kid has been paid for is now announced. */
+    public function markWinsSeen(Profile $kid): void
+    {
+        ArcadeWeekPrize::query()
+            ->where('paid_profile_id', $kid->id)
+            ->whereNull('seen_at')
+            ->update(['seen_at' => now()]);
     }
 
     /**

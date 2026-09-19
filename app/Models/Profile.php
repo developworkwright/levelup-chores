@@ -78,6 +78,10 @@ class Profile extends Model implements Authenticatable
         'pending_sleep_hours_chest',
         'monsters_seen',
         'pending_monster_kills',
+        'arcade_tokens',
+        'pet_snack',
+        'pet_toy',
+        'pet_bed',
     ];
 
     protected $hidden = [
@@ -95,6 +99,7 @@ class Profile extends Model implements Authenticatable
             'badges_seen_at' => 'datetime',
             'loot_seen_at' => 'datetime',
             'arcade_seen_at' => 'datetime',
+            'arcade_tokens' => 'integer',
             'quotes_seen_at' => 'datetime',
             'sleep_card_enabled' => 'boolean',
             'sleep_card_type' => SleepCardType::class,

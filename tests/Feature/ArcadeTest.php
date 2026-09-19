@@ -333,7 +333,7 @@ class ArcadeTest extends TestCase
         $this->openOn(ArcadeGame::WindyWalkies)
             ->assertSee('Beat')
             ->assertSee('39')
-            ->assertSee('for 3 tickets');
+            ->assertSee('for 30 tokens');
     }
 
     public function test_a_kid_already_on_top_is_told_they_are_leading_rather_than_to_beat_themselves(): void
@@ -344,11 +344,11 @@ class ArcadeTest extends TestCase
 
         $this->openOn(ArcadeGame::WindyWalkies)
             ->assertSee('Leading')
-            ->assertSee('3 tickets if it holds')
+            ->assertSee('30 tokens if it holds')
             ->assertDontSee('Beat');
     }
 
-    public function test_a_grown_up_is_never_promised_tickets_by_the_target_strip(): void
+    public function test_a_grown_up_is_never_promised_tokens_by_the_target_strip(): void
     {
         // They can top the week and get nothing for it — see ArcadeService.
         $parent = $this->loginParent();
@@ -358,7 +358,7 @@ class ArcadeTest extends TestCase
         $this->openOn(ArcadeGame::WindyWalkies)
             ->assertSee('Leading')
             ->assertSee('hold it to take the week')
-            ->assertDontSee('tickets if it holds');
+            ->assertDontSee('tokens if it holds');
     }
 
     public function test_the_board_shows_each_player_once_rather_than_their_best_three_runs(): void

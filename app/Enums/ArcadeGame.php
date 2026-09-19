@@ -96,7 +96,7 @@ enum ArcadeGame: string
      * unranked one — a *toy* — has none of the three and cannot lose. The
      * distinction exists because the next games in the pipeline are the
      * physics-comedy kind, where a score would have to be invented to exist,
-     * and an invented score on a board that pays tickets is worse than no
+     * and an invented score on a board that pays tokens is worse than no
      * board at all.
      *
      * Slime Time is the first game to answer false, and it is the one the flag
@@ -321,7 +321,7 @@ enum ArcadeGame: string
         };
     }
 
-    /** What a winning week is called in the kid's ticket history. */
+    /** What a winning week is called in the kid's token history. */
     public function prizeReason(int $score): string
     {
         return match ($this) {

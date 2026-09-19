@@ -909,6 +909,8 @@
         // An egg that has hatched since they last looked: the new pet comes
         // out of it in front of them, once.
         $justHatched = isset($ownPet['egg']) ? null : $pets->takeHatchReveal($profile);
+        // What the pet has out from the arcade's prize counter.
+        $gear = app(App\Services\PrizeCounterService::class)->gearFor($profile);
     @endphp
 
     @if ($ownPet)
@@ -928,6 +930,11 @@
                  rest of it. Never a punishment for the days it isn't there:
                  before then the pet simply wanders. --}}
             @if ($poweredUpToday && ! isset($ownPet['egg'])) toy @endif
+            {{-- The prize counter's gear: the snack it eats, a toy it keeps
+                 out every day, and the bed it naps in. See pets.js. --}}
+            snack="{{ $gear['snack'] }}"
+            @if ($gear['toy'] && ! isset($ownPet['egg'])) toy-prize="{{ $gear['toy'] }}" @endif
+            @if ($gear['bed'] && ! isset($ownPet['egg'])) bed="{{ $gear['bed'] }}" @endif
             @if ($petAsleep) asleep @endif
             {{-- A sibling's pet, on Home only and only now and again — see
                  CosmeticService::visitingPet(). Home because that is the page a

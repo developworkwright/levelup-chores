@@ -123,6 +123,9 @@ Route::middleware(['auth:profile', 'role:parent', 'arcade-last-call'])->prefix('
     // The second screen over here that isn't administration. Same game and
     // the same board as the kids' — beating them is the entire feature.
     Volt::route('/arcade', 'parent.arcade')->name('parent.arcade');
+    // The sweets on the arcade's prize counter, and the queue of ones the kids
+    // have bought with tokens and are waiting on — see PrizeCounterService.
+    Volt::route('/candy', 'parent.candy')->name('parent.candy');
     // The music library. Songs live on a disk rather than in the repository,
     // so adding one is a page rather than a commit — see MusicService.
     Volt::route('/music', 'parent.music')->name('parent.music');

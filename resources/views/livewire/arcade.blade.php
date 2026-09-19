@@ -2,9 +2,17 @@
 
 use App\Enums\ArcadeGame;
 use App\Enums\CosmeticSlot;
+use App\Enums\PrizeSlot;
+use App\Exceptions\InsufficientTokensException;
+use App\Models\Candy;
+use App\Models\Chore;
 use App\Models\Profile;
 use App\Services\ArcadeService;
+use App\Services\ChoreService;
 use App\Services\CosmeticService;
+use App\Services\PetService;
+use App\Services\PrizeCounterService;
+use App\Services\TokenService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\RateLimiter;
 use Livewire\Volt\Component;
@@ -30,6 +38,14 @@ use Livewire\Volt\Component;
  * Laid out from `handoff/design_handoff_arcade_shell` — see that README for why
  * the rail carries the week's leader rather than the reader's own best, and why
  * there is no lobby screen in front of it.
+ *
+ * **Tokens and the prize counter** are from `handoff/design_handoff_arcade_tokens`.
+ * Every run pays a kid tokens the moment it ends, itemised on a card under the
+ * game; the machine runs dry at the day's cap until a chore refills it; and a
+ * second tab, PRIZES, is the counter the tokens are spent at. The counter is a
+ * tab rather than a page because a redemption counter belongs in the room with
+ * the machines — see TokenService and PrizeCounterService for the rules.
+ * Grown-ups get none of it: they play and top boards, and are paid nothing.
  */
 new class extends Component
 {
@@ -37,6 +53,26 @@ new class extends Component
 
     /** Highlights the row the player just put there, for the rest of the visit. */
     public ?int $postedId = null;
+
+    /** Which tab is showing: the machines, or the prize counter. Kids only. */
+    public string $tab = 'play';
+
+    /**
+     * The last run's payout, line by line, for the card under the game. Kept
+     * until the next run replaces it, so a kid who looked away still sees it.
+     *
+     * @var array<string, mixed>|null
+     */
+    public ?array $payout = null;
+
+    /** What opening the toy paid this visit, for the one-line note under it. */
+    public ?int $toyPaid = null;
+
+    /** The counter's last word: a refusal, or what was just bought. */
+    public ?string $counterNote = null;
+
+    /** Whether a refill claim went wrong, said on the empty machine's card. */
+    public ?string $refillNote = null;
 
     /**
      * Which games were new when this visit started.
@@ -67,6 +103,16 @@ new class extends Component
         // behind it. On mount rather than in with(), so it happens once a visit
         // rather than on every round trip the game makes.
         $arcade->settle($player->household);
+
+        // Arriving straight on the toy counts as opening it.
+        $this->toyPaid = app(TokenService::class)->payToy($player, $this->game);
+    }
+
+    /** PLAY or PRIZES. A grown-up has nothing to spend, so only ever PLAY. */
+    public function showTab(string $tab): void
+    {
+        $this->tab = $tab === 'prizes' && $this->player()->isKid() ? 'prizes' : 'play';
+        $this->counterNote = null;
     }
 
     /**
@@ -80,6 +126,13 @@ new class extends Component
     {
         $this->game = ArcadeGame::from($game);
         $this->postedId = null;
+        $this->payout = null;
+        // The rail stays put on the counter tab, so picking a game from it is
+        // the way back to the machines.
+        $this->tab = 'play';
+
+        // The toy pays for being opened, once a day. See TokenService::payToy().
+        $this->toyPaid = app(TokenService::class)->payToy($this->player(), $this->game);
     }
 
     /**
@@ -114,7 +167,170 @@ new class extends Component
 
         RateLimiter::hit($throttle, 3600);
 
-        $this->postedId = app(ArcadeService::class)->post($player, $this->game, $score)?->id;
+        // Which rungs are new today is decided against the runs *before* this
+        // one, so it is read before the post.
+        $tokens = app(TokenService::class);
+        $bestBefore = $tokens->bestToday($player, $this->game);
+
+        $run = app(ArcadeService::class)->post($player, $this->game, $score);
+        $this->postedId = $run?->id;
+
+        if ($run !== null) {
+            $this->payout = $tokens->payRun($player, $this->game, $score, $bestBefore, $run);
+        }
+    }
+
+    /**
+     * Claims the chore the empty machine points at, without leaving the arcade
+     * — the same move as Home's suggested job, and re-checked the same way. A
+     * claim is what refills the machine, so the refill is one tap from the game.
+     */
+    public function claimRefill(int $choreId): void
+    {
+        $this->refillNote = null;
+
+        $player = $this->player();
+        $service = app(ChoreService::class);
+        $chore = Chore::find($choreId);
+
+        if (! $player->isKid()
+            || ! $chore
+            || $chore->household_id !== $player->household_id
+            || ! $chore->isAppropriateFor($player)
+            || $service->stateFor($player, $chore) !== 'ready') {
+            $this->refillNote = 'That one just went — here is another.';
+
+            return;
+        }
+
+        $service->claim($player, $chore);
+
+        $this->dispatch(
+            'celebrate',
+            message: "{$chore->name} claimed! +".TokenService::CAP_PER_CHORE.' in the machine.',
+            motion: 'burst',
+            origin: 'tap',
+        );
+    }
+
+    /** Buys a snack, toy or bed for the pet, and puts it out. */
+    public function buyPrize(string $slot, string $key): void
+    {
+        $player = $this->player();
+        $prizeSlot = PrizeSlot::tryFrom($slot);
+
+        if ($prizeSlot === null) {
+            return;
+        }
+
+        try {
+            app(PrizeCounterService::class)->buy($player, $prizeSlot, $key);
+        } catch (InsufficientTokensException $e) {
+            $this->counterNote = $e->shortfall.' short. Go play.';
+
+            return;
+        } catch (RuntimeException $e) {
+            $this->counterNote = $e->getMessage();
+
+            return;
+        }
+
+        $this->counterNote = $prizeSlot->item($key)['name'].' is out. Look down!';
+        $this->announceGear($player);
+        $this->dispatch('celebrate', message: $prizeSlot->item($key)['name'].' is yours!', motion: 'burst', origin: 'tap');
+    }
+
+    /** Swaps which snack, toy or bed is out. Free. */
+    public function putOutPrize(string $slot, string $key): void
+    {
+        $player = $this->player();
+        $prizeSlot = PrizeSlot::tryFrom($slot);
+
+        if ($prizeSlot === null || ! app(PrizeCounterService::class)->putOut($player, $prizeSlot, $key)) {
+            return;
+        }
+
+        $this->counterNote = null;
+        $this->announceGear($player);
+    }
+
+    /** Puts the toy or bed away, so the pet has none out. */
+    public function putAwayPrize(string $slot): void
+    {
+        $prizeSlot = PrizeSlot::tryFrom($slot);
+
+        if ($prizeSlot === null) {
+            return;
+        }
+
+        $player = $this->player();
+        app(PrizeCounterService::class)->putAway($player, $prizeSlot);
+        $this->announceGear($player);
+    }
+
+    /** Ten tokens for one bonus ticket. */
+    public function buyTicket(): void
+    {
+        $player = $this->player();
+
+        if (! $player->isKid()) {
+            return;
+        }
+
+        try {
+            app(TokenService::class)->buyTicket($player);
+        } catch (InsufficientTokensException $e) {
+            $this->counterNote = $e->shortfall.' short. Go play.';
+
+            return;
+        }
+
+        $this->counterNote = 'One ticket. Spend it in the Locker.';
+        $this->dispatch('celebrate', message: '+1 ticket!', treat: 'ticket', motion: 'burst', origin: 'tap');
+    }
+
+    /** Real sweets, into a grown-up's queue. */
+    public function buyCandy(?int $candyId): void
+    {
+        $candy = $candyId === null ? null : Candy::find($candyId);
+
+        if ($candy === null) {
+            return;
+        }
+
+        try {
+            app(PrizeCounterService::class)->buyCandy($this->player(), $candy);
+        } catch (InsufficientTokensException $e) {
+            $this->counterNote = $e->shortfall.' short. Go play.';
+
+            return;
+        } catch (RuntimeException $e) {
+            $this->counterNote = $e->getMessage();
+
+            return;
+        }
+
+        $this->counterNote = $candy->name.' is on its way. A grown-up will bring it.';
+    }
+
+    /** The week's win has been read — and, from "Spend it", off to the counter. */
+    public function dismissWin(bool $spend = false): void
+    {
+        app(ArcadeService::class)->markWinsSeen($this->player());
+
+        if ($spend) {
+            $this->showTab('prizes');
+        }
+    }
+
+    /**
+     * Tells the pet layer what is out now. The layer is part of the page rather
+     * than this component, so it would otherwise keep the old gear until the
+     * next page load.
+     */
+    private function announceGear(Profile $player): void
+    {
+        $this->dispatch('fq-pet-gear', gear: app(PrizeCounterService::class)->gearFor($player->fresh()));
     }
 
     private function player(): Profile
@@ -149,6 +365,7 @@ new class extends Component
             : null;
 
         return [
+            ...$this->tokenData($player),
             'arcade' => $arcade,
             'player' => $player,
             'rankedGames' => ArcadeGame::ranked(),
@@ -158,8 +375,8 @@ new class extends Component
             'beat' => $arcade->beatTarget($leader),
             'youLead' => $leader !== null && $leader->profile_id === $player->id,
             // A grown-up can top the week and gets nothing for it, so the target
-            // strip must not promise them tickets. See ArcadeService.
-            'canWinTickets' => $player->isKid(),
+            // strip must not promise them tokens. See ArcadeService.
+            'canWinPrize' => $player->isKid(),
             // The reader's own cabinet skin — theirs only, never drawn on a
             // sibling's screen. The free house cabinet is the machine as it
             // already looks, so it draws nothing extra.
@@ -173,7 +390,7 @@ new class extends Component
             'best' => $this->game->isRanked() ? $arcade->allTimeBest($household, $this->game) : null,
             'yourBest' => $this->game->isRanked() ? $arcade->personalBest($player, $this->game) : 0,
             'champion' => $this->game->isRanked() ? $arcade->lastChampion($household, $this->game) : null,
-            'prize' => ArcadeService::PRIZE_TICKETS,
+            'prize' => ArcadeService::PRIZE_TOKENS,
             // The deadline, said out loud. A weekly board that never mentions
             // when the week ends is just a list, and the last day of it felt
             // exactly like the first.
@@ -190,11 +407,103 @@ new class extends Component
             'boardRatio' => round(320 / $this->game->boardHeight(), 5),
         ];
     }
+
+    /**
+     * Everything tokens put on the page: the meter, the counter's shelves, what
+     * the pet has out and the week's win. A grown-up gets none of it — `kid` is
+     * false and nothing else is read.
+     *
+     * @return array<string, mixed>
+     */
+    private function tokenData(Profile $player): array
+    {
+        if (! $player->isKid()) {
+            return ['kid' => false, 'meter' => null, 'win' => null];
+        }
+
+        $tokens = app(TokenService::class);
+        $chores = app(ChoreService::class);
+        $meter = $tokens->meterFor($player);
+
+        // What the empty machine points at: the easiest job still going, and
+        // how many are left to claim, which is how many "+15" blocks to draw.
+        $refill = $meter['empty'] ? $chores->suggestedChoreFor($player) : null;
+        $claimable = $chores->boardSpanFor($player)['count'];
+
+        $data = [
+            'kid' => true,
+            'meter' => $meter,
+            'refill' => $refill,
+            'claimable' => $claimable,
+            'perChore' => TokenService::CAP_PER_CHORE,
+            'win' => app(ArcadeService::class)->unseenWinFor($player),
+        ];
+
+        if ($this->tab !== 'prizes') {
+            return $data;
+        }
+
+        $counter = app(PrizeCounterService::class);
+        $owned = $counter->ownedKeys($player);
+        $gear = $counter->gearFor($player);
+
+        return [
+            ...$data,
+            'owned' => $owned,
+            'gear' => $gear,
+            'candies' => $counter->candiesFor($player->household),
+            'waiting' => $counter->waitingCountFor($player),
+            'ticketPrice' => TokenService::TICKET_PRICE,
+            'petSprite' => app(PetService::class)->spriteFor($player),
+        ];
+    }
 }; ?>
 
 <div class="flex flex-col gap-[13px]">
-    <div class="flex items-center justify-between gap-[10px]">
+    <div class="flex flex-wrap items-center gap-[10px]">
         <h2 class="font-baloo text-[22px] leading-none font-extrabold text-fq-text">Arcade</h2>
+
+        {{-- PLAY and PRIZES: the counter is a second tab on this page rather
+             than a rail button or a route of its own — a redemption counter
+             belongs in the same room as the machines. Kids only; a grown-up
+             has nothing to spend. --}}
+        @if ($kid)
+            <div class="flex gap-[6px] rounded-[12px] border border-fq-line bg-fq-panel p-[4px]">
+                @foreach (['play' => 'Play', 'prizes' => 'Prizes'] as $key => $label)
+                    <button
+                        type="button"
+                        wire:click="showTab('{{ $key }}')"
+                        @class([
+                            'rounded-[9px] border px-[18px] py-[7px] font-mono-fq text-[10px] tracking-[0.1em] uppercase',
+                            'border-fq-gold text-fq-lime' => $tab === $key,
+                            'border-transparent text-fq-text-4' => $tab !== $key,
+                        ])
+                        @if ($tab === $key) style="background: #2a2405" @endif
+                        aria-pressed="{{ $tab === $key ? 'true' : 'false' }}"
+                    >{{ $label }}</button>
+                @endforeach
+            </div>
+        @endif
+
+        <span class="flex-1"></span>
+
+        {{-- The balance and today's meter, compact, where a kid is already
+             looking on a big screen (2g). A phone gets the full meter card
+             below instead. --}}
+        @if ($kid)
+            <div
+                class="hidden items-center gap-[10px] rounded-[13px] border border-fq-ticket-line px-[13px] py-[8px] lg:flex"
+                style="background: linear-gradient(160deg, #2a2405, var(--fq-sunk) 72%)"
+                title="Tokens today: {{ $meter['today'] }} of {{ $meter['cap'] }}"
+            >
+                <fq-prize kind="token" class="h-[24px] w-[24px] shrink-0"></fq-prize>
+                <span class="font-baloo text-[18px] font-extrabold text-fq-lime">{{ $meter['balance'] }}</span>
+                <span class="block h-[9px] w-[78px] overflow-hidden rounded-full border border-fq-line-2 bg-fq-panel">
+                    <span class="block h-full" style="width: {{ $meter['cap'] > 0 ? min(100, (int) round($meter['today'] / $meter['cap'] * 100)) : 100 }}%; background: linear-gradient(90deg, var(--fq-gold), var(--fq-lime))"></span>
+                </span>
+                <span class="font-mono-fq text-[9.5px] text-fq-ticket-label">{{ $meter['today'] }}/{{ $meter['cap'] }} TODAY</span>
+            </div>
+        @endif
 
         {{-- The one sound control on the page, and the only one there ever
              needed to be. Both games read the same `fq-muted` key at the moment
@@ -205,6 +514,25 @@ new class extends Component
              control away mid-run. --}}
         <x-sound-toggle small />
     </div>
+
+    {{-- The week's win, to the kid it paid, until they tap it away. --}}
+    @if ($win)
+        <x-arcade.week-win :win="$win" />
+    @endif
+
+    {{-- Today's meter on a phone, and the empty machine on every screen. --}}
+    @if ($kid && $tab === 'play')
+        <x-arcade.meter
+            :meter="$meter"
+            :refill="$refill"
+            :claimable="$claimable"
+            :per-chore="$perChore"
+            :note="$refillNote"
+        />
+
+        {{-- The lit way to the counter, above the machines on every screen. --}}
+        <x-arcade.prize-sign :balance="$meter['balance']" />
+    @endif
 
     {{-- Three rails from `lg`: the games down the left, the one that is showing
          in the middle, its board on the right. Below that they stack — strip,
@@ -230,7 +558,14 @@ new class extends Component
              instead. It bleeds to the screen edges so a half-visible entry says
              there is more to swipe to, and hides its scrollbar because that
              half-visible entry has already said it. --}}
-        <div class="no-scrollbar -mx-[14px] flex shrink-0 snap-x snap-mandatory gap-[8px] overflow-x-auto px-[14px] pb-[2px] lg:mx-0 lg:w-[186px] lg:flex-col lg:overflow-visible lg:px-0 lg:pb-0">
+        {{-- On the prize counter it stays put on a desktop, so getting back to
+             a machine is one click (2g), and gets out of the way on a phone,
+             where the counter needs the whole screen. --}}
+        <div @class([
+            'no-scrollbar -mx-[14px] shrink-0 snap-x snap-mandatory gap-[8px] overflow-x-auto px-[14px] pb-[2px] lg:mx-0 lg:flex lg:w-[186px] lg:flex-col lg:overflow-visible lg:px-0 lg:pb-0',
+            'flex' => $tab === 'play',
+            'hidden' => $tab !== 'play',
+        ])>
             <span class="hidden font-mono-fq text-[9.5px] tracking-[0.14em] text-fq-text-5 uppercase lg:block">
                 Games
             </span>
@@ -336,6 +671,26 @@ new class extends Component
             @endif
         </div>
 
+        @if ($tab === 'prizes')
+            {{-- PRIZES swaps the game and its board for the counter and what
+                 the pet has out (2g) — the counter where the game was, the
+                 loadout where the board was. --}}
+            <div class="flex w-full min-w-0 flex-col gap-[13px] lg:max-w-[520px] lg:flex-1">
+                <x-arcade.counter
+                    :meter="$meter"
+                    :owned="$owned"
+                    :gear="$gear"
+                    :candies="$candies"
+                    :waiting="$waiting"
+                    :ticket-price="$ticketPrice"
+                    :note="$counterNote"
+                />
+            </div>
+
+            <div class="flex w-full flex-col gap-[8px] lg:w-[300px] lg:shrink-0">
+                <x-arcade.loadout :owned="$owned" :gear="$gear" :pet-sprite="$petSprite" />
+            </div>
+        @else
         {{-- The game, and the middle rail.
 
              Every game draws a fixed 320-wide board scaled to whatever box it is
@@ -408,7 +763,7 @@ new class extends Component
                             :leader="$leader"
                             :beat="$beat"
                             :you-lead="$youLead"
-                            :can-win-tickets="$canWinTickets"
+                            :can-win-prize="$canWinPrize"
                             :prize="$prize"
                         />
                     </div>
@@ -422,10 +777,15 @@ new class extends Component
                      wrong game. It is also what unmounts the outgoing game: both
                      hold an animation frame, and `<fart-dash>` holds a window-level
                      keydown listener that would eat the arrow keys of whatever
-                     replaced it. --}}
+                     replaced it.
+
+                     Drawn above the pet layer (z-30 in pets.js), and never a
+                     perch: a pet walking past goes *behind* the machine rather
+                     than over the game, and never hops onto a card inside it. --}}
                 <div
                     wire:key="machine-{{ $game->value }}"
-                    class="relative isolate flex flex-col gap-[11px] rounded-[24px] border border-fq-line-3 p-[12px]"
+                    data-fq-no-perch
+                    class="relative isolate z-[35] flex flex-col gap-[11px] rounded-[24px] border border-fq-line-3 p-[12px]"
                     style="background: linear-gradient(160deg, var(--fq-cabinet), var(--fq-panel))"
                 >
                     {{-- A kid's cabinet skin from the locker, as the bezel behind
@@ -643,6 +1003,16 @@ new class extends Component
                         </div>
                     @endif
 
+                    {{-- What the run just paid, on the game screen itself — the
+                         card under the canvas is off the bottom of a phone, and
+                         a win nobody sees is not instant. Pops in over the
+                         game-over screen, holds, and fades; it takes no taps, so
+                         "again" still lands on the game. Keyed per run so the
+                         next run's pop plays from the start. --}}
+                    @if ($payout)
+                        <x-arcade.win-pop :payout="$payout" wire:key="win-pop-{{ $postedId }}" />
+                    @endif
+
                     {{-- Read once and then never again, so full screen is where
                          it stops earning its share of the height. --}}
                     <div class="fq-full-hide flex items-center gap-[9px] border-t border-fq-line pt-[10px]">
@@ -673,6 +1043,21 @@ new class extends Component
                     </div>
                 </div>
             </div>
+
+            {{-- The payout lands here, under the canvas rather than in a dialog,
+                 so the run is still on screen behind it (2a, 2g). --}}
+            @if ($payout)
+                <x-arcade.payout :payout="$payout" />
+            @elseif ($kid && ! $game->isRanked())
+                <p class="flex items-center gap-[8px] rounded-[13px] border border-fq-ticket-line bg-fq-panel px-[12px] py-[9px] text-[12px] text-fq-text-3">
+                    <fq-prize kind="token" class="h-[20px] w-[20px] shrink-0"></fq-prize>
+                    @if ($toyPaid)
+                        <span><strong class="text-fq-lime">+{{ $toyPaid }} {{ Str::plural('token', $toyPaid) }}</strong> for opening it today. Nothing else here pays &mdash; it&rsquo;s a toy.</span>
+                    @else
+                        <span>A toy pays {{ \App\Services\TokenService::TOY_TOKENS }} tokens the first time you open it each day. Come back tomorrow.</span>
+                    @endif
+                </p>
+            @endif
         </div>
 
         {{-- The board. A fixed sidebar rather than a second flexible column: two
@@ -689,7 +1074,7 @@ new class extends Component
                         :leader="$leader"
                         :beat="$beat"
                         :you-lead="$youLead"
-                        :can-win-tickets="$canWinTickets"
+                        :can-win-prize="$canWinPrize"
                         :prize="$prize"
                     />
                 </div>
@@ -778,17 +1163,28 @@ new class extends Component
                 @if ($champion)
                     <p class="font-mono-fq text-[10.5px] leading-relaxed tracking-[0.12em] text-fq-text-6 uppercase">
                         Last champion &middot; {{ $champion->profile?->name }} &middot; {{ $champion->score }} {{ $game->unit() }}
-                        @if ($champion->tickets > 0)
+                        @if ($champion->tokens > 0)
+                            &middot; {{ $champion->paid_profile_id === $champion->profile_id ? 'won' : 'paid '.$champion->paidProfile?->name }} {{ $champion->tokens }} tokens
+                        @elseif ($champion->tickets > 0)
                             &middot; won {{ $champion->tickets }} {{ Str::plural('ticket', $champion->tickets) }}
                         @endif
                     </p>
                 @endif
 
                 <p class="font-mono-fq text-[10.5px] leading-relaxed tracking-[0.12em] text-fq-text-6 uppercase">
-                    {{ $prize }} bonus {{ Str::plural('ticket', $prize) }} every Sunday, one prize per game.
-                    Grown-ups can win the week, but not the tickets.
+                    {{ $prize }} tokens every Sunday, one prize per game.
+                    A grown-up can win the week &mdash; the tokens go to the best kid below them.
                 </p>
+
+                {{-- The refill, one click from the game (2g). --}}
+                @if ($kid && $meter['empty'] && $refill)
+                    <div class="hidden rounded-[14px] border border-fq-green p-[11px] text-[12px] text-pretty text-fq-green-ink lg:block" style="background: var(--fq-green-deep)">
+                        Machine empty? <strong class="text-fq-text">Claim a chore</strong> for +{{ $perChore }} &mdash;
+                        <button type="button" wire:click="claimRefill({{ $refill->id }})" class="font-bold text-fq-green underline">{{ $refill->name }}</button>.
+                    </div>
+                @endif
             </div>
+        @endif
         @endif
     </div>
 </div>

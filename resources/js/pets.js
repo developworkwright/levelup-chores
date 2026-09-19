@@ -91,6 +91,25 @@ const VISIT_SECONDS = 300;
 /** How long a snack takes to eat, in seconds. */
 const EAT_SECONDS = 1.8;
 
+/*
+ * The prize counter's pet gear, drawn with `window.FQPrizes` (prizes.js) at the
+ * sizes the design gives: a toy 34px, a bed 96px wide. A bed's art stands on
+ * the lower part of its box, so BED_FOOT is how far up the box its underside
+ * is, and BED_LIFT how far above the floor a pet lying in it sits.
+ */
+const PRIZE_TOY_SIZE = 34;
+const BED_SIZE = 96;
+const BED_FOOT = 12;
+const BED_LIFT = 16;
+
+/** How often an idle pet with a bed goes for a nap, per decision. */
+const NAP_CHANCE = 0.12;
+
+/** The drawn prize, or null when prizes.js has not loaded. */
+function prizeSvg(kind, key) {
+    return window.FQPrizes ? window.FQPrizes.draw(kind, key) : null;
+}
+
 /**
  * What a tap on the page lands on when it is *not* a request for a snack:
  * anything that does something when tapped. Livewire and Alpine handlers are
@@ -360,7 +379,8 @@ class Pet {
     comeBack() {
         const world = this.world;
 
-        if (this.held || this.leaving || ['falling', 'jumping', 'crouch'].includes(this.state)) {
+        // A nap keeps itself on the bed, and the bed on the floor — see step().
+        if (this.held || this.leaving || ['falling', 'jumping', 'crouch', 'napping'].includes(this.state)) {
             return;
         }
 
@@ -457,7 +477,15 @@ class Pet {
 
         if (world.asleep) {
             if (this.state !== 'sleeping' && this.state !== 'happy') {
-                this.settle();
+                // Bedtime in its own bed, when it has one; anywhere, when not.
+                if (world.bed && ! this.visiting) {
+                    this.perch = null;
+                    this.x = world.bed.x;
+                    this.y = world.floor() - BED_LIFT * screenZoom();
+                } else {
+                    this.settle();
+                }
+
                 this.act('sleeping', 'sleep', 0);
             }
 
@@ -539,7 +567,38 @@ class Pet {
                     return;
                 }
 
+                // Got to its bed: in, and a nap.
+                if (this.toBed && world.bed && Math.abs(world.bed.x - this.x) < 8) {
+                    this.toBed = false;
+                    this.act('napping', 'sleep', random(4, 8));
+
+                    return;
+                }
+
+                this.toBed = false;
                 this.act('idle', 'idle', random(0.4, 1.4));
+            }
+
+            return;
+        }
+
+        if (this.state === 'napping') {
+            if (! world.bed) {
+                this.act('idle', 'idle', 0.4);
+
+                return;
+            }
+
+            this.x = world.bed.x;
+
+            if (! world.scrolling()) {
+                this.y = world.floor() - BED_LIFT * screenZoom();
+            }
+
+            // A snack wakes it up. Otherwise it sleeps the nap out.
+            if (world.snack || this.think <= 0) {
+                this.y = world.floor();
+                this.act('landed', 'landed', 0.5);
             }
 
             return;
@@ -623,9 +682,34 @@ class Pet {
                 return;
             }
 
+            // A toy from the prize counter can't use the sheet's play and toss
+            // poses — those have the sheet's own toy drawn in the paws, so the
+            // pet would be playing with a different toy from the one on the
+            // floor. It plays with the real one instead: a pounce in a pose
+            // with empty paws, and the toy batted away across the floor, which
+            // the pet then chases on its next decision.
+            if (toy.prizeKey) {
+                this.facing = toy.x < this.x ? -1 : 1;
+                this.pose = Math.random() < 0.5 ? 'crouch' : 'happy';
+                this.state = 'playing';
+                this.think = random(0.5, 0.9);
+                toy.bat(this.facing);
+
+                return;
+            }
+
             this.pose = Math.random() < 0.5 ? 'play' : 'toss';
             this.state = 'playing';
             this.think = random(0.8, 1.6);
+
+            return;
+        }
+
+        // A nap in its bed, now and then — its own pet only, and never on a
+        // card: the bed is on the floor.
+        if (world.bed && ! this.visiting && ! this.perch && Math.random() < NAP_CHANCE) {
+            this.toBed = true;
+            this.runTo(world.bed.x);
 
             return;
         }
@@ -665,6 +749,8 @@ class World {
         this.toys = [];
         this.eggs = [];
         this.snack = null;
+        // The pet's own bed from the prize counter, standing on the floor.
+        this.bed = null;
         this.asleep = false;
         this.width = 0;
     }
@@ -864,6 +950,10 @@ class World {
             });
         }
 
+        if (this.bed && ! scrolling) {
+            this.bed.y = this.floor();
+        }
+
         this.wasScrolling = scrolling;
         this.pets.forEach((pet) => pet.step(dt));
         this.eggs.forEach((egg) => egg.step(dt));
@@ -989,10 +1079,28 @@ class Egg {
 /** The toy: a sprite that falls, sits, and can be dragged about. */
 class Toy {
     constructor(world, x) {
+        this.world = world;
         this.x = x ?? random(80, Math.max(140, world.width - 80));
         this.y = -40;
+        this.vx = 0;
         this.vy = 0;
+        // How far it has rolled, in degrees — only a prize-counter toy is drawn
+        // turning. See FqPets.paint().
+        this.spin = 0;
         this.held = false;
+    }
+
+    /**
+     * Batted by its pet: a hop and a roll away in the direction it was hit.
+     * The sheet's own toy is never batted — it is played with in the paws.
+     */
+    bat(direction) {
+        if (this.held) {
+            return;
+        }
+
+        this.vx = direction * random(140, 260);
+        this.vy = -random(260, 420);
     }
 
     step(dt, world) {
@@ -1000,11 +1108,33 @@ class Toy {
             return;
         }
 
+        // Rolling along after a bat, slowing as it goes, and never off the page.
+        if (this.vx !== 0) {
+            const before = this.x;
+
+            this.x = world.clampX(this.x + this.vx * dt);
+            this.spin += (this.x - before) * 4;
+
+            // Hit an edge: it stops there rather than pressing into it.
+            this.vx = this.x === before ? 0 : this.vx * Math.pow(0.25, dt);
+
+            if (Math.abs(this.vx) < 8) {
+                this.vx = 0;
+            }
+        }
+
         const ground = world.groundUnder(this.x, this.y);
 
-        if (this.y < ground) {
+        if (this.y < ground || this.vy < 0) {
             this.vy += GRAVITY * dt;
             this.y = Math.min(ground, this.y + this.vy * dt);
+
+            // Landing hard enough: one small bounce.
+            if (this.y >= ground && this.vy > 380) {
+                this.vy = -this.vy * 0.3;
+            } else if (this.y >= ground) {
+                this.vy = 0;
+            }
         } else {
             this.y = ground;
             this.vy = 0;
@@ -1013,17 +1143,27 @@ class Toy {
 }
 
 class FqPets extends HTMLElement {
+    /*
+     * `snack`, `toy-prize` and `bed` are the gear a kid bought at the arcade's
+     * prize counter (App\Services\PrizeCounterService::gearFor()), as prize
+     * keys. A bought toy is out every day, not only on a powered-up one.
+     */
     static get observedAttributes() {
-        return ['sheet', 'scale', 'effect', 'toy', 'asleep', 'drag', 'sheets', 'visitor', 'egg', 'egg-hue'];
+        return ['sheet', 'scale', 'effect', 'toy', 'asleep', 'drag', 'sheets', 'visitor', 'egg', 'egg-hue', 'snack', 'toy-prize', 'bed'];
     }
 
     connectedCallback() {
         this.reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        // A prize being tried on at the counter, standing in for the real gear
+        // until the tray closes: {kind, key}, or null.
+        this.trial = null;
         this.render();
 
         this.onCelebrate = () => this.cheer();
         this.onFeed = () => this.feed();
         this.onTap = (event) => this.feedAt(event);
+        this.onGear = (event) => this.takeGear(event.detail?.gear);
+        this.onTry = (event) => this.tryOn(event.detail ?? null);
         this.onScroll = () => {
             if (this.world) {
                 this.world.scrolledAt = performance.now();
@@ -1033,6 +1173,8 @@ class FqPets extends HTMLElement {
 
         window.addEventListener('celebrate', this.onCelebrate);
         window.addEventListener('fq-pet-feed', this.onFeed);
+        window.addEventListener('fq-pet-gear', this.onGear);
+        window.addEventListener('fq-pet-try', this.onTry);
         document.addEventListener('click', this.onTap);
         window.addEventListener('scroll', this.onScroll, { passive: true });
         document.addEventListener('visibilitychange', this.onVisible);
@@ -1042,6 +1184,8 @@ class FqPets extends HTMLElement {
         this.pause();
         window.removeEventListener('celebrate', this.onCelebrate);
         window.removeEventListener('fq-pet-feed', this.onFeed);
+        window.removeEventListener('fq-pet-gear', this.onGear);
+        window.removeEventListener('fq-pet-try', this.onTry);
         document.removeEventListener('click', this.onTap);
         window.removeEventListener('scroll', this.onScroll);
         document.removeEventListener('visibilitychange', this.onVisible);
@@ -1063,7 +1207,62 @@ class FqPets extends HTMLElement {
         if (this.world) {
             this.world.asleep = this.hasAttribute('asleep');
             this.syncToy();
+            this.syncBed();
         }
+    }
+
+    /**
+     * The counter bought or swapped something. The page's own markup would
+     * say so on the next load; this says so now, by setting the same
+     * attributes the kid shell renders. Only on a kid's own layer — the login
+     * door's row and a grown-up's pet have no gear.
+     */
+    takeGear(gear) {
+        if (! gear || this.sheets() || ! this.hasAttribute('feed-on-tap')) {
+            return;
+        }
+
+        [['snack', gear.snack], ['toy-prize', gear.toy], ['bed', gear.bed]].forEach(([name, value]) => {
+            if (value) {
+                this.setAttribute(name, value);
+            } else {
+                this.removeAttribute(name);
+            }
+        });
+    }
+
+    /**
+     * A prize tried on at the counter: a snack drops to be eaten, a toy or bed
+     * takes the place of the real one until the tray closes (`null`).
+     */
+    tryOn(trial) {
+        if (this.sheets() || ! this.hasAttribute('feed-on-tap')) {
+            return;
+        }
+
+        this.trial = trial && ['snack', 'toy', 'bed'].includes(trial.kind) ? trial : null;
+        this.syncToy();
+        this.syncBed();
+
+        if (this.trial && this.trial.kind === 'snack') {
+            this.world?.finishSnack();
+            this.feed();
+        }
+    }
+
+    /** The snack that drops: the one being tried, else the one out. */
+    snackKey() {
+        return this.trial?.kind === 'snack' ? this.trial.key : (this.getAttribute('snack') || 'meat');
+    }
+
+    /** The bought toy that is out, if any — the one being tried first. */
+    toyKey() {
+        return this.trial?.kind === 'toy' ? this.trial.key : this.getAttribute('toy-prize');
+    }
+
+    /** The bed that is out, if any — the one being tried first. */
+    bedKey() {
+        return this.trial?.kind === 'bed' ? this.trial.key : this.getAttribute('bed');
     }
 
     /**
@@ -1161,6 +1360,18 @@ class FqPets extends HTMLElement {
                 text-align: center; pointer-events: none; transform-origin: 50% 100%;
                 filter: drop-shadow(0 2px 0 rgba(0,0,0,.45));
             }
+            /* The prize counter's gear: drawn art rather than a cell of the sheet. */
+            .toy.prize {
+                width: ${PRIZE_TOY_SIZE}px; height: ${PRIZE_TOY_SIZE}px; background: none;
+                filter: drop-shadow(0 2px 0 rgba(0,0,0,.45));
+            }
+            .toy.prize .toy-grab { inset: 0; height: auto; }
+            .toy.prize svg { transform-origin: 50% 50%; }
+            .bed {
+                position: absolute; width: ${BED_SIZE}px; height: ${BED_SIZE}px;
+                pointer-events: none; transform-origin: 50% 100%; z-index: 0;
+            }
+            .snack svg, .toy svg, .bed svg { display: block; width: 100%; height: 100%; }
         `;
 
         root.append(style);
@@ -1219,6 +1430,7 @@ class FqPets extends HTMLElement {
         });
 
         this.syncToy();
+        this.syncBed();
 
         // Just hatched: the first time the kid sees their new pet, it comes
         // out of its egg in front of them.
@@ -1309,17 +1521,36 @@ class FqPets extends HTMLElement {
         }
 
         this.world.pets.forEach((pet) => {
+            // A toy bought at the prize counter is out every day; the sheet's
+            // own toy only comes with a powered-up day. Visitors bring neither.
+            const prize = ! pet.visiting && ! this.sheets() ? this.toyKey() : null;
+
             if (! pet.visiting && ! this.sheets()) {
-                pet.wantsToy = this.hasAttribute('toy');
+                pet.wantsToy = Boolean(prize) || this.hasAttribute('toy');
             }
 
             const wanted = pet.wantsToy && ! this.reduced && pet.src;
 
+            // A different toy than the one out: this one goes, and the new one
+            // drops in below.
+            if (pet.toy && (pet.toy.prizeKey ?? null) !== (prize || null)) {
+                pet.toy.sprite.remove();
+                this.world.toys = this.world.toys.filter((toy) => toy !== pet.toy);
+                pet.toy = null;
+            }
+
             if (wanted && ! pet.toy) {
                 const sprite = document.createElement('div');
-                sprite.className = 'toy';
-                sprite.style.setProperty('--sheet', 'url("' + cssUrl(pet.src) + '")');
-                sprite.style.backgroundPosition = posePosition('toy');
+                const art = prize ? prizeSvg('toy', prize) : null;
+
+                if (art) {
+                    sprite.className = 'toy prize';
+                    sprite.innerHTML = art;
+                } else {
+                    sprite.className = 'toy';
+                    sprite.style.setProperty('--sheet', 'url("' + cssUrl(pet.src) + '")');
+                    sprite.style.backgroundPosition = posePosition('toy');
+                }
 
                 const grab = document.createElement('div');
                 grab.className = 'toy-grab';
@@ -1338,6 +1569,7 @@ class FqPets extends HTMLElement {
                 pet.toy = new Toy(this.world, near);
                 pet.toy.sprite = sprite;
                 pet.toy.owner = pet;
+                pet.toy.prizeKey = art ? prize : null;
                 this.world.toys.push(pet.toy);
                 this.bindDrag(grab, pet.toy);
             }
@@ -1348,6 +1580,53 @@ class FqPets extends HTMLElement {
                 pet.toy = null;
             }
         });
+    }
+
+    /**
+     * The pet's bed from the prize counter, standing on the floor near the
+     * left of the page — where a pet naps now and then, and sleeps at bedtime.
+     * A kid's own layer only.
+     */
+    syncBed() {
+        if (! this.world || ! this.shadowRoot) {
+            return;
+        }
+
+        const key = this.sheets() || ! this.world.pets.some((pet) => ! pet.visiting) ? null : this.bedKey();
+        const bed = this.world.bed;
+
+        if (bed && bed.key !== key) {
+            bed.sprite.remove();
+            this.world.bed = null;
+        }
+
+        const art = key ? prizeSvg('bed', key) : null;
+
+        if (art && ! this.world.bed) {
+            const sprite = document.createElement('div');
+            sprite.className = 'bed';
+            sprite.innerHTML = art;
+            this.shadowRoot.append(sprite);
+
+            this.world.bed = {
+                key,
+                sprite,
+                x: this.world.clampX(Math.min(this.world.width * 0.14, 140) + BED_SIZE / 2),
+                y: this.world.floor(),
+            };
+        }
+
+        // Out of a bed that has gone: back on the floor.
+        if (! this.world.bed) {
+            this.world.pets.forEach((pet) => {
+                if (pet.state === 'napping') {
+                    pet.y = this.world.floor();
+                    pet.act('idle', 'idle', 0.4);
+                }
+            });
+        }
+
+        this.paint();
     }
 
     /** Whether this layer is the login door's row of pets. */
@@ -1461,9 +1740,18 @@ class FqPets extends HTMLElement {
             }
         }
 
+        // The snack out, from the prize counter — the meat block when none
+        // has been bought, and the old emoji if the art has not loaded.
         const sprite = document.createElement('div');
+        const art = prizeSvg('snack', this.snackKey());
         sprite.className = 'snack';
-        sprite.textContent = '🍖';
+
+        if (art) {
+            sprite.innerHTML = art;
+        } else {
+            sprite.textContent = '🍖';
+        }
+
         this.shadowRoot.append(sprite);
 
         this.world.snack = new Snack(x, rest, at ? at.y : undefined);
@@ -1610,6 +1898,18 @@ class FqPets extends HTMLElement {
         });
 
         this.world.toys.forEach((toy) => {
+            // A bought toy is drawn at its own true size and stays out while
+            // the pet plays — the sheet's play pose holds the sheet's toy, and
+            // batting at one beside the other reads fine (design 2 of
+            // handoff/design_handoff_arcade_tokens).
+            if (toy.prizeKey) {
+                // Rolled about its middle, standing on its foot.
+                toy.sprite.style.transform = 'translate(' + (toy.x - PRIZE_TOY_SIZE / 2) + 'px,' + (toy.y - PRIZE_TOY_SIZE) + 'px) scale(' + zoom.toFixed(3) + ')';
+                toy.sprite.firstElementChild?.style.setProperty('transform', 'rotate(' + (toy.spin % 360).toFixed(1) + 'deg)');
+
+                return;
+            }
+
             // Shrunk with its own pet, so a baby's toy stays in proportion.
             const scale = (toy.owner?.scale ?? 1) * zoom;
             const size = scale !== 1 ? ' scale(' + scale.toFixed(3) + ')' : '';
@@ -1621,6 +1921,13 @@ class FqPets extends HTMLElement {
             // the same toy side by side reads as a glitch.
             toy.sprite.style.visibility = toy.owner && toy.owner.state === 'playing' && ! toy.held ? 'hidden' : '';
         });
+
+        const bed = this.world.bed;
+
+        if (bed) {
+            // Its underside on the floor, scaled up from there with the pets.
+            bed.sprite.style.transform = 'translate(' + (bed.x - BED_SIZE / 2) + 'px,' + (bed.y - BED_SIZE + BED_FOOT) + 'px) scale(' + zoom.toFixed(3) + ')';
+        }
 
         this.world.eggs.forEach((egg) => {
             const scale = egg.scale * zoom;

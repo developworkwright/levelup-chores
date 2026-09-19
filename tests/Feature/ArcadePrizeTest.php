@@ -3,12 +3,12 @@
 namespace Tests\Feature;
 
 use App\Enums\ArcadeGame;
-use App\Enums\TicketKind;
+use App\Enums\TokenKind;
 use App\Models\ArcadeScore;
 use App\Models\ArcadeWeekPrize;
-use App\Models\BonusTicketEntry;
 use App\Models\Household;
 use App\Models\Profile;
+use App\Models\TokenEntry;
 use App\Services\ArcadeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -16,12 +16,13 @@ use Livewire\Volt\Volt;
 use Tests\TestCase;
 
 /**
- * Three bonus tickets to the top of a finished week — on each game.
+ * Thirty arcade tokens to the top of a finished week — on each game. (It was
+ * three bonus tickets until the prize counter arrived.)
  *
  * There is no scheduler: the week is settled by whoever opens the arcade next.
  * So the two things worth testing hardest are that it pays exactly once however
  * many times that happens, and that a grown-up topping a board closes that week
- * without collecting anything.
+ * without collecting anything — the tokens pass down to the best kid below.
  *
  * A second game added a third: a week is now two settlements rather than
  * one, and closing the tower must not close the walk. One prize per game is a
@@ -69,7 +70,7 @@ class ArcadePrizeTest extends TestCase
         ]);
     }
 
-    public function test_the_top_of_a_finished_week_wins_three_tickets(): void
+    public function test_the_top_of_a_finished_week_wins_thirty_tokens(): void
     {
         $winner = $this->kid('Nova');
         $other = $this->kid('Rook');
@@ -79,16 +80,19 @@ class ArcadePrizeTest extends TestCase
 
         $this->arcade()->settle($this->household);
 
-        $this->assertSame(ArcadeService::PRIZE_TICKETS, $winner->fresh()->bonus_tickets);
-        $this->assertSame(0, $other->fresh()->bonus_tickets);
+        $this->assertSame(ArcadeService::PRIZE_TOKENS, $winner->fresh()->arcade_tokens);
+        $this->assertSame(0, $other->fresh()->arcade_tokens);
 
-        // Through TicketService, so the entries and the cached balance are
+        // Through TokenService, so the entries and the cached balance are
         // written in one transaction and cannot drift.
-        $entry = BonusTicketEntry::sole();
+        $entry = TokenEntry::sole();
 
-        $this->assertSame(TicketKind::Arcade, $entry->kind);
-        $this->assertSame(ArcadeService::PRIZE_TICKETS, $entry->amount);
+        $this->assertSame(TokenKind::WeeklyPrize, $entry->kind);
+        $this->assertSame(ArcadeService::PRIZE_TOKENS, $entry->amount);
         $this->assertSame($winner->id, $entry->profile_id);
+
+        // Nothing in tickets any more.
+        $this->assertSame(0, $winner->fresh()->bonus_tickets);
     }
 
     public function test_each_game_pays_its_own_champion(): void
@@ -108,8 +112,8 @@ class ArcadePrizeTest extends TestCase
 
         $this->arcade()->settle($this->household);
 
-        $this->assertSame(ArcadeService::PRIZE_TICKETS, $climber->fresh()->bonus_tickets);
-        $this->assertSame(ArcadeService::PRIZE_TICKETS, $walker->fresh()->bonus_tickets);
+        $this->assertSame(ArcadeService::PRIZE_TOKENS, $climber->fresh()->arcade_tokens);
+        $this->assertSame(ArcadeService::PRIZE_TOKENS, $walker->fresh()->arcade_tokens);
         $this->assertSame(2, ArcadeWeekPrize::count());
     }
 
@@ -134,7 +138,7 @@ class ArcadePrizeTest extends TestCase
 
         $this->arcade()->settle($this->household);
 
-        $this->assertSame(ArcadeService::PRIZE_TICKETS, $climber->fresh()->bonus_tickets);
+        $this->assertSame(ArcadeService::PRIZE_TOKENS, $climber->fresh()->arcade_tokens);
         $this->assertSame(2, ArcadeWeekPrize::count());
     }
 
@@ -149,12 +153,77 @@ class ArcadePrizeTest extends TestCase
         $this->arcade()->settle($this->household);
         $this->arcade()->settle($this->household);
 
-        $this->assertSame(ArcadeService::PRIZE_TICKETS, $winner->fresh()->bonus_tickets);
-        $this->assertSame(1, BonusTicketEntry::count());
+        $this->assertSame(ArcadeService::PRIZE_TOKENS, $winner->fresh()->arcade_tokens);
+        $this->assertSame(1, TokenEntry::count());
         $this->assertSame(1, ArcadeWeekPrize::count());
     }
 
-    public function test_a_grown_up_can_win_the_week_but_not_the_tickets(): void
+    public function test_a_grown_up_can_win_the_week_and_the_tokens_go_to_the_best_kid_below(): void
+    {
+        $parent = $this->parent('Dad');
+        $kid = $this->kid('Nova');
+        $slower = $this->kid('Rook');
+
+        $this->lastWeek($slower, 9);
+        $this->lastWeek($kid, 18);
+        $this->lastWeek($parent, 44);
+
+        $this->arcade()->settle($this->household);
+
+        // The user's call when the prize moved to tokens: a grown-up on top
+        // still takes the week, and the prize passes down to the best kid on
+        // the board rather than going to nobody.
+        $this->assertSame(0, $parent->fresh()->arcade_tokens);
+        $this->assertSame(ArcadeService::PRIZE_TOKENS, $kid->fresh()->arcade_tokens);
+        $this->assertSame(0, $slower->fresh()->arcade_tokens);
+
+        // The week still records who took it, which is what the board's
+        // "last champion" line reads.
+        $prize = ArcadeWeekPrize::sole();
+
+        $this->assertSame($parent->id, $prize->profile_id);
+        $this->assertSame($kid->id, $prize->paid_profile_id);
+        $this->assertSame(ArcadeService::PRIZE_TOKENS, $prize->tokens);
+        $this->assertSame(0, $prize->tickets);
+        $this->assertSame(44, $prize->score);
+        $this->assertSame(ArcadeGame::default(), $prize->game);
+    }
+
+    public function test_a_week_only_grown_ups_played_pays_nobody(): void
+    {
+        $parent = $this->parent('Dad');
+        $this->kid('Nova');
+
+        $this->lastWeek($parent, 44);
+
+        $this->arcade()->settle($this->household);
+
+        $prize = ArcadeWeekPrize::sole();
+
+        $this->assertNull($prize->paid_profile_id);
+        $this->assertSame(0, $prize->tokens);
+        $this->assertSame(0, TokenEntry::count());
+    }
+
+    public function test_the_winner_is_told_once_on_the_arcade_page(): void
+    {
+        $kid = $this->kid('Nova');
+        $this->lastWeek($kid, 31);
+
+        Auth::guard('profile')->login($kid);
+
+        Volt::test('arcade')
+            ->assertSee('You took the board')
+            ->assertSee('+30 tokens')
+            ->call('dismissWin')
+            ->assertDontSee('You took the board');
+
+        $this->assertNotNull(ArcadeWeekPrize::sole()->seen_at);
+
+        Volt::test('arcade')->assertDontSee('You took the board');
+    }
+
+    public function test_a_handed_down_win_says_who_topped_it(): void
     {
         $parent = $this->parent('Dad');
         $kid = $this->kid('Nova');
@@ -162,21 +231,9 @@ class ArcadePrizeTest extends TestCase
         $this->lastWeek($kid, 18);
         $this->lastWeek($parent, 44);
 
-        $this->arcade()->settle($this->household);
+        Auth::guard('profile')->login($kid);
 
-        $this->assertSame(0, $parent->fresh()->bonus_tickets);
-        // And not passed down to the runner-up either: they did not win.
-        $this->assertSame(0, $kid->fresh()->bonus_tickets);
-        $this->assertSame(0, BonusTicketEntry::count());
-
-        // The week is still settled and still records who took it, which is
-        // what stops it being re-checked and re-lost every single page load.
-        $prize = ArcadeWeekPrize::sole();
-
-        $this->assertSame($parent->id, $prize->profile_id);
-        $this->assertSame(0, $prize->tickets);
-        $this->assertSame(44, $prize->score);
-        $this->assertSame(ArcadeGame::default(), $prize->game);
+        Volt::test('arcade')->assertSee('Dad topped it');
     }
 
     public function test_the_week_in_progress_is_never_settled(): void
@@ -196,7 +253,7 @@ class ArcadePrizeTest extends TestCase
 
         // Paying the leader on Wednesday would make the rest of the week
         // pointless, and the board says Sunday.
-        $this->assertSame(0, $kid->fresh()->bonus_tickets);
+        $this->assertSame(0, $kid->fresh()->arcade_tokens);
         $this->assertSame(0, ArcadeWeekPrize::count());
     }
 
@@ -236,8 +293,8 @@ class ArcadePrizeTest extends TestCase
 
         // The bigger run belongs to another house and cannot win this one's
         // week — nor can settling here quietly pay a stranger.
-        $this->assertSame(ArcadeService::PRIZE_TICKETS, $mine->fresh()->bonus_tickets);
-        $this->assertSame(0, $theirs->fresh()->bonus_tickets);
+        $this->assertSame(ArcadeService::PRIZE_TOKENS, $mine->fresh()->arcade_tokens);
+        $this->assertSame(0, $theirs->fresh()->arcade_tokens);
         $this->assertSame(1, ArcadeWeekPrize::count());
     }
 
@@ -258,8 +315,8 @@ class ArcadePrizeTest extends TestCase
         // whichever game the rail happens to land on.
         Volt::test('kid.arcade')->assertOk();
 
-        $this->assertSame(ArcadeService::PRIZE_TICKETS, $walker->fresh()->bonus_tickets);
-        $this->assertSame(ArcadeService::PRIZE_TICKETS, $climber->fresh()->bonus_tickets);
+        $this->assertSame(ArcadeService::PRIZE_TOKENS, $walker->fresh()->arcade_tokens);
+        $this->assertSame(ArcadeService::PRIZE_TOKENS, $climber->fresh()->arcade_tokens);
 
         // And it says so on the board, so a kid finds out where they played
         // rather than only in their ticket balance. Asked of the walk by name:
@@ -281,7 +338,10 @@ class ArcadePrizeTest extends TestCase
 
         Auth::guard('profile')->login($walker);
 
+        // The walker's own win card names the walk too, whichever game is
+        // showing; it is read and put away first so only the board is asked.
         Volt::test('arcade')
+            ->call('dismissWin')
             ->call('switchTo', ArcadeGame::WindyWalkies->value)
             ->assertSee('33 lanes')
             ->call('switchTo', ArcadeGame::StackTheMess->value)
@@ -296,8 +356,8 @@ class ArcadePrizeTest extends TestCase
         Auth::guard('profile')->login($kid);
 
         Volt::test('kid.arcade')
-            ->assertSee('3 bonus tickets')
+            ->assertSee('30 tokens every Sunday')
             ->assertSee('one prize per')
-            ->assertSee('Grown-ups can win the week, but not the tickets.');
+            ->assertSee('the tokens go to the best kid below them');
     }
 }

@@ -12,9 +12,11 @@ use Livewire\Volt\Component;
  * console lands on it. That is the whole feature: a parent on the board is
  * somebody for the kids to beat.
  *
- * They cannot win the prize. Topping the week pays three bonus tickets, and
- * tickets are the kids' currency — see ArcadeService::PRIZE_TICKETS. A parent
- * who tops it takes the week and nothing else.
+ * They cannot win the prize. Topping the week pays arcade tokens, and tokens
+ * are the kids' — see ArcadeService::PRIZE_TOKENS. A parent who tops it takes
+ * the week, and the tokens go to the best kid below them. Nor do their runs pay
+ * tokens, and they have no prize counter tab; the sweets on it are stocked from
+ * the Candy page.
  */
 new class extends Component
 {

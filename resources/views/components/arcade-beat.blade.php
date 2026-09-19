@@ -7,12 +7,12 @@
 
      Four states, because a target only means something if it is true: somebody
      else leads, you lead, nobody has played, or the reader is a grown-up and
-     the tickets were never theirs to win. --}}
+     the tokens were never theirs to win. --}}
 @props([
     'leader' => null,
     'beat' => 1,
     'youLead' => false,
-    'canWinTickets' => true,
+    'canWinPrize' => true,
     'prize' => 3,
 ])
 
@@ -24,8 +24,8 @@
         <span class="shrink-0 font-mono-fq text-[9.5px] tracking-[0.12em] text-fq-lime uppercase">Leading</span>
         <span class="font-baloo text-[21px] leading-none font-extrabold text-fq-text">{{ $leader->score }}</span>
         <span class="min-w-0 text-[12px] leading-tight text-pretty text-fq-text-3">
-            @if ($canWinTickets)
-                {{ $prize }} {{ Str::plural('ticket', $prize) }} if it holds
+            @if ($canWinPrize)
+                {{ $prize }} tokens if it holds
             @else
                 hold it to take the week
             @endif
@@ -34,8 +34,8 @@
         <span class="shrink-0 font-mono-fq text-[9.5px] tracking-[0.12em] text-fq-coral uppercase">Beat</span>
         <span class="font-baloo text-[21px] leading-none font-extrabold text-fq-text">{{ $beat }}</span>
         <span class="min-w-0 text-[12px] leading-tight text-pretty text-fq-text-3">
-            @if ($canWinTickets)
-                for {{ $prize }} {{ Str::plural('ticket', $prize) }}
+            @if ($canWinPrize)
+                for {{ $prize }} tokens
             @else
                 to take the week
             @endif
@@ -43,8 +43,8 @@
     @else
         <span class="shrink-0 font-mono-fq text-[9.5px] tracking-[0.12em] text-fq-coral uppercase">Open</span>
         <span class="min-w-0 text-[12px] leading-tight text-pretty text-fq-text-3">
-            @if ($canWinTickets)
-                Nobody yet &mdash; the first run takes {{ $prize }} {{ Str::plural('ticket', $prize) }}.
+            @if ($canWinPrize)
+                Nobody yet &mdash; the first run takes {{ $prize }} tokens.
             @else
                 Nobody yet &mdash; the first run takes the week.
             @endif

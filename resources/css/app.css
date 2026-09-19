@@ -1229,3 +1229,63 @@ body {
         animation: none;
     }
 }
+
+/*
+ * The arcade's tokens and prize counter (handoff/design_handoff_arcade_tokens).
+ * The coin drops in on the payout and the week's win; the keeper blinks and
+ * the PRIZES sign flickers on the cosmetic locker's shared keyframes; a toy on
+ * the pet's floor preview bobs.
+ */
+@keyframes fq-tok-drop {
+    0% { transform: translateY(-14px) scale(0.8); opacity: 0; }
+    60% { opacity: 1; }
+    100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+.fq-token-drop {
+    animation: fq-tok-drop 0.5s ease-out;
+}
+
+.fq-flicker {
+    animation: fqflicker 6s linear infinite;
+}
+
+.fq-blink {
+    animation: fqblink 5s linear infinite;
+}
+
+.fq-bob {
+    animation: fqbob 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fq-token-drop,
+    .fq-flicker,
+    .fq-blink,
+    .fq-bob {
+        animation: none;
+    }
+}
+
+/*
+ * The token pop over the game screen at game over: in with a bounce, held long
+ * enough to read beside the score, then out of the way of the next run.
+ * Reduced motion keeps it on screen, still — it carries the news.
+ */
+@keyframes fq-win-pop {
+    0% { transform: translateY(10px) scale(0.6); opacity: 0; }
+    8% { transform: translateY(0) scale(1.08); opacity: 1; }
+    13% { transform: scale(1); }
+    82% { opacity: 1; transform: translateY(0); }
+    100% { opacity: 0; transform: translateY(-10px); }
+}
+
+.fq-win-pop {
+    animation: fq-win-pop 5.5s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fq-win-pop {
+        animation: none;
+    }
+}
