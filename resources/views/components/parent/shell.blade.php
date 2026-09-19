@@ -207,6 +207,7 @@
     @if ($parentPet)
         <fq-pets
             sheet="{{ $parentPet['src'] }}"
+            @if ($parentPet['rig'] ?? null) rig="{{ json_encode($parentPet['rig'], JSON_UNESCAPED_SLASHES) }}" @endif
             scale="{{ $parentPet['scale'] }}"
             @if ($parentPet['effect']) effect="{{ $parentPet['effect'] }}" @endif
             toy

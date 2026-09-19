@@ -422,12 +422,14 @@ new class extends Component
                     >{{ $short > 0 ? $short.' short' : 'Buy · '.$trying->cost.' ✦' }}</button>
                 </div>
 
-                {{-- A pet is twelve poses, so trying one on shows the sheet cut
-                     up — the whole animal, not one still tile. It runs about
-                     for real once it is bought. --}}
+                {{-- A pet is a sheet of poses, so trying one on shows the sheet
+                     cut up — the whole animal, not one still tile. It runs
+                     about for real once it is bought. The blink and the second
+                     walking step are left out: as stills they are the idle
+                     and the walk again. --}}
                 @if ($trying->slot === App\Enums\CosmeticSlot::Pet)
                     <div class="flex w-full flex-wrap gap-[6px]" data-fq-pose-strip>
-                        @foreach (App\Enums\CosmeticSlot::PET_POSES as $pose)
+                        @foreach (array_diff($trying->pet_rig ? App\Enums\CosmeticSlot::PET_POSES : App\Enums\CosmeticSlot::LEGACY_PET_POSES, ['blink', 'walk2']) as $pose)
                             <span class="flex flex-col items-center gap-[3px]">
                                 <span class="relative block h-[52px] w-[52px] overflow-hidden rounded-[10px] bg-fq-bg">
                                     <x-cosmetic.art :item="$trying" :pose="$pose" mode="fill" still class="absolute inset-0" />

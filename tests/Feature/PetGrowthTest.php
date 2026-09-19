@@ -292,14 +292,16 @@ class PetGrowthTest extends TestCase
     }
 
     /**
-     * An all-ages sheet the way the prompt asks for one: six by six, baby rows
+     * An all-ages sheet the way the prompt asks for one: nine by six, baby rows
      * at the top, each age smaller than the one above, ruled grid and all.
+     * `$side` is its height; it is half as wide again.
      *
      * @param  array<string, array<int, int>>  $skip  poses to leave out, by age
      */
-    private function familyPng(int $side = 1200, array $skip = [], bool $youngIsAdult = false, bool $checkerboard = false, bool $touching = false, bool $crowded = false): string
+    private function familyPng(int $side = 1200, array $skip = [], bool $youngIsAdult = false, bool $checkerboard = false, bool $touching = false, bool $crowded = false, bool $tailUp = false, bool $joined = false): string
     {
-        $image = imagecreatetruecolor($side, $side);
+        $width = (int) ($side * 1.5);
+        $image = imagecreatetruecolor($width, $side);
         imagesavealpha($image, true);
         imagealphablending($image, false);
         imagefill($image, 0, 0, imagecolorallocatealpha($image, 0, 0, 0, 127));
@@ -311,7 +313,7 @@ class PetGrowthTest extends TestCase
             $dark = imagecolorallocate($image, 204, 204, 204);
 
             for ($y = 0; $y < $side; $y += 16) {
-                for ($x = 0; $x < $side; $x += 16) {
+                for ($x = 0; $x < $width; $x += 16) {
                     imagefilledrectangle($image, $x, $y, $x + 15, $y + 15, (($x + $y) / 16) % 2 ? $dark : $light);
                 }
             }
@@ -328,16 +330,23 @@ class PetGrowthTest extends TestCase
         $heights = ['baby' => 0.40, 'young' => $youngIsAdult ? 0.70 : 0.55, 'adult' => 0.70];
 
         foreach (['baby', 'young', 'adult'] as $band => $age) {
-            foreach (range(0, 11) as $index) {
+            foreach (range(0, 17) as $index) {
                 if (in_array($index, $skip[$age] ?? [], true)) {
                     continue;
                 }
 
                 $height = $cell * $heights[$age];
-                $left = ($index % 6) * $cell;
-                $bottom = ($band * 2 + intdiv($index, 6)) * $cell + $cell * 0.9;
+                $left = ($index % 9) * $cell;
+                $bottom = ($band * 2 + intdiv($index, 9)) * $cell + $cell * 0.9;
 
                 imagefilledellipse($image, (int) ($left + $cell / 2), (int) ($bottom - $height / 2), (int) ($height * 0.8), (int) $height, $coats[$youngIsAdult && $age === 'young' ? 'adult' : $age]);
+
+                // A pet on its back with its tail curled up behind it, higher
+                // than its paws — the gremlin that balanced its bone on its tail.
+                if ($tailUp && $index === 15) {
+                    $tailLeft = (int) ($left + $cell / 2 - $height * 0.42);
+                    imagefilledrectangle($image, $tailLeft, (int) ($bottom - $height * 1.15), $tailLeft + (int) ($cell * 0.05), (int) ($bottom - $height * 0.4), $coats[$age]);
+                }
             }
         }
 
@@ -356,6 +365,12 @@ class PetGrowthTest extends TestCase
             imagefilledrectangle($image, (int) ($cell * 3.6), (int) ($cell * 3.8), (int) ($cell * 4.4), (int) ($cell * 3.84), $fur);
         }
 
+        // Two of the adults drawn joined side by side, as a real gremlin sheet
+        // had its idle and blink: one piece of art across two cells.
+        if ($joined) {
+            imagefilledrectangle($image, (int) ($cell * 0.6), (int) ($cell * 4.6), (int) ($cell * 1.4), (int) ($cell * 4.66), $fur);
+        }
+
         if ($touching) {
             imagefilledrectangle($image, (int) ($cell * 0.46), (int) ($cell * 4.85), (int) ($cell * 0.54), (int) ($cell * 5.25), $fur);
         }
@@ -363,9 +378,12 @@ class PetGrowthTest extends TestCase
         // The grid a generator rules in whatever the prompt says.
         $ink = imagecolorallocate($image, 90, 40, 20);
 
-        foreach ($touching ? [] : range(1, 5) as $line) {
+        foreach ($touching || $joined ? [] : range(1, 8) as $line) {
             imagefilledrectangle($image, (int) ($line * $cell) - 1, 0, (int) ($line * $cell), $side - 1, $ink);
-            imagefilledrectangle($image, 0, (int) ($line * $cell) - 1, $side - 1, (int) ($line * $cell), $ink);
+        }
+
+        foreach ($touching || $joined ? [] : range(1, 5) as $line) {
+            imagefilledrectangle($image, 0, (int) ($line * $cell) - 1, $width - 1, (int) ($line * $cell), $ink);
         }
 
         ob_start();
@@ -406,7 +424,7 @@ class PetGrowthTest extends TestCase
 
         foreach (['baby', 'young', 'adult'] as $age) {
             $this->assertNotNull($family['sheets'][$age], $age);
-            $this->assertSame([1024, 768], array_slice(getimagesizefromstring($family['sheets'][$age]), 0, 2));
+            $this->assertSame([1536, 768], array_slice(getimagesizefromstring($family['sheets'][$age]), 0, 2));
         }
 
         // Every age is cut at the same full size — the baby drawn at 40% of
@@ -452,11 +470,11 @@ class PetGrowthTest extends TestCase
         $labels = array_column($family['checks'], 'label');
 
         $this->assertNotContains('fail', array_column($family['checks'], 'status'), json_encode($family['checks']));
-        $this->assertContains('Adult: All 12 poses are there', $labels);
+        $this->assertContains('Adult: All 18 poses are there', $labels);
         $this->assertContains('Adult: One animal, one size', $labels);
         $this->assertStringContainsString('some were touching', $labels[0]);
 
-        // The held cell has its dog, and the idle cell holds one dog, not two.
+        // The cell below has its dog, and the idle cell holds one dog, not two.
         $adult = imagecreatefromstring($family['sheets']['adult']);
         $idleTop = null;
 
@@ -501,7 +519,7 @@ class PetGrowthTest extends TestCase
         Volt::test('parent.cosmetics')
             ->call('$set', 'slot', 'pet')
             ->set('upload', UploadedFile::fake()->createWithContent('family.png', $this->familyPng()))
-            ->assertSee('found all 36 poses')
+            ->assertSee('found all 54 poses')
             ->set('name', 'Gremlin')
             ->set('stock', 'limited')
             ->set('effect', 'rainbow')
@@ -524,14 +542,14 @@ class PetGrowthTest extends TestCase
     }
 
     /** A single four-by-three sheet is one age, and a pet needs all three. */
-    public function test_a_pet_upload_that_is_not_the_square_is_refused(): void
+    public function test_a_pet_upload_that_is_not_the_whole_sheet_is_refused(): void
     {
         Auth::guard('profile')->login($this->parent);
 
         Volt::test('parent.cosmetics')
             ->call('$set', 'slot', 'pet')
             ->set('upload', UploadedFile::fake()->createWithContent('adult.png', $this->petSheetPng()))
-            ->assertSee('A pet needs all three ages in one square picture')
+            ->assertSee('A pet needs all three ages in one 3:2 picture')
             ->set('name', 'Tabby')
             ->call('publish')
             ->assertHasErrors('upload');
@@ -539,26 +557,27 @@ class PetGrowthTest extends TestCase
         $this->assertSame(0, Cosmetic::where('name', 'Tabby')->count());
     }
 
-    public function test_the_all_ages_prompt_lays_out_six_by_six_and_spells_out_the_held_pose(): void
+    public function test_the_all_ages_prompt_lays_out_nine_by_six_and_spells_out_the_held_pose(): void
     {
         $prompt = CosmeticSlot::PET_FAMILY_PROMPT;
 
-        $this->assertStringContainsString('6 columns × 6 rows', $prompt);
+        $this->assertStringContainsString('9 columns × 6 rows', $prompt);
         $this->assertStringContainsString('Rows 1–2: the BABY. Rows 3–4: the YOUNG pet. Rows 5–6: the ADULT.', $prompt);
         $this->assertStringContainsString('NOT sitting', $prompt);
         // Stray toys, and drawings joined together — a scruff hand reaching
-        // into the row above was one — are what generators got wrong.
-        $this->assertStringContainsString('EXACTLY THREE cells of each age', $prompt);
+        // into the row above was one — are what generators got wrong. The toy
+        // is only ever on its own: the app draws it into the empty paws.
+        $this->assertStringContainsString('EXACTLY ONE cell of each age', $prompt);
+        $this->assertStringContainsString('their paws are EMPTY', $prompt);
         $this->assertStringContainsString('EVERY DRAWING IS ITS OWN ISLAND', $prompt);
         $this->assertStringContainsString('Draw NO hand, arm or person holding it', $prompt);
         // Generators shrank the second row to fit the toy; one scale per age.
         $this->assertStringContainsString('ONE SCALE PER AGE', $prompt);
-        $this->assertStringContainsString('make the toy smaller, never the animal', $prompt);
         // Each age's toy cell is cut into that age's sheet, so the toy can wear out.
         $this->assertStringContainsString('ragged, torn and patched with the ADULT', $prompt);
         $this->assertStringContainsString('Never repeat one age\'s drawing for another', $prompt);
         $this->assertStringContainsString('Hand back a PNG file', $prompt.CosmeticSlot::Pet->promptOutput());
-        $this->assertStringContainsString('1024x1024 pixels', CosmeticSlot::Pet->promptOutput());
+        $this->assertStringContainsString('1536x1024 pixels', CosmeticSlot::Pet->promptOutput());
     }
 
     public function test_the_console_has_one_pet_prompt_and_no_per_age_uploads(): void
@@ -568,7 +587,7 @@ class PetGrowthTest extends TestCase
 
         $html = Volt::test('parent.cosmetics')->call('pickListSlot', 'pet')->html();
 
-        $this->assertStringContainsString('6 columns × 6 rows', $html);
+        $this->assertStringContainsString('9 columns × 6 rows', $html);
         $this->assertStringNotContainsString('Pet · one age', $html);
         $this->assertStringNotContainsString('data-stage-chip', $html);
     }
@@ -743,7 +762,7 @@ class PetGrowthTest extends TestCase
             ->call('$set', 'slot', 'pet')
             ->set('upload', UploadedFile::fake()->createWithContent('family.webp', $webp))
             ->assertHasNoErrors()
-            ->assertSee('found all 36 poses')
+            ->assertSee('found all 54 poses')
             ->set('name', 'Webby')
             ->call('publish')
             ->assertHasNoErrors();
@@ -979,5 +998,191 @@ class PetGrowthTest extends TestCase
 
         $disk->assertMissing('cosmetics/1/a.png');
         $disk->assertMissing('cosmetics/1/b.png');
+    }
+
+    /**
+     * Play, toss and back are drawn with empty paws, and the app puts the toy
+     * in them — so the cut records where the paws are, for every age.
+     */
+    public function test_the_cut_records_where_the_paws_and_the_toy_are(): void
+    {
+        $family = app(CosmeticArt::class)->prepareFamily($this->familyPng());
+
+        foreach (['baby', 'young', 'adult'] as $age) {
+            $anchors = $family['anchors'][$age];
+
+            $this->assertSame(['play', 'toss', 'back', 'toy'], array_keys($anchors), $age);
+
+            // The test animals are ovals in the middle of their cells: held-up
+            // paws are the middle of the top, and the pounce reaches right.
+            $this->assertEqualsWithDelta(0.5, $anchors['back'][0], 0.03, $age);
+            $this->assertLessThan(0.5, $anchors['back'][1], $age);
+            $this->assertGreaterThan(0.6, $anchors['play'][0], $age);
+            $this->assertCount(4, $anchors['toy'], $age);
+        }
+    }
+
+    /**
+     * Two animals drawn joined side by side are one piece, so there is no gap
+     * between them to find. The row is split where they meet instead — never
+     * cut into even strips, which sliced a wide landed gremlin in two.
+     */
+    public function test_two_animals_joined_side_by_side_are_split_where_they_meet(): void
+    {
+        $family = app(CosmeticArt::class)->prepareFamily($this->familyPng(joined: true));
+        $labels = array_column($family['checks'], 'label');
+
+        $this->assertNotContains('fail', array_column($family['checks'], 'status'), json_encode($family['checks']));
+        $this->assertStringNotContainsString('even strips', $labels[0]);
+        $this->assertStringContainsString('some were touching', $labels[0]);
+        $this->assertEqualsWithDelta(0.7 * 256, $this->standingHeight($family['sheets']['adult']), 8);
+    }
+
+    public function test_the_paws_are_found_over_the_body_even_when_the_tail_reaches_higher(): void
+    {
+        $family = app(CosmeticArt::class)->prepareFamily($this->familyPng(tailUp: true));
+
+        foreach (['baby', 'young', 'adult'] as $age) {
+            $this->assertEqualsWithDelta(0.5, $family['anchors'][$age]['back'][0], 0.08, $age);
+        }
+    }
+
+    public function test_a_published_pet_hands_the_layer_its_eighteen_pose_layout(): void
+    {
+        Auth::guard('profile')->login($this->parent);
+
+        Volt::test('parent.cosmetics')
+            ->call('$set', 'slot', 'pet')
+            ->set('upload', UploadedFile::fake()->createWithContent('family.png', $this->familyPng()))
+            ->set('name', 'Gremlin')
+            ->call('tryOut', 'baby')
+            ->assertSee('rig="{&quot;poses&quot;:18', false)
+            ->call('publish')
+            ->assertHasNoErrors();
+
+        $pet = Cosmetic::where('name', 'Gremlin')->firstOrFail();
+
+        $this->assertSame(['baby', 'young', 'adult'], array_keys($pet->pet_rig['anchors']));
+
+        $this->adopt($this->kid, $pet);
+        $sprite = app(PetService::class)->spriteFor($this->kid->fresh());
+
+        $this->assertSame(18, $sprite['rig']['poses']);
+        $this->assertSame($pet->pet_rig['anchors']['baby'], $sprite['rig']['anchors']);
+
+        Auth::guard('profile')->login($this->kid->fresh());
+        Volt::test('kid.bonus')->assertSee('rig="{&quot;poses&quot;:18', false);
+    }
+
+    /** A pet made before the re-grid keeps working, on its old layout. */
+    public function test_a_pet_from_before_the_re_grid_has_no_rig_and_is_flagged_for_new_art(): void
+    {
+        $tabby = $this->pet('Tabby', ['baby_art_path' => 'x/baby.png', 'young_art_path' => 'x/young.png']);
+        $this->adopt($this->kid, $tabby);
+
+        $this->assertNull(app(PetService::class)->spriteFor($this->kid->fresh())['rig']);
+
+        Auth::guard('profile')->login($this->kid->fresh());
+        Volt::test('kid.bonus')->assertDontSee(' rig="', false);
+
+        Auth::guard('profile')->login($this->parent);
+        Volt::test('parent.cosmetics')
+            ->call('pickListSlot', 'pet')
+            ->assertSee('data-old-pet-art', false)
+            ->assertSee('NEW ART');
+    }
+
+    /** A picture made from the old prompt is turned away with a reason. */
+    public function test_an_old_square_all_ages_sheet_is_refused_with_a_reason(): void
+    {
+        $image = imagecreatetruecolor(1200, 1200);
+        imagesavealpha($image, true);
+        imagealphablending($image, false);
+        imagefill($image, 0, 0, imagecolorallocatealpha($image, 0, 0, 0, 127));
+        imagefilledellipse($image, 600, 600, 300, 300, imagecolorallocate($image, 168, 116, 72));
+        ob_start();
+        imagepng($image);
+        $square = (string) ob_get_clean();
+
+        Auth::guard('profile')->login($this->parent);
+
+        Volt::test('parent.cosmetics')
+            ->call('$set', 'slot', 'pet')
+            ->set('upload', UploadedFile::fake()->createWithContent('old.png', $square))
+            ->assertSee('That is the old square sheet with 12 poses')
+            ->set('name', 'Oldie')
+            ->call('publish')
+            ->assertHasErrors('upload');
+
+        $this->assertSame(0, Cosmetic::where('name', 'Oldie')->count());
+    }
+
+    /**
+     * New art goes onto the same pet, so a kid who owns it keeps it — grown
+     * as far as it was — and its name, price and stock stay as they were.
+     */
+    public function test_new_art_replaces_a_pets_sheets_without_taking_it_from_anyone(): void
+    {
+        $disk = Storage::disk('drawings');
+        $disk->put('cosmetics/1/old-adult.png', 'OLD');
+        $disk->put('cosmetics/1/old-baby.png', 'OLD');
+        $tabby = $this->pet('Tabby', [
+            'art_path' => 'cosmetics/1/old-adult.png',
+            'baby_art_path' => 'cosmetics/1/old-baby.png',
+            'stock' => 'limited',
+            'cost' => 12,
+        ]);
+        OwnedCosmetic::create([
+            'household_id' => $this->household->id,
+            'profile_id' => $this->kid->id,
+            'cosmetic_id' => $tabby->id,
+            'tickets_paid' => 12,
+            'growth' => 17,
+        ]);
+
+        Auth::guard('profile')->login($this->parent);
+
+        Volt::test('parent.cosmetics')
+            ->call('pickListSlot', 'pet')
+            ->call('replaceArt', $tabby->id)
+            ->assertSet('slot', 'pet')
+            ->assertSee('New art for Tabby')
+            ->set('upload', UploadedFile::fake()->createWithContent('family.png', $this->familyPng()))
+            ->assertSee('Put the new art on Tabby')
+            ->call('publish')
+            ->assertHasNoErrors()
+            ->assertSee('Tabby has its new art.')
+            ->assertSet('replacing', null);
+
+        $fresh = $tabby->fresh();
+
+        $this->assertSame(1, Cosmetic::where('slot', 'pet')->count(), 'New art made a new pet.');
+        $this->assertSame(['Tabby', 12, 'limited'], [$fresh->name, $fresh->cost, $fresh->stock->value]);
+        $this->assertCount(3, $fresh->artPaths());
+        $this->assertNotNull($fresh->pet_rig);
+        $this->assertSame(17, $this->growthOf($this->kid, $tabby));
+
+        foreach ($fresh->artPaths() as $path) {
+            $disk->assertExists($path);
+        }
+
+        $disk->assertMissing('cosmetics/1/old-adult.png');
+        $disk->assertMissing('cosmetics/1/old-baby.png');
+    }
+
+    public function test_new_art_that_fails_its_checks_leaves_the_pet_as_it_was(): void
+    {
+        $tabby = $this->pet('Tabby', ['baby_art_path' => 'x/baby.png', 'young_art_path' => 'x/young.png']);
+
+        Auth::guard('profile')->login($this->parent);
+
+        Volt::test('parent.cosmetics')
+            ->call('replaceArt', $tabby->id)
+            ->set('upload', UploadedFile::fake()->createWithContent('family.png', $this->familyPng(youngIsAdult: true)))
+            ->call('publish')
+            ->assertHasErrors('upload');
+
+        $this->assertSame('cosmetics/'.$this->household->id.'/Tabby.png', $tabby->fresh()->art_path);
+        $this->assertNull($tabby->fresh()->pet_rig);
     }
 }

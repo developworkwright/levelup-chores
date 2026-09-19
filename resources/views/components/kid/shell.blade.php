@@ -920,6 +920,9 @@
                 egg-hue="{{ $ownPet['hue'] }}"
             @else
                 sheet="{{ $ownPet['src'] }}"
+                {{-- How the sheet is laid out; none on a pet made before the
+                     eighteen-pose sheet. See App\Models\Cosmetic::rig(). --}}
+                @if ($ownPet['rig']) rig="{{ json_encode($ownPet['rig'], JSON_UNESCAPED_SLASHES) }}" @endif
                 @if ($ownPet['effect']) effect="{{ $ownPet['effect'] }}" @endif
                 {{-- The hatching, in the colour of the egg it came out of. --}}
                 @if ($justHatched) hatch="{{ $justHatched->hue() }}" @endif

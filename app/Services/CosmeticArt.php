@@ -33,7 +33,7 @@ class CosmeticArt
      * Bumped whenever the way a pet picture is cut or checked changes, so a
      * cut cached under the old rules (see the parent console) is never used.
      */
-    public const CUT_VERSION = 5;
+    public const CUT_VERSION = 8;
 
     /** Past this many pixels nothing is decoded — the decompression-bomb ceiling. */
     private const MAX_PIXELS = 4000000;
@@ -217,7 +217,7 @@ class CosmeticArt
 
         // The standing poses only — a crouch is meant to be short and a jump
         // tall, so including them would fire this on a perfectly good sheet.
-        $standing = array_intersect_key($heights, array_flip(['idle', 'blink', 'walk', 'happy']));
+        $standing = array_intersect_key($heights, array_flip(['idle', 'blink', 'walk', 'walk2', 'happy']));
 
         if (count($standing) > 1 && min($standing) > 0 && max($standing) / min($standing) > 1.35) {
             $checks[] = ['label' => 'The standing poses are different sizes — check it is the same animal', 'status' => 'warn'];
@@ -281,9 +281,10 @@ class CosmeticArt
         $clear = imagecolorallocatealpha($image, 0, 0, 0, 127);
         $erased = 0;
 
-        // A 4x3 grid is five rulings; at four pixels thick that is twenty rows
-        // and columns. Fifty is generous and still nowhere near a whole sheet.
-        $ceiling = 50;
+        // The all-ages sheet is nine by six: thirteen rulings, plus a foot line
+        // under each row, at up to four pixels thick. A hundred is generous
+        // and still nowhere near a whole sheet.
+        $ceiling = 100;
 
         $visibleAt = function (int $x, int $y) use ($image): bool {
             return ((imagecolorat($image, $x, $y) >> 24) & 0x7F) < 110;
@@ -760,7 +761,7 @@ class CosmeticArt
         /*
          * A sheet is resized on nearly the right shape rather than exactly it.
          * Generators hand back 1200x896 when asked for 1024x768 — a percent off
-         * four-three — and the poses are still on an even 4x3 grid inside it,
+         * the right shape — and the poses are still on an even grid inside it,
          * because the model divided whatever canvas it used. Squashing that by
          * a percent is invisible; turning it away over four pixels is not.
          *
@@ -946,10 +947,26 @@ class CosmeticArt
     }
 
     /**
-     * Whether an upload for a pet is the all-ages sheet rather than one age:
-     * square, where one age's sheet is four by three.
+     * Whether an upload for a pet is the all-ages sheet: nine cells by six,
+     * so half as wide again as it is tall.
      */
     public function isFamilySheet(string $binary): bool
+    {
+        return $this->hasShape($binary, CosmeticSlot::FAMILY_GRID['cols'] / CosmeticSlot::FAMILY_GRID['rows']);
+    }
+
+    /**
+     * Whether an upload is the six-by-six square every pet was made from
+     * before the re-grid — the old prompt's picture, which has twelve poses
+     * an age and cannot be cut into eighteen.
+     */
+    public function isOldFamilySheet(string $binary): bool
+    {
+        return $this->hasShape($binary, 1.0);
+    }
+
+    /** A readable PNG of about this width-to-height, big enough to cut. */
+    private function hasShape(string $binary, float $ratio): bool
     {
         $info = @getimagesizefromstring($binary);
 
@@ -960,28 +977,29 @@ class CosmeticArt
         [$width, $height] = [(int) $info[0], (int) $info[1]];
 
         return $height > 0
-            && abs($width / $height - 1) <= 0.03
-            && min($width, $height) >= 600
+            && abs(($width / $height) / $ratio - 1) <= 0.03
+            && $height >= 600
             && $width * $height <= self::MAX_PIXELS;
     }
 
     /**
-     * A pet's whole family from one square sheet: the three ages cut apart,
-     * tidied and checked, ready to store as three ordinary sheets.
+     * A pet's whole family from one sheet: the three ages cut apart, tidied
+     * and checked, ready to store as three ordinary sheets, with where each
+     * age's paws are.
      *
      * Every age is held to every check, because every pet has all three: a
      * younger age with a missing pose, or one that is just another age's
      * drawing handed back again, fails the upload like a broken adult does.
      *
-     * @return array{sheets: array<string, string|null>, checks: array<int, array{label: string, status: string}>}
-     *                                                                                                             sheets keyed by PetStage value
+     * @return array{sheets: array<string, string|null>, anchors: array<string, array<string, array<int, float>>>, checks: array<int, array{label: string, status: string}>}
+     *                                                                                                                                                                       keyed by PetStage value
      */
     public function prepareFamily(string $binary): array
     {
         $cut = $this->splitFamily($binary);
 
         if ($cut === null) {
-            return ['sheets' => ['baby' => null, 'young' => null, 'adult' => null], 'checks' => [['label' => 'The picture would not open', 'status' => 'fail']]];
+            return ['sheets' => ['baby' => null, 'young' => null, 'adult' => null], 'anchors' => [], 'checks' => [['label' => 'The picture would not open', 'status' => 'fail']]];
         }
 
         $sheets = [];
@@ -1023,20 +1041,126 @@ class CosmeticArt
             $checks[] = ['label' => "{$name}: all ".count(CosmeticSlot::PET_POSES).' poses, drawn at '.$stage->pixels().'px', 'status' => 'pass'];
         }
 
-        return ['sheets' => $sheets, 'checks' => $checks];
+        $anchors = array_map(fn (?string $sheet) => $sheet === null ? [] : $this->anchors($sheet), $sheets);
+
+        return ['sheets' => $sheets, 'anchors' => $anchors, 'checks' => $checks];
     }
 
     /**
-     * Cuts the square all-ages sheet into three ordinary four-by-three sheets,
-     * one per age, untidied.
+     * Where the toy goes on one age's cut sheet.
+     *
+     * The play, toss and back poses are drawn with empty paws and the app
+     * puts the toy into them, so it needs to know where the paws are. Each is
+     * a point as fractions of the cell, [x, y]:
+     *
+     * - play: the front paws, which is the far right of the lowest quarter
+     *   of the drawing (it faces right), on its foot line;
+     * - toss and back: the paws held up, which is the highest point of the
+     *   drawing above the middle of its body.
+     *
+     * And the toy's own cell, as [middle x, middle y, width, height], so the
+     * app can put the middle of the toy where the paws are.
+     *
+     * @return array<string, array<int, float>>
+     */
+    public function anchors(string $sheet): array
+    {
+        $image = @imagecreatefromstring($sheet);
+
+        if (! $image instanceof GdImage) {
+            return [];
+        }
+
+        $grid = CosmeticSlot::Pet->poseGrid();
+        $cell = (int) (imagesx($image) / $grid['cols']);
+        $fraction = fn (float $pixels, int $from) => round(($pixels - $from) / $cell, 3);
+        $anchors = [];
+
+        foreach ([...CosmeticSlot::EMPTY_PAW_POSES, 'toy'] as $pose) {
+            $index = array_search($pose, CosmeticSlot::PET_POSES, true);
+            $left = ($index % $grid['cols']) * $cell;
+            $top = intdiv($index, $grid['cols']) * $cell;
+            $box = $this->boundingBox($image, $left, $top, $cell, $cell);
+
+            if ($box === null) {
+                continue;
+            }
+
+            $height = $box['bottom'] - $box['top'] + 1;
+
+            if ($pose === 'toy') {
+                $anchors[$pose] = [
+                    $fraction(($box['left'] + $box['right']) / 2, $left),
+                    $fraction(($box['top'] + $box['bottom']) / 2, $top),
+                    round(($box['right'] - $box['left'] + 1) / $cell, 3),
+                    round($height / $cell, 3),
+                ];
+
+                continue;
+            }
+
+            if ($pose === 'play') {
+                $from = (int) ($box['bottom'] - $height * 0.25);
+                $xs = $this->visibleXs($image, $box['left'], $box['right'], $from, $box['bottom']);
+                $anchors[$pose] = [$fraction($xs === [] ? $box['right'] : max($xs), $left), $fraction($box['bottom'], $top)];
+
+                continue;
+            }
+
+            // Held-up paws are over the middle of the body. Not simply the
+            // highest point of the drawing: a tail curled up behind a pet on
+            // its back reaches higher than its paws do, and the toy ended up
+            // balanced on the tip of the tail.
+            $body = $this->visibleXs($image, $box['left'], $box['right'], $box['top'], $box['bottom']);
+            $middle = $body === [] ? ($box['left'] + $box['right']) / 2 : array_sum($body) / count($body);
+            $from = (int) max($box['left'], $middle - $cell * 0.12);
+            $to = (int) min($box['right'], $middle + $cell * 0.12);
+            $highest = $box['top'];
+
+            while ($highest < $box['bottom'] && $this->visibleXs($image, $from, $to, $highest, $highest) === []) {
+                $highest++;
+            }
+
+            $xs = $this->visibleXs($image, $from, $to, $highest, (int) ($highest + max(2, $height * 0.08)));
+            $anchors[$pose] = [$fraction($xs === [] ? $middle : array_sum($xs) / count($xs), $left), $fraction($highest, $top)];
+        }
+
+        imagedestroy($image);
+
+        return $anchors;
+    }
+
+    /**
+     * The x of every visible pixel in a band of rows, one per pixel.
+     *
+     * @return array<int, int>
+     */
+    private function visibleXs(GdImage $image, int $left, int $right, int $top, int $bottom): array
+    {
+        $xs = [];
+
+        for ($y = $top; $y <= $bottom; $y++) {
+            for ($x = $left; $x <= $right; $x++) {
+                if (((imagecolorat($image, $x, $y) >> 24) & 0x7F) < 110) {
+                    $xs[] = $x;
+                }
+            }
+        }
+
+        return $xs;
+    }
+
+    /**
+     * Cuts the all-ages sheet into three ordinary six-by-three sheets, one
+     * per age, untidied.
      *
      * The grid is not trusted. Asked for six even rows, a generator draws the
      * adults taller than the babies and lets the rows grow to fit, so slicing
-     * the square into even strips cuts through the animals — feet at the top of
+     * the sheet into even strips cuts through the animals — feet at the top of
      * one cell, the head chopped off the next. So each animal is *found*
      * instead: rows are the bands of art between empty lines across the whole
      * picture, and within a row, each pose is the art between empty columns.
-     * Only when the art will not come apart into six by six does it fall back
+     * Only when the art will not come apart into nine by six does it fall back
      * to even strips.
      *
      * Every pose is then set into its 256px cell at one scale for the whole
@@ -1091,14 +1215,19 @@ class CosmeticArt
             $touched,
         );
 
+        // Two animals drawn touching — one's feet on the other's head — are
+        // one piece of art. Pull them apart before anything is handed out.
+        //
+        // Only along lines found in the art. An even strip is a guess, and
+        // cutting along a guess slices one wide animal in two — a landed
+        // gremlin lost its tail to the cell beside it that way. Along even
+        // strips each piece just goes, whole, to the cell its middle is in.
         if ($rows === null) {
             $found = false;
             $rows = $this->evenBands($height, $grid['rows']);
+        } else {
+            $pieces = $this->separate($labels, $pieces, array_map(fn (array $row) => $row[1], array_slice($rows, 0, -1)));
         }
-
-        // Two animals drawn touching — one's feet on the other's head — are
-        // one piece of art. Pull them apart before anything is handed out.
-        $pieces = $this->separate($labels, $pieces, array_map(fn (array $row) => $row[1], array_slice($rows, 0, -1)));
 
         // Where each pose roughly is, row by row, in reading order.
         $cells = [];
@@ -1112,14 +1241,14 @@ class CosmeticArt
                 $touched,
             );
 
+            // And two touching side by side — a curled tail against the pose
+            // beside it — the same way, and again only along found lines.
             if ($columns === null) {
                 $found = false;
                 $columns = $this->evenBands($width, $grid['cols']);
+            } else {
+                $pieces = $this->separate($labels, $pieces, array_map(fn (array $column) => $column[1], array_slice($columns, 0, -1)), 'x', $row);
             }
-
-            // And two touching side by side — a curled tail against the pose
-            // beside it — the same way.
-            $pieces = $this->separate($labels, $pieces, array_map(fn (array $column) => $column[1], array_slice($columns, 0, -1)), 'x', $row);
 
             foreach ($columns as $column) {
                 $cells[] = ['left' => $column[0], 'top' => $row[0], 'right' => $column[1], 'bottom' => $row[1]];
@@ -1129,11 +1258,13 @@ class CosmeticArt
         // And which art belongs to which pose — whole pieces, never a cut line.
         $figures = $this->claim($cells, $pieces);
 
+        $all = $grid['cols'] * $grid['rows'];
+
         $checks = [
             match (true) {
                 ! $found => ['label' => "{$width}×{$height} — cut into even strips; the poses would not come apart cleanly, so check them", 'status' => 'warn'],
-                $touched => ['label' => "{$width}×{$height} — found all 36 poses, but some were touching — check the edges with Try it out", 'status' => 'warn'],
-                default => ['label' => "{$width}×{$height} — found all 36 poses and cut them apart", 'status' => 'pass'],
+                $touched => ['label' => "{$width}×{$height} — found all {$all} poses, but some were touching — check the edges with Try it out", 'status' => 'warn'],
+                default => ['label' => "{$width}×{$height} — found all {$all} poses and cut them apart", 'status' => 'pass'],
             },
             ...$checks,
         ];
@@ -1155,7 +1286,7 @@ class CosmeticArt
          * care about the pose, where height would call every sleeping dog tiny.
          *
          * Every age is cut at the same FULL size: its own idle pose stands 70%
-         * of a cell tall, as a four-by-three sheet asks for, and every other
+         * of a cell tall, as a one-age sheet always has, and every other
          * pose of that age has the idle's area. How big an age then looks on
          * screen is not the art's business at all — it is PetStage::pixels().
          * The toy on its own has no animal to measure, so it takes the scale
@@ -1718,7 +1849,23 @@ class CosmeticArt
             [$first, $last] = $runs[$widest];
             $split = $splitAt($runs[$widest]);
 
+            // Two animals drawn joined are one piece, so there are no two
+            // middles to split between. They join where they meet, which is
+            // the thinnest line across the middle of the run — but only when
+            // the run is plainly two animals wide. A run of ordinary width is
+            // one animal, and the row is short because a pose is missing: that
+            // must fail as a missing pose, not be made up by halving a pet.
             if ($split === null || $split <= $first || $split >= $last) {
+                $widths = array_map(fn (array $run) => $run[1] - $run[0], $runs);
+                sort($widths);
+                $typical = $widths[intdiv(count($widths), 2)];
+
+                $split = count($runs) > 1 && $last - $first > 1.6 * $typical
+                    ? $this->thinnest($visibleAt, $first, $last)
+                    : null;
+            }
+
+            if ($split === null) {
                 break;
             }
 
@@ -1727,6 +1874,33 @@ class CosmeticArt
         }
 
         return count($runs) === $expected ? $runs : null;
+    }
+
+    /**
+     * The line with the least art on it in the middle half of a run: where
+     * two animals drawn touching meet. Null for a run too short to hold two.
+     *
+     * @param  callable(int): int  $visibleAt
+     */
+    private function thinnest(callable $visibleAt, int $first, int $last): ?int
+    {
+        $quarter = (int) (($last - $first) / 4);
+
+        if ($quarter < 4) {
+            return null;
+        }
+
+        $best = null;
+        $least = PHP_INT_MAX;
+
+        for ($i = $first + $quarter; $i <= $last - $quarter; $i++) {
+            if (($count = $visibleAt($i)) < $least) {
+                $least = $count;
+                $best = $i;
+            }
+        }
+
+        return $best;
     }
 
     /**

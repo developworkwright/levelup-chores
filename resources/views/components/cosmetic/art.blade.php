@@ -28,5 +28,7 @@
     @if ($still) still @endif
     @if ($label) label="{{ $label }}" @endif
     @if ($pose) pose="{{ $pose }}" @endif
+    {{-- A pet's sheet layout — none on one made before the eighteen-pose sheet. --}}
+    @if ($item->isSheet() && $item->pet_rig) poses="{{ count(App\Enums\CosmeticSlot::PET_POSES) }}" @endif
     aria-hidden="true"
 ></fq-cosmetic>

@@ -2,10 +2,11 @@
  * The pet that lives on a kid's pages.
  *
  * One custom element, `<fq-pets>`, laid over the page. It draws the pet from the
- * twelve-pose sprite sheet a grown-up uploaded (see App\Enums\CosmeticSlot), and
- * the pet gets on with its own day: wanders, hops onto the top edge of a card,
- * sits and blinks, looks at whatever was tapped last, plays with its toy on a
- * powered-up day, and sleeps after bedtime. It can be petted, picked up and fed.
+ * eighteen-pose sprite sheet a grown-up uploaded (see App\Enums\CosmeticSlot, and
+ * pet-sheet.js for the older twelve-pose one), and the pet gets on with its own
+ * day: wanders, hops onto the top edge of a card, sits and blinks, sniffs about,
+ * plays with its toy on a powered-up day, and sleeps after bedtime. It can be
+ * petted, picked up and fed.
  *
  * Three things shape how this is written.
  *
@@ -24,6 +25,8 @@
  * `document.querySelector('fq-pets').world` and drive it by hand.
  */
 
+import { posePosition, sheetLayout, sheetSize } from './pet-sheet.js';
+
 /** How big the pet is drawn, in CSS pixels. One cell of the sheet. */
 const PET_SIZE = 78;
 
@@ -39,9 +42,6 @@ const ZOOM_MAX = 1.6;
 function screenZoom() {
     return Math.min(ZOOM_MAX, Math.max(1, (window.innerWidth || 0) / ZOOM_FROM));
 }
-
-/** The poses, in the order the sheet draws them. Mirrors CosmeticSlot::PET_POSES. */
-const POSES = ['idle', 'blink', 'crouch', 'jump', 'walk', 'happy', 'held', 'landed', 'play', 'toss', 'sleep', 'toy'];
 
 const WALK_SPEED = 46;
 const CHASE_SPEED = 96;
@@ -102,6 +102,12 @@ const BED_SIZE = 96;
 const BED_FOOT = 12;
 const BED_LIFT = 16;
 
+/**
+ * The most of its cell the sheet's own toy may span, across or up. About a
+ * prize-counter toy's size next to a grown pet (34px against 120px).
+ */
+const TOY_SPAN = 0.3;
+
 /** How often an idle pet with a bed goes for a nap, per decision. */
 const NAP_CHANCE = 0.12;
 
@@ -160,13 +166,6 @@ function eggSvg(cracks, hue) {
     );
 }
 
-/** Where one pose sits in the sheet, as a background-position pair. */
-function posePosition(pose) {
-    const index = Math.max(0, POSES.indexOf(pose));
-
-    return ((index % 4) * 100 / 3) + '% ' + (Math.floor(index / 4) * 100 / 2) + '%';
-}
-
 /** A URL, safe inside a CSS url("..."). See cosmetic-elements.js for why not encodeURI. */
 function cssUrl(src) {
     return String(src).replace(/["\\]/g, (character) => '\\' + character).replace(/[\r\n]/g, '');
@@ -199,6 +198,10 @@ class Pet {
         this.src = settings.src ?? null;
         this.wantsToy = settings.toy ?? false;
         this.toy = null;
+        // Which poses its sheet has, and where the toy goes in the ones with
+        // empty paws — see pet-sheet.js and App\Models\Cosmetic::rig().
+        this.layout = sheetLayout(settings.rig);
+        this.anchors = settings.rig?.anchors ?? {};
         // Smaller while it is young — see App\Enums\PetStage.
         this.scale = settings.scale ?? 1;
         this.x = settings.home ?? random(60, Math.max(120, world.width - 60));
@@ -219,6 +222,117 @@ class Pet {
         this.state = state;
         this.pose = pose;
         this.think = seconds;
+    }
+
+    /**
+     * Whether its sheet is the eighteen-pose one: a real walk cycle, and play
+     * poses with empty paws. An older sheet has the toy drawn into play and
+     * toss, and plays the old way.
+     */
+    hasFullSheet() {
+        return ! this.layout.legacy;
+    }
+
+    /**
+     * The walking frame for this moment: the two steps in turn, in time with
+     * the bob the painter adds (see FqPets.paint()), so a foot lands on each
+     * dip.
+     */
+    walkFrame() {
+        if (! this.hasFullSheet()) {
+            return 'walk';
+        }
+
+        const stride = (this.clock ?? 0) * (this.speed > WALK_SPEED ? 13 : 9);
+
+        return Math.floor(stride / Math.PI) % 2 ? 'walk2' : 'walk';
+    }
+
+    /**
+     * A point on its sheet — fractions of the cell, as the cutter measured
+     * them — where it is on the page right now, allowing for its size and
+     * which way it faces.
+     */
+    cellPoint(point) {
+        const size = PET_SIZE * this.scale * screenZoom();
+
+        return {
+            x: this.x + (point[0] - 0.5) * size * this.facing,
+            y: this.y + (point[1] - 1) * size,
+        };
+    }
+
+    /**
+     * Where the middle of its toy is while it holds it: resting on the paws
+     * it holds up on its back, or just in front of the paws it pounces with.
+     * Null when it is not holding the toy.
+     */
+    holdPoint(toy) {
+        const paws = this.anchors[this.pose];
+
+        if (this.state !== 'playing' || ! paws || (this.pose !== 'play' && this.pose !== 'back')) {
+            return null;
+        }
+
+        const at = this.cellPoint(paws);
+        const half = toy.halfSize();
+
+        if (this.pose === 'back') {
+            // Batted about between the paws.
+            return { x: at.x + Math.sin(this.clock * 9) * 2.5, y: at.y - half.h * 0.55 + Math.abs(Math.sin(this.clock * 9)) * -2 };
+        }
+
+        return { x: at.x + this.facing * half.w * 0.9, y: at.y - half.h };
+    }
+
+    /**
+     * Play with its toy, standing next to it. On a full sheet: a swipe that
+     * bats it away, a pounce that pins it, a roll onto its back holding it
+     * up, or a toss straight up — the same four for its own toy and a bought
+     * one, because the paws are empty and the toy is drawn in.
+     */
+    playWith(toy) {
+        this.facing = toy.x < this.x ? -1 : 1;
+        this.state = 'playing';
+
+        const roll = Math.random();
+
+        if (roll < 0.3 || ! this.anchors.play) {
+            this.pose = 'swipe';
+            this.think = random(0.5, 0.9);
+            toy.bat(this.facing);
+
+            return;
+        }
+
+        if (roll < 0.55) {
+            this.pose = 'play';
+            this.think = random(0.8, 1.5);
+            toy.carriedBy = this;
+
+            return;
+        }
+
+        if (roll < 0.8 && this.anchors.back) {
+            this.pose = 'back';
+            this.think = random(1.4, 2.6);
+            toy.carriedBy = this;
+
+            return;
+        }
+
+        // Up it goes, from the paws held over its head, and it lands wherever
+        // it lands — the next thing the pet does is go and get it.
+        this.pose = 'toss';
+        this.think = random(0.7, 1.1);
+
+        const paws = this.cellPoint(this.anchors.toss ?? [0.5, 0.2]);
+        const half = toy.halfSize();
+
+        toy.carriedBy = null;
+        toy.centerAt(paws.x, paws.y - half.h);
+        toy.vy = -random(460, 620);
+        toy.vx = this.facing * random(20, 70);
     }
 
     /** The surface under a point: the top of a card, or the floor. */
@@ -322,7 +436,10 @@ class Pet {
             return;
         }
 
-        this.act('happy', 'happy', 1.4);
+        // Now and then it rolls over for a belly rub instead.
+        const rollsOver = this.hasFullSheet() && ! this.perch && Math.random() < 0.3;
+
+        this.act('happy', rollsOver ? 'back' : 'happy', rollsOver ? 1.8 : 1.4);
         this.world.emit('fq-pet-petted');
     }
 
@@ -545,7 +662,7 @@ class Pet {
 
             this.facing = distance < 0 ? -1 : 1;
             this.x += Math.sign(distance) * Math.min(Math.abs(distance), this.speed * dt);
-            this.pose = 'walk';
+            this.pose = this.walkFrame();
 
             // On the floor. Not while the page is scrolling: then the pet
             // stays where it is on the page and scrolls away with it, and
@@ -562,7 +679,12 @@ class Pet {
                 }
 
                 if (this.canReachSnack()) {
-                    this.act('eating', 'crouch', EAT_SECONDS);
+                    // A quick sniff first, then it tucks in — see decide().
+                    if (this.hasFullSheet()) {
+                        this.act('sniffing', 'sniff', 0.45);
+                    } else {
+                        this.act('eating', 'crouch', EAT_SECONDS);
+                    }
 
                     return;
                 }
@@ -640,7 +762,7 @@ class Pet {
             return;
         }
 
-        if (this.state === 'idle' || this.state === 'happy' || this.state === 'landed' || this.state === 'playing') {
+        if (['idle', 'happy', 'landed', 'playing', 'sitting', 'sniffing', 'surprised'].includes(this.state)) {
             if (! this.perch && ! world.scrolling()) {
                 this.y = world.floor();
             }
@@ -653,7 +775,12 @@ class Pet {
             }
 
             if (this.think <= 0) {
-                this.decide();
+                // Surprise always gives way to delight.
+                if (this.state === 'surprised') {
+                    this.act('happy', 'happy', 1.2);
+                } else {
+                    this.decide();
+                }
             }
         }
     }
@@ -682,12 +809,18 @@ class Pet {
                 return;
             }
 
-            // A toy from the prize counter can't use the sheet's play and toss
-            // poses — those have the sheet's own toy drawn in the paws, so the
-            // pet would be playing with a different toy from the one on the
-            // floor. It plays with the real one instead: a pounce in a pose
-            // with empty paws, and the toy batted away across the floor, which
-            // the pet then chases on its next decision.
+            if (this.hasFullSheet()) {
+                this.playWith(toy);
+
+                return;
+            }
+
+            // An old twelve-pose sheet. A toy from the prize counter can't use
+            // its play and toss poses — those have the sheet's own toy drawn
+            // in the paws, so the pet would be playing with a different toy
+            // from the one on the floor. It plays with the real one instead: a
+            // pounce in a pose with empty paws, and the toy batted away across
+            // the floor, which the pet then chases on its next decision.
             if (toy.prizeKey) {
                 this.facing = toy.x < this.x ? -1 : 1;
                 this.pose = Math.random() < 0.5 ? 'crouch' : 'happy';
@@ -729,6 +862,19 @@ class Pet {
 
         if (roll < 0.78) {
             this.runTo(this.pen(this.x + random(-260, 260)));
+
+            return;
+        }
+
+        // A sit, or a nose round the floor, when its sheet has them.
+        if (this.hasFullSheet() && roll < 0.86) {
+            this.act('sitting', 'sit', random(2, 4.5));
+
+            return;
+        }
+
+        if (this.hasFullSheet() && roll < 0.91) {
+            this.act('sniffing', 'sniff', random(0.8, 1.6));
 
             return;
         }
@@ -1088,11 +1234,72 @@ class Toy {
         // turning. See FqPets.paint().
         this.spin = 0;
         this.held = false;
+        // The pet holding it in its paws, if one is — see Pet.holdPoint().
+        this.carriedBy = null;
+    }
+
+    /**
+     * Half its drawn width and height, on the page. A bought toy is its own
+     * little picture; the sheet's toy is one cell of the pet's sheet, sized
+     * with its pet, and the cutter measured the toy inside that cell.
+     */
+    halfSize() {
+        const zoom = screenZoom();
+
+        if (this.prizeKey) {
+            return { w: PRIZE_TOY_SIZE / 2 * zoom, h: PRIZE_TOY_SIZE / 2 * zoom };
+        }
+
+        const size = this.cellSize();
+        const box = this.owner?.anchors?.toy;
+
+        return { w: (box?.[2] ?? 0.3) / 2 * size, h: (box?.[3] ?? 0.3) / 2 * size };
+    }
+
+    /** Puts the middle of the toy at a point on the page. */
+    centerAt(x, y) {
+        const zoom = screenZoom();
+
+        if (this.prizeKey) {
+            this.x = x;
+            this.y = y + PRIZE_TOY_SIZE / 2 * zoom;
+
+            return;
+        }
+
+        // The sheet's toy is drawn somewhere inside its cell, and the cell is
+        // what is positioned: from its feet, like a pet.
+        const size = this.cellSize();
+        const box = this.owner?.anchors?.toy ?? [0.5, 0.8];
+
+        this.x = x - (box[0] - 0.5) * size;
+        this.y = y - (box[1] - 1) * size;
+    }
+
+    /**
+     * How big the sheet's toy cell is drawn, on the page: with its pet, and
+     * shrunk when the generator drew the toy big. A toy is something a pet
+     * holds in its paws, and a bone half as long as the animal looked like
+     * a plank — so it is never more than TOY_SPAN of the cell across, about
+     * the size of a toy from the prize counter.
+     */
+    cellSize() {
+        const box = this.owner?.anchors?.toy;
+        const span = box ? Math.max(box[2], box[3]) : 0;
+        const shrink = span > TOY_SPAN ? TOY_SPAN / span : 1;
+
+        return PET_SIZE * (this.owner?.scale ?? 1) * screenZoom() * shrink;
+    }
+
+    /** Whether a pet has it in its paws this frame. */
+    carried() {
+        return Boolean(this.carriedBy && ! this.held && this.carriedBy.holdPoint(this));
     }
 
     /**
      * Batted by its pet: a hop and a roll away in the direction it was hit.
-     * The sheet's own toy is never batted — it is played with in the paws.
+     * On an old twelve-pose sheet the sheet's own toy is never batted — it is
+     * played with in the paws, where that sheet draws it.
      */
     bat(direction) {
         if (this.held) {
@@ -1106,6 +1313,22 @@ class Toy {
     step(dt, world) {
         if (this.held || world.scrolling()) {
             return;
+        }
+
+        // In its pet's paws: it goes where they go. Let go of — the pet has
+        // moved on to something else — it drops from wherever it was.
+        if (this.carriedBy) {
+            const hold = this.carriedBy.holdPoint(this);
+
+            if (hold) {
+                this.centerAt(hold.x, hold.y);
+                this.vx = 0;
+                this.vy = 0;
+
+                return;
+            }
+
+            this.carriedBy = null;
         }
 
         // Rolling along after a bat, slowing as it goes, and never off the page.
@@ -1149,7 +1372,7 @@ class FqPets extends HTMLElement {
      * keys. A bought toy is out every day, not only on a powered-up one.
      */
     static get observedAttributes() {
-        return ['sheet', 'scale', 'effect', 'toy', 'asleep', 'drag', 'sheets', 'visitor', 'egg', 'egg-hue', 'snack', 'toy-prize', 'bed'];
+        return ['sheet', 'rig', 'scale', 'effect', 'toy', 'asleep', 'drag', 'sheets', 'visitor', 'egg', 'egg-hue', 'snack', 'toy-prize', 'bed'];
     }
 
     connectedCallback() {
@@ -1198,7 +1421,7 @@ class FqPets extends HTMLElement {
 
         // The sheet changing is a different pet; everything else is the same
         // pet in a different mood, and must not restart it mid-jump.
-        if (name === 'sheet' || name === 'scale' || name === 'effect' || name === 'sheets' || name === 'visitor' || name === 'egg' || name === 'egg-hue') {
+        if (['sheet', 'rig', 'scale', 'effect', 'sheets', 'visitor', 'egg', 'egg-hue'].includes(name)) {
             this.render();
 
             return;
@@ -1272,7 +1495,10 @@ class FqPets extends HTMLElement {
      * row of them from `sheets` — which is the login door, where each pet is
      * penned around its own kid's tile.
      *
-     * @return array<int, {src: string, effect: ?string, scale: ?number, home: ?number, roam: ?number, visiting: ?boolean, toy: ?boolean}>
+     * `rig` says how each sheet is laid out (App\Models\Cosmetic::rig()); a
+     * pet without one has the old twelve-pose sheet.
+     *
+     * @return array<int, {src: string, rig: ?object, effect: ?string, scale: ?number, home: ?number, roam: ?number, visiting: ?boolean, toy: ?boolean}>
      */
     cast() {
         const read = (name) => {
@@ -1295,7 +1521,7 @@ class FqPets extends HTMLElement {
 
         return [
             egg !== null ? { egg, hue: parseInt(this.getAttribute('egg-hue'), 10), scale: parseFloat(this.getAttribute('scale')) || 1 } : null,
-            egg === null && mine ? { src: mine, effect: this.getAttribute('effect'), scale: parseFloat(this.getAttribute('scale')) || 1 } : null,
+            egg === null && mine ? { src: mine, rig: read('rig'), effect: this.getAttribute('effect'), scale: parseFloat(this.getAttribute('scale')) || 1 } : null,
             visitor && visitor.src ? { ...visitor, visiting: true } : null,
         ].filter(Boolean);
     }
@@ -1323,7 +1549,7 @@ class FqPets extends HTMLElement {
             :host { position: absolute; inset: 0; pointer-events: none; z-index: 30; }
             .pet, .toy {
                 position: absolute; width: ${PET_SIZE}px; height: ${PET_SIZE}px;
-                background-image: var(--sheet); background-size: 400% 300%;
+                background-image: var(--sheet); background-size: 600% 300%;
                 background-repeat: no-repeat; pointer-events: auto; cursor: grab;
                 touch-action: none; will-change: transform;
             }
@@ -1404,6 +1630,7 @@ class FqPets extends HTMLElement {
             const sprite = document.createElement('div');
             sprite.className = 'pet ' + (entry.effect || '');
             sprite.style.setProperty('--sheet', 'url("' + cssUrl(entry.src) + '")');
+            sprite.style.backgroundSize = sheetSize(sheetLayout(entry.rig));
 
             if (! this.hasAttribute('drag')) {
                 sprite.style.cursor = 'pointer';
@@ -1420,6 +1647,7 @@ class FqPets extends HTMLElement {
                 visiting: entry.visiting ?? false,
                 scale: entry.scale ?? 1,
                 src: entry.src,
+                rig: entry.rig ?? null,
                 // A kid's own pages say so with the `toy` attribute; the
                 // login door says so per pet.
                 toy: entry.visiting ? false : (entry.toy ?? this.hasAttribute('toy')),
@@ -1486,7 +1714,13 @@ class FqPets extends HTMLElement {
                     pet.toy.sprite.style.visibility = '';
                 }
 
-                pet.act('happy', 'happy', 1.8);
+                // Out, amazed at the world, and then delighted with itself.
+                if (pet.hasFullSheet()) {
+                    pet.act('surprised', 'surprised', 0.9);
+                } else {
+                    pet.act('happy', 'happy', 1.8);
+                }
+
                 this.world.emit('fq-pet-hatched');
             },
         });
@@ -1549,7 +1783,8 @@ class FqPets extends HTMLElement {
                 } else {
                     sprite.className = 'toy';
                     sprite.style.setProperty('--sheet', 'url("' + cssUrl(pet.src) + '")');
-                    sprite.style.backgroundPosition = posePosition('toy');
+                    sprite.style.backgroundSize = sheetSize(pet.layout);
+                    sprite.style.backgroundPosition = posePosition('toy', pet.layout);
                 }
 
                 const grab = document.createElement('div');
@@ -1759,7 +1994,7 @@ class FqPets extends HTMLElement {
 
         // Straight over, unless it is busy in the air or in a hand — then it
         // finds the food the next time it decides what to do.
-        if (! pet.held && ! pet.leaving && ['idle', 'happy', 'landed', 'playing', 'walking'].includes(pet.state)) {
+        if (! pet.held && ! pet.leaving && ['idle', 'happy', 'landed', 'playing', 'walking', 'sitting', 'sniffing', 'surprised'].includes(pet.state)) {
             pet.runTo(x, CHASE_SPEED);
         }
 
@@ -1844,14 +2079,14 @@ class FqPets extends HTMLElement {
         const zoom = screenZoom();
 
         this.world.pets.forEach((pet) => {
-            pet.sprite.style.backgroundPosition = posePosition(pet.pose);
+            pet.sprite.style.backgroundPosition = posePosition(pet.pose, pet.layout);
 
             /*
-             * The sheet has one walking frame, so walking it across the page
-             * slides it like a sticker. A gait instead: the body rises and dips
-             * twice a stride and squashes on the down beat, which is what a
-             * two-frame walk cycle is really doing. Cheap, and it reads as legs
-             * even though the legs never move.
+             * A gait: the body rises and dips twice a stride and squashes on
+             * the down beat. On a full sheet the two walking frames change on
+             * the same beat (Pet.walkFrame()), so a foot lands on each dip. An
+             * old sheet has one walking frame, and the bob alone is what keeps
+             * it from sliding along like a sticker.
              */
             let gait = '';
             // Feet for anything standing on the ground; the scruff for a pet
@@ -1898,9 +2133,10 @@ class FqPets extends HTMLElement {
         });
 
         this.world.toys.forEach((toy) => {
-            // A bought toy is drawn at its own true size and stays out while
-            // the pet plays — the sheet's play pose holds the sheet's toy, and
-            // batting at one beside the other reads fine (design 2 of
+            // In the paws, it is in front of the pet holding it.
+            toy.sprite.style.zIndex = toy.carried() ? '3' : '';
+
+            // A bought toy is drawn at its own true size (design 2 of
             // handoff/design_handoff_arcade_tokens).
             if (toy.prizeKey) {
                 // Rolled about its middle, standing on its foot.
@@ -1910,16 +2146,20 @@ class FqPets extends HTMLElement {
                 return;
             }
 
-            // Shrunk with its own pet, so a baby's toy stays in proportion.
-            const scale = (toy.owner?.scale ?? 1) * zoom;
+            // Shrunk with its own pet, so a baby's toy stays in proportion —
+            // and never drawn bigger than a toy should be. See Toy.cellSize().
+            const scale = toy.cellSize() / PET_SIZE;
             const size = scale !== 1 ? ' scale(' + scale.toFixed(3) + ')' : '';
 
             toy.sprite.style.transform = 'translate(' + (toy.x - PET_SIZE / 2) + 'px,' + (toy.y - PET_SIZE) + 'px)' + size;
 
-            // The play and toss poses have the toy drawn in the pet's paws, so
-            // while its own pet is playing the loose one is put away — two of
-            // the same toy side by side reads as a glitch.
-            toy.sprite.style.visibility = toy.owner && toy.owner.state === 'playing' && ! toy.held ? 'hidden' : '';
+            // An old sheet's play and toss poses have the toy drawn in the
+            // pet's paws, so while its own pet is playing the loose one is put
+            // away — two of the same toy side by side reads as a glitch. A
+            // full sheet's paws are empty, and this toy is the one in them.
+            const drawnInPaws = toy.owner && ! toy.owner.hasFullSheet() && toy.owner.state === 'playing' && ! toy.held;
+
+            toy.sprite.style.visibility = drawnInPaws ? 'hidden' : '';
         });
 
         const bed = this.world.bed;

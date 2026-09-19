@@ -30,6 +30,7 @@ class Cosmetic extends Model
         'art_path',
         'baby_art_path',
         'young_art_path',
+        'pet_rig',
         'name',
         'cost',
         'stock',
@@ -50,6 +51,7 @@ class Cosmetic extends Model
             'motion' => CosmeticMotion::class,
             'effect' => CosmeticEffect::class,
             'checks' => 'array',
+            'pet_rig' => 'array',
             'cost' => 'integer',
             'published_at' => 'datetime',
             'pulled_at' => 'datetime',
@@ -160,6 +162,26 @@ class Cosmetic extends Model
     public function drawScale(PetStage $stage): float
     {
         return $stage->scale();
+    }
+
+    /**
+     * How the pet layer reads this stage's sheet: which poses it has and
+     * where the toy goes in them. Null for a pet cut before the re-grid,
+     * which the layer draws from the old twelve-pose layout — see
+     * CosmeticSlot::LEGACY_PET_POSES.
+     *
+     * @return array{poses: int, anchors: array<string, array<int, float>>}|null
+     */
+    public function rig(PetStage $stage): ?array
+    {
+        if (! $this->isSheet() || $this->pet_rig === null) {
+            return null;
+        }
+
+        return [
+            'poses' => count(CosmeticSlot::PET_POSES),
+            'anchors' => $this->pet_rig['anchors'][$this->drawnStage($stage)->value] ?? [],
+        ];
     }
 
     /** Where this stage's art is stored, falling back the same way. */

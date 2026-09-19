@@ -20,6 +20,8 @@
  *   <fq-spark recipe="bats">                           bursts on every celebration
  */
 
+import { posePosition, sheetLayout, sheetSize } from './pet-sheet.js';
+
 const REDUCED = '@media (prefers-reduced-motion: reduce) { *, :host { animation: none !important; } }';
 
 function C() {
@@ -70,7 +72,7 @@ function picture(src, motion, fit) {
 
 class FqCosmetic extends HTMLElement {
     static get observedAttributes() {
-        return ['kind', 'recipe', 'src', 'motion', 'mode', 'still', 'label', 'pose'];
+        return ['kind', 'recipe', 'src', 'motion', 'mode', 'still', 'label', 'pose', 'poses'];
     }
 
     connectedCallback() {
@@ -132,26 +134,22 @@ class FqCosmetic extends HTMLElement {
         }
 
         /*
-         * A pet is a 4x3 sprite sheet, so a still one is a window onto one cell
-         * of it — `pose` names which, defaulting to the idle pose. The sheet is
-         * scaled to 400% by 300% so one cell fills the box exactly, which is
-         * how the engine will show a pet too.
+         * A pet is a sprite sheet, so a still one is a window onto one cell of
+         * it — `pose` names which, defaulting to the idle pose, and `poses`
+         * says which layout the sheet is in (see pet-sheet.js). The sheet is
+         * scaled so one cell fills the box exactly, which is how the engine
+         * shows a pet too.
          */
         if (kind === 'pet') {
             if (! src) {
                 return;
             }
 
-            const poses = ['idle', 'blink', 'crouch', 'jump', 'walk', 'happy', 'held', 'landed', 'play', 'toss', 'sleep', 'toy'];
-            const index = Math.max(0, poses.indexOf(this.getAttribute('pose') || 'idle'));
-            const column = index % 4;
-            const row = Math.floor(index / 4);
+            const layout = sheetLayout(parseInt(this.getAttribute('poses'), 10) || 0);
 
             box.style.background = 'url("' + cssUrl(src) + '") no-repeat';
-            box.style.backgroundSize = '400% 300%';
-            // Thirds and halves of the leftover space, which is what a
-            // percentage background-position means: column 1 of 4 is 33.3%.
-            box.style.backgroundPosition = (column * 100 / 3) + '% ' + (row * 100 / 2) + '%';
+            box.style.backgroundSize = sheetSize(layout);
+            box.style.backgroundPosition = posePosition(this.getAttribute('pose') || 'idle', layout);
 
             return;
         }

@@ -314,14 +314,14 @@ class ParentCosmeticsTest extends TestCase
     }
 
     /**
-     * A pet sheet the way a generator really hands one back: twelve poses, and
-     * the grid ruled in over the top whatever the prompt asked for.
+     * One age's pet sheet with the grid ruled in over the top, as a generator
+     * rules one whatever the prompt asked for: eighteen poses, six by three.
      *
      * @param  array<int, int>  $skipCells  poses to leave out
      */
-    private function petSheetPng(array $skipCells = [], bool $gridLines = true, bool $bleed = false, int $scale = 1): string
+    private function petSheetPng(array $skipCells = [], bool $gridLines = true, bool $bleed = false, float $scale = 1): string
     {
-        $image = imagecreatetruecolor(1024 * $scale, 768 * $scale);
+        $image = imagecreatetruecolor((int) (1536 * $scale), (int) (768 * $scale));
         imagesavealpha($image, true);
         imagealphablending($image, false);
         imagefill($image, 0, 0, imagecolorallocatealpha($image, 0, 0, 0, 127));
@@ -330,13 +330,13 @@ class ParentCosmeticsTest extends TestCase
         $fur = imagecolorallocate($image, 168, 116, 72);
         $cell = 256 * $scale;
 
-        foreach (range(0, 11) as $index) {
+        foreach (range(0, 17) as $index) {
             if (in_array($index, $skipCells, true)) {
                 continue;
             }
 
-            $left = ($index % 4) * $cell;
-            $top = intdiv($index, 4) * $cell;
+            $left = ($index % 6) * $cell;
+            $top = intdiv($index, 6) * $cell;
             $width = $bleed ? $cell : (int) ($cell * 0.6);
 
             imagefilledellipse($image, (int) ($left + $cell / 2), (int) ($top + $cell / 2), $width, (int) ($cell * 0.6), $fur);
@@ -345,16 +345,16 @@ class ParentCosmeticsTest extends TestCase
         if ($gridLines) {
             $ink = imagecolorallocate($image, 90, 40, 20);
 
-            foreach ([1, 2, 3] as $column) {
+            foreach ([1, 2, 3, 4, 5] as $column) {
                 imagefilledrectangle($image, $column * $cell - 1, 0, $column * $cell, 768 * $scale - 1, $ink);
             }
 
             foreach ([1, 2] as $row) {
-                imagefilledrectangle($image, 0, $row * $cell - 1, 1024 * $scale - 1, $row * $cell, $ink);
+                imagefilledrectangle($image, 0, $row * $cell - 1, 1536 * $scale - 1, $row * $cell, $ink);
             }
 
             // The foot line a generator rules across a row of cells.
-            imagefilledrectangle($image, 0, (int) ($cell * 0.9), 1024 * $scale - 1, (int) ($cell * 0.9) + 1, $ink);
+            imagefilledrectangle($image, 0, (int) ($cell * 0.9), 1536 * $scale - 1, (int) ($cell * 0.9) + 1, $ink);
         }
 
         ob_start();
@@ -378,16 +378,16 @@ class ParentCosmeticsTest extends TestCase
         $labels = array_column($checks, 'label');
 
         $this->assertNotContains('fail', array_column($checks, 'status'), implode(' | ', $labels));
-        $this->assertContains('All 12 poses are there', $labels);
+        $this->assertContains('All 18 poses are there', $labels);
         $this->assertContains('Every pose stays inside its cell', $labels);
         $this->assertStringContainsString('Rubbed out', implode(' ', $labels));
     }
 
     public function test_a_pet_sheet_with_a_missing_pose_names_the_empty_cell(): void
     {
-        // Cell 11 is Sleep, cell 12 the toy.
+        // Cell 17 is Sleep, cell 18 the toy.
         $labels = array_column(
-            array_filter($this->inspectPet($this->petSheetPng(skipCells: [10, 11])), fn ($c) => $c['status'] === 'fail'),
+            array_filter($this->inspectPet($this->petSheetPng(skipCells: [16, 17])), fn ($c) => $c['status'] === 'fail'),
             'label',
         );
 
@@ -412,39 +412,39 @@ class ParentCosmeticsTest extends TestCase
 
     public function test_a_bigger_sheet_in_the_same_shape_is_shrunk_rather_than_refused(): void
     {
-        $checks = $this->inspectPet($this->petSheetPng(scale: 2));
+        $checks = $this->inspectPet($this->petSheetPng(scale: 1.5));
         $labels = array_column($checks, 'label');
 
         $this->assertNotContains('fail', array_column($checks, 'status'), implode(' | ', $labels));
-        $this->assertContains('Resized from 2048×1536 to 1024×768', $labels);
-        $this->assertContains('1024×768, PNG', $labels);
+        $this->assertContains('Resized from 2304×1152 to 1536×768', $labels);
+        $this->assertContains('1536×768, PNG', $labels);
     }
 
     /**
-     * The sheet a real generator handed back: 1200x896 rather than 1024x768,
+     * The sheet a real generator handed back: 1800x896 rather than 1536x768,
      * and the "transparent" background drawn in as an actual grey-and-white
      * checkerboard. Both are the app's problem to solve, not the parent's.
      */
     private function checkerboardSheetPng(): string
     {
-        $image = imagecreatetruecolor(1200, 896);
+        $image = imagecreatetruecolor(1800, 896);
         $light = imagecolorallocate($image, 255, 255, 255);
         $dark = imagecolorallocate($image, 229, 229, 229);
 
         for ($y = 0; $y < 896; $y += 16) {
-            for ($x = 0; $x < 1200; $x += 16) {
+            for ($x = 0; $x < 1800; $x += 16) {
                 imagefilledrectangle($image, $x, $y, $x + 15, $y + 15, (($x + $y) / 16) % 2 ? $dark : $light);
             }
         }
 
         $fur = imagecolorallocate($image, 168, 116, 72);
         $eye = imagecolorallocate($image, 255, 255, 255);
-        $cellWidth = 1200 / 4;
+        $cellWidth = 1800 / 6;
         $cellHeight = 896 / 3;
 
-        foreach (range(0, 11) as $index) {
-            $cx = (int) ((($index % 4) + 0.5) * $cellWidth);
-            $cy = (int) ((intdiv($index, 4) + 0.5) * $cellHeight);
+        foreach (range(0, 17) as $index) {
+            $cx = (int) ((($index % 6) + 0.5) * $cellWidth);
+            $cy = (int) ((intdiv($index, 6) + 0.5) * $cellHeight);
 
             imagefilledellipse($image, $cx, $cy, (int) ($cellWidth * 0.6), (int) ($cellHeight * 0.6), $fur);
             // A white patch *inside* the drawing: the flood must leave it alone.
@@ -453,12 +453,12 @@ class ParentCosmeticsTest extends TestCase
 
         $ink = imagecolorallocate($image, 90, 40, 20);
 
-        foreach ([1, 2, 3] as $column) {
+        foreach ([1, 2, 3, 4, 5] as $column) {
             imagefilledrectangle($image, (int) ($column * $cellWidth) - 1, 0, (int) ($column * $cellWidth), 895, $ink);
         }
 
         foreach ([1, 2] as $row) {
-            imagefilledrectangle($image, 0, (int) ($row * $cellHeight) - 1, 1199, (int) ($row * $cellHeight), $ink);
+            imagefilledrectangle($image, 0, (int) ($row * $cellHeight) - 1, 1799, (int) ($row * $cellHeight), $ink);
         }
 
         ob_start();
@@ -475,7 +475,7 @@ class ParentCosmeticsTest extends TestCase
      */
     private function sheetWithHolesPng(): string
     {
-        $image = imagecreatetruecolor(1024, 768);
+        $image = imagecreatetruecolor(1536, 768);
         $light = imagecolorallocate($image, 255, 255, 255);
         $dark = imagecolorallocate($image, 229, 229, 229);
 
@@ -484,7 +484,7 @@ class ParentCosmeticsTest extends TestCase
         };
 
         for ($y = 0; $y < 768; $y++) {
-            for ($x = 0; $x < 1024; $x++) {
+            for ($x = 0; $x < 1536; $x++) {
                 imagesetpixel($image, $x, $y, $checker($x, $y));
             }
         }
@@ -492,9 +492,9 @@ class ParentCosmeticsTest extends TestCase
         $fur = imagecolorallocate($image, 168, 116, 72);
         $eye = imagecolorallocate($image, 252, 252, 252);
 
-        foreach (range(0, 11) as $index) {
-            $cx = (($index % 4) * 256) + 128;
-            $cy = (intdiv($index, 4) * 256) + 128;
+        foreach (range(0, 17) as $index) {
+            $cx = (($index % 6) * 256) + 128;
+            $cy = (intdiv($index, 6) * 256) + 128;
 
             // A ring of fur with the background showing through the middle.
             imagefilledellipse($image, $cx, $cy, 150, 150, $fur);
@@ -544,9 +544,9 @@ class ParentCosmeticsTest extends TestCase
         $labels = array_column($checks, 'label');
 
         $this->assertNotContains('fail', array_column($checks, 'status'), implode(' | ', $labels));
-        $this->assertContains('Resized from 1200×896 to 1024×768', $labels);
+        $this->assertContains('Resized from 1800×896 to 1536×768', $labels);
         $this->assertContains('Cut out the painted-in background', $labels);
-        $this->assertContains('All 12 poses are there', $labels);
+        $this->assertContains('All 18 poses are there', $labels);
         $this->assertContains('Transparent background', $labels);
     }
 
@@ -557,7 +557,7 @@ class ParentCosmeticsTest extends TestCase
      */
     public function test_a_picture_that_is_all_art_keeps_every_row_of_it(): void
     {
-        $image = imagecreatetruecolor(1024, 768);
+        $image = imagecreatetruecolor(1536, 768);
         imagefill($image, 0, 0, imagecolorallocate($image, 40, 90, 60));
         ob_start();
         imagepng($image);
@@ -601,9 +601,9 @@ class ParentCosmeticsTest extends TestCase
     {
         $prompt = CosmeticSlot::PET_FAMILY_PROMPT.CosmeticSlot::Pet->promptOutput();
 
-        $this->assertStringContainsString('6 columns × 6 rows', $prompt);
+        $this->assertStringContainsString('9 columns × 6 rows', $prompt);
         $this->assertStringContainsString('ruled foot line', $prompt);
-        $this->assertStringContainsString('1024x1024 pixels', $prompt);
+        $this->assertStringContainsString('1536x1024 pixels', $prompt);
         $this->assertStringContainsString('REAL transparency', $prompt);
     }
 

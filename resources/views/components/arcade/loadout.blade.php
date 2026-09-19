@@ -15,6 +15,8 @@
 
 @php
     $hasPet = $petSprite !== null && ! isset($petSprite['egg']) && $petSprite['src'];
+    // Six cells across on an eighteen-pose sheet, four on an older one.
+    $sheetWidth = ($petSprite['rig'] ?? null) ? '600%' : '400%';
 @endphp
 
 <div class="flex flex-col gap-[12px] rounded-[24px] border border-fq-line bg-fq-bg p-[13px]">
@@ -33,7 +35,7 @@
         @if ($hasPet)
             <span
                 class="block h-[80px] w-[80px] shrink-0"
-                style="background-image: url('{{ $petSprite['src'] }}'); background-size: 400% 300%; background-position: 0 0; background-repeat: no-repeat"
+                style="background-image: url('{{ $petSprite['src'] }}'); background-size: {{ $sheetWidth }} 300%; background-position: 0 0; background-repeat: no-repeat"
                 aria-label="Your pet"
             ></span>
         @else

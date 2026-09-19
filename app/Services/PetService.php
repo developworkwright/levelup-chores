@@ -295,10 +295,11 @@ class PetService
 
     /**
      * What the pet layer needs to draw a kid's pet out: the sheet for its
-     * stage, the effect laid over it, and how big to draw it — or, while an
-     * egg is out, the egg and how cracked it is.
+     * stage, the effect laid over it, how big to draw it and how its sheet is
+     * laid out (see Cosmetic::rig()) — or, while an egg is out, the egg and
+     * how cracked it is.
      *
-     * @return array{src: ?string, effect: ?string, scale: float, stage: string, egg?: int, hue?: int}|null
+     * @return array{src: ?string, effect: ?string, scale: float, stage: string, rig?: array{poses: int, anchors: array<string, array<int, float>>}|null, egg?: int, hue?: int}|null
      */
     public function spriteFor(Profile $owner): ?array
     {
@@ -321,6 +322,7 @@ class PetService
             'effect' => $pet->effect?->cssClass(),
             'scale' => $pet->drawScale($stage),
             'stage' => $stage->value,
+            'rig' => $pet->rig($stage),
         ];
     }
 }

@@ -101,9 +101,12 @@ class CosmeticCatalogTest extends TestCase
     }
 
     /**
-     * A pet's twelve poses are a contract between three things: the prompt that
-     * asks for the sheet, the checks that name an empty cell, and the element
-     * that crops one pose out of it. All three read this list.
+     * A pet's eighteen poses are a contract between three things: the prompt
+     * that asks for the sheet, the checks that name an empty cell, and the
+     * engine that crops one pose out of it (pet-sheet.js, shared by the pet
+     * layer and the still element). All three read this list — and the old
+     * twelve-pose layout has to match too, or pets made before the re-grid
+     * would be cut up wrong.
      */
     public function test_the_pet_poses_are_the_same_in_the_prompt_the_enum_and_the_element(): void
     {
@@ -111,25 +114,31 @@ class CosmeticCatalogTest extends TestCase
         $grid = CosmeticSlot::Pet->poseGrid();
 
         $this->assertCount($grid['cols'] * $grid['rows'], $poses);
+        $this->assertCount(CosmeticSlot::FAMILY_GRID['cols'] * CosmeticSlot::FAMILY_GRID['rows'], [...$poses, ...$poses, ...$poses]);
 
         // The prompt numbers its cells; every pose has to be named in it.
         foreach ($poses as $pose) {
             $this->assertStringContainsStringIgnoringCase(
-                $pose === 'toy' ? 'the toy on its own' : $pose,
+                match ($pose) {
+                    'toy' => 'the toy on its own',
+                    'walk2' => 'walk, other step',
+                    default => $pose,
+                },
                 CosmeticSlot::PET_FAMILY_PROMPT,
                 "The prompt never mentions the {$pose} pose.",
             );
         }
 
-        preg_match(
-            "/const poses = \[(.*?)\];/s",
-            file_get_contents(resource_path('js/cosmetic-elements.js')),
-            $block,
-        );
+        $source = file_get_contents(resource_path('js/pet-sheet.js'));
+        $listed = function (string $name) use ($source): array {
+            preg_match("/export const {$name} = \[(.*?)\];/s", $source, $block);
+            preg_match_all("/'(\w+)'/", $block[1] ?? '', $found);
 
-        preg_match_all("/'(\w+)'/", $block[1] ?? '', $inElement);
+            return $found[1];
+        };
 
-        $this->assertSame($poses, $inElement[1], 'cosmetic-elements.js has drifted from PET_POSES.');
+        $this->assertSame($poses, $listed('PET_POSES'), 'pet-sheet.js has drifted from PET_POSES.');
+        $this->assertSame(CosmeticSlot::LEGACY_PET_POSES, $listed('LEGACY_PET_POSES'), 'pet-sheet.js has drifted from LEGACY_PET_POSES.');
     }
 
     public function test_the_theme_colours_match_the_artwork(): void

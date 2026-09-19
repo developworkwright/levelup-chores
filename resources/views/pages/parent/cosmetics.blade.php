@@ -71,6 +71,17 @@ new class extends Component
      */
     public ?string $uploadNote = null;
 
+    /**
+     * The published pet whose art the upload replaces, or null when the
+     * upload is a new item.
+     *
+     * New art goes onto the same row, so every kid who owns the pet keeps it,
+     * with its growth and anything it was traded for. That is how pets made
+     * before the eighteen-pose sheet get their new poses: kids own them, so
+     * they are never swapped for a new item.
+     */
+    public ?int $replacing = null;
+
     public function mount(): void
     {
         $this->profile = Auth::guard('profile')->user();
@@ -131,6 +142,11 @@ new class extends Component
             $this->stock = CosmeticStock::Shelf->value;
         }
 
+        // Only a pet's art is replaced; another slot is a new item.
+        if ($this->replacing !== null && $this->slot !== CosmeticSlot::Pet->value) {
+            $this->stopReplacing();
+        }
+
         if ($this->upload) {
             $this->validateOnly('upload');
         }
@@ -142,7 +158,7 @@ new class extends Component
     }
 
     /**
-     * The upload, tidied and checked — and for a square pet picture, cut into
+     * The upload, tidied and checked — and for a whole pet sheet, cut into
      * its three ages.
      *
      * Worked out once per file and slot and kept for half an hour, because a
@@ -150,7 +166,7 @@ new class extends Component
      * again. It is also what makes the try-out honest: the pet on the screen,
      * the checks beside it and what Publish stores are the same pixels.
      *
-     * @return array{family: bool, sheets: array<string, string|null>, checks: array<int, array{label: string, status: string}>}
+     * @return array{family: bool, sheets: array<string, string|null>, anchors: array<string, array<string, array<int, float>>>, checks: array<int, array{label: string, status: string}>}
      */
     private function prepared(): array
     {
@@ -163,17 +179,22 @@ new class extends Component
 
             if ($slot === CosmeticSlot::Pet && $art->isFamilySheet($raw)) {
                 $family = $art->prepareFamily($raw);
-                $prepared = ['family' => true, 'sheets' => $family['sheets'], 'checks' => $family['checks']];
+                $prepared = ['family' => true, 'sheets' => $family['sheets'], 'anchors' => $family['anchors'], 'checks' => $family['checks']];
+            } elseif ($slot === CosmeticSlot::Pet && $art->isOldFamilySheet($raw)) {
+                // Made from the old prompt: twelve poses an age, not eighteen.
+                $prepared = ['family' => false, 'sheets' => ['adult' => null], 'anchors' => [], 'checks' => [
+                    ['label' => 'That is the old square sheet with 12 poses — make a new one from the Pet prompt, 9 across and 6 down', 'status' => 'fail'],
+                ]];
             } elseif ($slot === CosmeticSlot::Pet) {
-                // Every pet has all three ages, so a pet is only ever the square.
-                $prepared = ['family' => false, 'sheets' => ['adult' => null], 'checks' => [
-                    ['label' => 'A pet needs all three ages in one square picture — use the Pet prompt', 'status' => 'fail'],
+                // Every pet has all three ages, so a pet is only ever the whole sheet.
+                $prepared = ['family' => false, 'sheets' => ['adult' => null], 'anchors' => [], 'checks' => [
+                    ['label' => 'A pet needs all three ages in one 3:2 picture — use the Pet prompt', 'status' => 'fail'],
                 ]];
             } else {
                 // Shrunk and, on a sprite sheet, de-gridded first — then checked,
                 // so the checks and the stored file are the same pixels.
                 $tidied = $art->normalize($raw, $slot);
-                $prepared = ['family' => false, 'sheets' => ['adult' => $tidied['binary']], 'checks' => [...$tidied['checks'], ...$art->inspect($tidied['binary'], $slot)]];
+                $prepared = ['family' => false, 'sheets' => ['adult' => $tidied['binary']], 'anchors' => [], 'checks' => [...$tidied['checks'], ...$art->inspect($tidied['binary'], $slot)]];
             }
 
             // Encoded, because the cache may be a database column.
@@ -226,7 +247,11 @@ new class extends Component
      */
     public function publish(): void
     {
-        $this->validate();
+        $replacing = $this->replacing === null ? null : $this->find($this->replacing);
+
+        // New art for a pet already in the shop keeps its name, price and
+        // stock, so only the picture is checked.
+        $replacing ? $this->validateOnly('upload') : $this->validate();
 
         $slot = CosmeticSlot::from($this->slot);
         $art = app(CosmeticArt::class);
@@ -251,12 +276,21 @@ new class extends Component
             return;
         }
 
+        $rig = $slot === CosmeticSlot::Pet ? ['anchors' => $prepared['anchors'] ?? []] : null;
+
+        if ($replacing) {
+            $this->swapArt($replacing, $path, $youngerPaths, $rig, $checks);
+
+            return;
+        }
+
         Cosmetic::create([
             'household_id' => $this->profile->household_id,
             'slot' => $slot,
             'art_path' => $path,
             'baby_art_path' => $youngerPaths['baby'] ?? null,
             'young_art_path' => $youngerPaths['young'] ?? null,
+            'pet_rig' => $rig,
             'name' => trim($this->name),
             'cost' => $this->cost,
             'stock' => $this->stock,
@@ -274,6 +308,66 @@ new class extends Component
 
         $this->reset('upload', 'name', 'motion', 'effect', 'trialAge');
         app(CosmeticService::class)->forget();
+    }
+
+    /**
+     * Puts the new sheets on a pet that is already in the shop, and throws
+     * the old ones away. The row stays the same, so nobody who owns it loses
+     * anything. The art URL carries the row's timestamp, so every screen
+     * fetches the new picture rather than a cached one.
+     *
+     * @param  array<string, string>  $youngerPaths
+     * @param  array{anchors: array<string, array<string, array<int, float>>>}|null  $rig
+     * @param  array<int, array{label: string, status: string}>  $checks
+     */
+    private function swapArt(Cosmetic $pet, string $path, array $youngerPaths, ?array $rig, array $checks): void
+    {
+        $old = $pet->artPaths();
+
+        $pet->update([
+            'art_path' => $path,
+            'baby_art_path' => $youngerPaths['baby'] ?? null,
+            'young_art_path' => $youngerPaths['young'] ?? null,
+            'pet_rig' => $rig,
+            'checks' => $checks,
+        ]);
+
+        foreach (array_diff($old, $pet->artPaths()) as $gone) {
+            rescue(fn () => app(CosmeticArt::class)->disk()->delete($gone), report: false);
+        }
+
+        Cache::forget('cosmetic-upload:v'.CosmeticArt::CUT_VERSION.':'.$this->profile->id.':'.$this->slot.':'.$this->upload->getFilename());
+        rescue(fn () => $this->upload->delete(), report: false);
+
+        $this->flashMessage = $pet->name.' has its new art. Every kid who owns it sees it now.';
+
+        $this->reset('upload', 'name', 'motion', 'effect', 'trialAge', 'replacing');
+        app(CosmeticService::class)->forget();
+    }
+
+    /** Starts new art for a pet already in the shop — see $replacing. */
+    public function replaceArt(int $id): void
+    {
+        $pet = $this->find($id);
+
+        if (! $pet || ! $pet->isSheet() || $pet->isDraft()) {
+            return;
+        }
+
+        if ($this->upload) {
+            $this->toss();
+        }
+
+        $this->replacing = $pet->id;
+        $this->slot = CosmeticSlot::Pet->value;
+        $this->name = $pet->name;
+        $this->uploadNote = null;
+        $this->resetErrorBag();
+    }
+
+    public function stopReplacing(): void
+    {
+        $this->reset('replacing', 'name');
     }
 
     private function find(int $id): ?Cosmetic
@@ -435,6 +529,7 @@ new class extends Component
                 $trial = $sheet === null ? null : [
                     'age' => $age,
                     'src' => 'data:image/png;base64,'.base64_encode($sheet),
+                    'rig' => ['poses' => count(CosmeticSlot::PET_POSES), 'anchors' => $prepared['anchors'][$drawn->value] ?? []],
                     'scale' => $age->scale(),
                     'borrowed' => $drawn === $age ? null : $drawn,
                     'own' => collect(PetStage::cases())->mapWithKeys(fn (PetStage $one) => [$one->value => ($prepared['sheets'][$one->value] ?? null) !== null])->all(),
@@ -452,6 +547,7 @@ new class extends Component
             'previewUrl' => $previewUrl,
             'previewIsFamily' => $previewIsFamily,
             'trial' => $trial,
+            'replacingPet' => $this->replacing === null ? null : $this->find($this->replacing),
             // A real face under the preview, since a frame is judged by how it
             // sits round one.
             'previewFace' => $catalog->first(fn (Cosmetic $item) => $item->slot === CosmeticSlot::Avatar && ! $item->isDraft()),
@@ -480,7 +576,7 @@ new class extends Component
         'pattern' => 'Seamless is the one thing you cannot fix later, and the uploader checks it: opposite edges have to match or the page shows a grid of seams.',
         'cabinet' => 'The screen must come back empty and black — the game draws into it.',
         'spark' => 'Keep the center empty: this animates outward from whatever button was tapped.',
-        'pet' => 'Baby, young and adult in ONE square picture — a generator keeps a character far more consistent inside one image than across separate ones. Upload it as it comes and it is cut apart for you. Every pet needs all three ages: one missing a pose, or copied from another age, means generating again. Press Try it out to watch each age run about on your own screen before publishing.',
+        'pet' => 'Baby, young and adult in ONE picture, nine poses across and six down — a generator keeps a character far more consistent inside one image than across separate ones. Upload it as it comes and it is cut apart for you. Every pet needs all three ages: one missing a pose, or copied from another age, means generating again. Press Try it out to watch each age run about on your own screen before publishing.',
     ];
 
     // Six of the prompts ship with the artwork bundle. The pet's is the app's
@@ -529,9 +625,24 @@ new class extends Component
 
 
 
-        <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_300px] md:items-start">
+        <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_300px] md:items-start" id="cosmetic-upload">
             <div class="flex flex-col gap-[13px]">
-                <p class="font-mono-fq text-[9.5px] tracking-[0.16em] text-fq-text-4 uppercase">New item</p>
+                @if ($replacingPet)
+                    {{-- New art on a pet already in the shop: same row, so the
+                         kids who own it keep it. Name, price and stock stay. --}}
+                    <div class="flex flex-wrap items-center gap-[10px] rounded-[14px] border border-fq-cyan px-[13px] py-[10px]" style="background: #0d1f24" data-replacing="{{ $replacingPet->id }}">
+                        <span class="relative h-[40px] w-[40px] shrink-0 overflow-hidden rounded-[10px] bg-fq-bg">
+                            <x-cosmetic.art :item="$replacingPet" still class="absolute inset-0" />
+                        </span>
+                        <span class="min-w-[160px] flex-1">
+                            <span class="block font-mono-fq text-[9px] tracking-[0.14em] text-fq-cyan uppercase">New art for {{ $replacingPet->name }}</span>
+                            <span class="block text-[12px] text-fq-text-3">Every kid who owns it keeps it, grown as far as it has. Its name, price and stock stay as they are.</span>
+                        </span>
+                        <button type="button" wire:click="stopReplacing" class="shrink-0 rounded-[8px] border border-fq-line-2 px-[11px] py-[6px] font-mono-fq text-[9px] tracking-[0.1em] whitespace-nowrap text-fq-text-4">CANCEL</button>
+                    </div>
+                @else
+                    <p class="font-mono-fq text-[9.5px] tracking-[0.16em] text-fq-text-4 uppercase">New item</p>
+                @endif
 
                 @php $spec = $uploadSlot->uploadSpec(); @endphp
 
@@ -543,7 +654,7 @@ new class extends Component
                     <span class="min-w-0 flex-1">
                         <span class="block font-baloo text-[16px] font-extrabold">{{ $upload ? 'Choose a different PNG' : 'Choose a PNG' }}</span>
                         <span class="mt-1 block font-mono-fq text-[10px] text-fq-text-4 uppercase">
-                            {{ $uploadSlot->label() }} · {{ $uploadSlot === App\Enums\CosmeticSlot::Pet ? 'square, all three ages' : $spec['width'].'×'.$spec['height'] }} · {{ $spec['alpha'] ? 'transparent background' : 'solid, seamless' }} · max {{ $uploadSlot->uploadLimitLabel() }}
+                            {{ $uploadSlot->label() }} · {{ $uploadSlot === App\Enums\CosmeticSlot::Pet ? '3:2, all three ages' : $spec['width'].'×'.$spec['height'] }} · {{ $spec['alpha'] ? 'transparent background' : 'solid, seamless' }} · max {{ $uploadSlot->uploadLimitLabel() }}
                         </span>
                     </span>
                     <span class="shrink-0 rounded-[9px] px-3 py-2 font-mono-fq text-[10px] tracking-[0.1em] whitespace-nowrap text-fq-bg" style="background: var(--fq-cyan)">CHOOSE</span>
@@ -575,7 +686,7 @@ new class extends Component
 
                 <div wire:loading wire:target="upload" class="font-mono-fq text-[10px] text-fq-text-4">UPLOADING…</div>
                 @if ($uploadSlot === App\Enums\CosmeticSlot::Pet)
-                    <p class="text-[11.5px] text-fq-text-4">One square picture with the baby, young and adult on it — made from the Pet prompt below.</p>
+                    <p class="text-[11.5px] text-fq-text-4">One 3:2 picture with the baby, young and adult on it — made from the Pet prompt below.</p>
                 @endif
                 @error('upload') <p class="text-[12.5px] text-fq-danger">{{ $message }}</p> @enderror
 
@@ -585,6 +696,8 @@ new class extends Component
                     </p>
                 @endif
 
+                {{-- New art keeps everything else about the item. --}}
+                @unless ($replacingPet)
                 {{-- Chips rather than a dropdown: all six kinds of upload are on
                      screen at once, so nobody has to open a menu to find out a
                      background can be uploaded at all. --}}
@@ -684,6 +797,8 @@ new class extends Component
                     <span class="text-[11.5px] text-fq-text-4">A rainbow or a flame on top of the picture. Worth about 20 tickets on a pet.</span>
                 </label>
 
+                @endunless
+
                 {{-- No drafts: the art is judged here and now. A pet can be let
                      loose on this screen first; anything that is not right is
                      tossed, and the next picture uploaded in its place. --}}
@@ -703,7 +818,7 @@ new class extends Component
                         wire:loading.attr="disabled"
                         class="min-w-[160px] flex-1 rounded-[12px] p-3 text-center font-baloo text-[15px] font-extrabold text-fq-ink"
                         style="background: linear-gradient(150deg,#fff6b0,#ffc93d)"
-                    >Publish to the shop</button>
+                    >{{ $replacingPet ? 'Put the new art on '.$replacingPet->name : 'Publish to the shop' }}</button>
                     @if ($upload)
                         <button
                             type="button"
@@ -906,12 +1021,24 @@ new class extends Component
                         <p class="mt-[2px] font-mono-fq text-[8.5px] tracking-[0.08em] text-fq-text-5 uppercase">
                             {{ $item->isUpload() ? 'uploaded png' : 'drawn by the app' }}
                             @if ($item->motion) · moves @endif
+                            {{-- Made before the eighteen-pose sheet: no walk cycle and no
+                                 empty paws until it gets new art. --}}
+                            @if ($item->isSheet() && ! $item->pet_rig) · <span class="text-fq-gold" data-old-pet-art>old 12-pose art</span> @endif
                             @if ($inRotation->contains($item->id)) · <span class="text-fq-gold">out this week</span> @endif
                         </p>
                     </div>
                     <span class="w-[34px] shrink-0 font-baloo text-[14px] font-extrabold text-fq-lime">{{ $item->isFree() ? 'Free' : $item->cost }}</span>
                     <span class="shrink-0 rounded-full border px-[9px] py-1 font-mono-fq text-[8.5px] tracking-[0.08em] whitespace-nowrap uppercase" style="border-color: {{ $rim }}; color: {{ $ink }}">{{ $item->stock->label() }}</span>
                     @if ($item->isSheet())
+                        <button
+                            type="button"
+                            wire:click="replaceArt({{ $item->id }})"
+                            x-data
+                            x-on:click="document.getElementById('cosmetic-upload')?.scrollIntoView({ behavior: 'smooth' })"
+                            class="shrink-0 rounded-[8px] border px-[11px] py-[6px] font-mono-fq text-[9px] tracking-[0.1em] whitespace-nowrap"
+                            style="border-color: {{ $item->pet_rig ? '#3a2360' : '#ffc93d' }}; color: {{ $item->pet_rig ? '#b0a3cc' : '#ffe14d' }}"
+                        ><i class="fa-solid fa-arrows-rotate mr-[4px] text-[9px]"></i>NEW ART</button>
+
                         {{-- A grown-up's pet, for testing: free, no trades. --}}
                         @if ($myPet?->id === $item->id)
                             <span class="flex shrink-0 items-center gap-[4px]" data-my-pet="{{ $item->id }}">
@@ -963,6 +1090,7 @@ new class extends Component
         <div wire:key="trial-{{ $trial['age']->value }}" class="pointer-events-none fixed inset-0 z-30" data-pet-trial="{{ $trial['age']->value }}">
             <fq-pets
                 sheet="{{ $trial['src'] }}"
+                rig="{{ json_encode($trial['rig'], JSON_UNESCAPED_SLASHES) }}"
                 scale="{{ $trial['scale'] }}"
                 @if ($effect !== '') effect="{{ App\Enums\CosmeticEffect::from($effect)->cssClass() }}" @endif
                 toy
@@ -1014,7 +1142,7 @@ new class extends Component
                     class="rounded-[10px] px-[12px] py-[7px] font-baloo text-[13px] font-extrabold text-fq-ink disabled:opacity-40"
                     style="background: linear-gradient(150deg,#fff6b0,#ffc93d)"
                     title="{{ $name === '' ? 'Give it a name first' : '' }}"
-                >Publish</button>
+                >{{ $replacingPet ? 'Use this art' : 'Publish' }}</button>
 
                 <button type="button" wire:click="toss" class="rounded-[10px] border border-fq-line-2 px-[11px] py-[7px] font-baloo text-[13px] font-extrabold text-fq-text-3">Discard</button>
                 <button type="button" wire:click="stopTrying" aria-label="Put it away" class="px-[6px] py-[7px] text-[13px] text-fq-text-4"><i class="fa-solid fa-xmark"></i></button>
