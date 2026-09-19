@@ -1045,7 +1045,8 @@ new class extends Component
                                 @endforeach
                             </select>
                             @if ($chosenKnack = App\Enums\PetKnack::tryFrom($petKnack))
-                                <span class="text-[11.5px] text-fq-text-4">{{ $chosenKnack->describe(App\Enums\PetStage::Adult) }} Half strength while it's young, and not yet as a baby.</span>
+                                <x-perk-by-age :knack="$chosenKnack" />
+                                <span class="text-[11px] text-fq-text-4">Not yet as a baby.</span>
                             @endif
                             @error('petKnack') <span class="text-[12px] text-fq-danger">Pick a knack for a {{ mb_strtolower($tier->label()) }} pet.</span> @enderror
                         </label>

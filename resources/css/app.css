@@ -1123,6 +1123,9 @@ body {
 @keyframes fqtick { to { transform: rotate(360deg); } }
 @keyframes fqthrob { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.06); opacity: .74; } }
 @keyframes fqbob { 0%,100% { transform: translateY(0) scaleY(1); } 50% { transform: translateY(-3px) scaleY(1.03); } }
+/* The Pets page's room: a snack dropped beside the pet and eaten, and the hop it gives. */
+@keyframes fq-munch { 0% { transform: translateY(0) scale(1); opacity: 1; } 60% { transform: translateY(-10px) scale(1.1); opacity: 1; } 100% { transform: translateY(-4px) scale(.2); opacity: 0; } }
+@keyframes fq-hop { 0%,100% { transform: translateY(0); } 30% { transform: translateY(-14px) scaleY(1.06); } 60% { transform: translateY(0) scaleY(.94); } }
 @keyframes fqsway { 0%,100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
 @keyframes fqblink { 0%,92%,100% { transform: scaleY(1); } 96% { transform: scaleY(.08); } }
 @keyframes fqflicker { 0%,100% { opacity: 1; } 42% { opacity: .55; } 46% { opacity: 1; } 61% { opacity: .4; } 65% { opacity: 1; } }

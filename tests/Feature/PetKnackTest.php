@@ -1017,6 +1017,105 @@ class PetKnackTest extends TestCase
         $this->assertSame($tabby->id, $this->kid->fresh()->worn_pet_id);
     }
 
+    /** A baby can't use its perk yet, but the kid is told what it will do. */
+    public function test_a_babys_perk_card_says_what_the_perk_will_do(): void
+    {
+        $sniffy = $this->pet('Sniffy', ['pet_rarity' => 'rare', 'pet_style' => 'lucky', 'pet_knack' => 'sniffer']);
+        $this->outOn($this->kid, $sniffy, 0);
+
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        Volt::test('kid.pets')
+            ->assertSee('Still learning')
+            ->assertSee('narrows the Mystery Chore down to 5')
+            ->assertSee('narrows the Mystery Chore down to 3')
+            ->assertSee('Young · Once a week')
+            ->assertSee('Grown up · 2 times a week')
+            ->assertDontSee('Still learning this one')
+            ->assertSee('Learns it in 10 more chores.')
+            ->assertDontSee('data-power-treat', false);
+    }
+
+    /** How often, in a kid's words, straight from the allowance. */
+    public function test_how_often_a_perk_goes_off_at_each_age(): void
+    {
+        $this->assertNull(PetKnack::Fetch->howOften(PetStage::Baby));
+        $this->assertSame('Once every 2 weeks', PetKnack::Fetch->howOften(PetStage::Young));
+        $this->assertSame('Once a week', PetKnack::Fetch->howOften(PetStage::Adult));
+        $this->assertSame('2 times a week', PetKnack::PawNudge->howOften(PetStage::Adult));
+        $this->assertSame('Once every 2 months, by itself', PetKnack::GuardDog->howOften(PetStage::Young));
+        $this->assertSame('Always on', PetKnack::Sidekick->howOften(PetStage::Young));
+    }
+
+    /** The charm says how many chores, that they're marked, and what they pay. */
+    public function test_the_charm_says_what_it_does_at_each_age(): void
+    {
+        $this->assertStringContainsString('Charms 1 chore', PetKnack::GoodLuckCharm->describe(PetStage::Young));
+        $this->assertStringContainsString('Charms '.ChoreService::CHARM_CHORES.' chores', PetKnack::GoodLuckCharm->describe(PetStage::Adult));
+
+        foreach ([PetStage::Young, PetStage::Adult] as $stage) {
+            $this->assertStringContainsString('marked', PetKnack::GoodLuckCharm->describe($stage));
+            $this->assertStringContainsString('50% more points today', PetKnack::GoodLuckCharm->describe($stage));
+        }
+    }
+
+    /** Looking at a pet for sale shows what its style does in each game. */
+    public function test_a_pet_for_sale_shows_its_style_in_every_game(): void
+    {
+        $bolt = $this->pet('Bolt', ['pet_style' => 'quick']);
+
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        $page = Volt::test('kid.pets')
+            ->assertDontSee('data-looking-style-games', false)
+            ->call('look', $bolt->id)
+            ->assertSee('data-looking-style-games', false)
+            ->assertSee('Quick in the arcade');
+
+        foreach (ArcadeGame::ranked() as $game) {
+            $page->assertSee($game->styleHelp(PetStyle::Quick));
+        }
+
+        // Nothing to try out without a pet being looked at.
+        $page->call('stopLooking')->call('tryOut', 'baby')->assertDontSee('data-pet-trial', false);
+    }
+
+    /** A Common has a style and no perk — the page says so instead of hiding the card. */
+    public function test_the_pets_page_says_a_common_has_no_perk(): void
+    {
+        $rex = $this->pet('Rex', ['pet_style' => 'steady']);
+        $this->outOn($this->kid, $rex, 3);
+
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        Volt::test('kid.pets')
+            ->assertSee('data-pet-no-perk', false)
+            ->assertSee('No perk')
+            ->assertDontSee('data-pet-knack=', false)
+            ->assertDontSee('data-power-treat', false)
+            ->assertSee('Steady in the arcade');
+    }
+
+    /** The shop says what each pet brings, and an egg's confirm never names its perk. */
+    public function test_the_pets_page_shop_shows_perk_lines_and_keeps_the_egg_a_surprise(): void
+    {
+        $this->pet('Sniffy', ['pet_rarity' => 'rare', 'pet_style' => 'lucky', 'pet_knack' => 'sniffer']);
+        $this->pet('Plainy', ['pet_style' => 'big']);
+        $this->pet('Glimmer', ['stock' => 'egg', 'pet_rarity' => 'epic', 'pet_style' => 'quick', 'pet_knack' => 'paw_nudge']);
+
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        $html = Volt::test('kid.pets')
+            ->assertSee('Lucky + '.PetKnack::Sniffer->label())
+            ->assertDontSee('no perk')
+            ->assertSee("It'll have a style and an Epic perk — which one is a surprise.")
+            ->assertDontSee(PetKnack::PawNudge->label())
+            ->assertSee(route('kid.trades'), false)
+            ->html();
+
+        $this->assertStringNotContainsString('Glimmer', $html);
+    }
+
     /** Old pets get a style each, spread across the four rather than all the same. */
     public function test_old_pets_start_with_styles_spread_across_the_four(): void
     {

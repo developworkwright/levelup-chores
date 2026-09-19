@@ -187,12 +187,12 @@ class PetGrowthTest extends TestCase
 
         Volt::test('kid.pets')
             ->assertSee('Grown up')
-            ->assertSee('Raise again from a baby')
+            ->assertSee('wire:click="raiseAgain(', false)
             ->call('raiseAgain', $tabby->id)
             ->assertSee('Tabby is a baby again.')
             ->assertSee('10 more chores and it grows up')
             // Nothing to go back to once it is a baby already.
-            ->assertDontSee('Raise again from a baby');
+            ->assertDontSee('wire:click="raiseAgain(', false);
 
         $this->assertSame(0, $this->growthOf($this->kid, $tabby));
     }
@@ -224,7 +224,6 @@ class PetGrowthTest extends TestCase
             ->assertSee('fq-pet-feed', false)
             // And a tap on anything empty on any of their pages feeds it too.
             ->assertSee('feed-on-tap', false)
-            ->assertSee('Tap anywhere empty', false)
             ->assertSee('6 more chores and it grows up');
     }
 
@@ -297,7 +296,7 @@ class PetGrowthTest extends TestCase
      *
      * @param  array<string, array<int, int>>  $skip  poses to leave out, by age
      */
-    private function familyPng(int $side = 1200, array $skip = [], bool $youngIsAdult = false, bool $checkerboard = false, bool $touching = false, bool $crowded = false, bool $tailUp = false, bool $joined = false): string
+    private function familyPng(int $side = 1200, array $skip = [], bool $youngIsAdult = false, bool $checkerboard = false, bool $touching = false, bool $crowded = false, bool $tailUp = false, bool $joined = false, bool $extra = false): string
     {
         $width = (int) ($side * 1.5);
         $image = imagecreatetruecolor($width, $side);
@@ -372,6 +371,13 @@ class PetGrowthTest extends TestCase
 
         if ($touching) {
             imagefilledrectangle($image, (int) ($cell * 0.46), (int) ($cell * 4.85), (int) ($cell * 0.54), (int) ($cell * 5.25), $fur);
+        }
+
+        // What a real generator did: a tenth dog squeezed into a row of nine —
+        // an extra walking step — so the baby's landed cell holds two.
+        if ($extra) {
+            $height = $cell * 0.3;
+            imagefilledellipse($image, (int) ($cell * 5.86), (int) ($cell * 0.9 - $height / 2), (int) ($height * 0.7), (int) $height, $coats['baby']);
         }
 
         // The grid a generator rules in whatever the prompt says.
@@ -488,6 +494,27 @@ class PetGrowthTest extends TestCase
         }
 
         $this->assertGreaterThan(40, $idleTop, 'The idle cell was stretched to hold two dogs.');
+    }
+
+    /**
+     * A golden puppy sheet came back with ten dogs in a row of nine. Every
+     * cell had something in it, so it passed — and the baby's landed cell was
+     * a lying dog with a walking dog beside it, both on screen at once.
+     */
+    public function test_a_cell_with_two_animals_in_it_fails(): void
+    {
+        $family = app(CosmeticArt::class)->prepareFamily($this->familyPng(extra: true));
+
+        $this->assertNull($family['sheets']['baby']);
+        $this->assertContains('Baby: two animals in the landed cell — the picture has an extra pose — generate the picture again', array_column($family['checks'], 'label'));
+    }
+
+    public function test_a_sheet_with_one_animal_per_cell_passes_the_count(): void
+    {
+        $family = app(CosmeticArt::class)->prepareFamily($this->familyPng());
+
+        $this->assertContains('Adult: One animal in every cell', array_column($family['checks'], 'label'));
+        $this->assertNotContains('fail', array_column($family['checks'], 'status'));
     }
 
     public function test_an_age_that_repeats_the_drawing_above_it_fails(): void

@@ -87,7 +87,8 @@ class KnackService
                 $stage === PetStage::Adult => 'full',
                 default => 'half',
             },
-            'description' => $knack->describe($stage),
+            // A baby's is what it will do once it learns it, so the kid knows what's coming.
+            'description' => $knack->describe($unlocked ? $stage : PetStage::Young),
             'automatic' => $knack->automatic(),
             'uses' => $allowance['uses'] ?? null,
             'left' => $left === null ? null : $left + $treats,

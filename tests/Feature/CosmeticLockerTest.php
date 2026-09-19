@@ -425,7 +425,7 @@ class CosmeticLockerTest extends TestCase
         Volt::test('kid.pets')->assertSee('data-no-pet', false);
     }
 
-    public function test_a_pet_is_bought_like_anything_else_and_shows_its_poses_on_the_way(): void
+    public function test_a_pet_is_bought_like_anything_else_and_tried_out_on_the_way(): void
     {
         $pet = Cosmetic::create([
             'household_id' => $this->household->id,
@@ -443,12 +443,23 @@ class CosmeticLockerTest extends TestCase
         Volt::test('kid.pets')
             ->assertSee('Tabby')
             ->call('look', $pet->id)
-            // The sheet, cut into its poses.
             ->assertSee('data-looking-at="'.$pet->id.'"', false)
-            ->assertSee('pose="sleep"', false)
+            ->assertSee('data-try-out', false)
+            ->assertDontSee('data-pet-trial', false)
+            // Loose on the screen at the age picked, aura and all — nothing spent.
+            ->call('tryOut', 'young')
+            ->assertSee('data-pet-trial="young"', false)
+            ->assertSee('Trying it out · not bought yet')
             ->assertSee('fq-aura-rainbow', false)
+            ->call('tryOut', 'adult')
+            ->assertSee('data-pet-trial="adult"', false)
+            ->call('stopTrying')
+            ->assertDontSee('data-pet-trial', false)
+            ->call('tryOut', 'baby')
             ->call('buy')
-            ->assertSee('Tabby is yours');
+            ->assertSee('Tabby is yours')
+            // Bought, so the try-out is put away.
+            ->assertDontSee('data-pet-trial', false);
 
         $this->assertSame($pet->id, $this->kid->fresh()->worn_pet_id);
     }

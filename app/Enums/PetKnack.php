@@ -2,6 +2,8 @@
 
 namespace App\Enums;
 
+use App\Services\ChoreService;
+
 /**
  * A rarer pet's own trick, on top of its style. Commons have none.
  *
@@ -155,6 +157,35 @@ enum PetKnack: string
         return in_array($this, [self::GuardDog, self::NightOwl, self::LuckyTail], true);
     }
 
+    /**
+     * How often it can do it at this age, in a kid's words — from allowance().
+     * Null for a baby, which can't do it at all yet.
+     */
+    public function howOften(PetStage $stage): ?string
+    {
+        if (! self::unlocked($stage)) {
+            return null;
+        }
+
+        $allowance = $this->allowance($stage);
+
+        if ($allowance === null) {
+            return 'Always on';
+        }
+
+        $every = match ($allowance['days']) {
+            7 => 'a week',
+            14 => 'every 2 weeks',
+            30 => 'a month',
+            60 => 'every 2 months',
+            default => "every {$allowance['days']} days",
+        };
+
+        $times = $allowance['uses'] === 1 ? 'Once' : "{$allowance['uses']} times";
+
+        return "{$times} {$every}".($this->automatic() ? ', by itself' : '');
+    }
+
     /** What it does at this age, in a kid's words. A baby's says when it learns. */
     public function describe(PetStage $stage): string
     {
@@ -173,8 +204,8 @@ enum PetKnack: string
                 : 'You can earn 5 more arcade tokens a day.',
             self::Fetch => 'Landed a 2x on the Bonus Wheel? It fetches you another go at the boost — same chore.',
             self::Sniffer => $grown
-                ? 'Sniffs the quest board and narrows the Mystery Chore down to 3.'
-                : 'Sniffs the quest board and narrows the Mystery Chore down to 5.',
+                ? 'Sniffs the quest board and narrows the Mystery Chore down to 3. It won\'t say which of the 3 it is.'
+                : 'Sniffs the quest board and narrows the Mystery Chore down to 5. It won\'t say which of the 5 it is.',
             self::PawNudge => $grown
                 ? 'Bats the Bonus Wheel one chore over — you pick which way.'
                 : 'Bats the Bonus Wheel one chore over — whichever way it likes!',
@@ -183,8 +214,8 @@ enum PetKnack: string
                 ? 'Charges your first spin of the week — a shot at 4x.'
                 : 'Gives your first spin of the week a better shot at 3x.',
             self::GoodLuckCharm => $grown
-                ? 'Casts a Quest Charm over your board.'
-                : 'Makes one chore on your board pay half again.',
+                ? 'Charms '.ChoreService::CHARM_CHORES.' chores on your quest board, picked at random. They\'re marked, so you can see which — each pays 50% more points today.'
+                : 'Charms 1 chore on your quest board, picked at random. It\'s marked, so you can see which — it pays 50% more points today.',
             self::Digger => 'Digs you a free hit on the Lucky Block.',
             self::GuardDog => 'Guards your streak the day you miss.',
             self::NightOwl => 'Saves your bedtime run after a night out of your own bed.',

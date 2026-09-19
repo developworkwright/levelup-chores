@@ -245,6 +245,9 @@ GEOMETRY — follow exactly:
   Play, Back, Sleep) obey the margin too. If a pose would cross into its
   margin, make that whole row smaller — the drawings are cut apart by the
   empty space between them, and a sheet whose drawings touch is thrown away.
+· EXACTLY NINE DRAWINGS IN EVERY ROW — count them. Never a tenth: no extra
+  walking step, no spare pose squeezed in at the end. A row of ten is
+  thrown away.
 · Rows 1–2: the BABY. Rows 3–4: the YOUNG pet. Rows 5–6: the ADULT.
 · Each age takes its two rows the same way: the eighteen cells below, left to
   right, nine in its first row and nine in its second. So every column holds

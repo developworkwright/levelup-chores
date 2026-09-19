@@ -33,7 +33,7 @@ class CosmeticArt
      * Bumped whenever the way a pet picture is cut or checked changes, so a
      * cut cached under the old rules (see the parent console) is never used.
      */
-    public const CUT_VERSION = 8;
+    public const CUT_VERSION = 9;
 
     /** Past this many pixels nothing is decoded — the decompression-bomb ceiling. */
     private const MAX_PIXELS = 4000000;
@@ -215,6 +215,12 @@ class CosmeticArt
             ? ['label' => 'Every pose stays inside its cell', 'status' => 'pass']
             : ['label' => implode(', ', $bleeding).' sits right on the cell edge — it may show a sliver of the pose beside it', 'status' => 'warn'];
 
+        $crowded = $this->crowdedCells($image, $grid, $poses);
+
+        $checks[] = $crowded === []
+            ? ['label' => 'One animal in every cell', 'status' => 'pass']
+            : ['label' => 'Two animals in the '.implode(', ', $crowded).' '.(count($crowded) === 1 ? 'cell' : 'cells').' — the picture has an extra pose', 'status' => 'fail'];
+
         // The standing poses only — a crouch is meant to be short and a jump
         // tall, so including them would fire this on a perfectly good sheet.
         $standing = array_intersect_key($heights, array_flip(['idle', 'blink', 'walk', 'walk2', 'happy']));
@@ -226,6 +232,51 @@ class CosmeticArt
         }
 
         return $checks;
+    }
+
+    /**
+     * The poses whose cell holds more than one animal.
+     *
+     * A generator that draws ten poses in a row of nine leaves every cell
+     * with something in it, so nothing else notices — but the cutter has to
+     * put two of those animals in one cell, and the pet then shows both at
+     * once whenever it takes that pose. A second piece counts as an animal
+     * when it is at least a third the size of the biggest one in the cell;
+     * a speck, a tuft or a sweat drop never is. The toy's cell holds no
+     * animal, so it is left alone.
+     *
+     * @param  array{cols: int, rows: int}  $grid
+     * @param  array<int, string>  $poses
+     * @return array<int, string>
+     */
+    private function crowdedCells(GdImage $image, array $grid, array $poses): array
+    {
+        [, $pieces] = $this->pieces($image);
+        $cellWidth = imagesx($image) / $grid['cols'];
+        $cellHeight = imagesy($image) / $grid['rows'];
+        $sizes = [];
+
+        foreach ($pieces as $piece) {
+            $index = (int) min($grid['rows'] - 1, floor($piece['y'] / $cellHeight)) * $grid['cols']
+                + (int) min($grid['cols'] - 1, floor($piece['x'] / $cellWidth));
+            $sizes[$index][] = $piece['count'];
+        }
+
+        $crowded = [];
+
+        foreach ($poses as $index => $pose) {
+            if ($pose === 'toy' || count($sizes[$index] ?? []) < 2) {
+                continue;
+            }
+
+            rsort($sizes[$index]);
+
+            if ($sizes[$index][1] >= $sizes[$index][0] / 3) {
+                $crowded[] = $pose;
+            }
+        }
+
+        return $crowded;
     }
 
     /**
