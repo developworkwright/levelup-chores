@@ -39,6 +39,14 @@ const MERCY_WIDTH = 9;
 
 const SIDE_MARGIN = 8;
 
+/*
+ * A pet's style in the tower — see Stacker. How much wider a Big pet starts
+ * the tower, and how much slower a Quick pet makes the swing, for how long.
+ */
+const STYLE_BIG = 30;
+const QUICK_SLOW = 0.2;
+const QUICK_FLOORS = 10;
+
 /* ------------------------------------------------------------------ *
  * Small helpers
  * ------------------------------------------------------------------ */
@@ -1020,11 +1028,21 @@ const Sfx = {
  * ------------------------------------------------------------------ */
 
 class Stacker {
-    constructor(canvas, milestones, hooks) {
+    /*
+     * `style` is the kid's pet's style, or null — App\Enums\PetStyle, and
+     * ArcadeGame::styleHelp() for what the kid is told each one does here:
+     *
+     *   steady  the first wobbly drop of the run lands straight
+     *   big     the tower starts STYLE_BIG wider, and mercy grows it back there
+     *   quick   the slab swings QUICK_SLOW slower for the first QUICK_FLOORS
+     *   lucky   the first miss of the run hands the floor back
+     */
+    constructor(canvas, milestones, hooks, style) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
         this.milestones = milestones;
         this.hooks = hooks;
+        this.style = style ?? null;
         this.scale = 1;
         this.raf = null;
         this.last = 0;
@@ -1083,14 +1101,21 @@ class Stacker {
         this.debris = [];
         this.effects = [];
         this.banner = null;
+        // Each style's once-a-run help, not yet used.
+        this.steadied = false;
+        this.caught = false;
 
-        const x = (W - START_W) / 2;
+        // The widest the tower can be: where it starts, and as far as a run of
+        // perfect drops can grow it back to.
+        this.fullW = this.style === 'big' ? START_W + STYLE_BIG : START_W;
+
+        const x = (W - this.fullW) / 2;
 
         this.tower = [{
             x,
-            w: START_W,
+            w: this.fullW,
             artX: x,
-            artW: START_W,
+            artW: this.fullW,
             type: itemFor(0),
             seed: 1.7,
             squash: 0,
@@ -1118,7 +1143,7 @@ class Stacker {
             dir,
             type: itemFor(this.tower.length),
             seed: this.tower.length * 3.4 + 0.7,
-            speed: Math.min(235, 78 + this.floors * 4.4),
+            speed: Math.min(235, 78 + this.floors * 4.4) * (this.style === 'quick' && this.floors < QUICK_FLOORS ? 1 - QUICK_SLOW : 1),
         };
     }
 
@@ -1150,6 +1175,20 @@ class Stacker {
         const overlap = slab.w - Math.abs(delta);
 
         if (overlap <= 0) {
+            // A Lucky pet catches the first miss: the floor tumbles off, and a
+            // fresh one swings in for another go.
+            if (this.style === 'lucky' && ! this.caught) {
+                this.caught = true;
+                this.debris.push({
+                    x: slab.x, y: this.slabScreenY(), w: slab.w, artOff: 0, artW: slab.w,
+                    type: slab.type, seed: slab.seed, vx: slab.dir * 60, vy: -30, rot: 0, vr: slab.dir * 3,
+                });
+                this.petHelp('LUCKY!', prev.x + prev.w / 2, this.slabScreenY());
+                this.spawnSlab();
+
+                return;
+            }
+
             this.collapse();
 
             return;
@@ -1159,6 +1198,22 @@ class Stacker {
         const perfect = Math.abs(delta) <= PERFECT;
         let block;
 
+        // A Steady pet steadies the first wobbly drop: it lands square on the
+        // floor below, nothing sheared off. It is not a perfect — the combo
+        // neither grows nor breaks.
+        if (! perfect && this.style === 'steady' && ! this.steadied) {
+            this.steadied = true;
+            block = { x: prev.x, w: prev.w, artX: prev.x, artW: prev.w, type: slab.type, seed: slab.seed, squash: 1 };
+            this.petHelp('STEADIED!', prev.x + prev.w / 2, slabY);
+            this.tower.push(block);
+            this.floors += 1;
+            this.spawnSlab();
+            this.checkMilestone();
+            this.hooks.onScore(this.floors, this.milestones[this.milestone][1], this.combo);
+
+            return;
+        }
+
         if (perfect) {
             this.combo += 1;
 
@@ -1166,7 +1221,7 @@ class Stacker {
             // run is a slow death by rounding: you can play flawlessly and
             // still lose to the width you gave up in the first ten floors.
             const w = this.combo % MERCY_EVERY === 0
-                ? Math.min(START_W, prev.w + MERCY_WIDTH)
+                ? Math.min(this.fullW, prev.w + MERCY_WIDTH)
                 : prev.w;
             const x = prev.x - (w - prev.w) / 2;
 
@@ -1236,6 +1291,13 @@ class Stacker {
         this.checkMilestone();
 
         this.hooks.onScore(this.floors, this.milestones[this.milestone][1], this.combo);
+    }
+
+    /** The pet stepping in: a paw, a word, and a happy chirp. */
+    petHelp(text, x, y) {
+        this.effects.push({ kind: 'ring', x, y: y + FLOOR_H / 2, t: 0, life: 0.6 });
+        this.effects.push({ kind: 'text', x, y: y - 4, t: 0, life: 1.1, text: '🐾 ' + text });
+        Sfx.blip(660, 0.2, 0.07, 1320);
     }
 
     checkMilestone() {
@@ -1760,7 +1822,7 @@ document.addEventListener('alpine:init', () => {
      * off the signed-in profile rather than taking from this component. There
      * is still no text input anywhere in the game.
      */
-    window.Alpine.data('fqStacker', (milestones) => ({
+    window.Alpine.data('fqStacker', (milestones, petStyle = null) => ({
         phase: 'idle',
         score: 0,
         combo: 0,
@@ -1800,7 +1862,7 @@ document.addEventListener('alpine:init', () => {
                      */
                     this.post();
                 },
-            });
+            }, petStyle);
 
             this.game.mount();
         },

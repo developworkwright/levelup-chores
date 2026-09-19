@@ -7,7 +7,6 @@ use App\Exceptions\InsufficientTicketsException;
 use App\Models\Cosmetic;
 use App\Models\Profile;
 use App\Services\CosmeticService;
-use App\Services\PetService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
@@ -45,13 +44,6 @@ new class extends Component
 
     public ?string $flashMessage = null;
 
-    /**
-     * Said on the egg's own card, not at the top of the page: the egg is
-     * bought from well down the Pet tab, and a refusal up at the top — out of
-     * sight — looked like the button had done nothing at all.
-     */
-    public ?string $eggNote = null;
-
     public function mount(): void
     {
         $this->profile = Auth::guard('profile')->user();
@@ -60,6 +52,13 @@ new class extends Component
 
     public function pickSlot(string $slot): void
     {
+        // Pets have their own page now — see kid.pets.
+        if ($slot === CosmeticSlot::Pet->value) {
+            $this->redirectRoute('kid.pets', navigate: true);
+
+            return;
+        }
+
         if (CosmeticSlot::tryFrom($slot)) {
             $this->slot = $slot;
             $this->flashMessage = null;
@@ -152,47 +151,6 @@ new class extends Component
         }
     }
 
-    /**
-     * Back to a baby, because the kid asked. Never happens any other way —
-     * putting a different pet out and back again keeps it as grown as it was.
-     */
-    public function raiseAgain(int $cosmeticId): void
-    {
-        $pet = Cosmetic::where('household_id', $this->profile->household_id)->find($cosmeticId);
-
-        if (! $pet || $pet->slot !== CosmeticSlot::Pet || ! app(CosmeticService::class)->owns($this->profile, $pet)) {
-            return;
-        }
-
-        app(PetService::class)->raiseAgain($this->profile, $pet);
-        $this->flashMessage = "{$pet->name} is a baby again.";
-    }
-
-    /**
-     * A surprise egg: out on their pages straight away, cracked by chores,
-     * hatching into a pet that was never in the shop. See PetService.
-     */
-    public function buyEgg(int $petId): void
-    {
-        $pet = Cosmetic::where('household_id', $this->profile->household_id)->find($petId);
-
-        if (! $pet) {
-            return;
-        }
-
-        try {
-            app(PetService::class)->buyEgg($this->profile, $pet);
-        } catch (InsufficientTicketsException|CosmeticUnavailableException $e) {
-            $this->eggNote = $e->getMessage();
-
-            return;
-        }
-
-        $this->profile->refresh();
-        $this->eggNote = null;
-        $this->dispatch('celebrate', message: 'A surprise egg! Do chores to crack it.', style: 'ticket', motion: 'burst', origin: 'tap');
-    }
-
     public function with(): array
     {
         $service = app(CosmeticService::class);
@@ -201,7 +159,6 @@ new class extends Component
         $slot = CosmeticSlot::tryFrom($this->slot) ?? CosmeticSlot::Frame;
 
         $worn = $service->worn($this->profile);
-        $pets = app(PetService::class);
 
         // A try-on is only honoured while it is still something they could buy.
         $trying = $this->tryingId ? $catalog->get($this->tryingId) : null;
@@ -244,20 +201,8 @@ new class extends Component
             'shelf' => $shelf,
             'fromCost' => $priced->min('cost'),
             'bought' => $this->boughtId ? $catalog->get($this->boughtId) : null,
-            // How grown up each pet they own is, so a pet put away shows the
-            // size it will come back out at.
-            'petStages' => $slot === CosmeticSlot::Pet ? $pets->stagesFor($this->profile) : [],
-            'egg' => $egg = $slot === CosmeticSlot::Pet ? $pets->eggFor($this->profile) : null,
-            // One egg per egg-only pet nobody has yet, each its own colour.
-            'eggsForSale' => $slot === CosmeticSlot::Pet ? $pets->eggsForSale($household) : collect(),
-            // While an egg is out it stands in for the pet, so the pet's own
-            // panel waits until it has hatched.
-            'petOut' => $slot === CosmeticSlot::Pet && $worn['pet'] && $egg === null ? [
-                'item' => $worn['pet'],
-                'growth' => $pets->growthOf($this->profile, $worn['pet']),
-                'stage' => $pets->stageOf($this->profile, $worn['pet']),
-                'toGo' => $pets->choresToGrow($this->profile, $worn['pet']),
-            ] : null,
+            // Pets have their own page; this one never opens on them.
+            'petStages' => [],
         ];
     }
 }; ?>
@@ -422,24 +367,6 @@ new class extends Component
                     >{{ $short > 0 ? $short.' short' : 'Buy · '.$trying->cost.' ✦' }}</button>
                 </div>
 
-                {{-- A pet is a sheet of poses, so trying one on shows the sheet
-                     cut up — the whole animal, not one still tile. It runs
-                     about for real once it is bought. The blink and the second
-                     walking step are left out: as stills they are the idle
-                     and the walk again. --}}
-                @if ($trying->slot === App\Enums\CosmeticSlot::Pet)
-                    <div class="flex w-full flex-wrap gap-[6px]" data-fq-pose-strip>
-                        @foreach (array_diff($trying->pet_rig ? App\Enums\CosmeticSlot::PET_POSES : App\Enums\CosmeticSlot::LEGACY_PET_POSES, ['blink', 'walk2']) as $pose)
-                            <span class="flex flex-col items-center gap-[3px]">
-                                <span class="relative block h-[52px] w-[52px] overflow-hidden rounded-[10px] bg-fq-bg">
-                                    <x-cosmetic.art :item="$trying" :pose="$pose" mode="fill" still class="absolute inset-0" />
-                                </span>
-                                <span class="font-mono-fq text-[7px] tracking-[0.08em] text-fq-text-5 uppercase">{{ $pose }}</span>
-                            </span>
-                        @endforeach
-                    </div>
-                @endif
-
                 {{-- A cabinet is judged around a game, not as a tile: the same
                      <fq-cabinet> bezel the arcade page draws, round a stand-in
                      screen. --}}
@@ -589,137 +516,12 @@ new class extends Component
                 <span class="font-mono-fq text-[8.5px] tracking-[0.1em] whitespace-nowrap text-fq-text-5">
                     @if ($shelf->isNotEmpty())
                         {{ $shelf->count() }}{{ $fromCost ? ' · FROM '.$fromCost.' ✦' : '' }}
-                    @elseif ($openSlot === App\Enums\CosmeticSlot::Pet && $flavor === 'all')
-                        {{-- Pets are the one slot the app ships nothing for: every
-                             one is a sprite sheet a grown-up uploads. --}}
-                        NO PETS YET — ASK A GROWN-UP
                     @else
                         NOTHING IN THIS SET YET
                     @endif
                 </span>
             </div>
         </div>
-
-        {{-- The surprise egg: bought here, cracked by chores, hatching into a
-             pet that has never been in the shop. See PetService. --}}
-        @if ($egg)
-            @php $eggHue = $egg->hue(); @endphp
-            <div wire:key="egg-{{ $egg->id }}" class="flex flex-wrap items-center gap-[13px] rounded-[18px] border p-[13px]" style="border-color: hsl({{ $eggHue }} 100% 72% / .35); background: linear-gradient(160deg, hsl({{ $eggHue }} 45% 12%), #150c26 74%)" data-egg-out>
-                <img x-data :src="window.fqEggSvg?.({{ $egg->cracks }}, {{ $eggHue }})" alt="" class="h-[64px] w-[64px] shrink-0">
-                <div class="min-w-[150px] flex-1">
-                    <p class="font-mono-fq text-[8.5px] tracking-[0.16em] uppercase" style="color: hsl({{ $eggHue }} 100% 72%)">{{ App\Models\PetEgg::colourName($eggHue) }} egg · {{ $egg->cracks }} of {{ App\Models\PetEgg::CRACKS_TO_HATCH }} cracks</p>
-                    <p class="mt-[3px] font-baloo text-[17px] leading-tight font-extrabold">
-                        {{ $egg->choresToHatch() === 0 ? 'Ready to hatch!' : $egg->choresToHatch().' more '.Str::plural('chore', $egg->choresToHatch()).' and it hatches' }}
-                    </p>
-                    <p class="mt-[2px] text-[11px] text-fq-text-4">Something in there is a pet that's never been in the shop. It's out on your pages — tap it.</p>
-                </div>
-            </div>
-        @endif
-
-        {{-- The eggs for sale: one per egg-only pet nobody has yet, each its
-             own colour, what's inside a secret. The first kid to buy one has
-             it — it's gone for everybody. One egg at a time, so while theirs
-             is out the rest wait. --}}
-        @if ($eggsForSale->isNotEmpty())
-            @php $short = App\Models\PetEgg::PRICE - $profile->bonus_tickets; @endphp
-            <div class="flex flex-col gap-[9px] rounded-[18px] border p-[13px]" style="border-color: #3a2360; background: #120a22" data-eggs-for-sale>
-                <div class="flex flex-wrap items-baseline justify-between gap-[8px]">
-                    <p class="font-baloo text-[16px] font-extrabold">Surprise eggs</p>
-                    <p class="text-[11px] text-fq-text-4">
-                        @if ($egg)
-                            Hatch yours first — then pick another.
-                        @else
-                            {{ App\Models\PetEgg::PRICE }} ✦ each. Crack one with {{ App\Models\PetEgg::CRACKS_TO_HATCH }} chores — it hatches into a pet that's never been in the shop.
-                        @endif
-                    </p>
-                </div>
-
-                <div class="grid grid-cols-3 gap-[8px] sm:grid-cols-4 md:grid-cols-6">
-                    @foreach ($eggsForSale as $inside)
-                        @php $hue = App\Models\PetEgg::hueFor($inside->id); @endphp
-                        <button
-                            type="button"
-                            wire:key="egg-for-sale-{{ $inside->id }}"
-                            @if (! $egg && $short <= 0)
-                                wire:click="buyEgg({{ $inside->id }})"
-                                wire:confirm="Spend {{ App\Models\PetEgg::PRICE }} tickets on the {{ mb_strtolower(App\Models\PetEgg::colourName($hue)) }} egg?"
-                            @endif
-                            @disabled($egg || $short > 0)
-                            class="flex flex-col items-center gap-[4px] rounded-[12px] border p-[8px] disabled:opacity-50"
-                            style="border-color: hsl({{ $hue }} 100% 72% / .35); background: linear-gradient(170deg, hsl({{ $hue }} 45% 13%), #0b0616)"
-                            data-egg-colour="{{ mb_strtolower(App\Models\PetEgg::colourName($hue)) }}"
-                        >
-                            <img x-data :src="window.fqEggSvg?.(0, {{ $hue }})" alt="" class="h-[52px] w-[52px]">
-                            <span class="font-mono-fq text-[8px] tracking-[0.1em] uppercase" style="color: hsl({{ $hue }} 100% 72%)">{{ App\Models\PetEgg::colourName($hue) }}</span>
-                        </button>
-                    @endforeach
-                </div>
-
-                @if (! $egg && $short > 0)
-                    <p class="text-[11px] text-fq-text-4" data-egg-short>{{ $short }} more {{ Str::plural('ticket', $short) }} and you can pick one.</p>
-                @endif
-
-                @if ($eggNote)
-                    <p class="text-[11.5px] text-fq-danger" data-egg-note>{{ $eggNote }}</p>
-                @endif
-            </div>
-        @endif
-
-        {{-- The pet that's out: how grown up it is, a snack, and the way back to
-             a baby. Growing is the kid's chores; feeding is only play, and is
-             done entirely by the pet layer — see feed() in pets.js. --}}
-        @if ($petOut)
-            @php
-                $stageNow = $petOut['stage'];
-                $nextStage = $stageNow->next();
-                $span = $nextStage ? $nextStage->startsAt() - $stageNow->startsAt() : 1;
-                $along = $nextStage ? ($petOut['growth'] - $stageNow->startsAt()) / $span : 1;
-            @endphp
-
-            <div wire:key="pet-out-{{ $petOut['item']->id }}" class="flex flex-wrap items-center gap-[13px] rounded-[18px] border border-fq-line-2 bg-fq-panel p-[13px]" data-pet-out>
-                <span class="relative grid h-[64px] w-[64px] shrink-0 place-items-end overflow-hidden rounded-[14px] bg-fq-bg">
-                    <span class="relative block" style="width: {{ round(64 * $stageNow->pixels() / App\Enums\PetStage::Adult->pixels()) }}px; height: {{ round(64 * $stageNow->pixels() / App\Enums\PetStage::Adult->pixels()) }}px; margin: 0 auto">
-                        <x-cosmetic.art :item="$petOut['item']" :stage="$stageNow" mode="fill" class="absolute inset-0" />
-                    </span>
-                </span>
-
-                <div class="min-w-[150px] flex-1">
-                    <p class="font-mono-fq text-[8.5px] tracking-[0.16em] text-fq-text-4 uppercase">{{ $stageNow->label() }}</p>
-                    <p class="mt-[2px] font-baloo text-[17px] leading-tight font-extrabold">{{ $petOut['item']->name }}</p>
-
-                    <div class="mt-[7px] h-[7px] overflow-hidden rounded-full bg-fq-track">
-                        <div class="h-full rounded-full" style="width: {{ round($along * 100) }}%; background: linear-gradient(90deg,#54e8d0,#7dffb0)"></div>
-                    </div>
-
-                    <p class="mt-[5px] text-[11px] text-fq-text-4">
-                        @if ($petOut['toGo'] === null)
-                            All grown up.
-                        @else
-                            {{ $petOut['toGo'] }} more {{ Str::plural('chore', $petOut['toGo']) }} and it grows up{{ $nextStage === App\Enums\PetStage::Adult ? ' all the way' : '' }}.
-                        @endif
-                    </p>
-                    <p class="mt-[3px] text-[11px] text-fq-text-4"><i class="fa-solid fa-hand-pointer mr-[4px] text-fq-green"></i>Hungry? Tap anywhere empty on any page and a snack drops right there.</p>
-                </div>
-
-                <div class="flex shrink-0 flex-col gap-[6px]">
-                    <button
-                        type="button"
-                        x-on:click="window.dispatchEvent(new CustomEvent('fq-pet-feed'))"
-                        class="rounded-[10px] px-[14px] py-[8px] font-baloo text-[14px] font-extrabold text-fq-ink"
-                        style="background: linear-gradient(150deg,#b8ffd9,#54e8d0)"
-                    ><i class="fa-solid fa-drumstick-bite mr-[5px] text-[12px]"></i>Feed</button>
-
-                    @if ($petOut['growth'] > 0)
-                        <button
-                            type="button"
-                            wire:click="raiseAgain({{ $petOut['item']->id }})"
-                            wire:confirm="Make {{ $petOut['item']->name }} a baby again? It will grow back up with your chores."
-                            class="rounded-[8px] border border-fq-line-2 px-[9px] py-[5px] font-mono-fq text-[8.5px] tracking-[0.08em] text-fq-text-4 uppercase"
-                        >Raise again from a baby</button>
-                    @endif
-                </div>
-            </div>
-        @endif
 
         <div class="grid grid-cols-3 gap-[7px] sm:grid-cols-4 md:grid-cols-5">
             @foreach ($shelf as $item)
@@ -738,6 +540,11 @@ new class extends Component
                 >
                     <span class="relative aspect-square w-full overflow-hidden rounded-[10px] bg-fq-bg">
                         <x-cosmetic.art :item="$item" :stage="$petStage" :label="mb_strtoupper($profile->name)" class="absolute inset-0" />
+
+                        {{-- A pet's tier, top right: seen before it is bought. --}}
+                        @if ($item->isSheet() && $item->rarity() !== App\Enums\PetRarity::Common)
+                            <span class="absolute top-[4px] right-[4px] z-[2] rounded-full border px-[5px] py-[1px] font-mono-fq text-[6.5px] tracking-[0.08em] uppercase" style="background: rgba(10,5,18,.82); border-color: {{ $item->rarity()->color() }}; color: {{ $item->rarity()->color() }}" data-tile-tier="{{ $item->rarity()->value }}">{{ $item->rarity()->label() }}</span>
+                        @endif
 
                         @if ($petStage)
                             <span class="absolute right-[4px] bottom-[4px] z-[2] rounded-full border px-[5px] py-[1px] font-mono-fq text-[6.5px] tracking-[0.08em] uppercase" style="background: rgba(10,5,18,.82); border-color: #7dffb0; color: #7dffb0">{{ $petStage->label() }}</span>

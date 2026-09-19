@@ -79,6 +79,8 @@ The board also **moves on the claim, not the approval** — a chore locks for th
 | 🏅 | **Badges** | 13 achievements on their own tab, each with what unlocks it and the XP it pays. 5 are secret — name and description stay hidden until earned. |
 | 🎟️ | **Bonus Shop** | Levelling up, earning badges and beating monsters mint **tickets**. Spend them on wheel respins, quest charms, streak repairs, Mystery Chore hints, OP spins, or the right to name a monster. Spending never costs XP — your level is permanent. |
 | 👹 | **The Arena** | The family goal, standing as a monster. Every chore you finish is damage; beat it and the household gets what it was guarding. |
+| 🐾 | **Pets** | Bought with tickets or hatched from a surprise egg, a pet runs around your pages and **grows up with your chores**. Every pet helps in the arcade with its **style**; rarer pets also have a **knack** — a trick like sniffing out the Mystery Chore or batting the Bonus Wheel one chore over. Feed it a **Power Treat** for more. |
+| 🕹️ | **Arcade** | Little games with a weekly board per game. Every run pays **arcade tokens**, capped each day — and every chore you claim raises the cap. Tokens buy pet gear and candy at the prize counter, or swap for tickets. |
 
 ### For parents
 
@@ -187,6 +189,55 @@ Bonuses hit the ledger the moment they're earned, but the *reveal* waits for the
 <br>
 
 One spin per kid per day. The result is genuinely random. The *wheel itself* is not: above 10 eligible chores, the displayed subset is chosen by a deterministic per-kid, per-day hash, and always force-includes whatever chore was actually landed on. Without that, the wheel would silently show a different set of options on every page load — including forgetting the chore it just landed on.
+
+</details>
+
+<details>
+<summary><b>Pets — raised by chores, helpful everywhere</b></summary>
+
+<br>
+
+**Getting one.** Pets for sale are on the kid's **Pets** page, bought with tickets. **Surprise eggs** are pets a parent marked "egg only": the shell's colour says nothing about what's inside, but its **pattern shows the tier** — plain, speckled, striped or gold — and the price follows it (15 / 20 / 30 / 40 tickets). Five approved chores crack it open. Each egg pet exists once per household: the first kid to buy it has it.
+
+**Growing up.** Every approved chore grows the pet that's out by one: **baby** until 10, **young** until 30, then **grown up**. Growth lives on the kid's own copy, so swapping pets never resets anything, and a traded pet arrives as grown as it left. The only way back to a baby is the kid asking for it.
+
+**Rarity, style and knack.** A parent sets all three when uploading a pet, and can change them later from its row in the console.
+
+- **Style** — Steady, Big, Quick or Lucky — is how the pet helps in the arcade. **Every pet has one, at every age, and styles are the same strength at every rarity**, so a Legendary never wins a game a Common would have lost. Each game decides what each style does there (see *Adding an arcade game* below).
+- **Rarity** — Common, Rare, Epic, Legendary — decides whether a pet has a **knack**, and which. Commons have a style only.
+- **Knacks** by tier:
+
+| Tier | Knacks |
+|---|---|
+| Rare | Coin Sniffer (bonus tokens on new rungs) · Big Pockets (a bigger daily token cap) · Fetch (re-rolls a 2x wheel boost) · Sniffer (narrows the Mystery Chore to 5, or 3 grown — never gives it away) |
+| Epic | Paw Nudge (bats the wheel one chore over) · Second Look (spins again) · Lucky Tail (charges the week's first spin) · Good Luck Charm (a Quest Charm) · Digger (a free Lucky Block hit) |
+| Legendary | Guard Dog (saves a streak) · Night Owl (saves a bedtime run) · Sidekick (chores hit the monster harder) — *designed, not built yet* |
+
+A knack grows with the pet: a baby is still learning it, a young pet does it at **half strength** — usually a weaker version (a young Paw Nudge picks its own direction) — and a grown pet does it properly. Uses come back on a rolling window rather than resetting on a schedule, and are counted per kid, so two pets with the same knack don't double it. Grown-ups' pets have no knacks and no styles.
+
+**How a kid uses one.** Tapping the pet is still petting. When a knack can help on the page the kid is on, the pet hops onto the thing it acts on and a 🐾 bubble offers it; the same offer is a line on the page for anyone with reduced motion. Guard Dog, Night Owl and Lucky Tail go off by themselves.
+
+**Power Treats** are bought on the Pets page and fed to the pet on screen: one more use of its knack, on top of the free ones — or, for an always-on knack, double strength for the rest of the day. No limit, and each costs **one ticket less than the Bonus Shop perk the knack matches** (at the household's own price for it), so a pet with the knack is always the cheaper way.
+
+**The art.** A pet is one generated picture: all three ages on a 9×6, 3:2 sheet — eighteen poses each, including a two-step walk and play poses with empty paws that the app draws the toy into. The console's prompt asks for exactly that, cuts it apart, and lets you watch every age run about on your own screen before publishing. **New art** on an existing pet goes onto the same pet, so no kid ever loses one.
+
+</details>
+
+<details>
+<summary><b>Adding an arcade game — the checklist</b></summary>
+
+<br>
+
+Every ranked game has its own board, its own ladder and its own weekly prize — see `App\Enums\ArcadeGame`. Beyond the game itself, a new one needs:
+
+1. **A case on `ArcadeGame`**, with its label, unit, release date, board height and score ceiling, and its **milestone ladder** in `ArcadeService` (the game's JS keeps a copy, and `ArcadeMilestoneTest` holds the two together).
+2. **All four pet styles.** Add the game to `ArcadeGame::styleHelp()` with what Steady, Big, Quick and Lucky do in it, and make the game's own code do exactly that — the page hands the game the kid's pet style (`<your-game pet-style="…">`). Rules for picking them:
+   - Each of the four should be worth **about the same**, so no one pet owns the game, and which style suits a game best should differ from game to game.
+   - An effect that **changes the score belongs to that one game only**. Anything that works across every game pays tokens, never score.
+   - Styles work at every age and every rarity, for a kid's own pet — never a grown-up's.
+
+   `ArcadePetStyleTest` fails for a ranked game with no styles. Grand Tour and Penguin Launch are the only games still waiting for theirs.
+3. **A payout that ends the run** — the page posts the score when the game says it's over, and `TokenService` pays it.
 
 </details>
 

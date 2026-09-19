@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\CosmeticSlot;
 use App\Enums\CosmeticStock;
+use App\Enums\PetRarity;
 use App\Enums\PetStage;
 use App\Exceptions\CosmeticUnavailableException;
 use App\Models\Chore;
@@ -184,8 +185,7 @@ class PetGrowthTest extends TestCase
 
         Auth::guard('profile')->login($this->kid->fresh());
 
-        Volt::test('kid.locker')
-            ->call('pickSlot', 'pet')
+        Volt::test('kid.pets')
             ->assertSee('Grown up')
             ->assertSee('Raise again from a baby')
             ->call('raiseAgain', $tabby->id)
@@ -206,7 +206,7 @@ class PetGrowthTest extends TestCase
 
         Auth::guard('profile')->login($this->kid);
 
-        Volt::test('kid.locker')->call('raiseAgain', $tabby->id);
+        Volt::test('kid.pets')->call('raiseAgain', $tabby->id);
 
         $this->assertSame(5, $this->growthOf($sibling, $tabby));
     }
@@ -219,8 +219,7 @@ class PetGrowthTest extends TestCase
 
         Auth::guard('profile')->login($this->kid->fresh());
 
-        Volt::test('kid.locker')
-            ->call('pickSlot', 'pet')
+        Volt::test('kid.pets')
             ->assertSee('data-pet-out', false)
             ->assertSee('fq-pet-feed', false)
             // And a tap on anything empty on any of their pages feeds it too.
@@ -801,7 +800,8 @@ class PetGrowthTest extends TestCase
         $egg = $pets->buyEgg($this->kid, $red);
 
         $this->assertSame($red->id, $egg->cosmetic_id);
-        $this->assertSame(100 - PetEgg::PRICE, $this->kid->fresh()->bonus_tickets);
+        // A common egg: the cheapest tier.
+        $this->assertSame(100 - PetRarity::Common->eggPrice(), $this->kid->fresh()->bonus_tickets);
         app()->forgetScopedInstances();
         $this->assertSame([$blue->id], app(PetService::class)->eggsForSale($this->household)->pluck('id')->all());
 
@@ -871,7 +871,7 @@ class PetGrowthTest extends TestCase
 
         Auth::guard('profile')->login($this->kid->fresh());
         Volt::test('kid.bonus')->assertSee('egg="2"', false)->assertSee('egg-hue="'.$hue.'"', false)->assertDontSee('sheet="', false);
-        Volt::test('kid.locker')->call('pickSlot', 'pet')->assertSee('data-egg-out', false)->assertSee('3 more chores and it hatches');
+        Volt::test('kid.pets')->assertSee('data-egg-out', false)->assertSee('3 more chores and it hatches');
 
         $this->approveChores($this->kid, 3);
         Auth::guard('profile')->login($this->kid->fresh());
@@ -915,8 +915,7 @@ class PetGrowthTest extends TestCase
         $this->kid->update(['bonus_tickets' => 11]);
         Auth::guard('profile')->login($this->kid->fresh());
 
-        Volt::test('kid.locker')
-            ->call('pickSlot', 'pet')
+        Volt::test('kid.pets')
             ->assertSee('data-egg-short', false)
             ->assertSee('4 more tickets')
             ->call('buyEgg', $surprise->id)
@@ -932,8 +931,7 @@ class PetGrowthTest extends TestCase
         $this->pet('Bluey', ['stock' => 'egg']);
         Auth::guard('profile')->login($this->kid);
 
-        Volt::test('kid.locker')
-            ->call('pickSlot', 'pet')
+        Volt::test('kid.pets')
             ->assertSee('data-eggs-for-sale', false)
             ->assertSee('data-egg-colour="'.mb_strtolower(PetEgg::colourName(PetEgg::hueFor($red->id))).'"', false)
             // Nothing gives away what's inside.

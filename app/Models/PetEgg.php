@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\PetRarity;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -13,8 +14,21 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class PetEgg extends Model
 {
-    /** What an egg costs, in tickets. */
-    public const PRICE = 15;
+    /**
+     * What the egg holding this pet costs, in tickets: its tier's price.
+     * The tier shows on the shell, so a rarer egg is a known, dearer pet —
+     * not a luckier draw. See PetRarity::eggPrice().
+     */
+    public static function priceFor(Cosmetic $pet): int
+    {
+        return $pet->rarity()->eggPrice();
+    }
+
+    /** The shell pattern of the egg holding this pet — its tier, on the outside. */
+    public static function patternFor(?Cosmetic $pet): string
+    {
+        return ($pet?->rarity() ?? PetRarity::Common)->eggPattern();
+    }
 
     /** Approved chores it takes to hatch — one crack each. */
     public const CRACKS_TO_HATCH = 5;

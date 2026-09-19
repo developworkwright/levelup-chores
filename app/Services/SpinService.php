@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Enums\PetKnack;
+use App\Enums\PetStage;
 use App\Models\Chore;
 use App\Models\Profile;
 use App\Models\Spin;
@@ -196,8 +198,15 @@ class SpinService
 
         $charged = $this->isCharged($profile);
 
+        // A pet's Lucky Tail charges the spin by itself — the week's first,
+        // and only when the kid has not charged it already, so it never lands
+        // on top of a ticket they spent. Grown, the full OP table; young, a
+        // better shot at 3x. See KnackService::luckyTailReady().
+        $knacks = app(KnackService::class);
+        $tail = $charged ? null : $knacks->luckyTailReady($profile);
+
         $chore = $eligible->random();
-        $multiplier = $this->rollMultiplier($charged);
+        $multiplier = $this->rollMultiplier($charged || $tail === PetStage::Adult, $tail === PetStage::Young);
 
         // Spent by the spin, not by the result. What the wheel landed on is
         // already decided by the time the charge clears, so there is nothing
@@ -211,8 +220,12 @@ class SpinService
             'spin_date' => HouseholdClock::for($profile->household)->today(),
             'chore_id' => $chore->id,
             'multiplier' => $multiplier,
-            'was_op' => $charged,
+            'was_op' => $charged || $tail === PetStage::Adult,
         ]);
+
+        if ($tail !== null) {
+            $knacks->use($profile, PetKnack::LuckyTail, ['spin_id' => $spin->id]);
+        }
 
         // The wheel badges would otherwise wait for the next chore approval to
         // notice a spin that already happened.
@@ -222,13 +235,34 @@ class SpinService
     }
 
     /**
+     * Rolls today's boost again, on the same chore — what a pet's Fetch does
+     * with a 2x. The plain table: an OP charge was spent by the first roll,
+     * and a fetch is another go at the boost, not another charge. It can come
+     * back 2x again, which is part of it.
+     *
+     * @return int the new multiplier
+     */
+    public function rerollBoost(Spin $spin): int
+    {
+        $spin->update(['multiplier' => $this->rollMultiplier(false)]);
+
+        return $spin->multiplier;
+    }
+
+    /**
      * 2x, 3x or 4x — one roll read against whichever table the spin was paid
      * for. 4x exists only on the charged table, which is the whole of what the
      * ticket buys.
      */
-    private function rollMultiplier(bool $charged): int
+    private function rollMultiplier(bool $charged, bool $lucky = false): int
     {
         $roll = mt_rand() / mt_getrandmax();
+
+        // A young pet's Lucky Tail: the charged table's chance of a 3x or
+        // better, all of it as 3x — no 4x until it is grown.
+        if ($lucky && ! $charged) {
+            return $roll < self::OP_QUAD_CHANCE + self::OP_TRIPLE_CHANCE ? 3 : 2;
+        }
 
         if (! $charged) {
             return $roll < self::TRIPLE_CHANCE ? 3 : 2;
@@ -239,6 +273,15 @@ class SpinService
             $roll < self::OP_QUAD_CHANCE + self::OP_TRIPLE_CHANCE => 3,
             default => 2,
         };
+    }
+
+    /**
+     * Moves today's boost to another chore on the wheel, keeping what it
+     * rolled — a pet's Paw Nudge. See KnackService::nudge().
+     */
+    public function moveBoostTo(Spin $spin, Chore $chore): void
+    {
+        $spin->update(['chore_id' => $chore->id]);
     }
 
     public function multiplierFor(Profile $profile, Chore $chore): int

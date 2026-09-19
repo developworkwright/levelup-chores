@@ -364,6 +364,11 @@ new class extends Component
             ? app(CosmeticService::class)->wornIn($player, CosmeticSlot::Cabinet)
             : null;
 
+        // The kid's pet's style, and what it does in this game — only where
+        // this game has been given one. The game's own code reads the style.
+        $petStyle = app(PetService::class)->styleFor($player);
+        $styleHelp = $petStyle ? $this->game->styleHelp($petStyle) : null;
+
         return [
             ...$this->tokenData($player),
             'arcade' => $arcade,
@@ -381,6 +386,9 @@ new class extends Component
             // sibling's screen. The free house cabinet is the machine as it
             // already looks, so it draws nothing extra.
             'cabinet' => $cabinet?->isFree() === false ? $cabinet : null,
+            'petStyle' => $styleHelp ? $petStyle : null,
+            'styleHelp' => $styleHelp,
+            'petName' => $styleHelp ? app(CosmeticService::class)->wornIn($player, CosmeticSlot::Pet)?->name : null,
             'standings' => $standings,
             'myRank' => $myRank === false ? null : $myRank,
             // The All-time block, and the three queries behind it. Skipped on a
@@ -502,6 +510,9 @@ new class extends Component
                     <span class="block h-full" style="width: {{ $meter['cap'] > 0 ? min(100, (int) round($meter['today'] / $meter['cap'] * 100)) : 100 }}%; background: linear-gradient(90deg, var(--fq-gold), var(--fq-lime))"></span>
                 </span>
                 <span class="font-mono-fq text-[9.5px] text-fq-ticket-label">{{ $meter['today'] }}/{{ $meter['cap'] }} TODAY</span>
+                @if (($meter['pockets'] ?? 0) > 0)
+                    <span class="font-mono-fq text-[9px] text-fq-green" title="Your pet's Big Pockets">🐾 +{{ $meter['pockets'] }}</span>
+                @endif
             </div>
         @endif
 
@@ -806,7 +817,7 @@ new class extends Component
                              frame. --}}
                         <div
                             wire:ignore
-                            x-data="fqStacker(@js($milestones))"
+                            x-data="fqStacker(@js($milestones), @js($petStyle?->value))"
                             x-on:pointerdown.prevent="$el.focus(); tap()"
                             x-on:keydown.space.prevent="tap()"
                             x-on:keydown.enter.prevent="tap()"
@@ -932,7 +943,7 @@ new class extends Component
                                 class="mb-2 text-right font-mono-fq text-[9px] tracking-[0.14em] text-fq-lime uppercase"
                             ><span x-text="score"></span> lanes &middot; on the board &#10003;</p>
 
-                            <fart-dash aria-label="Windy Walkies — tap or press space to hop"></fart-dash>
+                            <fart-dash @if ($petStyle) pet-style="{{ $petStyle->value }}" @endif aria-label="Windy Walkies — tap or press space to hop"></fart-dash>
                         </div>
                     @elseif ($game === ArcadeGame::GrandTour)
                         {{-- Grand Tour, the same arrangement as the walk: the
@@ -1038,6 +1049,16 @@ new class extends Component
                             @else
                                 Tap, space or W to drop each floor. Whatever hangs
                                 over the edge falls off &mdash; so line it up.
+                            @endif
+
+                            {{-- What the kid's pet does in this game — its style.
+                                 See ArcadeGame::styleHelp(). --}}
+                            @if ($styleHelp)
+                                <span class="mt-[4px] block text-fq-text-3" data-pet-style-help="{{ $petStyle->value }}">
+                                    <i class="fa-solid fa-paw mr-[4px] text-fq-green"></i><strong class="text-fq-green">{{ $petName }}</strong>
+                                    <span class="font-mono-fq text-[9px] tracking-[0.1em] text-fq-text-5 uppercase">{{ $petStyle->label() }}</span>
+                                    {{ $styleHelp }}
+                                </span>
                             @endif
                         </span>
                     </div>

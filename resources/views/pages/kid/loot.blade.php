@@ -115,6 +115,24 @@ new class extends Component
         }
     }
 
+    /**
+     * The pet's Digger: a free hit, with the same reveal and the same
+     * grown-up queue as a bought one. See KnackService::dig().
+     */
+    public function useDigger(): void
+    {
+        $hit = app(App\Services\KnackService::class)->dig($this->profile);
+
+        if ($hit === null) {
+            $this->flashMessage = 'Nothing to dig up right now.';
+
+            return;
+        }
+
+        $this->luckyHitId = $hit->id;
+        $this->flashMessage = null;
+    }
+
     public function dismissLuckyBlock(): void
     {
         $this->luckyHitId = null;
@@ -195,6 +213,10 @@ new class extends Component
             // ticket count, the journal boolean and the pool — everything else
             // on that card is fixed copy.
             'luckyPool' => $lucky->poolFor($this->profile),
+            // A pet with Digger, and something in the block to dig up.
+            'digger' => $this->luckyHitId === null && app(App\Services\KnackService::class)->diggable($this->profile)
+                ? app(App\Services\KnackService::class)->stateFor($this->profile)
+                : null,
             'luckyHit' => $this->luckyHitId === null
                 ? null
                 : LuckyHit::where('profile_id', $this->profile->id)
@@ -303,6 +325,23 @@ new class extends Component
         :journal-done="$luckyJournalDone"
         :hit="$luckyHit"
     />
+
+    {{-- Digger: the pet digs the block a free hit. --}}
+    @if ($digger)
+        <x-knack-offer
+            wire:key="knack-digger"
+            :knack="App\Enums\PetKnack::Digger"
+            :pet="$digger['pet']->name"
+            offer="can dig you a free hit on the Lucky Block."
+            question="Let {{ $digger['pet']->name }} dig at the Lucky Block? It's free!"
+            yes="Dig!"
+            action="useDigger"
+            :left="$digger['left']"
+            :uses="$digger['uses']"
+            :act="[['sniff', 0.6], ['swipe', 0.4], ['swipe', 0.4], ['happy', 1]]"
+            class="mt-3"
+        />
+    @endif
 
     @if ($saving)
         @php $savingAccent = $saving->color_tag->cssVar(); @endphp

@@ -35,6 +35,10 @@
         <div class="flex items-center gap-[10px]">
             <fq-prize kind="token" class="h-[26px] w-[26px] shrink-0"></fq-prize>
             <span class="flex-1 font-baloo text-[18px] font-extrabold text-fq-text">{{ $meter['room'] }} more today</span>
+            {{-- A Big Pockets pet's share of the cap, said where the cap is. --}}
+            @if (($meter['pockets'] ?? 0) > 0)
+                <span class="rounded-full border border-fq-green px-[7px] py-[1px] font-mono-fq text-[9px] text-fq-green" data-big-pockets title="Your pet's Big Pockets">🐾 +{{ $meter['pockets'] }}</span>
+            @endif
             <span class="font-mono-fq text-[12px] text-fq-lime">{{ $meter['today'] }}<span class="text-fq-text-5">/{{ $meter['cap'] }}</span></span>
         </div>
 

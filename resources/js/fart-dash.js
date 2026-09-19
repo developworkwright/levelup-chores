@@ -46,6 +46,16 @@ const SUPER_LANES = 3;
 const BLAST_LANES = 4;
 const MAX_CHARGE = 3;
 
+/*
+ * A pet's style on the walk — see BeanDash. How far a Steady pet's calm
+ * reaches and how much it slows things; and how much harder a Big pet's blast
+ * shoves, and how much slower the shove wears off (the normal rate is 3.4).
+ */
+const STEADY_LANES = 28;
+const STEADY_SLOW = 0.15;
+const BIG_SHOVE = 1.5;
+const BIG_EASE = 2.2;
+
 /** How long a biome lasts before the scenery changes. */
 const BIOME_LANES = 14;
 
@@ -313,7 +323,17 @@ const Sfx = {
  * ------------------------------------------------------------------ */
 
 class BeanDash {
-    constructor(canvas) {
+    /*
+     * `style` is the kid's pet's style, or null — App\Enums\PetStyle, and
+     * ArcadeGame::styleHelp() for what the kid is told each one does here:
+     *
+     *   steady  traffic and rafts STEADY_SLOW slower for the first STEADY_LANES
+     *   big     a bigger blast: shoves harder, for longer, a lane further
+     *   quick   a super hop goes a lane further, and so does its blast
+     *   lucky   one spare dog: the first death puts it back on a safe lane
+     */
+    constructor(canvas, style) {
+        this.style = style || null;
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
         this.scale = 1;
@@ -370,6 +390,7 @@ class BeanDash {
         this.score = 0;
         this.maxLane = 0;
         this.charge = 0;
+        this.spare = this.style === 'lucky' ? 1 : 0;
         this.milestone = 0;
         this.cam = 0;
         this.shake = 0;
@@ -458,6 +479,11 @@ class BeanDash {
             // it becomes a reflex test rather than a game.
             + Math.min(46, this.maxLane * 0.7);
 
+        // A Steady pet keeps the first stretch calm.
+        if (this.style === 'steady' && n < STEADY_LANES) {
+            built.speed *= 1 - STEADY_SLOW;
+        }
+
         const count = fast ? 2 + Math.floor(rnd(n * 6.1) * 2) : 2 + Math.floor(rnd(n * 6.1) * 2);
         const gap = (W + 190) / count;
 
@@ -540,7 +566,7 @@ class BeanDash {
         }
 
         const superHop = this.charge > 0;
-        const lane = dog.lane + (superHop ? SUPER_LANES : 1);
+        const lane = dog.lane + (superHop ? this.superLanes() : 1);
 
         if (superHop) {
             this.charge -= 1;
@@ -585,19 +611,22 @@ class BeanDash {
      * still a car. It buys a gap you have to use.
      */
     blast(lane, x) {
-        for (let n = Math.max(0, lane - BLAST_LANES); n <= lane + BLAST_LANES; n++) {
+        const reach = this.superLanes() - SUPER_LANES + BLAST_LANES + (this.style === 'big' ? 1 : 0);
+        const shove = this.style === 'big' ? BIG_SHOVE : 1;
+
+        for (let n = Math.max(0, lane - reach); n <= lane + reach; n++) {
             const row = this.lanes.get(n);
 
             if (!row || row.kind !== 'road') {
                 continue;
             }
 
-            const near = 1 - Math.min(1, Math.abs(n - lane) / (BLAST_LANES + 1));
+            const near = 1 - Math.min(1, Math.abs(n - lane) / (reach + 1));
 
             for (const item of row.items) {
                 const away = item.x + item.w / 2 < x ? -1 : 1;
 
-                item.push = away * (150 + near * 210);
+                item.push = away * (150 + near * 210) * shove;
             }
         }
 
@@ -691,7 +720,7 @@ class BeanDash {
                 item.x += (row.dir * row.speed + item.push) * dt;
 
                 if (item.push !== 0) {
-                    item.push -= item.push * Math.min(1, dt * 3.4);
+                    item.push -= item.push * Math.min(1, dt * (this.style === 'big' ? BIG_EASE : 3.4));
 
                     if (Math.abs(item.push) < 3) {
                         item.push = 0;
@@ -855,7 +884,44 @@ class BeanDash {
         }
     }
 
+    /** Lanes a super hop covers: one more with a Quick pet. */
+    superLanes() {
+        return SUPER_LANES + (this.style === 'quick' ? 1 : 0);
+    }
+
+    /**
+     * The spare dog: back on the nearest safe lane at or behind where it was
+     * got, in the middle, with the run and its score carrying on.
+     */
+    rescue() {
+        const dog = this.dog;
+        let lane = Math.max(0, Math.round(dog.lane));
+
+        while (lane > 0 && this.lane(lane).kind !== 'safe') {
+            lane -= 1;
+        }
+
+        dog.lane = lane;
+        dog.x = W / 2;
+        dog.from = { lane, x: W / 2 };
+        dog.to = { lane, x: W / 2 };
+        dog.hop = 0;
+        dog.super = false;
+        this.shake = 8;
+        this.puff(lane, W / 2, true);
+        Sfx.blip(660, 0.22, 0.07, 1320);
+        this.effects.push({ kind: 'text', lane, x: W / 2, t: 0, life: 1.3, text: '🐾 SPARE DOG!' });
+    }
+
     die(how) {
+        // A Lucky pet is the spare dog.
+        if (this.spare > 0) {
+            this.spare -= 1;
+            this.rescue();
+
+            return;
+        }
+
         this.phase = 'over';
         this.dog.dead = { how, t: 0 };
         this.shake = 14;
@@ -1009,7 +1075,7 @@ class BeanDash {
 
         // The landing marker for a charged hop. Same job as the tower's aim
         // ticks: it turns a super fart from a gamble into a decision.
-        if (this.charge > 0 && this.phase === 'playing' && n === Math.round(this.dog.lane) + SUPER_LANES) {
+        if (this.charge > 0 && this.phase === 'playing' && n === Math.round(this.dog.lane) + this.superLanes()) {
             ctx.strokeStyle = 'rgba(168,240,138,0.5)';
             ctx.lineWidth = 2;
             ctx.setLineDash([6, 5]);
@@ -1602,7 +1668,8 @@ class FartDashElement extends HTMLElement {
         wrap.appendChild(this.buildPad());
         this.appendChild(wrap);
 
-        this.game = new BeanDash(canvas);
+        // The kid's pet's style, set by the page — see the arcade view.
+        this.game = new BeanDash(canvas, this.getAttribute('pet-style'));
         this.game.mount();
 
         this.wire(canvas);

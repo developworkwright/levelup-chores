@@ -108,6 +108,16 @@ const BED_LIFT = 16;
  */
 const TOY_SPAN = 0.3;
 
+/** How long a pet glows after eating a Power Treat, in seconds. */
+const TREAT_GLOW = 2.6;
+
+/** A Power Treat: a glowing biscuit, drawn here rather than bought as a prize. */
+const TREAT_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30">'
+    + '<circle cx="15" cy="16" r="13" fill="#7dffb0" opacity=".28"/>'
+    + '<path d="M7 12 C5 8 10 6 12 9 L18 9 C20 6 25 8 23 12 C26 14 26 18 23 19 C25 23 20 25 18 22 L12 22 C10 25 5 23 7 19 C4 18 4 14 7 12 Z" fill="#ffd84a" stroke="#6b4a0a" stroke-width="1.4"/>'
+    + '<path d="M13 12 L17 12 L15.6 15 L18 15 L13.2 20 L14.4 16.4 L12 16.4 Z" fill="#fff6b0" stroke="#6b4a0a" stroke-width=".8"/>'
+    + '</svg>';
+
 /** How often an idle pet with a bed goes for a nap, per decision. */
 const NAP_CHANCE = 0.12;
 
@@ -146,19 +156,56 @@ const EGG_CRACKS = [
  * Every egg in a shop is its own colour — App\Models\PetEgg::hueFor() — so
  * the shell, its spots and the glow of its cracks all come off one hue. The
  * default is the purple the first egg was.
+ *
+ * The pattern is the pet's tier, on the outside (App\Enums\PetRarity::
+ * eggPattern()): plain spots for a Common, bright speckles for a Rare, zigzag
+ * bands for an Epic, and gold flecks and a gold rim for a Legendary. The
+ * colour says nothing about what is inside; the pattern says how rare it is.
  */
-function eggSvg(cracks, hue) {
+const EGG_SHELL = 'M50 20 C71 20 83 46 83 66 C83 85 68 96 50 96 C32 96 17 85 17 66 C17 46 29 20 50 20 Z';
+
+function eggPatternSvg(pattern, h) {
+    if (pattern === 'speckled') {
+        const speck = 'hsl(' + h + ',100%,80%)';
+
+        return [[34, 40], [58, 34], [70, 52], [28, 62], [48, 58], [62, 80], [38, 84], [74, 70], [52, 44], [42, 70]]
+            .map(([x, y]) => '<circle cx="' + x + '" cy="' + y + '" r="1.8" fill="' + speck + '"/>').join('');
+    }
+
+    if (pattern === 'striped') {
+        const band = 'hsl(' + h + ',90%,66%)';
+
+        return '<g clip-path="url(#shell)">'
+            + '<path d="M10 52 L22 46 L34 52 L46 46 L58 52 L70 46 L82 52 L94 46" stroke="' + band + '" stroke-width="4" fill="none" stroke-linejoin="round"/>'
+            + '<path d="M10 74 L22 68 L34 74 L46 68 L58 74 L70 68 L82 74 L94 68" stroke="' + band + '" stroke-width="4" fill="none" stroke-linejoin="round"/>'
+            + '</g>';
+    }
+
+    if (pattern === 'gold') {
+        return [[36, 42, 2.4], [60, 36, 1.8], [70, 58, 2.6], [30, 66, 2], [52, 54, 1.6], [58, 82, 2.2], [40, 80, 1.6], [66, 44, 1.4]]
+            .map(([x, y, r]) => '<path d="M' + x + ' ' + (y - r * 1.6) + ' L' + (x + r * 0.6) + ' ' + y + ' L' + x + ' ' + (y + r * 1.6) + ' L' + (x - r * 0.6) + ' ' + y + ' Z" fill="#ffd84a"/>')
+            .join('');
+    }
+
+    return '';
+}
+
+function eggSvg(cracks, hue, pattern) {
     const h = Number.isFinite(hue) ? hue : 275;
     const shown = EGG_CRACKS.slice(0, Math.max(0, Math.min(EGG_CRACKS.length, cracks)));
     const light = 'hsl(' + h + ',100%,72%)';
     const glow = cracks >= EGG_CRACKS.length ? '<ellipse cx="50" cy="60" rx="24" ry="30" fill="' + light + '" opacity=".2"/>' : '';
     const spot = 'hsl(' + h + ',42%,32%)';
+    const gold = pattern === 'gold';
 
     return 'data:image/svg+xml,' + encodeURIComponent(
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
-        + '<path d="M50 20 C71 20 83 46 83 66 C83 85 68 96 50 96 C32 96 17 85 17 66 C17 46 29 20 50 20 Z" fill="hsl(' + h + ',48%,19%)" stroke="#0e0719" stroke-width="3"/>'
+        + '<defs><clipPath id="shell"><path d="' + EGG_SHELL + '"/></clipPath></defs>'
+        + (gold ? '<path d="' + EGG_SHELL + '" fill="none" stroke="#ffd84a" stroke-width="9" opacity=".25"/>' : '')
+        + '<path d="' + EGG_SHELL + '" fill="hsl(' + h + ',48%,19%)" stroke="' + (gold ? '#e8a912' : '#0e0719') + '" stroke-width="3"/>'
         + '<ellipse cx="38" cy="46" rx="6" ry="4" fill="' + spot + '"/><ellipse cx="62" cy="70" rx="7" ry="5" fill="' + spot + '"/>'
         + '<ellipse cx="44" cy="80" rx="4" ry="3" fill="' + spot + '"/><ellipse cx="66" cy="42" rx="3" ry="2.5" fill="' + spot + '"/>'
+        + eggPatternSvg(pattern, h)
         + '<path d="M36 32 C40 26 46 24 50 24" stroke="hsl(' + h + ',38%,48%)" stroke-width="3" fill="none" stroke-linecap="round"/>'
         + glow
         + shown.map((d) => '<path d="' + d + '" stroke="' + light + '" stroke-width="3.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>').join('')
@@ -565,6 +612,7 @@ class Pet {
 
         // Its own clock, for the gait — see FqPets.paint().
         this.clock = (this.clock ?? 0) + dt;
+        this.glow = Math.max(0, (this.glow ?? 0) - dt);
 
         if (this.held) {
             this.swing(dt);
@@ -646,7 +694,17 @@ class Pet {
 
             if (this.vy > 0 && this.y >= this.target) {
                 this.y = this.target;
-                this.settle();
+
+                // Onto a knack's offer: it is not a card the page knows as
+                // one, so the spot itself is the perch.
+                if (this.offerSpot && Math.abs(this.target - this.offerSpot.top) < 2) {
+                    this.perch = { left: this.offerSpot.left, right: this.offerSpot.right, top: this.offerSpot.top };
+                    this.offerPerch = true;
+                    this.offerSpot = null;
+                } else {
+                    this.offerSpot = null;
+                    this.settle();
+                }
                 this.vx = 0;
                 this.act('idle', 'idle', random(0.6, 1.8));
             }
@@ -739,9 +797,17 @@ class Pet {
             }
 
             if (this.think <= 0) {
+                // A Power Treat powers it up: a glow, and a happy hop.
+                const treat = world.snack?.treat;
+
                 world.finishSnack();
                 this.act('happy', 'happy', 1.2);
                 world.emit('fq-pet-fed');
+
+                if (treat) {
+                    this.glow = TREAT_GLOW;
+                    world.emit('fq-pet-powered');
+                }
             }
 
             return;
@@ -762,7 +828,20 @@ class Pet {
             return;
         }
 
-        if (['idle', 'happy', 'landed', 'playing', 'sitting', 'sniffing', 'surprised'].includes(this.state)) {
+        // Playing its part in a knack: one step after another.
+        if (this.state === 'acting') {
+            if (! this.perch && ! world.scrolling()) {
+                this.y = world.floor();
+            }
+
+            if (this.think <= 0) {
+                this.nextAct();
+            }
+
+            return;
+        }
+
+        if (['idle', 'happy', 'landed', 'playing', 'sitting', 'sniffing', 'surprised', 'offering'].includes(this.state)) {
             if (! this.perch && ! world.scrolling()) {
                 this.y = world.floor();
             }
@@ -785,6 +864,53 @@ class Pet {
         }
     }
 
+    /**
+     * Over to a knack's offer and sit on top of it, where its bubble shows —
+     * or, already there, keep sitting. The spot is the top edge of the offer
+     * on the page, stood on like a card (see the landing in step()).
+     */
+    goOffer(offer) {
+        const x = Math.min(Math.max(offer.left + 40, offer.left), offer.right - 40);
+        // Anywhere along its top will do: a hop lands where its arc comes
+        // down, which is near the aim rather than on it.
+        const there = this.offerPerch && this.perch && Math.abs(this.perch.top - offer.top) < 4
+            && this.x >= offer.left && this.x <= offer.right;
+
+        if (there) {
+            this.offering = offer;
+            this.act('offering', 'sit', 2);
+
+            return;
+        }
+
+        this.offering = null;
+        this.offerSpot = offer;
+        this.jumpTo = { x, y: offer.top };
+        this.hop();
+    }
+
+    /**
+     * Plays its part in a knack the kid said yes to — a list of [pose,
+     * seconds] steps, one after the other, before it goes back to its day.
+     */
+    perform(steps) {
+        this.acting = (steps ?? []).slice();
+        this.nextAct();
+    }
+
+    nextAct() {
+        const step = this.acting?.shift();
+
+        if (! step) {
+            this.acting = null;
+            this.act('happy', 'happy', 0.6);
+
+            return;
+        }
+
+        this.act('acting', step[0], step[1]);
+    }
+
     /** What to do next, when nothing is already happening. */
     decide() {
         const world = this.world;
@@ -797,6 +923,29 @@ class Pet {
             } else {
                 this.runTo(world.snack.x, CHASE_SPEED);
             }
+
+            return;
+        }
+
+        // A knack it can use on this page: over to the thing, and sit there
+        // offering it. Its own pet only — see World.offer().
+        const offer = this.visiting ? null : world.offer();
+
+        if (offer) {
+            this.goOffer(offer);
+
+            return;
+        }
+
+        // The offer went — used, or put away: down off the spot it sat on.
+        if (this.offerPerch) {
+            this.offerPerch = false;
+            this.offering = null;
+            this.perch = null;
+            this.vy = 0;
+            this.landOn = null;
+            this.state = 'falling';
+            this.pose = 'jump';
 
             return;
         }
@@ -899,6 +1048,48 @@ class World {
         this.bed = null;
         this.asleep = false;
         this.width = 0;
+        // Knacks: whether this layer offers them at all (a kid's own pages),
+        // the ones put away for this visit, and the one being asked about.
+        this.offers = false;
+        this.dismissed = new Set();
+        this.asked = null;
+    }
+
+    /**
+     * A knack the page is offering, on screen and not put away — see
+     * x-knack-offer. Its top edge in the layer's own coordinates is where the
+     * pet goes to sit.
+     */
+    offer() {
+        if (! this.offers || this.asleep) {
+            return null;
+        }
+
+        const left = this.hostLeft();
+
+        for (const element of document.querySelectorAll('[data-fq-knack-offer]')) {
+            const key = element.getAttribute('data-fq-knack-offer');
+            const box = element.getBoundingClientRect();
+
+            if (this.dismissed.has(key) || box.width < 80) {
+                continue;
+            }
+
+            // On screen, with room above it for the animal.
+            if (box.bottom < 0 || box.top > window.innerHeight - 20 || box.top < PET_SIZE * screenZoom()) {
+                continue;
+            }
+
+            return {
+                key,
+                label: element.getAttribute('data-fq-knack-label') || '',
+                left: box.left - left,
+                right: box.right - left,
+                top: box.top + window.scrollY - this.top,
+            };
+        }
+
+        return null;
     }
 
     measure() {
@@ -1167,6 +1358,7 @@ class Egg {
         this.sprite = sprite;
         this.cracks = settings.cracks ?? 0;
         this.hue = settings.hue;
+        this.pattern = settings.pattern ?? 'plain';
         this.scale = settings.scale ?? 1;
         this.x = settings.x ?? (settings.home ?? random(80, Math.max(140, world.width - 80)));
         this.y = world.floor();
@@ -1372,7 +1564,7 @@ class FqPets extends HTMLElement {
      * keys. A bought toy is out every day, not only on a powered-up one.
      */
     static get observedAttributes() {
-        return ['sheet', 'rig', 'scale', 'effect', 'toy', 'asleep', 'drag', 'sheets', 'visitor', 'egg', 'egg-hue', 'snack', 'toy-prize', 'bed'];
+        return ['sheet', 'rig', 'scale', 'effect', 'toy', 'asleep', 'drag', 'sheets', 'visitor', 'egg', 'egg-hue', 'egg-pattern', 'snack', 'toy-prize', 'bed'];
     }
 
     connectedCallback() {
@@ -1384,6 +1576,8 @@ class FqPets extends HTMLElement {
 
         this.onCelebrate = () => this.cheer();
         this.onFeed = () => this.feed();
+        // A Power Treat bought on the Pets page — see KnackService::buyTreat().
+        this.onTreat = () => this.feed(undefined, true);
         this.onTap = (event) => this.feedAt(event);
         this.onGear = (event) => this.takeGear(event.detail?.gear);
         this.onTry = (event) => this.tryOn(event.detail ?? null);
@@ -1394,8 +1588,46 @@ class FqPets extends HTMLElement {
         };
         this.onVisible = () => (document.hidden ? this.pause() : this.play());
 
+        // Knacks, from the page's x-knack-offer: the confirm opened (the
+        // bubble waits), put away for this visit, or said yes to (the pet
+        // plays its part).
+        this.onKnack = (event) => {
+            if (this.world) {
+                this.world.asked = event.detail?.knack ?? null;
+                this.paint();
+            }
+        };
+        this.onKnackDismiss = (event) => {
+            if (! this.world) {
+                return;
+            }
+
+            this.world.dismissed.add(event.detail?.knack);
+            this.world.asked = null;
+            this.world.pets.forEach((pet) => {
+                if (pet.state === 'offering') {
+                    pet.act('idle', 'idle', 0.1);
+                }
+            });
+            this.paint();
+        };
+        this.onPetAct = (event) => {
+            const pet = this.world?.pets.find((one) => ! one.visiting);
+
+            if (! pet || pet.held || this.reduced) {
+                return;
+            }
+
+            this.world.asked = event.detail?.knack ?? null;
+            pet.perform(event.detail?.steps);
+        };
+
+        window.addEventListener('fq-knack', this.onKnack);
+        window.addEventListener('fq-knack-dismiss', this.onKnackDismiss);
+        window.addEventListener('fq-pet-act', this.onPetAct);
         window.addEventListener('celebrate', this.onCelebrate);
         window.addEventListener('fq-pet-feed', this.onFeed);
+        window.addEventListener('fq-pet-treat', this.onTreat);
         window.addEventListener('fq-pet-gear', this.onGear);
         window.addEventListener('fq-pet-try', this.onTry);
         document.addEventListener('click', this.onTap);
@@ -1405,8 +1637,12 @@ class FqPets extends HTMLElement {
 
     disconnectedCallback() {
         this.pause();
+        window.removeEventListener('fq-knack', this.onKnack);
+        window.removeEventListener('fq-knack-dismiss', this.onKnackDismiss);
+        window.removeEventListener('fq-pet-act', this.onPetAct);
         window.removeEventListener('celebrate', this.onCelebrate);
         window.removeEventListener('fq-pet-feed', this.onFeed);
+        window.removeEventListener('fq-pet-treat', this.onTreat);
         window.removeEventListener('fq-pet-gear', this.onGear);
         window.removeEventListener('fq-pet-try', this.onTry);
         document.removeEventListener('click', this.onTap);
@@ -1421,7 +1657,7 @@ class FqPets extends HTMLElement {
 
         // The sheet changing is a different pet; everything else is the same
         // pet in a different mood, and must not restart it mid-jump.
-        if (['sheet', 'rig', 'scale', 'effect', 'sheets', 'visitor', 'egg', 'egg-hue'].includes(name)) {
+        if (['sheet', 'rig', 'scale', 'effect', 'sheets', 'visitor', 'egg', 'egg-hue', 'egg-pattern'].includes(name)) {
             this.render();
 
             return;
@@ -1520,7 +1756,7 @@ class FqPets extends HTMLElement {
         const egg = this.hasAttribute('egg') ? parseInt(this.getAttribute('egg'), 10) || 0 : null;
 
         return [
-            egg !== null ? { egg, hue: parseInt(this.getAttribute('egg-hue'), 10), scale: parseFloat(this.getAttribute('scale')) || 1 } : null,
+            egg !== null ? { egg, hue: parseInt(this.getAttribute('egg-hue'), 10), pattern: this.getAttribute('egg-pattern'), scale: parseFloat(this.getAttribute('scale')) || 1 } : null,
             egg === null && mine ? { src: mine, rig: read('rig'), effect: this.getAttribute('effect'), scale: parseFloat(this.getAttribute('scale')) || 1 } : null,
             visitor && visitor.src ? { ...visitor, visiting: true } : null,
         ].filter(Boolean);
@@ -1598,25 +1834,61 @@ class FqPets extends HTMLElement {
                 pointer-events: none; transform-origin: 50% 100%; z-index: 0;
             }
             .snack svg, .toy svg, .bed svg { display: block; width: 100%; height: 100%; }
+            /* A knack on offer, over the pet's head — see World.offer(). */
+            .bubble {
+                position: absolute; transform: translate(-50%, -100%); z-index: 4;
+                pointer-events: auto; cursor: pointer; white-space: nowrap;
+                font: 800 13px/1 "Baloo 2", system-ui, sans-serif; color: #05170c;
+                background: linear-gradient(150deg, #b8ffd9, #54e8d0);
+                border: 2px solid #0e0719; border-radius: 14px; padding: 7px 11px;
+                box-shadow: 0 0 14px rgba(84, 232, 208, .6), 0 4px 0 rgba(0, 0, 0, .35);
+                animation: fq-bubble-bob 1.4s ease-in-out infinite;
+            }
+            .bubble::after {
+                content: ''; position: absolute; left: 50%; bottom: -8px; margin-left: -6px;
+                border: 6px solid transparent; border-top-color: #0e0719; border-bottom: 0;
+            }
+            @keyframes fq-bubble-bob { 50% { margin-top: -4px; } }
         `;
 
         root.append(style);
 
         this.world = new World(this);
         this.world.asleep = this.hasAttribute('asleep');
+        // Knacks are offered on a kid's own pages only — never on the login
+        // door, and never a grown-up's (who has none).
+        this.world.offers = this.hasAttribute('feed-on-tap') && ! this.sheets();
         this.world.measure();
+
+        // The bubble a knack is offered in. A tap opens the page's confirm
+        // (x-knack-offer), and the bubble waits while that is open.
+        this.bubble = document.createElement('button');
+        this.bubble.type = 'button';
+        this.bubble.className = 'bubble';
+        this.bubble.style.display = 'none';
+        this.bubble.addEventListener('click', () => {
+            const key = this.bubble.dataset.knack;
+
+            if (key && this.world) {
+                this.world.asked = key;
+                window.dispatchEvent(new CustomEvent('fq-knack', { detail: { knack: key } }));
+                this.paint();
+            }
+        });
+        root.append(this.bubble);
 
         cast.forEach((entry) => {
             // A surprise egg out in place of a pet.
             if (Number.isInteger(entry.egg)) {
                 const shell = document.createElement('div');
                 shell.className = 'egg';
-                shell.style.backgroundImage = 'url("' + eggSvg(entry.egg, entry.hue) + '")';
+                shell.style.backgroundImage = 'url("' + eggSvg(entry.egg, entry.hue, entry.pattern) + '")';
                 root.append(shell);
 
                 const egg = new Egg(this.world, shell, {
                     cracks: entry.egg,
                     hue: entry.hue,
+                    pattern: entry.pattern,
                     scale: entry.scale ?? 1,
                     home: entry.home === undefined || entry.home === null ? undefined : entry.home * this.world.width,
                 });
@@ -1693,12 +1965,14 @@ class FqPets extends HTMLElement {
         const shell = document.createElement('div');
         shell.className = 'egg';
         const hue = parseInt(this.getAttribute('hatch'), 10);
-        shell.style.backgroundImage = 'url("' + eggSvg(EGG_CRACKS.length, hue) + '")';
+        const pattern = this.getAttribute('hatch-pattern');
+        shell.style.backgroundImage = 'url("' + eggSvg(EGG_CRACKS.length, hue, pattern) + '")';
         this.shadowRoot.append(shell);
 
         const egg = new Egg(this.world, shell, {
             cracks: EGG_CRACKS.length,
             hue,
+            pattern,
             scale: pet.scale,
             x: pet.x,
             hatchIn: 1.6,
@@ -1735,7 +2009,7 @@ class FqPets extends HTMLElement {
         ['top', 'bottom'].forEach((half) => {
             const piece = document.createElement('div');
             piece.className = 'shell shell-' + half;
-            piece.style.backgroundImage = 'url("' + eggSvg(EGG_CRACKS.length, egg.hue) + '")';
+            piece.style.backgroundImage = 'url("' + eggSvg(EGG_CRACKS.length, egg.hue, egg.pattern) + '")';
             piece.style.width = size + 'px';
             piece.style.height = size + 'px';
             piece.style.left = (egg.x - size / 2) + 'px';
@@ -1941,9 +2215,18 @@ class FqPets extends HTMLElement {
      * and eats it. Play and nothing else — it grows nothing and is never owed.
      * One snack at a time, and none while it sleeps.
      */
-    feed(at) {
-        if (! this.world || this.reduced || this.world.asleep || this.world.snack) {
+    feed(at, treat = false) {
+        if (! this.world || this.reduced || this.world.asleep) {
             return;
+        }
+
+        // A Power Treat pushes past a snack already out — it was paid for.
+        if (this.world.snack) {
+            if (! treat) {
+                return;
+            }
+
+            this.world.finishSnack();
         }
 
         const pet = this.world.pets.find((one) => ! one.visiting);
@@ -1978,7 +2261,7 @@ class FqPets extends HTMLElement {
         // The snack out, from the prize counter — the meat block when none
         // has been bought, and the old emoji if the art has not loaded.
         const sprite = document.createElement('div');
-        const art = prizeSvg('snack', this.snackKey());
+        const art = treat ? TREAT_SVG : prizeSvg('snack', this.snackKey());
         sprite.className = 'snack';
 
         if (art) {
@@ -1991,6 +2274,7 @@ class FqPets extends HTMLElement {
 
         this.world.snack = new Snack(x, rest, at ? at.y : undefined);
         this.world.snack.sprite = sprite;
+        this.world.snack.treat = treat;
 
         // Straight over, unless it is busy in the air or in a hand — then it
         // finds the food the next time it decides what to do.
@@ -2130,6 +2414,16 @@ class FqPets extends HTMLElement {
             const size = scale === 1 ? '' : ' scale(' + scale.toFixed(3) + ')';
 
             pet.sprite.style.transform = 'translate(' + (pet.x - PET_SIZE / 2) + 'px,' + (pet.y - PET_SIZE) + 'px)' + size + swing + ' scaleX(' + pet.facing + ')' + gait;
+
+            // Powered up by a treat: a glow that fades. Inline, and cleared
+            // after, so an effect class's own filter comes back.
+            if (pet.glow > 0) {
+                const strength = Math.min(1, pet.glow / 1.2);
+
+                pet.sprite.style.filter = 'drop-shadow(0 0 ' + (4 + 8 * strength).toFixed(1) + 'px rgba(125,255,176,' + (0.9 * strength).toFixed(2) + ')) brightness(' + (1 + 0.25 * strength).toFixed(2) + ')';
+            } else if (pet.sprite.style.filter) {
+                pet.sprite.style.filter = '';
+            }
         });
 
         this.world.toys.forEach((toy) => {
@@ -2161,6 +2455,26 @@ class FqPets extends HTMLElement {
 
             toy.sprite.style.visibility = drawnInPaws ? 'hidden' : '';
         });
+
+        // A knack's bubble, over the head of the pet sitting offering it —
+        // hidden while its confirm is open, and once it was put away.
+        const offering = this.world.pets.find((pet) => pet.state === 'offering' && pet.offering);
+
+        if (this.bubble) {
+            const key = offering?.offering.key;
+            const show = key && this.world.asked !== key && ! this.world.dismissed.has(key);
+
+            this.bubble.style.display = show ? '' : 'none';
+
+            if (show) {
+                const height = PET_SIZE * offering.scale * zoom;
+
+                this.bubble.dataset.knack = key;
+                this.bubble.textContent = '🐾 ' + offering.offering.label;
+                this.bubble.style.left = offering.x + 'px';
+                this.bubble.style.top = (offering.y - height - 6) + 'px';
+            }
+        }
 
         const bed = this.world.bed;
 

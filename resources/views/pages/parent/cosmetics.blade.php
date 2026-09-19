@@ -5,7 +5,10 @@ use App\Enums\CosmeticFlavor;
 use App\Enums\CosmeticMotion;
 use App\Enums\CosmeticSlot;
 use App\Enums\CosmeticStock;
+use App\Enums\PetKnack;
+use App\Enums\PetRarity;
 use App\Enums\PetStage;
+use App\Enums\PetStyle;
 use App\Models\Cosmetic;
 use App\Models\OwnedCosmetic;
 use App\Models\Profile;
@@ -58,6 +61,13 @@ new class extends Component
     /** A CosmeticEffect value, or '' for plain art. What a 20-ticket pet has. */
     public string $effect = '';
 
+    /** A new pet's tier, style and — Rare and up — knack. See App\Enums\PetRarity. */
+    public string $petRarity = 'common';
+
+    public string $petStyle = 'steady';
+
+    public string $petKnack = '';
+
 
     /** Which slot's published items are listed below. */
     public string $listSlot = 'frame';
@@ -105,7 +115,65 @@ new class extends Component
             'stock' => ['required', 'in:'.implode(',', array_map(fn (CosmeticStock $s) => $s->value, CosmeticStock::forSlot($slot)))],
             'motion' => ['nullable', 'in:'.implode(',', array_map(fn (CosmeticMotion $m) => $m->value, CosmeticMotion::cases()))],
             'effect' => ['nullable', 'in:'.implode(',', array_map(fn (CosmeticEffect $e) => $e->value, CosmeticEffect::cases()))],
+            ...($slot === CosmeticSlot::Pet ? $this->petRules() : []),
         ];
+    }
+
+    /**
+     * A pet has a tier and a style, and Rare and up a knack its tier allows.
+     *
+     * @return array<string, mixed>
+     */
+    private function petRules(): array
+    {
+        $rarity = PetRarity::tryFrom($this->petRarity) ?? PetRarity::Common;
+
+        return [
+            'petRarity' => ['required', 'in:'.implode(',', array_column(PetRarity::cases(), 'value'))],
+            'petStyle' => ['required', 'in:'.implode(',', array_column(PetStyle::cases(), 'value'))],
+            'petKnack' => $rarity->hasKnack()
+                ? ['required', 'in:'.implode(',', array_map(fn (PetKnack $knack) => $knack->value, $rarity->knacks()))]
+                : ['nullable'],
+        ];
+    }
+
+    /** A new tier: the knack goes to the first one that tier allows, or none. */
+    public function updatedPetRarity(): void
+    {
+        $rarity = PetRarity::tryFrom($this->petRarity) ?? PetRarity::Common;
+
+        if (! in_array(PetKnack::tryFrom($this->petKnack), $rarity->knacks(), true)) {
+            $this->petKnack = $rarity->knacks()[0]->value ?? '';
+        }
+    }
+
+    /**
+     * Changes a published pet's tier, style or knack from its row.
+     *
+     * A kid who owns it keeps it either way; what it can do changes with it.
+     * A tier change moves the knack to one the new tier allows, so a pet is
+     * never left Rare with no knack or Common with one.
+     */
+    public function setPetTrait(int $id, string $trait, string $value): void
+    {
+        $pet = $this->find($id);
+
+        if (! $pet || ! $pet->isSheet()) {
+            return;
+        }
+
+        if ($trait === 'rarity' && ($rarity = PetRarity::tryFrom($value))) {
+            $knack = $pet->pet_knack !== null && $pet->pet_knack->rarity() === $rarity ? $pet->pet_knack : ($rarity->knacks()[0] ?? null);
+            $pet->update(['pet_rarity' => $rarity, 'pet_knack' => $knack]);
+        } elseif ($trait === 'style' && ($style = PetStyle::tryFrom($value))) {
+            $pet->update(['pet_style' => $style]);
+        } elseif ($trait === 'knack' && ($knack = PetKnack::tryFrom($value)) && $knack->rarity() === $pet->rarity()) {
+            $pet->update(['pet_knack' => $knack]);
+        } else {
+            return;
+        }
+
+        app(CosmeticService::class)->forget();
     }
 
     /** @return array<string, string> */
@@ -291,6 +359,11 @@ new class extends Component
             'baby_art_path' => $youngerPaths['baby'] ?? null,
             'young_art_path' => $youngerPaths['young'] ?? null,
             'pet_rig' => $rig,
+            ...($slot === CosmeticSlot::Pet ? [
+                'pet_rarity' => $this->petRarity,
+                'pet_style' => $this->petStyle,
+                'pet_knack' => PetRarity::from($this->petRarity)->hasKnack() ? $this->petKnack : null,
+            ] : []),
             'name' => trim($this->name),
             'cost' => $this->cost,
             'stock' => $this->stock,
@@ -306,7 +379,7 @@ new class extends Component
 
         $this->flashMessage = trim($this->name).' is in the shop.';
 
-        $this->reset('upload', 'name', 'motion', 'effect', 'trialAge');
+        $this->reset('upload', 'name', 'motion', 'effect', 'trialAge', 'petRarity', 'petStyle', 'petKnack');
         app(CosmeticService::class)->forget();
     }
 
@@ -797,6 +870,65 @@ new class extends Component
                     <span class="text-[11.5px] text-fq-text-4">A rainbow or a flame on top of the picture. Worth about 20 tickets on a pet.</span>
                 </label>
 
+                {{-- A pet's tier, style and knack. Style is what it does in the
+                     arcade and is the same strength at every tier; the tier
+                     decides whether it has a knack, and which. --}}
+                @if ($uploadSlot === App\Enums\CosmeticSlot::Pet)
+                    @php $tier = App\Enums\PetRarity::tryFrom($petRarity) ?? App\Enums\PetRarity::Common; @endphp
+
+                    <div class="flex flex-col gap-[6px]" data-pet-traits>
+                        <span class="{{ $label }}">Rarity</span>
+                        <div class="flex flex-wrap gap-[6px]">
+                            @foreach (App\Enums\PetRarity::cases() as $case)
+                                @php $on = $tier === $case; @endphp
+                                <button
+                                    type="button"
+                                    wire:click="$set('petRarity', '{{ $case->value }}')"
+                                    class="rounded-full border px-3 py-[6px] font-mono-fq text-[9.5px] tracking-[0.08em] uppercase"
+                                    style="border-color: {{ $on ? $case->color() : '#241539' }}; background: {{ $on ? '#1d1036' : '#0b0616' }}; color: {{ $on ? $case->color() : '#6f6288' }}"
+                                >{{ $case->label() }}</button>
+                            @endforeach
+                        </div>
+                        <span class="text-[11.5px] text-fq-text-4">
+                            {{ $tier->hasKnack() ? 'Has a knack on top of its style.' : 'A style only — no knack.' }}
+                            @if ($stock === App\Enums\CosmeticStock::Egg->value) Its egg costs {{ $tier->eggPrice() }} ✦. @endif
+                        </span>
+                    </div>
+
+                    <div class="flex flex-col gap-[6px]">
+                        <span class="{{ $label }}">Style · what it does in the arcade</span>
+                        <div class="flex flex-wrap gap-[6px]">
+                            @foreach (App\Enums\PetStyle::cases() as $case)
+                                @php $on = $petStyle === $case->value; @endphp
+                                <button
+                                    type="button"
+                                    wire:click="$set('petStyle', '{{ $case->value }}')"
+                                    class="flex items-center gap-[6px] rounded-full border px-3 py-[6px] text-[12px]"
+                                    style="border-color: {{ $on ? '#c9a0ff' : '#241539' }}; background: {{ $on ? '#241546' : '#0b0616' }}; color: {{ $on ? '#d8b4ff' : '#8c7bab' }}"
+                                    title="{{ $case->blurb() }}"
+                                ><i class="fa-solid {{ $case->icon() }} text-[10px]"></i>{{ $case->label() }}</button>
+                            @endforeach
+                        </div>
+                        @error('petStyle') <span class="text-[12px] text-fq-danger">{{ $message }}</span> @enderror
+                    </div>
+
+                    @if ($tier->hasKnack())
+                        <label class="flex flex-col gap-[6px]">
+                            <span class="{{ $label }}">Knack · {{ $tier->label() }}</span>
+                            <select wire:model.live="petKnack" class="{{ $field }}">
+                                <option value="">Pick one</option>
+                                @foreach ($tier->knacks() as $case)
+                                    <option value="{{ $case->value }}">{{ $case->label() }}</option>
+                                @endforeach
+                            </select>
+                            @if ($chosenKnack = App\Enums\PetKnack::tryFrom($petKnack))
+                                <span class="text-[11.5px] text-fq-text-4">{{ $chosenKnack->describe(App\Enums\PetStage::Adult) }} Half strength while it's young, and not yet as a baby.</span>
+                            @endif
+                            @error('petKnack') <span class="text-[12px] text-fq-danger">Pick a knack for a {{ mb_strtolower($tier->label()) }} pet.</span> @enderror
+                        </label>
+                    @endif
+                @endif
+
                 @endunless
 
                 {{-- No drafts: the art is judged here and now. A pet can be let
@@ -1030,6 +1162,32 @@ new class extends Component
                     <span class="w-[34px] shrink-0 font-baloo text-[14px] font-extrabold text-fq-lime">{{ $item->isFree() ? 'Free' : $item->cost }}</span>
                     <span class="shrink-0 rounded-full border px-[9px] py-1 font-mono-fq text-[8.5px] tracking-[0.08em] whitespace-nowrap uppercase" style="border-color: {{ $rim }}; color: {{ $ink }}">{{ $item->stock->label() }}</span>
                     @if ($item->isSheet())
+                        {{-- Tier, style and knack, changed in place. Kids who own
+                             it keep it; what it can do changes with it. --}}
+                        @php
+                            $mini = 'rounded-[8px] border border-fq-line-2 bg-fq-bg px-[7px] py-[5px] font-mono-fq text-[9px] tracking-[0.06em] uppercase';
+                            $itemTier = $item->rarity();
+                        @endphp
+                        <span class="flex shrink-0 flex-wrap items-center gap-[4px]" data-pet-row-traits="{{ $item->id }}">
+                            <select wire:change="setPetTrait({{ $item->id }}, 'rarity', $event.target.value)" class="{{ $mini }}" style="color: {{ $itemTier->color() }}; border-color: {{ $itemTier->color() }}" aria-label="Rarity">
+                                @foreach (App\Enums\PetRarity::cases() as $case)
+                                    <option value="{{ $case->value }}" @selected($itemTier === $case)>{{ $case->label() }}</option>
+                                @endforeach
+                            </select>
+                            <select wire:change="setPetTrait({{ $item->id }}, 'style', $event.target.value)" class="{{ $mini }} text-fq-text-3" aria-label="Style">
+                                @foreach (App\Enums\PetStyle::cases() as $case)
+                                    <option value="{{ $case->value }}" @selected($item->pet_style === $case)>{{ $case->label() }}</option>
+                                @endforeach
+                            </select>
+                            @if ($itemTier->hasKnack())
+                                <select wire:change="setPetTrait({{ $item->id }}, 'knack', $event.target.value)" class="{{ $mini }} text-fq-text-3" aria-label="Knack">
+                                    @foreach ($itemTier->knacks() as $case)
+                                        <option value="{{ $case->value }}" @selected($item->knack() === $case)>{{ $case->label() }}</option>
+                                    @endforeach
+                                </select>
+                            @endif
+                        </span>
+
                         <button
                             type="button"
                             wire:click="replaceArt({{ $item->id }})"

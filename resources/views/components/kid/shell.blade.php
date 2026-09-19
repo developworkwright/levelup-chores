@@ -28,6 +28,10 @@
         // The third thing behind Shop: it spends tickets like Bonus does, but
         // what it sells stays on the kid rather than getting used up.
         'locker' => ['label' => 'Locker', 'short' => 'Locker', 'icon' => 'fa-shirt', 'route' => 'kid.locker', 'accent' => 'var(--fq-coral)'],
+        // Pets moved out of the Locker once they started growing up and
+        // helping out. Filed "now and then" for the moment; the menu is due a
+        // shuffle.
+        'pets' => ['label' => 'Pets', 'icon' => 'fa-paw', 'route' => 'kid.pets', 'accent' => 'var(--fq-green)'],
         'household' => ['label' => 'Household', 'short' => 'House', 'icon' => 'fa-ranking-star', 'route' => 'kid.household', 'accent' => 'var(--fq-green)'],
         'trades' => ['label' => 'Trades & Jobs', 'short' => 'Trades', 'icon' => 'fa-right-left', 'route' => 'kid.trades', 'accent' => 'var(--fq-coral)'],
         'journal' => ['label' => 'Journal', 'icon' => 'fa-feather', 'route' => 'kid.journal', 'accent' => 'var(--fq-green)'],
@@ -102,7 +106,7 @@
     $sheetGroups = [
         'Every day' => ['home', 'quests', 'family', 'loot', 'journal'],
         'The house' => ['household', 'trades'],
-        'Now and then' => ['bonus', 'locker', 'arcade', 'music'],
+        'Now and then' => ['bonus', 'locker', 'pets', 'arcade', 'music'],
     ];
 
     // The tail of the last group, two to a row — a footnote rather than four
@@ -918,6 +922,8 @@
             @if (isset($ownPet['egg']))
                 egg="{{ $ownPet['egg'] }}"
                 egg-hue="{{ $ownPet['hue'] }}"
+                {{-- Its tier, on the shell — see App\Enums\PetRarity. --}}
+                egg-pattern="{{ $ownPet['pattern'] }}"
             @else
                 sheet="{{ $ownPet['src'] }}"
                 {{-- How the sheet is laid out; none on a pet made before the
@@ -925,7 +931,7 @@
                 @if ($ownPet['rig']) rig="{{ json_encode($ownPet['rig'], JSON_UNESCAPED_SLASHES) }}" @endif
                 @if ($ownPet['effect']) effect="{{ $ownPet['effect'] }}" @endif
                 {{-- The hatching, in the colour of the egg it came out of. --}}
-                @if ($justHatched) hatch="{{ $justHatched->hue() }}" @endif
+                @if ($justHatched) hatch="{{ $justHatched->hue() }}" hatch-pattern="{{ App\Models\PetEgg::patternFor($justHatched->pet) }}" @endif
             @endif
             {{-- Its age's size — see App\Enums\PetStage. --}}
             scale="{{ $ownPet['scale'] }}"

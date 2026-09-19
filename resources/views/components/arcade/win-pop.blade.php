@@ -9,7 +9,9 @@
 @props(['payout'])
 
 @php
-    $rungs = count(array_filter($payout['lines'], fn (array $line) => $line['paid'])) - 1;
+    // Rungs only: the pet's Coin Sniffer line is its own thing, said after.
+    $rungs = count(array_filter($payout['lines'], fn (array $line) => $line['paid'] && ! ($line['pet'] ?? false))) - 1;
+    $sniffed = collect($payout['lines'])->first(fn (array $line) => ($line['pet'] ?? false) && $line['paid'])['tokens'] ?? 0;
 @endphp
 
 <div {{ $attributes->class('fq-win-pop pointer-events-none absolute inset-x-0 top-[64px] z-10 flex justify-center px-[12px]') }} role="status">
@@ -29,7 +31,7 @@
                 @elseif ($payout['lost'] > 0)
                     Machine&rsquo;s full now &mdash; a chore makes room
                 @elseif ($rungs > 0)
-                    1 for playing &middot; {{ $rungs }} new {{ Str::plural('rung', $rungs) }}
+                    1 for playing &middot; {{ $rungs }} new {{ Str::plural('rung', $rungs) }}@if ($sniffed) &middot; 🐾 +{{ $sniffed }}@endif
                 @else
                     1 for playing &middot; bank {{ $payout['to'] }}
                 @endif

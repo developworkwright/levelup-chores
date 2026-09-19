@@ -80,6 +80,9 @@ Route::middleware(['auth:profile', 'role:kid', 'sync-streak', 'arcade-last-call'
     // The cosmetic locker: the one ticket sink that doesn't get used up. See
     // CosmeticService.
     Volt::route('/locker', 'kid.locker')->name('kid.locker');
+    // The pet's own page: raising it, its knack, eggs and pets for sale. A
+    // pet outgrew the Locker once it grew up and started helping out.
+    Volt::route('/pets', 'kid.pets')->name('kid.pets');
     Volt::route('/badges', 'kid.badges')->name('kid.badges');
     Volt::route('/stats', 'kid.stats')->name('kid.stats');
     Volt::route('/journal', 'kid.journal')->name('kid.journal');

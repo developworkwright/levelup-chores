@@ -22,6 +22,7 @@ use App\Services\BonusShopService;
 use App\Services\BountyService;
 use App\Services\ChoreService;
 use App\Services\HouseholdClock;
+use App\Services\KnackService;
 use App\Services\MonsterService;
 use App\Services\PerkInventoryService;
 use App\Services\SleepService;
@@ -450,6 +451,136 @@ new class extends Component
         }
     }
 
+    /**
+     * The pet's Fetch: today's 2x boost rolled again, same chore. Offered by
+     * the pet beside the wheel — see x-knack-offer and KnackService::fetch().
+     */
+    public function useFetch(): void
+    {
+        $multiplier = app(KnackService::class)->fetch($this->profile);
+
+        if ($multiplier === null) {
+            $this->perkMessage = 'Nothing to fetch right now.';
+
+            return;
+        }
+
+        $this->dispatch(
+            'celebrate',
+            message: $multiplier > 2 ? "Fetched it — {$multiplier}x now!" : 'Fetched it… still 2x. Worth a try!',
+            style: 'star',
+            big: $multiplier > 2,
+        );
+    }
+
+    /**
+     * The pet's Sniffer: the mystery chore narrowed down to five, or three,
+     * and every other card on the board marked. See KnackService::sniff().
+     */
+    public function useSniffer(): void
+    {
+        $maybe = app(KnackService::class)->sniff($this->profile);
+
+        if ($maybe === null) {
+            $this->perkMessage = 'Nothing to sniff out right now.';
+
+            return;
+        }
+
+        $this->dispatch('celebrate', message: 'Sniffed it out — it\'s one of these '.count($maybe).'!', style: 'star');
+    }
+
+    /**
+     * The pet's Paw Nudge: the boost moves one chore over on the wheel, and
+     * the wheel turns the one click to show it. A grown pet goes the way the
+     * kid picked; a young one picks for itself. See KnackService::nudge().
+     */
+    public function useNudge(?string $direction = null): void
+    {
+        $result = app(KnackService::class)->nudge($this->profile, $direction);
+
+        if ($result === null) {
+            $this->perkMessage = 'Nothing to nudge right now.';
+
+            return;
+        }
+
+        $this->turnWheelToBoost();
+        $this->dispatch('celebrate', message: 'Nudged — it\'s '.$result['chore']->name.' now!', style: 'star');
+    }
+
+    /** A young pet's nudge, put back where the wheel first landed. */
+    public function putNudgeBack(): void
+    {
+        if (app(KnackService::class)->unnudge($this->profile)) {
+            $this->turnWheelToBoost();
+        }
+    }
+
+    /**
+     * The pet's Second Look: today's spin cleared and the wheel back to the
+     * top, the same as the respin perk leaves it, ready for another spin.
+     */
+    public function useSecondLook(): void
+    {
+        if (! app(KnackService::class)->secondLook($this->profile)) {
+            $this->perkMessage = 'Nothing to look at again right now.';
+
+            return;
+        }
+
+        $this->spinRevealed = false;
+        $this->spinning = false;
+        $this->wheelDeg = 0;
+
+        $this->dispatch('celebrate', message: 'Second look — take another spin!', style: 'star');
+    }
+
+    /** The pet's Good Luck Charm, cast over the board. See KnackService::charm(). */
+    public function useCharm(): void
+    {
+        $charmed = app(KnackService::class)->charm($this->profile);
+
+        if ($charmed === null || $charmed->isEmpty()) {
+            $this->perkMessage = 'Nothing left on the board to charm.';
+
+            return;
+        }
+
+        $this->dispatch(
+            'celebrate',
+            message: $charmed->count() === 1 ? '1 chore just went charmed — find it!' : $charmed->count().' chores just went charmed — find them!',
+            style: 'star',
+        );
+    }
+
+    /**
+     * Turns the wheel to wherever today's boost now is, the short way round,
+     * so a nudge is one click of the wheel rather than another six turns.
+     */
+    private function turnWheelToBoost(): void
+    {
+        $spin = app(SpinService::class)->today($this->profile);
+        $chores = $this->wheelChores();
+        $index = $spin ? $chores->search(fn ($chore) => $chore->id === $spin->chore_id) : false;
+
+        if ($index === false) {
+            return;
+        }
+
+        $target = $this->restingDeg((int) $index, 360 / max(1, $chores->count()));
+
+        while ($target < $this->wheelDeg - 180) {
+            $target += 360;
+        }
+
+        while ($target > $this->wheelDeg + 180) {
+            $target -= 360;
+        }
+
+        $this->wheelDeg = $target;
+    }
+
     public function spin(): void
     {
         if ($this->spinning || $this->spinRevealed || ! $this->profile->household->spin_enabled) {
@@ -859,7 +990,24 @@ new class extends Component
             'selected' => $this->band === $case->value,
         ]);
 
+        // The pet's knack, where this page has one to offer: Fetch beside the
+        // wheel, Sniffer over the board — and a sniff's marks for the day.
+        $knacks = app(KnackService::class);
+        $knack = $knacks->stateFor($this->profile);
+
         return [
+            'knack' => $knack,
+            'fetchOffer' => $knack && ! $this->spinning && $this->spinRevealed && $knacks->fetchable($this->profile) !== null,
+            'nudgeTargets' => $knack && ! $this->spinning && $this->spinRevealed ? $knacks->nudgeTargets($this->profile) : null,
+            // A young pet's nudge, to keep or put back.
+            'nudged' => $knack && ! $this->spinning ? $knacks->nudgedToday($this->profile) : null,
+            'secondLookOffer' => $knack && ! $this->spinning && $this->spinRevealed && $knacks->secondLookable($this->profile),
+            // Lucky Tail waiting to charge the spin, and whether it charged this one.
+            'luckyTail' => $knack && ! $this->spinRevealed && ! $this->spinning ? $knacks->luckyTailReady($this->profile) : null,
+            'luckyTailBoost' => $boost !== null && $knacks->luckyTailOn($boost),
+            'charmOffer' => $knack && $knacks->charmable($this->profile),
+            'sniffOffer' => $knack && $knacks->sniffable($this->profile),
+            'sniffMaybe' => $knacks->sniffedToday($this->profile),
             'boost' => $boost,
             'boostClaim' => $this->boostClaim($boost),
             'wheelChores' => $wheelChores,
@@ -1205,6 +1353,10 @@ new class extends Component
                                 @if ($boost->was_op)
                                     <span style="color: var(--fq-gold)">&middot; &#9889; OP</span>
                                 @endif
+                                {{-- Charged by the pet rather than a ticket. --}}
+                                @if ($luckyTailBoost)
+                                    <span class="text-fq-green" data-lucky-tail-spin>&middot; 🐾 Lucky Tail</span>
+                                @endif
                             </p>
                             <p class="mt-1 font-baloo text-lg font-extrabold">{{ $boost->chore->name }} &mdash; {{ $boost->multiplier }}x</p>
                             {{-- The multiplier stated as the number it actually pays.
@@ -1216,6 +1368,80 @@ new class extends Component
                                 <span class="font-semibold" style="color: {{ $boostColor }}">{{ number_format($boost->chore->points * $boost->multiplier) }} PTS</span>
                             </p>
                         </div>
+                    @endif
+
+                    {{-- A 2x, and a pet with Fetch: it offers another go at the
+                         boost, same chore. See KnackService::fetchable(). --}}
+                    @if ($fetchOffer)
+                        <x-knack-offer
+                            wire:key="knack-fetch-{{ $boost->id }}"
+                            :knack="App\Enums\PetKnack::Fetch"
+                            :pet="$knack['pet']->name"
+                            offer="can fetch you another go at that boost."
+                            question="Send {{ $knack['pet']->name }} to fetch a better boost? Same chore — it might come back 3x!"
+                            yes="Fetch!"
+                            action="useFetch"
+                            :left="$knack['left']"
+                            :uses="$knack['uses']"
+                            :act="[['sniff', 0.6], ['jump', 0.4], ['happy', 1.2]]"
+                            class="max-w-[300px]"
+                        />
+                    @endif
+
+                    {{-- Paw Nudge: the boost one chore over. A grown pet asks
+                         which way; a young one goes whichever way it likes. --}}
+                    @if ($nudgeTargets)
+                        @php
+                            $grownNudge = $knack['stage'] === App\Enums\PetStage::Adult;
+                            $nudgeChoices = $grownNudge
+                                ? array_values(array_filter([
+                                    $nudgeTargets['left'] ? ['◀ '.$nudgeTargets['left']->name, 'left'] : null,
+                                    $nudgeTargets['right'] ? [$nudgeTargets['right']->name.' ▶', 'right'] : null,
+                                ]))
+                                : null;
+                        @endphp
+                        <x-knack-offer
+                            wire:key="knack-nudge-{{ $boost->id }}"
+                            :knack="App\Enums\PetKnack::PawNudge"
+                            :pet="$knack['pet']->name"
+                            offer="can bat the wheel one chore over — same boost."
+                            :question="$grownNudge ? 'Which way should '.$knack['pet']->name.' bat the wheel?' : 'Let '.$knack['pet']->name.' bat the wheel? It picks which way!'"
+                            yes="Bat it!"
+                            action="useNudge"
+                            :choices="$nudgeChoices"
+                            :left="$knack['left']"
+                            :uses="$knack['uses']"
+                            :act="[['crouch', 0.3], ['swipe', 0.7], ['happy', 1]]"
+                            class="max-w-[300px]"
+                        />
+                    @endif
+
+                    {{-- A young pet's nudge, just done: keep it, or put it back. --}}
+                    @if ($nudged && ! ($nudged['putBack'] ?? false) && $boost && $boost->chore_id === $nudged['to'] && $knack['stage'] !== App\Enums\PetStage::Adult && ($boostClaim['claimable'] ?? false))
+                        @php $original = $wheelChores->firstWhere('id', $nudged['from']); @endphp
+                        <div class="flex w-full max-w-[300px] flex-wrap items-center gap-[8px] rounded-[12px] border border-fq-green px-[12px] py-[8px] text-left text-[12.5px]" data-nudged>
+                            <span class="min-w-[140px] flex-1"><i class="fa-solid fa-paw mr-[4px] text-fq-green"></i>{{ $knack['pet']->name }} batted it to <strong>{{ $boost->chore->name }}</strong>!</span>
+                            @if ($original)
+                                <button type="button" wire:click="putNudgeBack" class="rounded-[9px] border border-fq-line-3 px-[10px] py-[5px] font-mono-fq text-[9px] tracking-[0.08em] text-fq-text-3 uppercase">Put it back</button>
+                            @endif
+                        </div>
+                    @endif
+
+                    {{-- Second Look: another spin, chore and boost. --}}
+                    @if ($secondLookOffer)
+                        <x-knack-offer
+                            wire:key="knack-second-look-{{ $boost->id }}"
+                            :knack="App\Enums\PetKnack::SecondLook"
+                            :pet="$knack['pet']->name"
+                            offer="can spin the wheel again for you."
+                            question="Let {{ $knack['pet']->name }} give the wheel a second spin? You'll land somewhere new."
+                            yes="Spin again!"
+                            action="useSecondLook"
+                            :left="$knack['left']"
+                            :uses="$knack['uses']"
+                            :act="[['jump', 0.4], ['swipe', 0.6], ['happy', 1]]"
+                            class="max-w-[300px]"
+                        />
                     @endif
                 </div>
 
@@ -1260,6 +1486,18 @@ new class extends Component
                              ever one of them, and never once the wheel has gone —
                              a charge bought after the spin would sit unseen until
                              tomorrow. --}}
+                        {{-- Lucky Tail, waiting to charge this spin by itself. --}}
+                        @if ($luckyTail && ! $wheelCharged)
+                            <div
+                                class="flex items-center gap-2 rounded-[12px] border px-[14px] py-[10px] text-xs font-semibold text-fq-green"
+                                style="border-color: color-mix(in srgb, var(--fq-green) 55%, transparent); background: color-mix(in srgb, var(--fq-green) 12%, transparent)"
+                                data-lucky-tail-ready
+                            >
+                                <i class="fa-solid fa-paw"></i>
+                                <span>{{ $knack['pet']->name }}'s Lucky Tail is charging this spin &mdash; {{ $luckyTail === App\Enums\PetStage::Adult ? '4x is in play' : 'a better shot at 3x' }}</span>
+                            </div>
+                        @endif
+
                         @unless ($spinRevealed || $spinning)
                             @if ($wheelCharged)
                                 <div
@@ -1657,6 +1895,48 @@ new class extends Component
                 </div>
             @endif
 
+            {{-- A pet with Sniffer and a mystery chore still out there: it offers
+                 to narrow it down. See KnackService::sniffable(). --}}
+            @if ($sniffOffer)
+                <x-knack-offer
+                    wire:key="knack-sniffer"
+                    :knack="App\Enums\PetKnack::Sniffer"
+                    :pet="$knack['pet']->name"
+                    offer="can sniff out which chores might be the Mystery Chore."
+                    question="Let {{ $knack['pet']->name }} sniff the board? It'll narrow the Mystery Chore down to {{ App\Services\KnackService::sniffKeeps($knack['stage']) }}."
+                    yes="Sniff it out"
+                    action="useSniffer"
+                    :left="$knack['left']"
+                    :uses="$knack['uses']"
+                    :act="[['sniff', 1.4], ['sniff', 0.8], ['happy', 1]]"
+                />
+            @endif
+
+            {{-- Good Luck Charm: a whole Quest Charm grown, one chore young. --}}
+            @if ($charmOffer)
+                <x-knack-offer
+                    wire:key="knack-charm"
+                    :knack="App\Enums\PetKnack::GoodLuckCharm"
+                    :pet="$knack['pet']->name"
+                    :offer="$knack['stage'] === App\Enums\PetStage::Adult ? 'can charm '.App\Services\ChoreService::CHARM_CHORES.' chores to pay half again today.' : 'can charm a chore to pay half again today.'"
+                    question="Let {{ $knack['pet']->name }} cast its Good Luck Charm over your board?"
+                    yes="Charm it!"
+                    action="useCharm"
+                    :left="$knack['left']"
+                    :uses="$knack['uses']"
+                    :act="[['sit', 0.8], ['jump', 0.4], ['happy', 1]]"
+                />
+            @endif
+
+            {{-- After a sniff: which chores are still in the running, and a note
+                 that the rest are paw-printed. Only for the kid who sniffed. --}}
+            @if ($sniffMaybe)
+                <p class="flex items-center gap-[8px] rounded-[12px] border border-fq-green px-[12px] py-[8px] text-[12.5px] text-fq-text-2" style="background: color-mix(in srgb, var(--fq-green) 8%, transparent)" data-sniffed="{{ count($sniffMaybe) }}">
+                    <i class="fa-solid fa-paw text-fq-green"></i>
+                    <span>{{ $knack['pet']->name ?? 'Your pet' }} sniffed the board — the Mystery Chore is one of the <strong class="text-fq-green">{{ count($sniffMaybe) }} marked "maybe!"</strong> Paw prints mean "not this one".</span>
+                </p>
+            @endif
+
             {{-- The board list. One row per chore, and the row *is* the button —
                  refreshed when the kid comes back to the page, not on a timer. The
                  server scales to zero when idle, so a poll on a tablet left open
@@ -1698,6 +1978,11 @@ new class extends Component
                         $payout = $chore->points * ($boosted ? $boost->multiplier : 1) + $charmBonus;
                         $boostColor = $boosted && $boost->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)';
                         $dimmed = $takenBy || $state === 'expired';
+                        // After a sniff, every card is marked: a "maybe!" on the
+                        // few still in the running, a paw print on everything
+                        // else — including chores that could never have been
+                        // it, so no card is left looking undecided.
+                        $sniffMark = $sniffMaybe === null ? null : (in_array($chore->id, $sniffMaybe, true) ? 'maybe' : 'paw');
                         // Cadence first, then only what a kid browses by. Built the
                         // same way the chips filter, off the flags resolved once in
                         // with(), so a row can't say "Muscle" under a chip that
@@ -1760,13 +2045,21 @@ new class extends Component
                         @else
                             disabled
                         @endif
-                        class="flex items-center gap-[11px] rounded-[17px] px-[13px] py-[11px] text-left {{ $dimmed ? 'opacity-70' : '' }} {{ $helpWanted || $chore->isOneTime() || $closesAt ? 'border-2' : 'border border-fq-line' }} {{ $state === 'ready' ? 'transition hover:brightness-115' : 'cursor-default' }}"
+                        @if ($sniffMark) data-sniff="{{ $sniffMark }}" @endif
+                        class="relative flex items-center gap-[11px] rounded-[17px] px-[13px] py-[11px] text-left {{ $dimmed || $sniffMark === 'paw' ? 'opacity-70' : '' }} {{ $helpWanted || $chore->isOneTime() || $closesAt ? 'border-2' : 'border border-fq-line' }} {{ $state === 'ready' ? 'transition hover:brightness-115' : 'cursor-default' }}"
                         {{-- Their own pending claim outranks everything: it is
                              feedback on a tap they just made. Below that the
                              order matches the board's own sort — a job a parent
                              asked for, then a one-time chore, then a clock. --}}
                         style="background: var(--fq-panel); {{ $state === 'pending' ? 'border-color: var(--fq-success-border)' : ($helpWanted ? 'border-color: color-mix(in srgb, var(--fq-coral) 65%, transparent); background: var(--fq-wash-coral)' : ($closesAt ? 'border-color: color-mix(in srgb, var(--fq-cyan) 55%, transparent)' : ($chore->isOneTime() ? 'border-color: color-mix(in srgb, var(--fq-gold) 55%, transparent); background: var(--fq-wash-gold)' : ''))) }}"
                     >
+                        {{-- The sniff's mark, stamped in a ripple down the board. --}}
+                        @if ($sniffMark === 'maybe')
+                            <span class="pointer-events-none absolute -top-[7px] right-[12px] z-[1] rounded-full border border-fq-green px-[7px] py-[1px] font-mono-fq text-[8.5px] tracking-[0.1em] text-fq-green uppercase" style="background: var(--fq-bg); box-shadow: 0 0 10px color-mix(in srgb, var(--fq-green) 60%, transparent); animation: fq-pop .3s ease both {{ $loop->index * 0.08 }}s">🐾 maybe!</span>
+                        @elseif ($sniffMark === 'paw')
+                            <span class="pointer-events-none absolute top-[3px] left-[40px] z-[1] -rotate-12 text-[17px] text-fq-text-3 opacity-80" style="animation: fq-pop .3s ease both {{ $loop->index * 0.08 }}s" title="Not the Mystery Chore"><i class="fa-solid fa-paw"></i></span>
+                        @endif
+
                         {{-- The same face the chore wears everywhere else. A board
                              of fourteen identical text rows is unusable to a kid
                              who can't read them; a picture per row is the only

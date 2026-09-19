@@ -122,10 +122,18 @@ class TokenService
             ->count();
     }
 
-    /** The most the machines will pay this kid today. */
+    /**
+     * The most the machines will pay this kid today — and more with a Big
+     * Pockets pet out (KnackService::pocketsFor()).
+     */
     public function capFor(Profile $kid): int
     {
-        return self::BASE_CAP + self::CAP_PER_CHORE * $this->choresClaimedToday($kid);
+        return $this->capWith($kid, $this->choresClaimedToday($kid));
+    }
+
+    private function capWith(Profile $kid, int $chores): int
+    {
+        return self::BASE_CAP + self::CAP_PER_CHORE * $chores + app(KnackService::class)->pocketsFor($kid);
     }
 
     /** What the machines have paid this kid today — the part the cap limits. */
@@ -141,12 +149,12 @@ class TokenService
     /**
      * Everything the meter needs, in one read.
      *
-     * @return array{balance: int, today: int, cap: int, room: int, chores: int, empty: bool}
+     * @return array{balance: int, today: int, cap: int, room: int, chores: int, empty: bool, pockets: int}
      */
     public function meterFor(Profile $kid): array
     {
         $chores = $this->choresClaimedToday($kid);
-        $cap = self::BASE_CAP + self::CAP_PER_CHORE * $chores;
+        $cap = $this->capWith($kid, $chores);
         $today = $this->earnedToday($kid);
 
         return [
@@ -156,6 +164,8 @@ class TokenService
             'room' => max(0, $cap - $today),
             'chores' => $chores,
             'empty' => $today >= $cap,
+            // What a Big Pockets pet adds to the cap, so the meter can say so.
+            'pockets' => app(KnackService::class)->pocketsFor($kid),
         ];
     }
 
@@ -208,6 +218,12 @@ class TokenService
 
         for ($rung = max(1, $already + 1); $rung <= $reached; $rung++) {
             $lines[] = ['name' => $ladder[$rung][1], 'tokens' => self::PER_RUNG];
+        }
+
+        // A Coin Sniffer pet finds a bonus token on new rungs. Its own line,
+        // so the kid sees the pet did it — and inside the cap like the rest.
+        if (($sniffed = app(KnackService::class)->coinsSniffedFor($kid, count($lines) - 1)) > 0) {
+            $lines[] = ['name' => '🐾 Coin Sniffer', 'tokens' => $sniffed, 'pet' => true];
         }
 
         $meter = $this->meterFor($kid);

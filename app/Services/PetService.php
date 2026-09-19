@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\CosmeticSlot;
 use App\Enums\CosmeticStock;
 use App\Enums\PetStage;
+use App\Enums\PetStyle;
 use App\Exceptions\CosmeticUnavailableException;
 use App\Exceptions\InsufficientTicketsException;
 use App\Models\Cosmetic;
@@ -140,6 +141,22 @@ class PetService
         $this->copyOf($kid, $pet)?->update(['growth' => 0]);
     }
 
+    /**
+     * The arcade style of the pet this kid has out, or null — for a grown-up,
+     * for a kid with no pet out, and while an egg stands in for one.
+     *
+     * Unlike a knack it works at every age: a style is the kind of help a pet
+     * gives, the same for a baby as for a grown pet. See App\Enums\PetStyle.
+     */
+    public function styleFor(Profile $kid): ?PetStyle
+    {
+        if (! $kid->isKid() || $this->eggFor($kid) !== null) {
+            return null;
+        }
+
+        return $this->cosmetics->wornIn($kid, CosmeticSlot::Pet)?->pet_style;
+    }
+
     /** The kid's unhatched egg, if they have one out. */
     public function eggFor(Profile $kid): ?PetEgg
     {
@@ -203,14 +220,16 @@ class PetService
                 // Fresh, inside the transaction: the header can hold a stale copy.
                 $kid->refresh();
 
+                $price = PetEgg::priceFor($pet);
+
                 $egg = PetEgg::create([
                     'household_id' => $kid->household_id,
                     'profile_id' => $kid->id,
                     'cosmetic_id' => $pet->id,
-                    'tickets_paid' => PetEgg::PRICE,
+                    'tickets_paid' => $price,
                 ]);
 
-                $this->tickets->spend($kid, PetEgg::PRICE, 'Bought a surprise egg', $egg);
+                $this->tickets->spend($kid, $price, 'Bought a '.mb_strtolower($pet->rarity()->label()).' surprise egg', $egg);
 
                 return $egg;
             });
@@ -299,14 +318,14 @@ class PetService
      * laid out (see Cosmetic::rig()) — or, while an egg is out, the egg and
      * how cracked it is.
      *
-     * @return array{src: ?string, effect: ?string, scale: float, stage: string, rig?: array{poses: int, anchors: array<string, array<int, float>>}|null, egg?: int, hue?: int}|null
+     * @return array{src: ?string, effect: ?string, scale: float, stage: string, rig?: array{poses: int, anchors: array<string, array<int, float>>}|null, egg?: int, hue?: int, pattern?: string}|null
      */
     public function spriteFor(Profile $owner): ?array
     {
         $egg = $this->eggFor($owner);
 
         if ($egg !== null) {
-            return ['src' => null, 'effect' => null, 'scale' => PetStage::Baby->scale(), 'stage' => 'egg', 'egg' => $egg->cracks, 'hue' => $egg->hue()];
+            return ['src' => null, 'effect' => null, 'scale' => PetStage::Baby->scale(), 'stage' => 'egg', 'egg' => $egg->cracks, 'hue' => $egg->hue(), 'pattern' => PetEgg::patternFor($egg->pet)];
         }
 
         $pet = $this->cosmetics->wornIn($owner, CosmeticSlot::Pet);

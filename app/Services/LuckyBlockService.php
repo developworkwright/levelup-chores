@@ -115,12 +115,14 @@ class LuckyBlockService
      * @throws InsufficientTicketsException
      * @throws LuckyBlockEmptyException
      */
-    public function hit(Profile $kid): LuckyHit
+    public function hit(Profile $kid, bool $free = false): LuckyHit
     {
-        $hit = DB::transaction(function () use ($kid) {
+        // $free: a pet's Digger dug it — no tickets, the same pool and the
+        // same queue. See KnackService::dig().
+        $hit = DB::transaction(function () use ($kid, $free) {
             $locked = Profile::whereKey($kid->id)->lockForUpdate()->firstOrFail();
 
-            if ($locked->bonus_tickets < self::TICKET_COST) {
+            if (! $free && $locked->bonus_tickets < self::TICKET_COST) {
                 throw new InsufficientTicketsException(self::TICKET_COST - $locked->bonus_tickets);
             }
 
@@ -132,7 +134,9 @@ class LuckyBlockService
 
             $prize = $drawable->random();
 
-            $this->tickets->spend($locked, self::TICKET_COST, "{$kid->name} — Lucky Block", $prize);
+            if (! $free) {
+                $this->tickets->spend($locked, self::TICKET_COST, "{$kid->name} — Lucky Block", $prize);
+            }
 
             return LuckyHit::create([
                 'household_id' => $kid->household_id,
@@ -140,7 +144,7 @@ class LuckyBlockService
                 'lucky_prize_id' => $prize->id,
                 'prize_name' => $prize->name,
                 'prize_icon' => $prize->icon,
-                'tickets_spent' => self::TICKET_COST,
+                'tickets_spent' => $free ? 0 : self::TICKET_COST,
                 'won_at' => now(),
             ]);
         });

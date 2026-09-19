@@ -323,7 +323,7 @@ class ChoreService
      *
      * @return Collection<int, Chore>
      */
-    public function charmBoard(Profile $profile): Collection
+    public function charmBoard(Profile $profile, int $count = self::CHARM_CHORES): Collection
     {
         $already = $this->charmedChoreIdsFor($profile);
 
@@ -340,9 +340,11 @@ class ChoreService
             return collect();
         }
 
-        $picked = $candidates->count() <= self::CHARM_CHORES
+        // $count is fewer than a whole charm for a young pet's Good Luck
+        // Charm, which lights one chore — see KnackService::charm().
+        $picked = $candidates->count() <= $count
             ? $candidates
-            : $candidates->random(self::CHARM_CHORES);
+            : $candidates->random($count);
 
         $today = HouseholdClock::for($profile->household)->today();
         $now = now();
@@ -568,7 +570,30 @@ class ChoreService
      */
     private function drawMysteryChore(Household $household, ?int $excludeChoreId = null): ?Chore
     {
-        $eligible = $household->chores
+        $eligible = $this->mysteryCandidates($household)
+            ->reject(fn (Chore $chore) => $excludeChoreId !== null && $chore->id === $excludeChoreId);
+
+        $hinted = $eligible->filter(fn (Chore $chore) => filled($chore->hint));
+
+        $choreId = ($hinted->isNotEmpty() ? $hinted : $eligible)->pluck('id')->all();
+
+        return empty($choreId) ? null : Chore::find(Arr::random($choreId));
+    }
+
+    /**
+     * Every chore that could be the mystery chore right now, by the draw's own
+     * fairness rules — the one list both the draw and a pet's Sniffer read,
+     * so a sniff can never rule in a chore the draw would have ruled out.
+     *
+     * Whether a chore has a hint is left out on purpose. The draw prefers
+     * hinted chores, and a sniff that only ever kept hinted ones would give
+     * the mystery away to anyone who noticed.
+     *
+     * @return Collection<int, Chore>
+     */
+    public function mysteryCandidates(Household $household): Collection
+    {
+        return $household->chores
             ->filter(fn (Chore $chore) => $chore->min_age === null)
             // Unlimited-cadence chores are always freely repeatable by
             // everyone — that's fundamentally at odds with "first one to
@@ -580,13 +605,7 @@ class ChoreService
             // claim any more means nobody wins it today.
             ->reject(fn (Chore $chore) => $this->isExpired($chore))
             ->reject(fn (Chore $chore) => $this->claimantFor($chore) !== null)
-            ->reject(fn (Chore $chore) => $excludeChoreId !== null && $chore->id === $excludeChoreId);
-
-        $hinted = $eligible->filter(fn (Chore $chore) => filled($chore->hint));
-
-        $choreId = ($hinted->isNotEmpty() ? $hinted : $eligible)->pluck('id')->all();
-
-        return empty($choreId) ? null : Chore::find(Arr::random($choreId));
+            ->values();
     }
 
     /** Whether this kid has already bought today's mystery hint. */

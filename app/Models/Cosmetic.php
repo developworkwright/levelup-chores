@@ -7,7 +7,10 @@ use App\Enums\CosmeticFlavor;
 use App\Enums\CosmeticMotion;
 use App\Enums\CosmeticSlot;
 use App\Enums\CosmeticStock;
+use App\Enums\PetKnack;
+use App\Enums\PetRarity;
 use App\Enums\PetStage;
+use App\Enums\PetStyle;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -31,6 +34,9 @@ class Cosmetic extends Model
         'baby_art_path',
         'young_art_path',
         'pet_rig',
+        'pet_rarity',
+        'pet_style',
+        'pet_knack',
         'name',
         'cost',
         'stock',
@@ -52,6 +58,9 @@ class Cosmetic extends Model
             'effect' => CosmeticEffect::class,
             'checks' => 'array',
             'pet_rig' => 'array',
+            'pet_rarity' => PetRarity::class,
+            'pet_style' => PetStyle::class,
+            'pet_knack' => PetKnack::class,
             'cost' => 'integer',
             'published_at' => 'datetime',
             'pulled_at' => 'datetime',
@@ -182,6 +191,24 @@ class Cosmetic extends Model
             'poses' => count(CosmeticSlot::PET_POSES),
             'anchors' => $this->pet_rig['anchors'][$this->drawnStage($stage)->value] ?? [],
         ];
+    }
+
+    /** A pet's tier. A pet saved before tiers existed is a Common. */
+    public function rarity(): PetRarity
+    {
+        return $this->pet_rarity ?? PetRarity::Common;
+    }
+
+    /**
+     * A pet's knack, or null — for a Common, and for a knack its tier does
+     * not allow (a grown-up turning an Epic back into a Rare leaves the old
+     * knack in the column until a new one is picked; it is not honoured).
+     */
+    public function knack(): ?PetKnack
+    {
+        $knack = $this->pet_knack;
+
+        return $knack !== null && $knack->rarity() === $this->rarity() ? $knack : null;
     }
 
     /** Where this stage's art is stored, falling back the same way. */

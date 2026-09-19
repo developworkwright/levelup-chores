@@ -308,6 +308,35 @@ enum ArcadeGame: string
         };
     }
 
+    /**
+     * What a pet's style does in this game, in a kid's words — or null where
+     * this game has not been given one yet (every style has nothing to do in
+     * it, rather than one style doing something).
+     *
+     * Each game gives each of the four styles something of about the same
+     * worth, so no one pet owns a game — see App\Enums\PetStyle. The game's
+     * own code reads the style (`fqStacker`, `<fart-dash pet-style>`); this
+     * is only what the kid is told, and the two must say the same thing.
+     */
+    public function styleHelp(PetStyle $style): ?string
+    {
+        return match ($this) {
+            self::StackTheMess => match ($style) {
+                PetStyle::Steady => 'steadies your first wobbly drop — it lands straight, no width lost.',
+                PetStyle::Big => 'starts your tower wider, and perfect drops grow it back to that width.',
+                PetStyle::Quick => 'slows the swing down for your first 10 floors.',
+                PetStyle::Lucky => 'catches your first miss — the floor comes back for another go.',
+            },
+            self::WindyWalkies => match ($style) {
+                PetStyle::Steady => 'slows the traffic and the rafts down for your first 28 lanes.',
+                PetStyle::Big => 'makes your super farts blast bigger — cars get shoved further, for longer.',
+                PetStyle::Quick => 'makes every super fart go 4 lanes instead of 3.',
+                PetStyle::Lucky => 'is your spare dog — the first time you get got, you are back on the last safe lane.',
+            },
+            default => null,
+        };
+    }
+
     /** The tips-strip icon, which is the one thing about a game that is not words. */
     public function icon(): string
     {
