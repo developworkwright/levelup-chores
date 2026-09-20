@@ -1080,6 +1080,29 @@ class PetKnackTest extends TestCase
         $page->call('stopLooking')->call('tryOut', 'baby')->assertDontSee('data-pet-trial', false);
     }
 
+    /** A grown-up sees every egg in the shop, what is in it, and who has it. */
+    public function test_the_parent_pets_page_lists_the_eggs_and_what_is_in_them(): void
+    {
+        $glimmer = $this->pet('Glimmer', ['stock' => 'egg', 'pet_rarity' => 'epic', 'pet_style' => 'quick', 'pet_knack' => 'paw_nudge']);
+        $plain = $this->pet('Plain', ['stock' => 'egg']);
+
+        app(PetService::class)->buyEgg($this->kid, $plain);
+
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        Auth::guard('profile')->login($parent);
+
+        Volt::test('parent.cosmetics', ['mode' => 'pets'])
+            ->assertSee('data-egg-shelf', false)
+            ->assertSee('data-egg-shelf-row="'.$glimmer->id.'"', false)
+            // What is inside, which a kid never sees.
+            ->assertSee('Glimmer')
+            ->assertSee(PetKnack::PawNudge->label())
+            ->assertSee('In the shop for')
+            ->assertSee(PetEgg::priceFor($glimmer).' ✦')
+            // And the one a kid is already cracking.
+            ->assertSee($this->kid->name.' is cracking it — 0 of '.PetEgg::CRACKS_TO_HATCH);
+    }
+
     /** A Common has a style and no perk — the page says so instead of hiding the card. */
     public function test_the_pets_page_says_a_common_has_no_perk(): void
     {

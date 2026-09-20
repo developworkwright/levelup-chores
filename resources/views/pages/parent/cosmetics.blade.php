@@ -154,6 +154,48 @@ new class extends Component
             ->all();
     }
 
+    /**
+     * Every egg-only pet in the house and where it stands: still in the shop,
+     * or bought by a kid and cracking, or already hatched. A grown-up made
+     * these pets, so a grown-up is told what is inside — a kid never is.
+     *
+     * @return list<array{pet: Cosmetic, price: int, hue: int, colour: string, pattern: string, egg: ?App\Models\PetEgg, holder: ?Profile, hatched: bool}>
+     */
+    private function eggShelf(): array
+    {
+        $household = $this->profile->household;
+        $pets = app(App\Services\PetService::class);
+        $eggs = App\Models\PetEgg::where('household_id', $household->id)
+            ->whereNotNull('cosmetic_id')
+            ->with('profile')
+            ->get()
+            ->keyBy('cosmetic_id');
+        $forSale = $pets->eggsForSale($household)->pluck('id');
+
+        return app(CosmeticService::class)->catalog($household)
+            ->filter(fn (Cosmetic $item) => $item->slot === CosmeticSlot::Pet
+                && $item->stock === App\Enums\CosmeticStock::Egg
+                && ! $item->isDraft())
+            ->sortByDesc(fn (Cosmetic $item) => [$forSale->contains($item->id), App\Models\PetEgg::priceFor($item)])
+            ->map(function (Cosmetic $item) use ($eggs) {
+                $egg = $eggs->get($item->id);
+                $hue = App\Models\PetEgg::hueFor($item->id);
+
+                return [
+                    'pet' => $item,
+                    'price' => App\Models\PetEgg::priceFor($item),
+                    'hue' => $hue,
+                    'colour' => App\Models\PetEgg::colourName($hue),
+                    'pattern' => $item->rarity()->eggPattern(),
+                    'egg' => $egg,
+                    'holder' => $egg?->profile,
+                    'hatched' => $egg?->hatched_at !== null,
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
     /** @return array<string, mixed> */
     public function rules(): array
     {
@@ -678,6 +720,7 @@ new class extends Component
             'replacingPet' => $this->replacing === null ? null : $this->find($this->replacing),
             'petsMode' => $this->petsMode(),
             'kidsPets' => $this->petsMode() ? $this->kidsPets() : [],
+            'eggShelf' => $this->petsMode() ? $this->eggShelf() : [],
             // A real face under the preview, since a frame is judged by how it
             // sits round one.
             'previewFace' => $catalog->first(fn (Cosmetic $item) => $item->slot === CosmeticSlot::Avatar && ! $item->isDraft()),
@@ -759,6 +802,57 @@ new class extends Component
             <div class="rounded-[14px] border border-fq-line-2 bg-fq-sunk px-4 py-3 text-sm text-fq-text-2">{{ $flashMessage }}</div>
         @endif
 
+        {{-- Pets mode: every surprise egg a kid can buy, what is inside it
+             and who has it. The kid's side shows the shell and the price and
+             nothing else — see the Pets page. --}}
+        @if ($petsMode && $eggShelf)
+            <div class="flex flex-col gap-[8px]" data-egg-shelf>
+                <div class="flex flex-wrap items-baseline justify-between gap-[8px]">
+                    <p class="font-mono-fq text-[9.5px] tracking-[0.16em] text-fq-text-4 uppercase">Surprise eggs</p>
+                    <p class="text-[11px] text-fq-text-5">Kids see the shell and the price. You see what's in it.</p>
+                </div>
+
+                <div class="grid gap-[8px] sm:grid-cols-2">
+                    @foreach ($eggShelf as $row)
+                        @php
+                            $eggTier = $row['pet']->rarity();
+                            $gone = $row['egg'] !== null;
+                        @endphp
+                        <div wire:key="egg-shelf-{{ $row['pet']->id }}" @class(['flex items-center gap-[11px] rounded-[14px] border border-fq-line bg-fq-panel px-[12px] py-[10px]', 'opacity-60' => $gone || $row['pet']->isPulled()]) data-egg-shelf-row="{{ $row['pet']->id }}">
+                            <span class="relative h-[44px] w-[38px] shrink-0">
+                                <img x-data :src="window.fqEggSvg?.({{ $row['egg'] && ! $row['hatched'] ? $row['egg']->cracks : 0 }}, {{ $row['hue'] }}, '{{ $row['pattern'] }}')" alt="" class="absolute inset-0 h-full w-full">
+                            </span>
+                            <span class="relative h-[40px] w-[40px] shrink-0 overflow-hidden rounded-[10px] bg-fq-bg">
+                                <x-cosmetic.art :item="$row['pet']" still class="absolute inset-0" />
+                            </span>
+
+                            <div class="min-w-0 flex-1">
+                                <p class="text-[13px] font-semibold">
+                                    {{ $row['pet']->name }}
+                                    <span class="font-mono-fq text-[9px] tracking-[0.08em] uppercase" style="color: {{ $eggTier->color() }}">· {{ $eggTier->label() }}</span>
+                                </p>
+                                <p class="mt-[1px] font-mono-fq text-[8.5px] tracking-[0.08em] text-fq-text-5 uppercase">
+                                    {{ $row['colour'] }} shell
+                                    @if ($row['pet']->pet_style) · {{ $row['pet']->pet_style->label() }} @endif
+                                    @if ($row['pet']->knack()) · {{ $row['pet']->knack()->label() }} @endif
+                                </p>
+                                <p class="mt-[2px] text-[11.5px] text-fq-text-3">
+                                    @if ($row['hatched'])
+                                        <span class="text-fq-text-4">Hatched by {{ $row['holder']?->name ?? 'a kid' }}.</span>
+                                    @elseif ($row['egg'])
+                                        <span class="text-fq-gold">{{ $row['holder']?->name ?? 'A kid' }} is cracking it — {{ $row['egg']->cracks }} of {{ App\Models\PetEgg::CRACKS_TO_HATCH }}.</span>
+                                    @elseif ($row['pet']->isPulled())
+                                        <span class="text-fq-text-4">Pulled — not in the shop.</span>
+                                    @else
+                                        In the shop for <span class="font-baloo text-[13px] font-extrabold text-fq-lime">{{ $row['price'] }} ✦</span>
+                                    @endif
+                                </p>
+                            </div>
+                        </div>
+                    @endforeach
+                </div>
+            </div>
+        @endif
         {{-- Pets mode: how every kid's pet is doing — the one out, how grown,
              its knack and what's left of it, or the egg in its place. --}}
         @if ($petsMode)
