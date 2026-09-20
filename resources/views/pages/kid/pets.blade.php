@@ -261,6 +261,13 @@ new class extends Component
             'treatPrice' => $knack ? $knacks->treatPrice($this->profile, $knack['knack']) : null,
             // What its style does, game by game — only the games given styles.
             'styleGames' => $this->styleGames($out?->pet_style),
+            // All four, so a kid can see what the word on a pet is worth
+            // before they own that pet — see the styles block.
+            'allStyles' => collect(PetStyle::cases())
+                ->map(fn (PetStyle $style) => ['style' => $style, 'games' => $this->styleGames($style)])
+                ->filter(fn (array $row) => $row['games'] !== [])
+                ->values()
+                ->all(),
             'gear' => app(PrizeCounterService::class)->gearFor($this->profile),
             'owned' => $owned,
             'stages' => $pets->stagesFor($this->profile),
@@ -486,27 +493,21 @@ new class extends Component
                             </div>
                         @endif
 
-                        {{-- Its style, game by game. --}}
-                        @if ($style && $styleGames)
-                            <div class="flex flex-col gap-[7px] rounded-[16px] border p-[12px]" style="border-color: #241539; background: #0b0616" data-pet-style-games>
-                                <span class="flex items-center gap-[7px]">
-                                    <i class="fa-solid fa-gamepad text-[13px]" style="color: #c9a0ff"></i>
-                                    <span class="font-baloo text-[16px] leading-tight font-extrabold">{{ $style->label() }} in the arcade</span>
-                                </span>
-                                <span class="text-[11px]" style="color: #8c7bab">{{ $style->blurb() }}</span>
-                                @foreach ($styleGames as $game => $help)
-                                    <span class="flex flex-col gap-[1px] border-t pt-[6px]" style="border-color: #1b1030">
-                                        <span class="font-mono-fq text-[8px] tracking-[0.12em] uppercase" style="color: #8c7bab">{{ $game }}</span>
-                                        <span class="text-[11.5px]" style="color: #ded0f5">{{ $out->name }} {{ $help }}</span>
-                                    </span>
-                                @endforeach
-                            </div>
-                        @endif
+                    @if ($allStyles)
+                        <x-pet-styles-card :styles="$allStyles" :mine="$style" :pet-name="$out->name" />
+                    @endif
                     </div>
                 @elseif (! $egg)
                     <div class="grid h-[214px] place-items-center rounded-[20px] border border-dashed border-fq-line-2 px-4 text-center text-[13px] text-fq-text-4 lg:h-[260px]" data-no-pet>
                         No pet out yet — {{ $owned->isNotEmpty() ? 'pick one of yours' : 'pick one from the pets for sale, or crack a surprise egg' }}.
                     </div>
+                @endif
+
+                {{-- With a pet out this sits beside its perk; with none — or an
+                     egg — it stands alone, which is exactly when a kid is
+                     reading style names in the shop. --}}
+                @if ($allStyles && ! $out)
+                    <x-pet-styles-card :styles="$allStyles" />
                 @endif
             </div>
 

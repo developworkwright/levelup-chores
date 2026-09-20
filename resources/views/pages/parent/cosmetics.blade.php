@@ -465,7 +465,9 @@ new class extends Component
             'cost' => $this->cost,
             'stock' => $this->stock,
             'flavor' => $this->flavor !== '' ? $this->flavor : null,
-            'motion' => $this->motion !== '' ? $this->motion : null,
+            // A pet's sheet does its own moving; motion would be a promise
+            // nothing keeps. See the Movement field.
+            'motion' => $this->motion !== '' && $slot !== CosmeticSlot::Pet ? $this->motion : null,
             'effect' => $this->effect !== '' ? $this->effect : null,
             'checks' => $checks,
             'published_at' => now(),
@@ -1062,7 +1064,10 @@ new class extends Component
                     </div>
                 </div>
 
-                <label class="flex flex-col gap-[6px]">
+                {{-- Not for a pet: a sprite sheet animates itself, and nothing
+                     that draws a pet reads motion — see the pet branch of
+                     <fq-cosmetic> in cosmetic-elements.js. --}}
+                <label @class(['flex flex-col gap-[6px]', 'hidden' => $uploadSlot === CosmeticSlot::Pet])>
                     <span class="{{ $label }}">Movement</span>
                     <select wire:model.live="motion" class="{{ $field }}">
                         <option value="">None — it holds still</option>

@@ -98,6 +98,22 @@ new class extends Component
         // Nothing to do but come back — with() reads the library afresh.
     }
 
+    /**
+     * Redraw when a song went into a list from the header's player.
+     *
+     * Only ever fires on the music page, where the builder and the header are
+     * on the same screen: a song added up there would otherwise leave the list
+     * down here showing the count it had a minute ago.
+     *
+     * A distinct event from `playlists-updated`, which this component *sends* —
+     * one listening for its own announcement would answer it forever.
+     */
+    #[On('playlist-touched')]
+    public function playlistTouched(): void
+    {
+        // Nothing to do but come back — with() reads the lists afresh.
+    }
+
     public function createPlaylist(): void
     {
         $service = app(PlaylistService::class);

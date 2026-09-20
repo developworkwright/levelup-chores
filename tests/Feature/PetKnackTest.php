@@ -1312,6 +1312,48 @@ class PetKnackTest extends TestCase
             ->assertSee($this->kid->name.' is cracking it — 0 of '.PetEgg::CRACKS_TO_HATCH);
     }
 
+    /**
+     * The Pets page explains all four styles, not only the one the kid has
+     * out: a style name on a pet in the shop means nothing on its own.
+     */
+    public function test_the_pets_page_explains_every_style_in_every_game(): void
+    {
+        $rex = $this->pet('Rex', ['pet_style' => 'quick']);
+        $this->outOn($this->kid, $rex, 30);
+
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        $page = Volt::test('kid.pets')->assertSee('data-all-styles', false)->assertSee('What the styles do');
+
+        foreach (PetStyle::cases() as $style) {
+            $page->assertSee('data-style-row="'.$style->value.'"', false);
+            $page->assertSee($style->blurb());
+
+            foreach (ArcadeGame::ranked() as $game) {
+                if ($help = $game->styleHelp($style)) {
+                    $page->assertSee($help);
+                }
+            }
+        }
+
+        // Their own is the one named and marked.
+        $page->assertSee('Yours')->assertSee('Rex '.ArcadeGame::StackTheMess->styleHelp(PetStyle::Quick));
+    }
+
+    /** And it is there with no pet out at all, which is when a kid is shopping. */
+    public function test_the_styles_are_explained_with_no_pet_out(): void
+    {
+        $this->pet('Rex', ['pet_style' => 'quick']);
+
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        Volt::test('kid.pets')
+            ->assertSee('data-no-pet', false)
+            ->assertSee('data-all-styles', false)
+            ->assertSee(PetStyle::Lucky->blurb())
+            ->assertDontSee('Yours');
+    }
+
     /** A Common has a style and no perk — the page says so instead of hiding the card. */
     public function test_the_pets_page_says_a_common_has_no_perk(): void
     {
@@ -1325,7 +1367,9 @@ class PetKnackTest extends TestCase
             ->assertSee('No perk')
             ->assertDontSee('data-pet-knack=', false)
             ->assertDontSee('data-power-treat', false)
-            ->assertSee('Steady in the arcade');
+            // Still told what its style is worth, perk or no perk.
+            ->assertSee('data-style-row="steady"', false)
+            ->assertSee('Yours');
     }
 
     /** The shop says what each pet brings, and an egg's confirm never names its perk. */

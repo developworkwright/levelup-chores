@@ -567,6 +567,30 @@ class PetGrowthTest extends TestCase
         $this->assertSame(PetStage::Baby->scale(), $pet->drawScale(PetStage::Baby));
     }
 
+    /**
+     * Movement is for the drawn cosmetics: a pet's sheet does its own moving,
+     * and nothing that draws a pet reads motion. So the field is not offered
+     * for one, and a motion left over from another upload is not stored.
+     */
+    public function test_a_pet_is_never_given_a_movement(): void
+    {
+        Auth::guard('profile')->login($this->parent);
+
+        $page = Volt::test('parent.cosmetics')
+            ->set('motion', 'spin')
+            ->call('$set', 'slot', 'pet');
+
+        // The select is still on the page for the other slots, just not shown.
+        $this->assertStringContainsString('hidden', str($page->html())->before('Movement')->afterLast('<label')->toString());
+
+        $page->set('upload', UploadedFile::fake()->createWithContent('family.png', $this->familyPng()))
+            ->set('name', 'Stiller')
+            ->call('publish')
+            ->assertHasNoErrors();
+
+        $this->assertNull(Cosmetic::where('name', 'Stiller')->firstOrFail()->motion);
+    }
+
     /** A single four-by-three sheet is one age, and a pet needs all three. */
     public function test_a_pet_upload_that_is_not_the_whole_sheet_is_refused(): void
     {

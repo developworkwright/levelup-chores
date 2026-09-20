@@ -8,10 +8,16 @@
      player: a rail of sources down one side, the songs of whichever you are
      looking at beside it, and the transport along the bottom.
 
-     The one thing it deliberately does not do is build a playlist. That is a
+     The one thing it deliberately does not do is *make* a playlist. That is a
      page (`kid.music` / `parent.music`), it wants the whole library laid out,
      and it does not fit in a panel on a phone — so `+ New playlist` in the rail
      is a link to it rather than a form.
+
+     Putting a song *into* a list it does do, from a `+` on every row: browsing
+     is exactly when a kid decides they like a song, and one they have to go and
+     rebuild a list from memory to keep is a song they lose. That is the only
+     thing in here that reaches a server — see `livewire/playlist-quick-add`,
+     which is how it gets there from a panel the shell draws.
 
      Everything it knows lives in the `music` Alpine store — see
      resources/js/music.js for why the audio is deliberately not an element on
@@ -89,7 +95,7 @@
         x-data="fqMusic(@js($tracks), {{ $latestAt }}, @js($playlists))"
         {{-- On the wrapper so a tap on either button counts as inside;
              hung off the panel it would race its own opening. --}}
-        @click.outside="open = false"
+        @click.outside="open = false; closeAdd()"
         class="relative shrink-0"
     >
         <div class="flex items-stretch overflow-hidden border bg-fq-sunk {{ $bar }}">
@@ -293,7 +299,7 @@
                      flex item will not shrink below its content. One long
                      "Song - Artist" filename pushed the whole list, the Play
                      all and the scrollbar out past the panel's right edge. --}}
-                <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
+                <div class="relative flex min-h-0 min-w-0 flex-1 flex-col gap-2">
                     <div class="flex shrink-0 flex-wrap items-end justify-between gap-3">
                         <div class="min-w-0">
                             <span class="block font-mono-fq text-[9.5px] tracking-[0.14em] text-fq-text-4 uppercase" x-text="viewKindLabel"></span>
@@ -369,6 +375,29 @@
                                     <span class="truncate" x-text="track.title"></span>
                                 </button>
 
+                                {{-- Keep it.
+
+                                     Browsing is *when* a kid decides they like
+                                     a song, so the panel has to answer that
+                                     here: the music page is two taps and a page
+                                     away, and by then the song they meant is a
+                                     thing they half remember.
+
+                                     Lit when the song is already in a list of
+                                     theirs, which is the cheapest answer there
+                                     is to "have I got this one?" — a question
+                                     asked over a hundred-song library, often. --}}
+                                @if ($buildHref !== null)
+                                    <button
+                                        type="button"
+                                        @click="openAdd(track)"
+                                        :aria-label="'Put ' + track.title + ' in a playlist'"
+                                        :title="kept(track.id) ? 'In a playlist of yours — add it to another' : 'Add to a playlist'"
+                                        class="grid min-h-[44px] w-[30px] shrink-0 place-items-center text-[15px] transition hover:text-fq-lime"
+                                        :class="kept(track.id) ? 'text-fq-lime' : 'text-fq-text-6'"
+                                    >&plus;</button>
+                                @endif
+
                                 {{-- On every row, not only the one playing:
                                      "that one again" is the thing the house
                                      actually does with this panel, and a
@@ -389,6 +418,104 @@
                             Nothing in here yet — put some songs in it on the music page.
                         </p>
                     </div>
+
+                    @if ($buildHref !== null)
+                        {{-- Which playlist?
+
+                             One sheet over the track list rather than a menu
+                             hanging off the row that opened it: that list
+                             scrolls, and a popover inside a scroller either
+                             gets clipped by it or rides down the page with the
+                             thumb. Over the songs and not over the whole panel,
+                             so the transport underneath keeps playing what it
+                             was playing — putting a song in a list is not a
+                             reason for the music to get out of the way.
+
+                             `x-show` and not `<template x-if>`: the header is
+                             morphed by every Livewire render on the page under
+                             it, and `x-if` clones its contents in as a sibling
+                             the morph cannot see, so handlers come back dead.
+                             See the feelings card. --}}
+                        <div
+                            x-show="adding"
+                            x-cloak
+                            {{-- Caught here rather than on the row, because the
+                                 answer arrives after a round trip and the row
+                                 it came from may well be scrolled away. --}}
+                            @playlist-add-said.window="said($event.detail)"
+                            class="absolute inset-0 z-10 flex flex-col gap-2 rounded-[14px] border border-fq-line-2 bg-fq-panel p-3"
+                        >
+                            <div class="flex shrink-0 items-start justify-between gap-2">
+                                <div class="min-w-0">
+                                    <span class="block font-mono-fq text-[9.5px] tracking-[0.14em] text-fq-text-4 uppercase">Add to playlist</span>
+                                    <span class="mt-[3px] block truncate font-baloo text-[17px] leading-[1.15] font-extrabold" x-text="adding ? adding.title : ''"></span>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    @click="closeAdd()"
+                                    aria-label="Never mind"
+                                    class="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-[11px] border border-fq-line-2 text-[13px] text-fq-text-4 transition hover:border-fq-line-4 hover:text-fq-text"
+                                >&times;</button>
+                            </div>
+
+                            <div class="-mr-1 flex min-h-0 flex-1 flex-col gap-[2px] overflow-y-auto border-t border-fq-line pt-2 pr-1">
+                                <template x-for="list in music.playlists" :key="list.id">
+                                    <button
+                                        type="button"
+                                        @click="addTo(list)"
+                                        {{-- Still drawn, and drawn as done. A
+                                             list that vanished from the sheet
+                                             the moment the song went in would
+                                             leave a kid tapping through the
+                                             others looking for the one they
+                                             had just used. --}}
+                                        :disabled="adding && holds(list, adding.id)"
+                                        :aria-label="adding && holds(list, adding.id)
+                                            ? list.name + ' already has it'
+                                            : 'Add to ' + list.name"
+                                        class="flex min-h-[44px] shrink-0 items-center gap-2 rounded-[10px] px-2 text-left text-[13.5px] transition"
+                                        :class="adding && holds(list, adding.id)
+                                            ? 'text-fq-text-5'
+                                            : 'text-fq-text-3 hover:bg-fq-sunk hover:text-fq-text'"
+                                    >
+                                        <span
+                                            class="w-[14px] shrink-0 font-mono-fq text-[11px]"
+                                            :class="adding && holds(list, adding.id) ? 'text-fq-lime' : 'text-fq-text-4'"
+                                            x-text="adding && holds(list, adding.id) ? '&check;' : '+'"
+                                        ></span>
+
+                                        <span class="min-w-0 flex-1 truncate" x-text="list.name"></span>
+
+                                        <span class="shrink-0 font-mono-fq text-[10px] text-fq-text-4" x-text="countIn(list)"></span>
+                                    </button>
+                                </template>
+
+                                <p x-show="! music.playlists.length" class="px-2 py-3 text-[13px] text-fq-text-5">
+                                    You have not made a playlist yet. Make one and this song can go straight in it.
+                                </p>
+                            </div>
+
+                            {{-- A full list, and a song already in one, are the
+                                 two things the ticks cannot say by themselves —
+                                 and the component that answers has no markup of
+                                 its own to say them in. --}}
+                            <p
+                                x-show="note"
+                                x-cloak
+                                class="shrink-0 text-[12.5px]"
+                                :style="noteOk ? 'color: var(--fq-lime)' : 'color: var(--fq-danger)'"
+                                x-text="note"
+                            ></p>
+
+                            <a
+                                href="{{ $buildHref }}"
+                                wire:navigate
+                                @click="open = false; closeAdd()"
+                                class="flex min-h-[40px] shrink-0 items-center justify-center rounded-[12px] border border-fq-line-2 text-[12.5px] text-fq-text-3 transition hover:border-fq-line-4 hover:text-fq-text"
+                            >+ New playlist</a>
+                        </div>
+                    @endif
                 </div>
             </div>
 
@@ -507,5 +634,14 @@
                 </label>
             </div>
         </div>
+
+        @if ($buildHref !== null)
+            {{-- Adding a song to a playlist is the one thing in this panel that
+                 has to reach a server, and the panel cannot do it itself: it is
+                 drawn by the shell, so `$wire` here is whichever page happens to
+                 be underneath. This hears the broadcast instead, and draws
+                 nothing at all. --}}
+            <livewire:playlist-quick-add />
+        @endif
     </div>
 @endif

@@ -1038,6 +1038,24 @@ document.addEventListener('alpine:init', () => {
         viewKind: 'all',
         viewRef: null,
 
+        /**
+         * The song whose "which playlist?" sheet is open, or null.
+         *
+         * Browsing is when a kid finds a song they want to keep, so the panel
+         * has to be able to answer that where they found it — walking to the
+         * music page to rebuild a list from memory is how a good song gets
+         * lost. It is one sheet over the track list rather than a menu hung off
+         * each row: the list scrolls, and a popover inside a scroller is a
+         * thing that either clips or follows you down the page.
+         *
+         * Panel-local and forgotten on close, like `viewKind` — see above.
+         */
+        adding: null,
+
+        /** What the server said about the last add, if anything. */
+        note: null,
+        noteOk: false,
+
         init() {
             this.$store.music.load(tracks, latestAt, playlists);
         },
@@ -1115,6 +1133,8 @@ document.addEventListener('alpine:init', () => {
         togglePanel() {
             this.open = ! this.open;
 
+            this.closeAdd();
+
             if (this.open) {
                 this.lookAtWhatIsPlaying();
                 this.music.markSeen();
@@ -1146,6 +1166,54 @@ document.addEventListener('alpine:init', () => {
         /** How many of a playlist's songs are actually in the library today. */
         countIn(playlist) {
             return playlist.trackIds.length;
+        },
+
+        /** Open the sheet on a song. */
+        openAdd(track) {
+            this.adding = track;
+            this.note = null;
+        },
+
+        closeAdd() {
+            this.adding = null;
+            this.note = null;
+        },
+
+        /** Is this song already in that list? */
+        holds(playlist, id) {
+            return playlist.trackIds.includes(id);
+        },
+
+        /** Is it anywhere at all — what the + on a row is lit by. */
+        kept(id) {
+            return this.music.playlists.some((list) => list.trackIds.includes(id));
+        },
+
+        /**
+         * Put the open song in a list.
+         *
+         * Broadcast rather than a `$wire` call: the panel is drawn by the shell
+         * and `$wire` there is whichever page is underneath. The answer comes
+         * back as `playlists-updated` — the store's own listener refreshes the
+         * ids, so the row ticks itself — and as the line `said()` catches.
+         */
+        addTo(playlist) {
+            if (this.adding === null || this.holds(playlist, this.adding.id)) {
+                return;
+            }
+
+            this.note = null;
+
+            window.Livewire.dispatch('quick-add-song', {
+                playlistId: playlist.id,
+                trackId: this.adding.id,
+            });
+        },
+
+        /** What came back. A refusal has nowhere else to be said. */
+        said(detail) {
+            this.note = detail?.message ?? null;
+            this.noteOk = detail?.ok === true;
         },
 
         get label() {

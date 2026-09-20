@@ -600,6 +600,194 @@ class PlaylistTest extends TestCase
         );
     }
 
+    public function test_a_song_can_be_put_in_a_playlist_from_the_player(): void
+    {
+        // Browsing is when a kid decides they like a song. The panel is Alpine
+        // over a store, so the one moment that touches the database is this
+        // component, reached by a broadcast rather than by $wire — see its
+        // docblock for why the page underneath cannot be asked.
+        $this->library(['Mossy_Save_Point.mp3']);
+        $kid = $this->loginKid();
+
+        $playlist = Playlist::factory()->create(['profile_id' => $kid->id, 'name' => 'Chore Power']);
+
+        Volt::test('playlist-quick-add')
+            ->call('addSong', $playlist->id, 'mossy-save-point')
+            ->assertDispatched('playlists-updated')
+            ->assertDispatched('playlist-add-said', message: 'Added to Chore Power.', ok: true);
+
+        $this->assertSame(['mossy-save-point'], $playlist->tracks()->pluck('track_id')->all());
+    }
+
+    public function test_the_player_adds_to_the_end_of_the_list(): void
+    {
+        $this->library(['One.mp3', 'Two.mp3']);
+        $kid = $this->loginKid();
+
+        $playlist = Playlist::factory()->create(['profile_id' => $kid->id]);
+        $this->service()->add($playlist, 'one');
+
+        Volt::test('playlist-quick-add')->call('addSong', $playlist->id, 'two');
+
+        $this->assertSame(['one', 'two'], $playlist->tracks()->pluck('track_id')->all());
+        $this->assertSame([1, 2], $playlist->tracks()->pluck('position')->all());
+    }
+
+    public function test_the_player_says_so_when_the_song_is_already_in_the_list(): void
+    {
+        // The sheet ticks a list it cannot add to, so this only happens to a
+        // panel whose store is a moment behind — and it still gets an answer
+        // rather than a tap that does nothing.
+        $this->library(['Mossy_Save_Point.mp3']);
+        $kid = $this->loginKid();
+
+        $playlist = Playlist::factory()->create(['profile_id' => $kid->id, 'name' => 'Chore Power']);
+        $this->service()->add($playlist, 'mossy-save-point');
+
+        Volt::test('playlist-quick-add')
+            ->call('addSong', $playlist->id, 'mossy-save-point')
+            ->assertDispatched('playlist-add-said', message: 'It is already in Chore Power.', ok: false)
+            ->assertNotDispatched('playlists-updated');
+
+        $this->assertSame(1, $playlist->tracks()->count());
+    }
+
+    public function test_the_player_says_so_when_the_list_is_full(): void
+    {
+        $this->library(['Mossy_Save_Point.mp3', 'Old_Ruins.mp3']);
+        $kid = $this->loginKid();
+
+        $playlist = Playlist::factory()->create(['profile_id' => $kid->id, 'name' => 'Chore Power']);
+
+        // Straight to the limit rather than through a hundred real songs: what
+        // is being tested is the refusal, not PlaylistService's counting.
+        for ($position = 1; $position <= PlaylistService::MAX_TRACKS; $position++) {
+            PlaylistTrack::create([
+                'playlist_id' => $playlist->id,
+                'track_id' => 'filler-'.$position,
+                'title' => 'Filler '.$position,
+                'position' => $position,
+            ]);
+        }
+
+        Volt::test('playlist-quick-add')
+            ->call('addSong', $playlist->id, 'mossy-save-point')
+            ->assertDispatched(
+                'playlist-add-said',
+                message: 'Chore Power is full at '.PlaylistService::MAX_TRACKS.' songs.',
+                ok: false,
+            );
+
+        $this->assertSame(PlaylistService::MAX_TRACKS, $playlist->tracks()->count());
+    }
+
+    public function test_the_player_never_adds_to_somebody_elses_playlist(): void
+    {
+        // The id comes off a broadcast event, which anything in the browser can
+        // send. Same rule as the builder: the list is found through the profile
+        // signed in or not at all.
+        $this->library(['Mossy_Save_Point.mp3']);
+        $kid = $this->loginKid();
+        $sibling = Profile::factory()->for($kid->household)->create();
+
+        $theirs = Playlist::factory()->create(['profile_id' => $sibling->id]);
+
+        Volt::test('playlist-quick-add')
+            ->call('addSong', $theirs->id, 'mossy-save-point')
+            ->assertNotDispatched('playlists-updated');
+
+        $this->assertSame(0, $theirs->tracks()->count());
+    }
+
+    public function test_the_player_never_adds_a_song_that_is_not_in_the_library(): void
+    {
+        $this->library(['Mossy_Save_Point.mp3']);
+        $kid = $this->loginKid();
+
+        $playlist = Playlist::factory()->create(['profile_id' => $kid->id]);
+
+        Volt::test('playlist-quick-add')
+            ->call('addSong', $playlist->id, 'never-existed')
+            ->assertNotDispatched('playlists-updated');
+
+        $this->assertSame(0, $playlist->tracks()->count());
+    }
+
+    public function test_an_empty_sheet_asks_for_nothing(): void
+    {
+        // Alpine holds an unset selection as null, and a typed parameter that
+        // will not take one throws on the most ordinary path there is.
+        $this->library(['Mossy_Save_Point.mp3']);
+        $this->loginKid();
+
+        Volt::test('playlist-quick-add')
+            ->call('addSong', null, null)
+            ->assertNotDispatched('playlists-updated');
+    }
+
+    public function test_adding_from_the_player_redraws_the_builder_under_it(): void
+    {
+        // Both are on the music page. Its own event rather than the one the
+        // builder sends: a component listening for its own announcement would
+        // answer it forever.
+        $this->library(['Mossy_Save_Point.mp3']);
+        $kid = $this->loginKid();
+
+        $playlist = Playlist::factory()->create(['profile_id' => $kid->id]);
+
+        // Drawn first, so its count is a lie by the time the song goes in —
+        // which is the whole situation: both are on the music page at once.
+        $builder = Volt::test('playlist-builder')->assertSee('0 SONGS');
+
+        Volt::test('playlist-quick-add')
+            ->call('addSong', $playlist->id, 'mossy-save-point')
+            ->assertDispatched('playlist-touched');
+
+        // And it must not answer with `playlists-updated`, the event it sends
+        // itself: a component listening for its own announcement would answer
+        // it forever.
+        $builder
+            ->dispatch('playlist-touched')
+            ->assertDontSee('0 SONGS')
+            ->assertNotDispatched('playlists-updated');
+    }
+
+    public function test_every_song_in_the_player_carries_the_button_that_keeps_it(): void
+    {
+        $this->library(['Mossy_Save_Point.mp3']);
+        $this->loginKid();
+
+        Volt::test('kid.quests')
+            ->assertSee('openAdd(track)', false)
+            // Lit when it is already in a list of theirs — the cheapest answer
+            // to "have I got this one?" over a hundred songs.
+            ->assertSee('kept(track.id)', false)
+            ->assertSee('Add to playlist')
+            ->assertSee('addTo(list)', false)
+            // `x-show`, never `<template x-if>`: the header is morphed by every
+            // render of the page under it, and x-if clones its contents in as a
+            // sibling the morph cannot see, so the handlers come back dead.
+            ->assertSee('x-show="adding"', false)
+            // Blade leaves an unknown `@thing` alone, but the sheet is mute if
+            // it ever stops doing so — this is the only way a refusal is heard.
+            ->assertSee('@playlist-add-said.window', false)
+            ->assertSeeLivewire('playlist-quick-add');
+    }
+
+    public function test_the_parent_player_can_keep_a_song_too(): void
+    {
+        $this->library(['Mossy_Save_Point.mp3']);
+        $parent = $this->loginParent();
+
+        $playlist = Playlist::factory()->create(['profile_id' => $parent->id, 'name' => 'Kitchen']);
+
+        Volt::test('playlist-quick-add')
+            ->call('addSong', $playlist->id, 'mossy-save-point')
+            ->assertDispatched('playlists-updated');
+
+        $this->assertSame(1, $playlist->tracks()->count());
+    }
+
     public function test_an_edit_tells_the_header_about_it(): void
     {
         $this->library(['Mossy_Save_Point.mp3']);
