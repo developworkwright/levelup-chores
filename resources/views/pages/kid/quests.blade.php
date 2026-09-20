@@ -515,6 +515,26 @@ new class extends Component
         $this->dispatch('celebrate', message: 'Nudged — it\'s '.$result['chore']->name.' now!', style: 'star');
     }
 
+    /**
+     * The pet's Sure Paw: the boost goes on the chore the kid pointed at, and
+     * the wheel turns to show it. A grown pet will take any chore on the
+     * wheel; a young one offers three of its own choosing. See
+     * KnackService::surePaw().
+     */
+    public function usePaw(int $choreId): void
+    {
+        $chore = app(KnackService::class)->surePaw($this->profile, $choreId);
+
+        if ($chore === null) {
+            $this->perkMessage = 'Nothing to point at right now.';
+
+            return;
+        }
+
+        $this->turnWheelToBoost();
+        $this->dispatch('celebrate', message: 'Boost on '.$chore->name.'!', style: 'star');
+    }
+
     /** A young pet's nudge, put back where the wheel first landed. */
     public function putNudgeBack(): void
     {
@@ -1005,6 +1025,8 @@ new class extends Component
             'knack' => $knack,
             'fetchOffer' => $knack && ! $this->spinning && $this->spinRevealed && $knacks->fetchable($this->profile) !== null,
             'nudgeTargets' => $knack && ! $this->spinning && $this->spinRevealed ? $knacks->nudgeTargets($this->profile) : null,
+            // Sure Paw: the chores it will put the boost on, the kid's pick.
+            'pawTargets' => $knack && ! $this->spinning && $this->spinRevealed ? $knacks->pawTargets($this->profile) : null,
             // A young pet's nudge, to keep or put back.
             'nudged' => $knack && ! $this->spinning ? $knacks->nudgedToday($this->profile) : null,
             'secondLookOffer' => $knack && ! $this->spinning && $this->spinRevealed && $knacks->secondLookable($this->profile),
@@ -1415,6 +1437,26 @@ new class extends Component
                             yes="Bat it!"
                             action="useNudge"
                             :choices="$nudgeChoices"
+                            :left="$knack['left']"
+                            :uses="$knack['uses']"
+                            :act="[['crouch', 0.3], ['swipe', 0.7], ['happy', 1]]"
+                            class="max-w-[300px]"
+                        />
+                    @endif
+
+                    {{-- Sure Paw: the boost put where the kid points. A grown
+                         pet takes any chore on the wheel; a young one offers
+                         three it sniffed out. --}}
+                    @if ($pawTargets && $pawTargets->isNotEmpty())
+                        <x-knack-offer
+                            wire:key="knack-paw-{{ $boost->id }}"
+                            :knack="App\Enums\PetKnack::SurePaw"
+                            :pet="$knack['pet']->name"
+                            offer="can put the boost on the chore you pick — same boost."
+                            :question="'Which chore should '.$knack['pet']->name.' put the boost on?'"
+                            yes="Point at it!"
+                            action="usePaw"
+                            :choices="$pawTargets->map(fn ($chore) => [$chore->name, $chore->id])->all()"
                             :left="$knack['left']"
                             :uses="$knack['uses']"
                             :act="[['crouch', 0.3], ['swipe', 0.7], ['happy', 1]]"

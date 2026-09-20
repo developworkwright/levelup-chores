@@ -37,6 +37,9 @@ enum TicketKind: string
     /** Swapped for arcade tokens at the prize counter. */
     case Tokens = 'tokens';
 
+    /** Tipped by a pet with the Tip Jar knack, every few chores signed off. */
+    case Pet = 'pet';
+
     public function label(): string
     {
         return match ($this) {
@@ -53,6 +56,7 @@ enum TicketKind: string
             self::HelpWanted => 'Help wanted',
             self::Gift => 'Sibling gift',
             self::Tokens => 'Arcade tokens',
+            self::Pet => 'Pet tip',
         };
     }
 }

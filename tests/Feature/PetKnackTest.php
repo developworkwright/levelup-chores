@@ -9,8 +9,10 @@ use App\Enums\PetRarity;
 use App\Enums\PetStage;
 use App\Enums\PetStyle;
 use App\Enums\SleepOutcome;
+use App\Enums\TicketKind;
 use App\Exceptions\PerkUnavailableException;
 use App\Models\BonusPerk;
+use App\Models\BonusTicketEntry;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\Cosmetic;
@@ -95,6 +97,32 @@ class PetKnackTest extends TestCase
         app(CosmeticService::class)->forget();
         app(CosmeticService::class)->wear($kid->fresh(), $pet);
         app()->forgetScopedInstances();
+    }
+
+    /** The tickets the pet itself has tipped — chores pay levels too. */
+    private function tipped(): int
+    {
+        return (int) BonusTicketEntry::where('profile_id', $this->kid->id)
+            ->where('kind', TicketKind::Pet)
+            ->sum('amount');
+    }
+
+    /** Signs off this many fresh chores for the kid, as a parent would. */
+    private function approve(int $count): void
+    {
+        for ($i = 0; $i < $count; $i++) {
+            $chore = Chore::factory()->for($this->household)->create();
+            $completion = ChoreCompletion::create([
+                'chore_id' => $chore->id,
+                'profile_id' => $this->kid->id,
+                'status' => 'pending',
+                'points_awarded' => 100,
+                'submitted_at' => now(),
+            ]);
+
+            app(ChoreService::class)->approve($completion, $this->parent);
+            app()->forgetScopedInstances();
+        }
     }
 
     private function knacks(): KnackService
@@ -1036,6 +1064,169 @@ class PetKnackTest extends TestCase
             ->assertDontSee('data-power-treat', false);
     }
 
+    /** Tip Jar: a ticket every other signed-off chore, by itself. */
+    public function test_the_tip_jar_pays_a_ticket_every_other_chore_when_grown(): void
+    {
+        $tipper = $this->pet('Tipper', ['pet_rarity' => 'legendary', 'pet_knack' => 'tip_jar']);
+        $this->outOn($this->kid, $tipper, 30);
+
+        $this->approve(1);
+        $this->assertSame(0, $this->tipped(), 'The first chore is not a tip.');
+
+        $this->approve(1);
+        $this->assertSame(1, $this->tipped());
+
+        // And the rhythm starts again, rather than every chore paying from here.
+        $this->approve(1);
+        $this->assertSame(1, $this->tipped());
+        $this->approve(1);
+        $this->assertSame(2, $this->tipped());
+
+        $entry = BonusTicketEntry::where('profile_id', $this->kid->id)
+            ->where('kind', TicketKind::Pet)
+            ->latest('id')
+            ->firstOrFail();
+
+        $this->assertStringContainsString('Tipper tipped you', $entry->description);
+    }
+
+    /** A young one tips half as often, and no treat is sold for it. */
+    public function test_a_young_tip_jar_tips_every_fourth_chore_and_takes_no_treat(): void
+    {
+        $tipper = $this->pet('Tipper', ['pet_rarity' => 'legendary', 'pet_knack' => 'tip_jar']);
+        $this->outOn($this->kid, $tipper, 12);
+
+        $this->approve(3);
+        $this->assertSame(0, $this->tipped());
+
+        $this->approve(1);
+        $this->assertSame(1, $this->tipped());
+
+        // A treat costs more tickets than the jar would ever tip back, so
+        // there is none to buy — see PetKnack::takesTreat().
+        $this->assertFalse(PetKnack::TipJar->takesTreat());
+
+        try {
+            $this->knacks()->buyTreat($this->kid->fresh());
+            $this->fail('A Tip Jar should not sell a Power Treat.');
+        } catch (PerkUnavailableException $e) {
+            $this->assertStringContainsString('pays in tickets already', $e->getMessage());
+        }
+
+        $this->assertSame(0, PetTreat::where('profile_id', $this->kid->id)->count());
+
+        // And the tips keep their own rhythm, a ticket at a time.
+        $this->approve(4);
+        $this->assertSame(2, $this->tipped());
+    }
+
+    /** No pet out, or a baby, and nothing is tipped. */
+    public function test_a_baby_tips_nothing(): void
+    {
+        $tipper = $this->pet('Tipper', ['pet_rarity' => 'legendary', 'pet_knack' => 'tip_jar']);
+        $this->outOn($this->kid, $tipper, 0);
+
+        $this->approve(6);
+
+        $this->assertSame(0, $this->tipped());
+        $this->assertSame(0, PetKnackUse::where('profile_id', $this->kid->id)->count());
+    }
+
+    /** The card sells no treat for it, and says why. */
+    public function test_the_pets_page_offers_no_power_treat_for_a_tip_jar(): void
+    {
+        $tipper = $this->pet('Tipper', ['pet_rarity' => 'legendary', 'pet_knack' => 'tip_jar']);
+        $this->outOn($this->kid, $tipper, 30);
+
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        Volt::test('kid.pets')
+            ->assertSee('data-pet-knack="tip_jar"', false)
+            ->assertDontSee('data-power-treat', false)
+            ->assertSee('data-no-treat', false)
+            ->assertSee('it pays in tickets already');
+    }
+
+    /** Sure Paw: a grown pet puts the boost on any chore the kid points at. */
+    public function test_sure_paw_puts_the_boost_on_the_chore_the_kid_picks(): void
+    {
+        $pointer = $this->pet('Pointer', ['pet_rarity' => 'legendary', 'pet_knack' => 'sure_paw']);
+        $this->outOn($this->kid, $pointer, 30);
+        $wheel = Chore::factory()->for($this->household)->count(4)->create();
+
+        $spin = Spin::create([
+            'profile_id' => $this->kid->id,
+            'spin_date' => HouseholdClock::for($this->household)->today(),
+            'chore_id' => $wheel->first()->id,
+            'multiplier' => 2,
+            'was_op' => false,
+        ]);
+
+        $kid = $this->kid->fresh();
+        $targets = $this->knacks()->pawTargets($kid);
+
+        // Every other chore on the wheel, for a grown pet.
+        $this->assertCount(3, $targets);
+        $this->assertNotContains($spin->chore_id, $targets->pluck('id')->all());
+
+        $wanted = $targets->last();
+
+        $this->assertSame($wanted->id, $this->knacks()->surePaw($kid, $wanted->id)?->id);
+        $this->assertSame($wanted->id, $spin->fresh()->chore_id);
+        // The boost itself is untouched — only which chore carries it.
+        $this->assertSame(2, $spin->fresh()->multiplier);
+        $this->assertSame($wanted->id, $this->knacks()->pawedToday($kid)['to']);
+
+        // One point per spin.
+        $this->assertNull($this->knacks()->pawTargets($kid->fresh()));
+    }
+
+    /** A young one narrows the wheel to three of its own choosing. */
+    public function test_a_young_sure_paw_offers_three_chores_it_picked(): void
+    {
+        $pointer = $this->pet('Pointer', ['pet_rarity' => 'legendary', 'pet_knack' => 'sure_paw']);
+        $this->outOn($this->kid, $pointer, 12);
+        $wheel = Chore::factory()->for($this->household)->count(6)->create();
+
+        Spin::create([
+            'profile_id' => $this->kid->id,
+            'spin_date' => HouseholdClock::for($this->household)->today(),
+            'chore_id' => $wheel->first()->id,
+            'multiplier' => 2,
+            'was_op' => false,
+        ]);
+
+        $kid = $this->kid->fresh();
+        $targets = $this->knacks()->pawTargets($kid);
+
+        $this->assertCount(PetKnack::PAW_PICKS_YOUNG, $targets);
+        // The same three every time the page is drawn, so nothing shuffles
+        // under a kid deciding between them.
+        $this->assertSame($targets->pluck('id')->all(), $this->knacks()->pawTargets($kid)->pluck('id')->all());
+
+        // And a chore it did not offer is not a chore it will point at.
+        $offered = $targets->pluck('id')->all();
+        $other = $wheel->firstWhere(fn ($chore) => ! in_array($chore->id, $offered, true) && $chore->id !== $wheel->first()->id);
+
+        $this->assertNull($this->knacks()->surePaw($kid, $other->id));
+    }
+
+    /** The wheel offer, on the page a kid actually spins on. */
+    public function test_the_quest_board_offers_sure_paw_after_a_spin(): void
+    {
+        $pointer = $this->pet('Pointer', ['pet_rarity' => 'legendary', 'pet_knack' => 'sure_paw']);
+        $this->outOn($this->kid, $pointer, 30);
+        $wheel = Chore::factory()->for($this->household)->count(3)->create();
+
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        app(SpinService::class)->spin($this->kid->fresh());
+
+        Volt::test('kid.quests')
+            ->assertSee('data-fq-knack-offer="sure_paw"', false)
+            ->assertSee('can put the boost on the chore you pick');
+    }
+
     /** How often, in a kid's words, straight from the allowance. */
     public function test_how_often_a_perk_goes_off_at_each_age(): void
     {
@@ -1078,6 +1269,24 @@ class PetKnackTest extends TestCase
 
         // Nothing to try out without a pet being looked at.
         $page->call('stopLooking')->call('tryOut', 'baby')->assertDontSee('data-pet-trial', false);
+    }
+
+    /**
+     * An egg-only pet's shelf cost never reaches a kid — it is sold in its
+     * shell at its tier's price — so that is the price the catalogue shows.
+     */
+    public function test_the_catalogue_prices_an_egg_only_pet_by_its_tier(): void
+    {
+        $glimmer = $this->pet('Glimmer', ['stock' => 'egg', 'pet_rarity' => 'epic', 'pet_knack' => 'paw_nudge', 'cost' => 23]);
+
+        $parent = Profile::factory()->parent()->for($this->household)->create();
+        Auth::guard('profile')->login($parent);
+
+        $this->assertSame(30, PetEgg::priceFor($glimmer));
+
+        Volt::test('parent.cosmetics', ['mode' => 'pets'])
+            ->assertSee('>30</span>', false)
+            ->assertDontSee('>23</span>', false);
     }
 
     /** A grown-up sees every egg in the shop, what is in it, and who has it. */

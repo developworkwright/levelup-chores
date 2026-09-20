@@ -24,6 +24,14 @@ use App\Services\ChoreService;
  */
 enum PetKnack: string
 {
+    /** Tip Jar: how many signed-off chores a tip costs, by age. */
+    public const TIP_EVERY_ADULT = 2;
+
+    public const TIP_EVERY_YOUNG = 4;
+
+    /** Sure Paw: how many chores a young pet sniffs out to choose between. */
+    public const PAW_PICKS_YOUNG = 3;
+
     case CoinSniffer = 'coin_sniffer';
     case BigPockets = 'big_pockets';
     case Fetch = 'fetch';
@@ -36,6 +44,8 @@ enum PetKnack: string
     case GuardDog = 'guard_dog';
     case NightOwl = 'night_owl';
     case Sidekick = 'sidekick';
+    case TipJar = 'tip_jar';
+    case SurePaw = 'sure_paw';
 
     public function label(): string
     {
@@ -52,6 +62,8 @@ enum PetKnack: string
             self::GuardDog => 'Guard Dog',
             self::NightOwl => 'Night Owl',
             self::Sidekick => 'Sidekick',
+            self::TipJar => 'Tip Jar',
+            self::SurePaw => 'Sure Paw',
         };
     }
 
@@ -70,6 +82,8 @@ enum PetKnack: string
             self::GuardDog => 'fa-shield-dog',
             self::NightOwl => 'fa-moon',
             self::Sidekick => 'fa-hand-fist',
+            self::TipJar => 'fa-hand-holding-dollar',
+            self::SurePaw => 'fa-bullseye',
         };
     }
 
@@ -83,7 +97,7 @@ enum PetKnack: string
         return match ($this) {
             self::CoinSniffer, self::BigPockets, self::Fetch, self::Sniffer => PetRarity::Rare,
             self::PawNudge, self::SecondLook, self::LuckyTail, self::GoodLuckCharm, self::Digger => PetRarity::Epic,
-            self::GuardDog, self::NightOwl, self::Sidekick => PetRarity::Legendary,
+            self::GuardDog, self::NightOwl, self::Sidekick, self::TipJar, self::SurePaw => PetRarity::Legendary,
         };
     }
 
@@ -107,11 +121,12 @@ enum PetKnack: string
         $grown = $stage === PetStage::Adult;
 
         return match ($this) {
-            self::CoinSniffer, self::BigPockets, self::Sidekick => null,
+            self::CoinSniffer, self::BigPockets, self::Sidekick, self::TipJar => null,
             self::Fetch, self::SecondLook, self::Digger => ['uses' => 1, 'days' => $grown ? 7 : 14],
             self::Sniffer => ['uses' => $grown ? 2 : 1, 'days' => 7],
             self::PawNudge => ['uses' => 2, 'days' => 7],
             self::LuckyTail, self::GoodLuckCharm => ['uses' => 1, 'days' => 7],
+            self::SurePaw => ['uses' => $grown ? 2 : 1, 'days' => 7],
             self::GuardDog, self::NightOwl => ['uses' => 1, 'days' => $grown ? 30 : 60],
         };
     }
@@ -137,7 +152,19 @@ enum PetKnack: string
     /** Whether it is always on — nothing to spend, and a treat doubles it instead. */
     public function alwaysOn(): bool
     {
-        return in_array($this, [self::CoinSniffer, self::BigPockets, self::Sidekick], true);
+        return in_array($this, [self::CoinSniffer, self::BigPockets, self::Sidekick, self::TipJar], true);
+    }
+
+    /**
+     * Whether a Power Treat is worth buying for this knack at all.
+     *
+     * Tip Jar pays in the very currency a treat is bought with, so a treat
+     * for it is tickets for tickets — it would have to tip four more times
+     * just to pay for itself. Its card says so instead of selling one.
+     */
+    public function takesTreat(): bool
+    {
+        return $this !== self::TipJar;
     }
 
     /** Whether a pet this age can do its knack at all. A baby is still learning. */
@@ -154,7 +181,7 @@ enum PetKnack: string
      */
     public function automatic(): bool
     {
-        return in_array($this, [self::GuardDog, self::NightOwl, self::LuckyTail], true);
+        return in_array($this, [self::GuardDog, self::NightOwl, self::LuckyTail, self::TipJar], true);
     }
 
     /**
@@ -222,6 +249,12 @@ enum PetKnack: string
             self::Sidekick => $grown
                 ? 'Jumps in on the monster — your chores hit 10% harder.'
                 : 'Jumps in on the monster — your chores hit 5% harder.',
+            self::TipJar => $grown
+                ? 'Tips you a bonus ticket for every other chore a grown-up signs off.'
+                : 'Tips you a bonus ticket for every '.self::TIP_EVERY_YOUNG.'th chore a grown-up signs off.',
+            self::SurePaw => $grown
+                ? 'Puts the Bonus Wheel\'s boost on any chore you point at. The boost itself is still a surprise.'
+                : 'Sniffs out '.self::PAW_PICKS_YOUNG.' chores on the Bonus Wheel and puts the boost on whichever one you pick. The boost itself is still a surprise.',
         };
     }
 }

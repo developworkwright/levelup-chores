@@ -1328,7 +1328,7 @@ new class extends Component
                             <p class="text-[13.5px] font-semibold">{{ $draft->name }}</p>
                             <p class="mt-[3px] font-mono-fq text-[9px] tracking-[0.08em] text-fq-text-4 uppercase">{{ $draft->slot->label() }} · uploaded png</p>
                         </div>
-                        <span class="w-[34px] shrink-0 font-baloo text-[15px] font-extrabold text-fq-lime">{{ $draft->cost }}</span>
+                        <span class="w-[34px] shrink-0 font-baloo text-[15px] font-extrabold text-fq-lime">{{ $draft->stock === App\Enums\CosmeticStock::Egg ? App\Models\PetEgg::priceFor($draft) : $draft->cost }}</span>
                         <span class="shrink-0 rounded-full border px-[9px] py-1 font-mono-fq text-[8.5px] tracking-[0.08em] whitespace-nowrap uppercase" style="border-color: {{ $rim }}; color: {{ $ink }}">{{ $draft->stock->label() }}</span>
                         <span class="min-w-[120px] flex-1 text-[11.5px]" style="color: {{ $failed ? '#ff8098' : ($warned ? '#e8ddbd' : '#7dffb0') }}">
                             {{ $failed['label'] ?? $warned['label'] ?? 'All checks passed' }}
@@ -1377,7 +1377,9 @@ new class extends Component
                             @if ($inRotation->contains($item->id)) · <span class="text-fq-gold">out this week</span> @endif
                         </p>
                     </div>
-                    <span class="w-[34px] shrink-0 font-baloo text-[14px] font-extrabold text-fq-lime">{{ $item->isFree() ? 'Free' : $item->cost }}</span>
+                    {{-- An egg-only pet is sold in its shell, priced by tier — the shelf
+                         cost never reaches a kid. See App\Models\PetEgg::priceFor(). --}}
+                    <span class="w-[34px] shrink-0 font-baloo text-[14px] font-extrabold text-fq-lime" @if ($item->stock === App\Enums\CosmeticStock::Egg) title="The egg's price, by tier" @endif>{{ $item->stock === App\Enums\CosmeticStock::Egg ? App\Models\PetEgg::priceFor($item) : ($item->isFree() ? 'Free' : $item->cost) }}</span>
                     <span class="shrink-0 rounded-full border px-[9px] py-1 font-mono-fq text-[8.5px] tracking-[0.08em] whitespace-nowrap uppercase" style="border-color: {{ $rim }}; color: {{ $ink }}">{{ $item->stock->label() }}</span>
                     @if ($item->isSheet())
                         {{-- Tier, style and knack, changed in place. Kids who own

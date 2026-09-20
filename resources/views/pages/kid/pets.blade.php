@@ -455,7 +455,9 @@ new class extends Component
                                 @endif
 
                                 {{-- Power Treat: one more use, or double today. --}}
-                                @if ($knack['unlocked'])
+                                @if ($knack['unlocked'] && ! $knack['knack']->takesTreat())
+                                    <span class="mt-[2px] text-[10px] text-pretty" style="color: #8c7bab" data-no-treat>No Power Treat for this one — it pays in tickets already.</span>
+                                @elseif ($knack['unlocked'])
                                     <button
                                         type="button"
                                         wire:click="buyTreat"

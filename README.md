@@ -212,11 +212,11 @@ One spin per kid per day. The result is genuinely random. The *wheel itself* is 
 |---|---|
 | Rare | Coin Sniffer (bonus tokens on new rungs) · Big Pockets (a bigger daily token cap) · Fetch (re-rolls a 2x wheel boost) · Sniffer (narrows the Mystery Chore to 5, or 3 grown — never gives it away) |
 | Epic | Paw Nudge (bats the wheel one chore over) · Second Look (spins again) · Lucky Tail (charges the week's first spin) · Good Luck Charm (a Quest Charm) · Digger (a free Lucky Block hit) |
-| Legendary | Guard Dog (saves a streak broken by one missed day) · Night Owl (saves a bedtime run after a night out of their own bed) · Sidekick (chores hit the monster 5–10% harder — damage only, never points) |
+| Legendary | Guard Dog (saves a streak broken by one missed day) · Night Owl (saves a bedtime run after a night out of their own bed) · Sidekick (chores hit the monster 5–10% harder — damage only, never points) · Tip Jar (a bonus ticket every other chore signed off, every fourth while young) · Sure Paw (puts the Bonus Wheel's boost on the chore the kid points at — any chore when grown, one of three it sniffs out while young; the boost itself stays a surprise) |
 
 A knack grows with the pet: a baby is still learning it, a young pet does it at **half strength** — usually a weaker version (a young Paw Nudge picks its own direction) — and a grown pet does it properly. Uses come back on a rolling window rather than resetting on a schedule, and are counted per kid, so two pets with the same knack don't double it. Grown-ups' pets have no knacks and no styles.
 
-**How a kid uses one.** Tapping the pet is still petting. When a knack can help on the page the kid is on, the pet hops onto the thing it acts on and a 🐾 bubble offers it; the same offer is a line on the page for anyone with reduced motion. Guard Dog, Night Owl and Lucky Tail go off by themselves.
+**How a kid uses one.** Tapping the pet is still petting. When a knack can help on the page the kid is on, the pet hops onto the thing it acts on and a 🐾 bubble offers it; the same offer is a line on the page for anyone with reduced motion. Guard Dog, Night Owl, Lucky Tail and Tip Jar go off by themselves.
 
 **Power Treats** are bought on the Pets page and fed to the pet on screen: one more use of its knack, on top of the free ones — or, for an always-on knack, double strength for the rest of the day. No limit, and each costs **one ticket less than the Bonus Shop perk the knack matches** (at the household's own price for it), so a pet with the knack is always the cheaper way.
 

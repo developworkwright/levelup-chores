@@ -2,14 +2,17 @@
 
 namespace App\Services;
 
+use App\Enums\CompletionStatus;
 use App\Enums\CosmeticSlot;
 use App\Enums\PetKnack;
 use App\Enums\PetRarity;
 use App\Enums\PetStage;
+use App\Enums\TicketKind;
 use App\Exceptions\InsufficientTicketsException;
 use App\Exceptions\PerkUnavailableException;
 use App\Models\BonusPerk;
 use App\Models\Chore;
+use App\Models\ChoreCompletion;
 use App\Models\Cosmetic;
 use App\Models\LuckyHit;
 use App\Models\PetKnackUse;
@@ -38,7 +41,8 @@ use RuntimeException;
  * more use of a knack that is spent, banked until the week's own run out; or,
  * for an always-on knack, double strength for the rest of the day. No limit
  * on how many — each costs a ticket less than the Bonus Shop perk the knack
- * matches (treatPrice()), so having the pet is always the cheaper way.
+ * matches (treatPrice()), so having the pet is always the cheaper way. A
+ * knack that pays in tickets itself takes none at all — PetKnack::takesTreat().
  */
 class KnackService
 {
@@ -405,6 +409,10 @@ class KnackService
             throw new PerkUnavailableException($state['pet']->name.' is still learning its knack — a treat will help once it grows up a bit.');
         }
 
+        if (! $state['knack']->takesTreat()) {
+            throw new PerkUnavailableException($state['knack']->label().' pays in tickets already — a treat would cost more than it tips.');
+        }
+
         $price = $this->treatPrice($kid, $state['knack']);
 
         return DB::transaction(function () use ($kid, $state, $price) {
@@ -679,6 +687,148 @@ class KnackService
     /* ------------------------------------------------------------------ *
      * The Legendary knacks
      * ------------------------------------------------------------------ */
+
+    /**
+     * Tip Jar: every other signed-off chore (every fourth while young) drops
+     * a bonus ticket in the kid's pocket, by itself. Counted from the last
+     * tip rather than from a total, so it keeps its rhythm when a pet is
+     * swapped, grows up, or is put away for a while.
+     *
+     * No Power Treat for this one — see PetKnack::takesTreat().
+     *
+     * @return int|null the ticket tipped, or null when nothing was
+     */
+    public function tipJar(Profile $kid, ChoreCompletion $completion): ?int
+    {
+        $stage = $this->strengthFor($kid, PetKnack::TipJar);
+
+        if ($stage === null) {
+            return null;
+        }
+
+        $every = $stage === PetStage::Adult ? PetKnack::TIP_EVERY_ADULT : PetKnack::TIP_EVERY_YOUNG;
+
+        return DB::transaction(function () use ($kid, $completion, $every) {
+            Profile::whereKey($kid->id)->lockForUpdate()->first();
+
+            // Counted from the chore the last tip paid on, by id rather than
+            // by time: two chores signed off in the same second are still two
+            // chores, and a timestamp cannot tell them apart.
+            $since = PetKnackUse::where('profile_id', $kid->id)
+                ->where('knack', PetKnack::TipJar->value)
+                ->latest('id')
+                ->value('payload')['completion_id'] ?? null;
+
+            $done = ChoreCompletion::where('profile_id', $kid->id)
+                ->where('status', CompletionStatus::Approved)
+                ->when($since !== null, fn ($query) => $query->where('id', '>', $since))
+                ->count();
+
+            if ($done < $every) {
+                return null;
+            }
+
+            $pet = $this->cosmetics->wornIn($kid, CosmeticSlot::Pet);
+
+            PetKnackUse::create([
+                'household_id' => $kid->household_id,
+                'profile_id' => $kid->id,
+                'cosmetic_id' => $pet?->id,
+                'knack' => PetKnack::TipJar,
+                'payload' => ['completion_id' => $completion->id, 'tickets' => 1, 'every' => $every],
+                'used_at' => now(),
+            ]);
+
+            app(TicketService::class)->record(
+                $kid,
+                TicketKind::Pet,
+                1,
+                ($pet?->name ?? 'Your pet').' tipped you for '.$completion->chore->name,
+                $completion,
+            );
+
+            return 1;
+        });
+    }
+
+    /**
+     * Sure Paw: the chores the pet will put the wheel's boost on — every one
+     * on the wheel that is still there to do for a grown pet, and three of
+     * them, the pet's own pick, for a young one.
+     *
+     * The three are picked from the spin itself, so they are the same three
+     * every time the page is drawn until the kid chooses.
+     *
+     * @return Collection<int, Chore>|null
+     */
+    public function pawTargets(Profile $kid): ?Collection
+    {
+        $spin = $this->available($kid, PetKnack::SurePaw) ? $this->openSpin($kid) : null;
+
+        if ($spin === null || $this->pawedToday($kid) !== null) {
+            return null;
+        }
+
+        $chores = app(ChoreService::class);
+        $wheel = app(SpinService::class)->eligibleChoresFor($kid)
+            ->filter(fn (Chore $chore) => $chore->id !== $spin->chore_id && $chores->stateFor($kid, $chore) === 'ready')
+            ->values();
+
+        if ($wheel->isEmpty()) {
+            return null;
+        }
+
+        if ($this->stateFor($kid)['stage'] === PetStage::Adult) {
+            return $wheel;
+        }
+
+        // The pet's own three: steady for this spin, so the offer does not
+        // shuffle under a kid deciding between them.
+        return $wheel
+            ->sortBy(fn (Chore $chore) => crc32($spin->id.':'.$chore->id))
+            ->take(PetKnack::PAW_PICKS_YOUNG)
+            ->values();
+    }
+
+    /**
+     * The pet points the wheel at the chore the kid picked: the boost moves
+     * there, and what the boost is worth is untouched.
+     */
+    public function surePaw(Profile $kid, int $choreId): ?Chore
+    {
+        $targets = $this->pawTargets($kid);
+        $chore = $targets?->firstWhere('id', $choreId);
+        $spin = $chore ? $this->openSpin($kid) : null;
+
+        if ($chore === null || $spin === null) {
+            return null;
+        }
+
+        if (! $this->use($kid, PetKnack::SurePaw, ['day' => $spin->spin_date->toDateString(), 'spin_id' => $spin->id, 'from' => $spin->chore_id, 'to' => $chore->id])) {
+            return null;
+        }
+
+        app(SpinService::class)->moveBoostTo($spin, $chore);
+
+        return $chore;
+    }
+
+    /**
+     * Today's Sure Paw, if it has been used: where the boost was put.
+     *
+     * @return array{spin_id: int, from: int, to: int}|null
+     */
+    public function pawedToday(Profile $kid): ?array
+    {
+        $today = HouseholdClock::for($kid->household)->today()->toDateString();
+
+        $use = PetKnackUse::where('profile_id', $kid->id)
+            ->where('knack', PetKnack::SurePaw->value)
+            ->latest('used_at')
+            ->first();
+
+        return $use !== null && ($use->payload['day'] ?? null) === $today ? $use->payload : null;
+    }
 
     /**
      * Guard Dog: a streak about to be lost over one missed day is saved, by

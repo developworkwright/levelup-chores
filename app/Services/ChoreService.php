@@ -1234,6 +1234,12 @@ class ChoreService
         // than by a kid tapping.
         $ticketed = $this->awardHelpWantedTicket($completion, $profile, $household);
 
+        // And the pet's own tip, for the same reason and in the same currency:
+        // a Tip Jar pays every other chore signed off, by itself. Settled here
+        // rather than on the way into a page, so the ticket is in the pocket by
+        // the time the kid is told about the chore.
+        $tipped = app(KnackService::class)->tipJar($profile, $completion);
+
         $this->ledger->record(
             $household,
             $profile,
@@ -1281,6 +1287,7 @@ class ChoreService
                 'Signed off!',
                 "+{$completion->points_awarded} points for {$completion->chore->name}."
                     .($ticketed ? ' Plus '.self::HELP_WANTED_TICKETS.' bonus '.Str::plural('ticket', self::HELP_WANTED_TICKETS).' for helping out!' : '')
+                    .($tipped ? ' Your pet tipped you '.$tipped.' '.Str::plural('ticket', $tipped).'!' : '')
                     .($petNews ? ' '.$petNews : ''),
             ));
         } catch (Throwable $e) {
