@@ -268,6 +268,12 @@ WHAT EACH AGE LOOKS LIKE:
 · ADULT: the full build, every marking crisp.
 Each age is drawn fresh. Never repeat one age\'s drawing for another.
 
+THE WHOLE ANIMAL IS IN EVERY CELL — head, body, every leg and the tail, all
+attached, whatever the pose. A head is never left off, never cropped by the
+cell, never hidden behind the body and never replaced by the belly: the lying
+down poses (Back, Sleep) and the head down ones (Sniff, Play) show the face
+just as clearly as Idle does. A cell whose animal has no head is thrown away.
+
 THE EIGHTEEN CELLS OF EACH AGE, in order:
 1. Idle — standing, facing the viewer, relaxed.
 2. Blink — exactly cell 1 with its eyes closed.
@@ -303,14 +309,20 @@ THE EIGHTEEN CELLS OF EACH AGE, in order:
     just thrown something up into the air.
 16. Back — lying on its back, belly up, happy, all four paws in the air: the
     two front paws held together, open and EMPTY, above its chest, with clear
-    space above them. Full size: as long as it is when walking.
+    space above them. Full size: as long as it is when walking. ITS HEAD IS
+    DRAWN, at one end of the body, resting on the foot line and tipped back so
+    the face looks up and slightly towards the viewer — the same head, the same
+    ears, the same markings as every other cell, upside down. Eyes open, happy.
+    A belly and paws with no head on the end is the single most common mistake
+    in this pose: draw the head.
 17. Sleep — curled up lying down, eyes closed. Full size: curled up, not
     shrunk — as wide as the walking pose is long.
 18. The toy on its own, no pet, resting on the foot line.
 
 MUST NOT INCLUDE: a background, ground, cast shadow or scenery; grid lines,
 borders, cell outlines or a ruled foot line; text, labels, numerals, "zzz",
-hearts, question marks or sound effects; more than one character in a cell; a
+hearts, question marks or sound effects; more than one character in a cell; an animal
+missing its head, or with its head cropped or hidden; a
 hand, arm or person anywhere; the toy in any cell but 18; anything held in the
 paws or mouth; any prop other than the toy; motion blur or speed lines; any
 drawing touching another drawing or the edge of its cell.';

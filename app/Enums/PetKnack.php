@@ -238,8 +238,11 @@ enum PetKnack: string
                 : 'Bats the Bonus Wheel one chore over — whichever way it likes!',
             self::SecondLook => 'Spins the Bonus Wheel again, chore and boost.',
             self::LuckyTail => $grown
-                ? 'Charges your first spin of the week — a shot at 4x.'
-                : 'Gives your first spin of the week a better shot at 3x.',
+                // "Next spin", not "the week's first": a Power Treat banks
+                // another charge, and then it fires on whatever spin comes
+                // after that. The line above it already says how often.
+                ? 'Charges your next spin — a shot at 4x.'
+                : 'Gives your next spin a better shot at 3x.',
             self::GoodLuckCharm => $grown
                 ? 'Charms '.ChoreService::CHARM_CHORES.' chores on your quest board, picked at random. They\'re marked, so you can see which — each pays 50% more points today.'
                 : 'Charms 1 chore on your quest board, picked at random. It\'s marked, so you can see which — it pays 50% more points today.',

@@ -915,7 +915,14 @@ class PetKnackTest extends TestCase
         $this->assertSame(PerkEffect::WheelRespin->defaults()['cost'] - 1, $knacks->treatPrice($this->kid, PetKnack::Fetch));
         $this->assertSame(PerkEffect::MysteryHint->defaults()['cost'] - 1, $knacks->treatPrice($this->kid, PetKnack::Sniffer));
         $this->assertSame(PerkEffect::StreakRestore->defaults()['cost'] - 1, $knacks->treatPrice($this->kid, PetKnack::GuardDog));
-        // Never under a ticket, even against a one-ticket perk.
+        $this->assertSame(PerkEffect::OpSpin->defaults()['cost'] - 1, $knacks->treatPrice($this->kid, PetKnack::LuckyTail));
+
+        // Never under a ticket, whatever the house charges for the perk.
+        BonusPerk::updateOrCreate(
+            ['household_id' => $this->household->id, 'effect' => PerkEffect::OpSpin],
+            ['name' => 'OP Spin', 'description' => 'Charged.', 'cost' => 1, 'enabled' => true],
+        );
+
         $this->assertSame(1, $knacks->treatPrice($this->kid, PetKnack::LuckyTail));
         // The Lucky Block stands in for Digger's perk.
         $this->assertSame(LuckyBlockService::TICKET_COST - 1, $knacks->treatPrice($this->kid, PetKnack::Digger));
@@ -1352,6 +1359,46 @@ class PetKnackTest extends TestCase
             ->assertSee('data-all-styles', false)
             ->assertSee(PetStyle::Lucky->blurb())
             ->assertDontSee('Yours');
+    }
+
+    /**
+     * A pet that is only in the shop this week says so — on its tile and,
+     * with how long is left, on the card that opens. A shelf pet says
+     * nothing, because there is nothing to say.
+     */
+    public function test_the_shop_says_when_a_pet_is_only_here_this_week(): void
+    {
+        $rotating = $this->pet('Archie', ['stock' => 'weekly', 'pet_rarity' => 'rare', 'pet_knack' => 'big_pockets']);
+        $limited = $this->pet('Comet', ['stock' => 'limited']);
+        $always = $this->pet('Gabby');
+
+        // Whatever the rotation picked this week, these two are in it.
+        app(CosmeticService::class)->forget();
+
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        $page = Volt::test('kid.pets');
+        $html = $page->html();
+
+        if (! str_contains($html, 'data-for-sale="'.$rotating->id.'"')) {
+            $this->markTestSkipped('The rotation did not pick it this week.');
+        }
+
+        $page->assertSee('data-sale-stock="weekly"', false)
+            ->assertDontSee('data-sale-stock="shelf"', false)
+            ->call('look', $rotating->id)
+            ->assertSee('data-looking-stock="weekly"', false)
+            ->assertSee('In the shop this week')
+            ->assertSee('it comes back another week');
+
+        // A shelf pet has no week to worry about.
+        $page->call('look', $always->id)->assertDontSee('data-looking-stock', false);
+
+        if (str_contains($html, 'data-for-sale="'.$limited->id.'"')) {
+            $page->call('look', $limited->id)
+                ->assertSee('data-looking-stock="limited"', false)
+                ->assertSee('This week only, ever.');
+        }
     }
 
     /** A Common has a style and no perk — the page says so instead of hiding the card. */

@@ -100,14 +100,16 @@ enum PerkEffect: string
                 'cost' => 3,
                 'glyph' => '✧',
             ],
-            // A ticket, and the cheapest thing in the shop — it buys odds on
-            // one spin, not a result, and on most days it pays back less than
-            // it cost. Priced so a kid can charge the wheel on a whim rather
-            // than saving up for the privilege of a coin flip.
+            // It buys odds on one spin, not a result, so it was priced at a
+            // single ticket — a whim rather than a saving-up. That was too
+            // cheap once pets arrived: a Lucky Tail is priced against this
+            // one (PetKnack::matchingPerk()), and a Power Treat that costs a
+            // ticket less than a ticket is no advantage at all. At five, the
+            // pet is the cheaper way again, which is the point of having one.
             self::OpSpin => [
                 'name' => 'OP Spin',
                 'description' => 'Charge the wheel before you spin: a shot at 4x, and a better chance at 3x. Spent the moment the wheel goes.',
-                'cost' => 1,
+                'cost' => 5,
                 'glyph' => '⚡',
             ],
         };

@@ -607,6 +607,21 @@ class PetGrowthTest extends TestCase
         $this->assertSame(0, Cosmetic::where('name', 'Tabby')->count());
     }
 
+    /**
+     * Generators drop the head on the Back pose — a belly, four paws and
+     * nothing on the end. The prompt says so three times: as a rule over the
+     * whole sheet, in the pose itself, and in what is thrown away.
+     */
+    public function test_the_prompt_insists_on_a_head_in_every_cell(): void
+    {
+        $prompt = CosmeticSlot::PET_FAMILY_PROMPT;
+
+        $this->assertStringContainsString('THE WHOLE ANIMAL IS IN EVERY CELL', $prompt);
+        $this->assertStringContainsString('A cell whose animal has no head is thrown away.', $prompt);
+        $this->assertStringContainsString('ITS HEAD IS', $prompt);
+        $this->assertStringContainsString('missing its head', $prompt);
+    }
+
     public function test_the_all_ages_prompt_lays_out_nine_by_six_and_spells_out_the_held_pose(): void
     {
         $prompt = CosmeticSlot::PET_FAMILY_PROMPT;

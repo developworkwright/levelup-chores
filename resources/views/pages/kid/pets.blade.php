@@ -276,6 +276,9 @@ new class extends Component
             'lookingStyleGames' => $this->styleGames($looking?->pet_style),
             'trial' => $this->trial($looking),
             'eggsForSale' => $pets->eggsForSale($household),
+            // A rotating or limited pet is only here for the week — see
+            // CosmeticStock and CosmeticService::rotationThisWeek().
+            'daysLeft' => $cosmetics->daysLeftInWeek($household),
         ];
     }
 }; ?>
@@ -620,10 +623,24 @@ new class extends Component
                                         <span class="font-baloo text-[18px] leading-none font-extrabold">{{ $looking->name }}</span>
                                         <span class="flex flex-wrap gap-[5px] font-mono-fq text-[8px] tracking-[0.14em] uppercase">
                                             <span class="rounded-full border px-[6px] py-[1px]" style="border-color: {{ $lookTier->color() }}; color: {{ $lookTier->color() }}">{{ $lookTier->label() }}</span>
+                                            @if ($looking->stock !== App\Enums\CosmeticStock::Shelf)
+                                                <span class="rounded-full border px-[6px] py-[1px]" style="border-color: #ffe14d; color: #ffe14d" data-looking-stock="{{ $looking->stock->value }}">{{ $looking->stock->label() }}</span>
+                                            @endif
                                             @if ($looking->pet_style)
                                                 <span style="color: #c8bade"><i class="fa-solid {{ $looking->pet_style->icon() }} mr-[3px]"></i>{{ $looking->pet_style->label() }}</span>
                                             @endif
                                         </span>
+
+                                        @if ($looking->stock !== App\Enums\CosmeticStock::Shelf)
+                                            <span class="text-[11px]" style="color: #ffe14d">
+                                                <i class="fa-solid fa-hourglass-half mr-[4px] text-[10px]"></i>
+                                                @if ($looking->stock === App\Enums\CosmeticStock::Limited)
+                                                    This week only, ever. {{ $daysLeft === 1 ? 'Gone tonight.' : 'Gone on Sunday — '.$daysLeft.' days left.' }}
+                                                @else
+                                                    In the shop this week. {{ $daysLeft === 1 ? 'Gone tonight' : $daysLeft.' days left' }}, then it comes back another week.
+                                                @endif
+                                            </span>
+                                        @endif
                                     </span>
                                     <button type="button" wire:click="stopLooking" aria-label="Close" class="px-[4px] py-[2px]" style="color: #8c7bab"><i class="fa-solid fa-xmark"></i></button>
                                 </div>
@@ -694,6 +711,11 @@ new class extends Component
                                     <span class="relative block aspect-square w-full rounded-[10px]" style="background: #07030f">
                                         <x-cosmetic.art :item="$pet" class="absolute inset-[8%]" />
                                         <span class="absolute top-[4px] right-[4px] rounded-full border px-[5px] py-[1px] font-mono-fq text-[6.5px] tracking-[0.08em] uppercase" style="background: rgba(10,5,18,.85); border-color: {{ $saleTier->color() }}; color: {{ $saleTier->color() }}">{{ $saleTier->label() }}</span>
+                                        {{-- Here for the week only: a kid should not have to
+                                             learn that by coming back and finding it gone. --}}
+                                        @if ($pet->stock !== App\Enums\CosmeticStock::Shelf)
+                                            <span class="absolute top-[4px] left-[4px] rounded-full border px-[5px] py-[1px] font-mono-fq text-[6.5px] tracking-[0.08em] uppercase" style="background: rgba(10,5,18,.85); border-color: #ffe14d; color: #ffe14d" data-sale-stock="{{ $pet->stock->value }}">{{ $pet->stock === App\Enums\CosmeticStock::Limited ? 'Last chance' : 'This week' }}</span>
+                                        @endif
                                     </span>
                                     <span class="text-center text-[11px] leading-tight font-semibold">{{ $pet->name }}</span>
                                     @if ($pet->pet_style || $pet->knack())
