@@ -2,11 +2,14 @@
 
 namespace App\Enums;
 
+use App\Services\NightWindow;
+
 /**
  * How long last night was, bucketed.
  *
- * The hours card takes a number and lands it in one of these. The band is
- * always derived from the minutes and never stored, so the two can't drift and
+ * The hours card takes a bedtime and a waking, and lands the night in one of
+ * these. The band is always derived — from the length, and from whether the
+ * night covered midnight to 6am — and never stored, so the two can't drift and
  * a household that later moves the six-hour line doesn't leave old rows
  * disagreeing with the enum.
  *
@@ -24,7 +27,7 @@ enum SleepBand: string
 
     case Poor = 'poor';
 
-    /** Eight hours. The night the run is actually about. */
+    /** Eight hours — necessary for a full night, and not sufficient: see {@see self::fromNight()}. */
     public const FULL_MINUTES = 480;
 
     /** Six. Below this the run stops, though nothing is taken away. */
@@ -36,14 +39,36 @@ enum SleepBand: string
     /** The most a kid can log — past this it isn't a night, it's a typo. */
     public const MAX_MINUTES = 840;
 
-    /** Where the stepper starts a kid who hasn't answered yet. */
-    public const DEFAULT_MINUTES = 480;
-
     public static function fromMinutes(int $minutes): self
     {
         return match (true) {
             $minutes >= self::FULL_MINUTES => self::Full,
             $minutes >= self::SHORT_MINUTES => self::Short,
+            default => self::Poor,
+        };
+    }
+
+    /**
+     * The band a night lands in, from its length and how much of midnight-to-6am
+     * it was asleep for.
+     *
+     * Eight hours is necessary and not sufficient: a full night has to cover
+     * the whole window as well, and one that doesn't drops to a short night
+     * however long it ran. Under four hours inside the window there is no
+     * paying band at all — that is the line between a night and a nap, and it
+     * catches both a doze at bedtime and a sleep that ran through the day,
+     * neither of which the length alone can tell from a real night.
+     *
+     * Demoted rather than failed, in both cases: the deal on this card never
+     * changes. Nothing already earned is taken back and nothing is counted
+     * against them — the night just doesn't advance the run, and a night that
+     * missed the window doesn't pay. See {@see NightWindow}.
+     */
+    public static function fromNight(int $minutes, int $coreOverlap): self
+    {
+        return match (true) {
+            $minutes >= self::FULL_MINUTES && $coreOverlap >= NightWindow::CORE_LENGTH => self::Full,
+            $minutes >= self::SHORT_MINUTES && $coreOverlap >= NightWindow::PAYING_OVERLAP => self::Short,
             default => self::Poor,
         };
     }
@@ -71,9 +96,9 @@ enum SleepBand: string
     public function range(): string
     {
         return match ($this) {
-            self::Full => '8 hours or more',
-            self::Short => '6 to 8 hours',
-            self::Poor => 'Under 6 hours',
+            self::Full => '8h, all of 12 to 6',
+            self::Short => '6h, 4h inside 12 to 6',
+            self::Poor => 'Anything less',
         };
     }
 

@@ -33,7 +33,7 @@ enum SleepCardType: string
     {
         return match ($this) {
             self::OwnBed => 'Did they stay in their own bed?',
-            self::Hours => 'How many hours did they sleep?',
+            self::Hours => 'How long did they sleep, and did it cover 12 to 6?',
         };
     }
 

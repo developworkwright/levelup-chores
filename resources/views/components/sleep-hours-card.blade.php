@@ -14,6 +14,7 @@
 
 @php
     use App\Enums\SleepBand;
+    use App\Services\NightWindow;
     use App\Services\SleepService;
 
     $answered = $card['answered'];
@@ -66,6 +67,12 @@
                         style="color: {{ $answeredBand->cssVar() }}"
                     >{{ $answeredBand->glyph() }} {{ SleepBand::say($answered->minutes) }}</span>
 
+                    @if ($answered->asleep_minute !== null)
+                        <span class="font-mono-fq text-[10px] tracking-[0.1em] text-fq-text-3 uppercase">
+                            {{ NightWindow::say($answered->asleep_minute) }} &rarr; {{ NightWindow::say($answered->awake_minute) }}
+                        </span>
+                    @endif
+
                     @php $paid = $bands[$answeredBand->value] ?? 0; @endphp
 
                     @if ($paid > 0)
@@ -78,45 +85,89 @@
                         <span class="font-mono-fq text-[10px] text-fq-cyan">&#9790; NIGHT SAVER USED</span>
                     @endif
                 </div>
+
+                {{-- The one answer that needs explaining. Hours enough and
+                     still not a full night reads as the card being broken
+                     unless it says why, and it has to say it without sounding
+                     like a telling off — the hours are the thing a kid
+                     controls least. --}}
+                @if ($answered->missedCoreHours())
+                    <p class="mt-3 text-sm text-fq-text-2">
+                        @if ($answeredBand === SleepBand::Poor)
+                            Only {{ SleepBand::say($answered->coreOverlap()) }} of that was between
+                            12 and 6. This card is about the night hours — it needs four of them
+                            before it pays. Nothing lost, and tonight is a new go.
+                        @else
+                            That is plenty of hours — just not all the right ones. A full night
+                            needs you asleep right through 12 to 6. Nothing lost.
+                        @endif
+                    </p>
+                @endif
             @else
                 <h3 class="font-baloo text-xl font-bold">How long did you sleep?</h3>
 
                 @if (($bands[SleepBand::Full->value] ?? 0) > 0)
                     <p class="mt-1 text-sm text-fq-text-2">
-                        A full night is worth
+                        A full night is 8 hours, asleep right through 12 to 6 — worth
                         <span class="font-baloo text-[15px] font-extrabold text-fq-lime">{{ $money($bands[SleepBand::Full->value]) }}</span>.
                         Give your best guess — nothing here goes backwards.
                     </p>
                 @else
                     <p class="mt-1 text-sm text-fq-text-2">
-                        Give your best guess — nothing here goes backwards, whatever you put.
+                        A full night is 8 hours, asleep right through 12 to 6. Give your best
+                        guess — nothing here goes backwards, whatever you put.
                     </p>
                 @endif
 
-                {{-- The stepper. A number rather than three buttons, because the
-                     number is the thing worth keeping: the bands are what it
-                     pays, but "he averaged 6h20 this week" is what a parent
-                     needs and three buttons can never say it.
+                {{-- Two steppers rather than one. The card used to ask only how
+                     long, and a length cannot tell 11-to-7 from 3-to-11: both
+                     are eight hours and only one of them is a night. So it asks
+                     when as well, and the length falls out of the pair.
 
-                     Alpine holds the value and names the band client-side, so
-                     the payout moves under the thumb rather than after a round
-                     trip. The server derives the band again from the minutes it
-                     is sent — see SleepService::recordHours(), which is what
-                     stops a kid posting themselves into the paying band. --}}
+                     Times are minutes since noon the evening before, the same as
+                     the columns they end up in — see App\Services\NightWindow.
+                     That keeps the arithmetic here a subtraction rather than a
+                     wrap-around special case.
+
+                     Alpine holds both and names the band client-side, so the
+                     payout moves under the thumb rather than after a round trip.
+                     The server works the band out again from the times it is
+                     sent — see SleepService::recordHours(), which is what stops
+                     a kid posting themselves into the paying band. --}}
                 <div
                     class="mt-4"
                     x-data="{
-                        minutes: {{ $card['startMinutes'] }},
+                        asleep: {{ $card['startAsleep'] }},
+                        awake: {{ $card['startAwake'] }},
                         step: {{ SleepBand::STEP_MINUTES }},
-                        max: {{ SleepBand::MAX_MINUTES }},
+                        bounds: {
+                            asleep: [{{ NightWindow::EARLIEST_ASLEEP }}, {{ NightWindow::LATEST_ASLEEP }}],
+                            awake: [{{ NightWindow::EARLIEST_AWAKE }}, {{ NightWindow::LATEST_AWAKE }}],
+                        },
                         rate: {{ $rate }},
                         pays: {{ Js::from($bands) }},
-                        bump(by) {
-                            this.minutes = Math.max(0, Math.min(this.max, this.minutes + by * this.step));
+                        bump(which, by) {
+                            const [earliest, latest] = this.bounds[which];
+                            this[which] = Math.max(earliest, Math.min(latest, this[which] + by * this.step));
+                        },
+                        say(minute) {
+                            const clock = (minute + {{ NightWindow::CORE_START }}) % 1440;
+                            const hour = Math.floor(clock / 60);
+                            const rest = String(clock % 60).padStart(2, '0');
+                            return (hour % 12 === 0 ? 12 : hour % 12) + ':' + rest + ' ' + (hour < 12 ? 'am' : 'pm');
+                        },
+                        get minutes() {
+                            return Math.max(0, Math.min({{ SleepBand::MAX_MINUTES }}, this.awake - this.asleep));
+                        },
+                        get overlap() {
+                            return Math.max(0, Math.min(this.awake, {{ NightWindow::CORE_END }}) - Math.max(this.asleep, {{ NightWindow::CORE_START }}));
+                        },
+                        get covers() {
+                            return this.overlap >= {{ NightWindow::CORE_LENGTH }};
                         },
                         get band() {
-                            if (this.minutes >= {{ SleepBand::FULL_MINUTES }}) return 'full';
-                            if (this.minutes >= {{ SleepBand::SHORT_MINUTES }}) return 'short';
+                            if (this.minutes >= {{ SleepBand::FULL_MINUTES }} && this.covers) return 'full';
+                            if (this.minutes >= {{ SleepBand::SHORT_MINUTES }} && this.overlap >= {{ NightWindow::PAYING_OVERLAP }}) return 'short';
                             return 'poor';
                         },
                         get label() {
@@ -133,32 +184,67 @@
                         get bandLabel() {
                             return { full: 'A full night', short: 'A short night', poor: 'A rough night' }[this.band];
                         },
+                        get note() {
+                            const hours = Math.floor(this.overlap / 60);
+                            const rest = this.overlap % 60;
+                            const said = (rest === 0 ? hours + 'h' : hours + 'h ' + rest + 'm') + ' between 12 and 6';
+                            if (this.covers) return 'Asleep right through 12 to 6';
+                            if (this.overlap >= {{ NightWindow::PAYING_OVERLAP }}) return said;
+                            return said + ' — needs 4h';
+                        },
+                        get noteTone() {
+                            if (this.covers) return 'var(--fq-lime)';
+                            return this.overlap >= {{ NightWindow::PAYING_OVERLAP }} ? 'var(--fq-cyan)' : 'var(--fq-text-4)';
+                        },
                     }"
                 >
-                    <div class="flex items-center gap-3">
-                        <button
-                            type="button"
-                            @click="bump(-1)"
-                            aria-label="Half an hour less"
-                            class="h-12 w-12 shrink-0 rounded-[14px] border border-fq-line-2 bg-fq-sunk font-baloo text-xl font-extrabold transition hover:border-fq-cyan"
-                        >&minus;</button>
+                    <div class="grid gap-3 min-[420px]:grid-cols-2">
+                        @foreach ([['asleep', 'Fell asleep'], ['awake', 'Woke up']] as [$which, $heading])
+                            <div class="rounded-[16px] border border-fq-line-2 bg-fq-sunk p-[10px_12px]">
+                                <p class="text-center font-mono-fq text-[10px] tracking-[0.18em] text-fq-text-4 uppercase">
+                                    {{ $heading }}
+                                </p>
 
-                        <div class="flex-1 text-center">
-                            <p class="font-baloo text-[34px] leading-none font-extrabold" x-text="label" :style="'color: ' + tone"></p>
-                            <p class="mt-1 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase" x-text="bandLabel"></p>
-                        </div>
+                                <div class="mt-1 flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        @click="bump('{{ $which }}', -1)"
+                                        aria-label="Half an hour earlier"
+                                        class="h-10 w-10 shrink-0 rounded-[12px] border border-fq-line-2 font-baloo text-lg font-extrabold transition hover:border-fq-cyan"
+                                    >&minus;</button>
 
-                        <button
-                            type="button"
-                            @click="bump(1)"
-                            aria-label="Half an hour more"
-                            class="h-12 w-12 shrink-0 rounded-[14px] border border-fq-line-2 bg-fq-sunk font-baloo text-xl font-extrabold transition hover:border-fq-cyan"
-                        >+</button>
+                                    <p
+                                        class="flex-1 text-center font-baloo text-[22px] leading-none font-extrabold"
+                                        x-text="say({{ $which }})"
+                                    ></p>
+
+                                    <button
+                                        type="button"
+                                        @click="bump('{{ $which }}', 1)"
+                                        aria-label="Half an hour later"
+                                        class="h-10 w-10 shrink-0 rounded-[12px] border border-fq-line-2 font-baloo text-lg font-extrabold transition hover:border-fq-cyan"
+                                    >+</button>
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+
+                    {{-- What the two times add up to, which is the number the
+                         bands are read from, and whether they cover the hours
+                         the full band also asks for. --}}
+                    <div class="mt-3 text-center">
+                        <p class="font-baloo text-[34px] leading-none font-extrabold" x-text="label" :style="'color: ' + tone"></p>
+                        <p class="mt-1 font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase" x-text="bandLabel"></p>
+                        <p
+                            class="mt-1 font-mono-fq text-[10px] tracking-[0.1em] uppercase"
+                            :style="'color: ' + noteTone"
+                            x-text="(covers ? '&#10003; ' : '&#8226; ') + note"
+                        ></p>
                     </div>
 
                     {{-- The three bands as a track, so a kid can see where the
                          next line is without having to be told the rules. The
-                         lit one follows the stepper. --}}
+                         lit one follows the steppers. --}}
                     <div class="mt-3 flex gap-1">
                         @foreach (SleepBand::cases() as $case)
                             @php $pays = $bands[$case->value] ?? 0; @endphp
@@ -180,11 +266,11 @@
 
                     <button
                         type="button"
-                        @click="$wire.{{ $answerAction }}(minutes)"
+                        @click="$wire.{{ $answerAction }}(asleep, awake)"
                         class="mt-4 flex w-full items-center justify-center gap-2 rounded-[16px] border p-[13px_16px] font-baloo text-[16px] font-extrabold transition hover:brightness-110"
                         style="border-color: var(--fq-lime); background: var(--fq-fill-gold); color: var(--fq-ink)"
                     >
-                        <span x-text="'That\'s my answer · ' + label"></span>
+                        <span x-text="'That\'s my answer &middot; ' + say(asleep) + ' to ' + say(awake)"></span>
                         <span class="font-mono-fq text-[11px] opacity-70" x-text="money"></span>
                     </button>
                 </div>

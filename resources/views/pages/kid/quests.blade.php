@@ -308,17 +308,18 @@ new class extends Component
     }
 
     /**
-     * Answer last night's hours card.
+     * Answer last night's hours card: when they fell asleep, and when they
+     * woke, as minutes since noon the evening before.
      *
-     * Takes minutes rather than a band, and the service works out which band
-     * that is — a kid who edits the wire can change what they claim to have
-     * slept, which is between them and their conscience, but they can't pick
-     * the payout directly.
+     * Takes times rather than a band or a length, and the service works out
+     * both from them — a kid who edits the wire can change what they claim to
+     * have slept, which is between them and their conscience, but they can't
+     * pick the payout directly.
      */
-    public function answerSleepHours(int $minutes): void
+    public function answerSleepHours(int $asleep, int $awake): void
     {
         try {
-            $result = app(SleepService::class)->recordHours($this->profile, $minutes);
+            $result = app(SleepService::class)->recordHours($this->profile, $asleep, $awake);
         } catch (RuntimeException) {
             // Already answered, or switched off mid-visit. The card re-renders
             // showing what they said, which explains it better than a message.
@@ -329,15 +330,24 @@ new class extends Component
 
         $this->profile->refresh();
 
+        // Hours enough in the wrong ones is the one answer that reads as a bug
+        // unless the toast says why, and the card repeats it underneath.
+        $said = SleepBand::say($result['minutes'])
+            .($result['missedCoreHours'] ? ', but not across 12 to 6' : '');
+
         $this->dispatch(
             'celebrate',
             // Hearts rather than coins on the nights that didn't pay: a kid who
             // slept badly and said so has still done the thing this card is
             // for, and "+0 pts" would read as being shortchanged for it.
-            message: ($owl ? "🐾 {$owl} saved your run! " : '').($result['nightPoints'] > 0
-                ? $result['band']->label().' — '.SleepBand::say($result['minutes'])
-                    .'! +'.number_format($result['nightPoints']).' pts'
-                : $result['band']->response()),
+            message: ($owl ? "🐾 {$owl} saved your run! " : '').match (true) {
+                $result['nightPoints'] > 0 => $result['band']->label().' — '.$said
+                    .'! +'.number_format($result['nightPoints']).' pts',
+                // A long sleep at the wrong end of the clock. Saying "a rough
+                // one" to a kid who slept ten hours would just sound broken.
+                $result['missedCoreHours'] => $said.'. Nothing lost — tonight is a new go.',
+                default => $result['band']->response(),
+            },
             style: $result['nightPoints'] > 0 ? 'money' : 'heart',
             motion: 'burst',
             origin: 'tap',

@@ -202,10 +202,11 @@ class SleepService
     {
         $run = (int) $profile->sleep_hours_run;
         $paidThrough = (int) $profile->sleep_hours_run_paid_through;
+        $answered = $this->answerFor($profile);
 
         return [
             'type' => SleepCardType::Hours,
-            'answered' => $this->answerFor($profile),
+            'answered' => $answered,
             'nights' => (int) $profile->sleep_hours_nights,
             'run' => $run,
             'bestRun' => (int) $profile->sleep_hours_best_run,
@@ -215,33 +216,47 @@ class SleepService
             'runPaidThrough' => $paidThrough,
             'bands' => $this->hoursPrizesFor($profile->household),
             'pointsPerDollar' => (int) $profile->household->points_per_dollar,
-            // Where the stepper opens. Last night's answer if there is one, so
-            // a kid who has already answered sees what they said rather than
-            // the default staring back at them.
-            'startMinutes' => $this->answerFor($profile)?->minutes ?? SleepBand::DEFAULT_MINUTES,
+            // Where the two steppers open. Last night's answer if there is one,
+            // so a kid who has already answered sees what they said rather than
+            // the defaults staring back at them.
+            'startAsleep' => $answered?->asleep_minute ?? NightWindow::DEFAULT_ASLEEP,
+            'startAwake' => $answered?->awake_minute ?? NightWindow::DEFAULT_AWAKE,
         ];
     }
 
     /**
-     * Answer last night on the hours card, in minutes.
+     * Answer last night on the hours card: when they fell asleep, and when
+     * they woke.
+     *
+     * Two times rather than a length, because the card now asks for both. A
+     * full night is eight hours that also cover midnight to 6am, and a night
+     * asleep for less than four of those six hours pays nothing — see
+     * {@see NightWindow} — and the length is worked out from the pair rather
+     * than sent alongside them, so the two can't be made to disagree.
      *
      * Same contract as {@see self::record()} — idempotent, transactional, and
      * incapable of taking anything away. The band is worked out here rather
      * than passed in, so a kid can't post themselves into the paying one.
      *
-     * @return array{band: SleepBand, minutes: int, nightPoints: int, chest: ?int}
+     * Both times are minutes since noon on the evening the night began.
+     *
+     * @return array{band: SleepBand, minutes: int, asleep: int, awake: int,
+     *               missedCoreHours: bool, nightPoints: int, chest: ?int}
      */
-    public function recordHours(Profile $profile, int $minutes): array
+    public function recordHours(Profile $profile, int $asleepMinute, int $awakeMinute): array
     {
         if (! $this->isEnabledFor($profile) || $this->typeFor($profile) !== SleepCardType::Hours) {
             throw new RuntimeException('The hours card is not switched on for this kid.');
         }
 
-        // Clamped rather than rejected: the stepper can only produce values in
-        // range, so anything outside it is a stale form or a poke at the wire,
-        // and neither deserves to lose the kid their answer for the night.
-        $minutes = max(0, min(SleepBand::MAX_MINUTES, $minutes));
-        $minutes -= $minutes % SleepBand::STEP_MINUTES;
+        // Clamped and snapped rather than rejected: the steppers can only
+        // produce times in range, so anything outside it is a stale form or a
+        // poke at the wire, and neither deserves to lose the kid their answer
+        // for the night.
+        $asleep = NightWindow::asleepAt($asleepMinute);
+        $awake = NightWindow::awakeAt($awakeMinute);
+        $minutes = NightWindow::lengthOf($asleep, $awake);
+        $overlap = NightWindow::overlapOf($asleep, $awake);
 
         $household = $profile->household;
         $date = $this->tonightsDate($household);
@@ -250,14 +265,16 @@ class SleepService
             throw new RuntimeException('Last night is already answered.');
         }
 
-        $band = SleepBand::fromMinutes($minutes);
+        $band = SleepBand::fromNight($minutes, $overlap);
 
-        $earned = DB::transaction(function () use ($profile, $household, $band, $minutes, $date) {
+        $earned = DB::transaction(function () use ($profile, $household, $band, $minutes, $asleep, $awake, $date) {
             SleepNight::create([
                 'household_id' => $household->id,
                 'profile_id' => $profile->id,
                 'night_date' => $date,
                 'minutes' => $minutes,
+                'asleep_minute' => $asleep,
+                'awake_minute' => $awake,
             ]);
 
             // Every band is paid at its own rate, the short one included. Paid
@@ -269,14 +286,20 @@ class SleepService
 
             if ($nightPoints > 0) {
                 // Named the way the own-bed rows are: the card, the answer and
-                // the night it was about. `night_date` is the morning it ended,
-                // and nobody calls that "Sunday night".
+                // the night it was about. The hours are spelled out as well as
+                // the length, since they are now half of what decides the band
+                // and a parent reading "7h 30m, short night" would otherwise
+                // have no way to see why.
+                //
+                // `night_date` is the morning it ended, and nobody calls that
+                // "Sunday night".
                 $this->ledger->record(
                     $household,
                     $profile,
                     LedgerKind::Earn,
                     $nightPoints,
                     "{$profile->name} — Hours card: ".SleepBand::say($minutes)
+                        .', '.NightWindow::say($asleep).' to '.NightWindow::say($awake)
                         .' ('.$date->copy()->subDay()->format('D').' night)',
                 );
             }
@@ -284,6 +307,8 @@ class SleepService
             if (! $band->counts()) {
                 // The no-punishment rule, same single line as the own-bed card:
                 // the run stops and nothing else moves. The night still paid.
+                // A long night in the wrong hours lands here too — it is a
+                // short night, not a failed one.
                 $profile->sleep_hours_run = 0;
                 $profile->save();
 
@@ -310,6 +335,13 @@ class SleepService
         return [
             'band' => $band,
             'minutes' => $minutes,
+            'asleep' => $asleep,
+            'awake' => $awake,
+            // Whether the hours rather than the length decided the band. The
+            // one answer that needs explaining, since a kid who slept eight
+            // hours and was told it was a short night — or paid nothing for
+            // sleeping through the afternoon — deserves to know why.
+            'missedCoreHours' => $band !== SleepBand::fromMinutes($minutes),
             'nightPoints' => $earned['nightPoints'],
             'chest' => $earned['chest'],
         ];
