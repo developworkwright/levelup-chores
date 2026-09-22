@@ -28,6 +28,7 @@ use App\Services\PerkInventoryService;
 use App\Services\SleepService;
 use App\Services\SpinService;
 use App\Services\StreakService;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
@@ -419,26 +420,66 @@ new class extends Component
     }
 
     /**
-     * Buys a Quest Charm without leaving the page.
+     * Buys one of this page's bonus items without leaving the page.
      *
-     * Sold from here because here is where it is spent: a charm lands on this
-     * board, for the rest of today, and a kid who has to go to the Bonus Shop
-     * to buy one has left the thing it acts on. The same reasoning as the OP
-     * Spin's button beside the wheel.
+     * Sold from here because here is where they are spent: a charm lands on
+     * this board for the rest of today, and the window to charge a spin closes
+     * the moment the wheel goes. A kid sent to the Bonus Shop first comes back
+     * to a board they have left or a spin they have spent.
+     *
+     * The match is the allow-list as well as the wording — an effect this page
+     * has no button for is a stale tab or a poke at the wire, and is ignored
+     * rather than sold.
      */
-    public function buyQuestCharm(): void
+    public function buyBonusItem(string $effect): void
     {
-        $this->buyPerk(PerkEffect::QuestCharm, 'cast it over the board!');
+        $case = PerkEffect::tryFrom($effect);
+
+        $suffix = $case === null ? null : match ($case) {
+            PerkEffect::QuestCharm => 'cast it over the board!',
+            PerkEffect::OpSpin => 'charge the wheel before you spin!',
+            PerkEffect::WheelRespin => 'send the wheel round again!',
+            PerkEffect::MysteryHint => 'read your clue!',
+            default => null,
+        };
+
+        if ($suffix === null) {
+            return;
+        }
+
+        $this->buyPerk($case, $suffix);
     }
 
     /**
-     * Sold from beside the wheel for the same reason the charm is sold from
-     * the board: the window to use one closes the moment the wheel goes, and a
-     * kid who has to leave for the shop first comes back to a spent spin.
+     * One bonus item beside the thing it acts on: how many are held, whether
+     * one can be spent right now, and what the next one costs.
+     *
+     * The price rides along whether or not they are holding any. A control
+     * that only offers to sell when the pocket is empty is one a kid can never
+     * stock up from, and one that hides the price once they own one takes the
+     * answer away at the moment they are deciding whether to spend it.
+     *
+     * `$perks` is the household's enabled catalogue, keyed by effect, so four
+     * of these cost one query between them rather than one each.
+     *
+     * @param  \Illuminate\Support\Collection<string, BonusPerk>  $perks
+     * @return array{effect: PerkEffect, count: int, blocked: ?string,
+     *               perk: ?BonusPerk, shortfall: int}
      */
-    public function buyOpSpin(): void
+    private function bonusItem(PerkEffect $effect, Collection $perks, PerkInventoryService $inventory): array
     {
-        $this->buyPerk(PerkEffect::OpSpin, 'charge the wheel before you spin!');
+        $count = $inventory->countOf($this->profile, $effect);
+        $perk = $perks->get($effect->value);
+
+        return [
+            'effect' => $effect,
+            'count' => $count,
+            // Only asked when there is something to block: blockedReason() is
+            // about spending one, and a kid holding none is not being refused.
+            'blocked' => $count > 0 ? $inventory->blockedReason($this->profile, $effect) : null,
+            'perk' => $perk,
+            'shortfall' => $perk ? max(0, $perk->cost - (int) $this->profile->bonus_tickets) : 0,
+        ];
     }
 
     /**
@@ -925,6 +966,14 @@ new class extends Component
         $spin = app(SpinService::class);
         $inventory = app(PerkInventoryService::class);
 
+        // The household's live catalogue, keyed by effect: every bonus item on
+        // this page reads its name, price and glyph from here, and a parent
+        // switching one off is what takes its buy button away.
+        $perks = BonusPerk::where('household_id', $this->profile->household_id)
+            ->enabled()
+            ->get()
+            ->keyBy(fn (BonusPerk $perk) => $perk->effect->value);
+
         // A Livewire round trip doesn't pass back through the route middleware
         // that expires a lapsed streak, and this is the page a kid is most
         // likely to be sitting on when the household day rolls over.
@@ -1050,30 +1099,14 @@ new class extends Component
             'boostClaim' => $this->boostClaim($boost),
             'wheelChores' => $wheelChores,
             'wheelSlice' => 360 / max(1, $wheelChores->count()),
-            'respin' => $inventory->holds($this->profile, PerkEffect::WheelRespin)
-                ? [
-                    'effect' => PerkEffect::WheelRespin,
-                    'count' => $inventory->countOf($this->profile, PerkEffect::WheelRespin),
-                    'blocked' => $inventory->blockedReason($this->profile, PerkEffect::WheelRespin),
-                ]
-                : null,
-            // The charge already on the wheel, the charge in their pocket, and
-            // the one they could buy — three states of the same control, and
-            // only ever one of them is on screen.
+            // The three bonus items this page acts on, each the same control:
+            // how many are held, a button to spend one, and the price of the
+            // next. See bonusItem().
+            'respinItem' => $this->bonusItem(PerkEffect::WheelRespin, $perks, $inventory),
+            'opSpinItem' => $this->bonusItem(PerkEffect::OpSpin, $perks, $inventory),
+            // Whether the charge is already on the wheel, which is the one
+            // state where neither half of that control has anything to offer.
             'wheelCharged' => $spin->isCharged($this->profile),
-            'opSpin' => $inventory->holds($this->profile, PerkEffect::OpSpin)
-                ? [
-                    'effect' => PerkEffect::OpSpin,
-                    'count' => $inventory->countOf($this->profile, PerkEffect::OpSpin),
-                    'blocked' => $inventory->blockedReason($this->profile, PerkEffect::OpSpin),
-                ]
-                : null,
-            'opSpinForSale' => $inventory->holds($this->profile, PerkEffect::OpSpin) || $spin->isCharged($this->profile)
-                ? null
-                : BonusPerk::where('household_id', $household->id)
-                    ->enabled()
-                    ->where('effect', PerkEffect::OpSpin)
-                    ->first(),
             // What a charm pays, for the strip above the board to quote. A
             // constant rather than a sum: the bonus is a percentage of whatever
             // row it lands on, so there is no single number until it lands.
@@ -1117,24 +1150,9 @@ new class extends Component
             // Null unless both the household and this kid have it switched on,
             // which is what keeps the card off every other kid's page.
             'sleepCard' => app(SleepService::class)->cardFor($this->profile),
-            // Contextual "use it here" buttons for the perks that act on this
-            // page, so a kid doesn't have to go hunting in the shop.
-            'heldPerks' => collect([PerkEffect::MysteryHint, PerkEffect::QuestCharm])
-                ->filter(fn (PerkEffect $effect) => $inventory->holds($this->profile, $effect))
-                ->mapWithKeys(fn (PerkEffect $effect) => [$effect->value => [
-                    'effect' => $effect,
-                    'count' => $inventory->countOf($this->profile, $effect),
-                    'blocked' => $inventory->blockedReason($this->profile, $effect),
-                ]]),
-            // The catalogue row, only when they're holding none — that's the
-            // whole condition for offering to sell one. Null when a parent has
-            // switched the charm off, which takes the button with it.
-            'charmForSale' => $inventory->holds($this->profile, PerkEffect::QuestCharm)
-                ? null
-                : BonusPerk::where('household_id', $household->id)
-                    ->enabled()
-                    ->where('effect', PerkEffect::QuestCharm)
-                    ->first(),
+            // The board's own two bonus items, same control as the wheel's.
+            'charmItem' => $this->bonusItem(PerkEffect::QuestCharm, $perks, $inventory),
+            'hintItem' => $this->bonusItem(PerkEffect::MysteryHint, $perks, $inventory),
             'household' => $household,
             // The boss card and the monster watching from behind the board. It
             // came back from Home: every hit on it is a chore off this board.
@@ -1565,43 +1583,39 @@ new class extends Component
                                     <span class="font-baloo text-sm">⚡</span>
                                     <span>Wheel charged &mdash; 4x is in play</span>
                                 </div>
-                            @elseif ($opSpin)
-                                <div class="flex flex-col items-start gap-1">
-                                    <x-perk-button :entry="$opSpin" />
-                                    @if ($opSpin['blocked'])
-                                        <span class="font-mono-fq text-[10px] text-fq-text-5">{{ $opSpin['blocked'] }}</span>
-                                    @endif
-                                </div>
-                            @elseif ($opSpinForSale)
-                                @php $canAffordOp = $profile->bonus_tickets >= $opSpinForSale->cost; @endphp
-
-                                <button
-                                    type="button"
-                                    wire:click="buyOpSpin"
-                                    @disabled(! $canAffordOp)
-                                    title="{{ $opSpinForSale->description }}"
-                                    class="inline-flex h-[42px] items-center gap-2 self-start rounded-[12px] border px-[14px] text-xs font-semibold whitespace-nowrap transition hover:brightness-125 disabled:opacity-40"
-                                    style="border-color: var(--fq-steel-edge); color: var(--fq-steel-text); background: var(--fq-steel-panel)"
-                                >
-                                    <span class="font-baloo text-sm">{{ $opSpinForSale->glyph }}</span>
-                                    <span>Buy an {{ $opSpinForSale->name }}</span>
-                                    <span class="font-mono-fq text-[10px]" style="color: {{ $canAffordOp ? 'var(--fq-lime)' : 'var(--fq-text-5)' }}">
-                                        {{ $opSpinForSale->cost }}&#127903;
-                                    </span>
-                                </button>
+                            @else
+                                {{-- Held, for sale, or both — the same control the
+                                     board's charm uses, and here for the same
+                                     reason: the window to charge a spin closes the
+                                     moment the wheel goes, so the price belongs
+                                     beside the button, not a tab away. Gone once
+                                     the wheel has gone, since a charge bought after
+                                     the spin sits unseen until tomorrow. --}}
+                                <x-perk-offer :entry="$opSpinItem">
+                                    4x in play, and 3x far more likely
+                                </x-perk-offer>
                             @endif
                         @endunless
 
-                        @if ($respin)
+                        {{-- Offered once the wheel has gone even when they are
+                             holding none: a result they want changed is the only
+                             moment a respin means anything, and that is exactly
+                             when being sent to the shop is most annoying. --}}
+                        @if ($respinItem['count'] > 0 || $spinRevealed)
                             {{-- The charge is spent by the spin, not by the result,
                                  so a respin cannot hand it back — and the kid has
                                  no way of knowing that from a button that just says
                                  "respin". Asked once, and only on a spin the ticket
                                  actually paid for. --}}
-                            @php $opAtRisk = $boost && $boost->was_op && ! $respin['blocked']; @endphp
+                            @php
+                                $opAtRisk = $respinItem['count'] > 0
+                                    && $boost
+                                    && $boost->was_op
+                                    && ! $respinItem['blocked'];
+                            @endphp
 
-                            <div class="flex flex-col items-start gap-1" x-data="{ asking: false }">
-                                @if ($opAtRisk)
+                            @if ($opAtRisk)
+                                <div class="flex flex-col items-start gap-1" x-data="{ asking: false }">
                                     <div x-show="! asking">
                                         <button
                                             type="button"
@@ -1611,8 +1625,8 @@ new class extends Component
                                         >
                                             <span class="font-baloo text-sm">↻</span>
                                             <span>Use Wheel Respin</span>
-                                            @if ($respin['count'] > 1)
-                                                <span class="font-mono-fq text-[10px]">×{{ $respin['count'] }}</span>
+                                            @if ($respinItem['count'] > 1)
+                                                <span class="font-mono-fq text-[10px]">×{{ $respinItem['count'] }}</span>
                                             @endif
                                         </button>
                                     </div>
@@ -1626,7 +1640,7 @@ new class extends Component
                                         <div class="flex gap-2">
                                             <button
                                                 type="button"
-                                                wire:click="usePerk('{{ $respin['effect']->value }}')"
+                                                wire:click="usePerk('{{ $respinItem['effect']->value }}')"
                                                 x-on:click="asking = false"
                                                 class="flex-1 rounded-[14px] py-[11px] font-baloo text-[15px] font-extrabold transition hover:brightness-110"
                                                 style="background: var(--fq-fill-gold-soft); color: var(--fq-ink)"
@@ -1640,14 +1654,16 @@ new class extends Component
                                             >Keep my {{ $boost->multiplier }}x</button>
                                         </div>
                                     </div>
-                                @else
-                                    <x-perk-button :entry="$respin" />
-                                @endif
 
-                                @if ($respin['blocked'])
-                                    <span class="font-mono-fq text-[10px] text-fq-text-5">{{ $respin['blocked'] }}</span>
-                                @endif
-                            </div>
+                                    @if ($respinItem['blocked'])
+                                        <span class="font-mono-fq text-[10px] text-fq-text-5">{{ $respinItem['blocked'] }}</span>
+                                    @endif
+                                </div>
+                            @else
+                                <x-perk-offer :entry="$respinItem">
+                                    A fresh chore and a fresh multiplier
+                                </x-perk-offer>
+                            @endif
                         @endif
 
                         @if ($perkMessage)
@@ -1768,44 +1784,13 @@ new class extends Component
 
                 {{-- Offered alongside the mark, not instead of it: a second
                      charm widens the spread, and a kid holding one after
-                     casting one should be able to spend it. --}}
-                @if (isset($heldPerks['quest_charm']))
-                    <div class="flex flex-col items-start gap-1">
-                        <x-perk-button :entry="$heldPerks['quest_charm']" />
-                        @if ($heldPerks['quest_charm']['blocked'])
-                            <span class="font-mono-fq text-[10px] text-fq-text-5">{{ $heldPerks['quest_charm']['blocked'] }}</span>
-                        @endif
-                    </div>
-                @elseif ($charmForSale)
-                    @php $canAffordCharm = $profile->bonus_tickets >= $charmForSale->cost; @endphp
-
-                    <button
-                        type="button"
-                        wire:click="buyQuestCharm"
-                        @disabled(! $canAffordCharm)
-                        title="{{ $charmForSale->description }}"
-                        class="inline-flex h-[42px] items-center gap-2 rounded-[12px] border px-[14px] text-xs font-semibold whitespace-nowrap transition hover:brightness-125 disabled:opacity-40"
-                        style="border-color: var(--fq-steel-edge); color: var(--fq-steel-text); background: var(--fq-steel-panel)"
-                    >
-                        <span class="font-baloo text-sm">{{ $charmForSale->glyph }}</span>
-                        <span>Buy a {{ $charmForSale->name }}</span>
-                        <span class="font-mono-fq text-[10px]" style="color: {{ $canAffordCharm ? 'var(--fq-lime)' : 'var(--fq-text-5)' }}">
-                            {{ $charmForSale->cost }}&#127903;
-                        </span>
-                    </button>
-
-                    {{-- A disabled button with no reason on it is the thing the
-                         board messages exist to stop. --}}
-                    @if (! $canAffordCharm)
-                        <span class="font-mono-fq text-[10px] text-fq-text-5">
-                            {{ $charmForSale->cost - $profile->bonus_tickets }} more
-                        </span>
-                    @else
-                        <span class="font-mono-fq text-[10px] text-fq-text-5">
-                            {{ $charmChores }} random chores, +{{ $charmPercent }}% each
-                        </span>
-                    @endif
-                @endif
+                     casting one should be able to spend it. The price stays up
+                     whether or not they are holding any — a control that only
+                     sells to an empty pocket is one nobody can stock up from.
+                     --}}
+                <x-perk-offer :entry="$charmItem">
+                    {{ $charmChores }} random chores, +{{ $charmPercent }}% each, today only
+                </x-perk-offer>
             </div>
 
             {{-- Price bands. Four constants over chores.points, declared in
@@ -2550,12 +2535,17 @@ new class extends Component
                             <p class="font-mono-fq text-[10px] tracking-[0.2em] uppercase" style="color: var(--fq-magenta)">Your Hint</p>
                             <p class="mt-1 text-sm text-fq-text-2">{{ $mysteryHint }}</p>
                         </div>
-                    @elseif (isset($heldPerks['mystery_hint']))
-                        <div class="mt-[14px] flex flex-col items-start gap-1">
-                            <x-perk-button :entry="$heldPerks['mystery_hint']" />
-                            @if ($heldPerks['mystery_hint']['blocked'])
-                                <span class="font-mono-fq text-[10px] text-fq-text-5">{{ $heldPerks['mystery_hint']['blocked'] }}</span>
-                            @endif
+                    @else
+                        {{-- The hint is the board's other bonus item, so it gets
+                             the board's other control: held count, a button to
+                             spend one, and what the next costs. Rendered only
+                             while the mystery is unfound and unhinted — the two
+                             branches above are the states where there is nothing
+                             left to buy. --}}
+                        <div class="mt-[14px]">
+                            <x-perk-offer :entry="$hintItem">
+                                A clue to which chore it is, yours alone
+                            </x-perk-offer>
                         </div>
                     @endif
                 @else

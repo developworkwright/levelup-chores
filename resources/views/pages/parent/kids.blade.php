@@ -546,6 +546,14 @@ new class extends Component
             'houseNow' => HouseholdClock::for($this->profile->household)->now(),
             'timezones' => self::timezoneOptions(),
             'daySummaries' => $kids->mapWithKeys(fn (Profile $kid) => [$kid->id => $this->daySummaryFor($kid)]),
+            // What each kid on the hours card actually logged — the times and
+            // the week's average, which the counters beside them can't say.
+            // Null for an own-bed kid, whose answers have no length.
+            'sleepLogs' => $kids->mapWithKeys(fn (Profile $kid) => [
+                $kid->id => $kid->sleep_card_enabled && ($kid->sleep_card_type ?? SleepCardType::OwnBed) === SleepCardType::Hours
+                    ? app(SleepService::class)->hoursLogFor($kid)
+                    : null,
+            ]),
             'spins' => $kids->mapWithKeys(function (Profile $kid) {
                 $spin = app(SpinService::class)->today($kid);
 
@@ -914,6 +922,58 @@ new class extends Component
                                     Own bed, finished: {{ $kid->sleep_nights }} nights ·
                                     {{ App\Enums\Constellation::completedFrom($kid->sleep_nights) }} pictures
                                 </p>
+                            @endif
+
+                            {{-- What they actually logged. The counters above
+                                 are the score; this is the answer, and without
+                                 it "0 full nights" is a verdict with no
+                                 evidence — a kid sleeping 2am to 10am and a kid
+                                 sleeping four hours read identically.
+
+                                 Hours card only: an own-bed answer has no times
+                                 and no length to average. --}}
+                            @php $sleepLog = $sleepLogs[$kid->id] ?? null; @endphp
+
+                            @if ($sleepLog)
+                                <div class="mt-[8px] rounded-[12px] border border-fq-line-2 bg-fq-panel px-[10px] py-[8px]">
+                                    <p class="font-mono-fq text-[10px] tracking-[0.14em] text-fq-text-4 uppercase">
+                                        What they logged
+                                    </p>
+
+                                    @if ($sleepLog['last'])
+                                        @php $night = $sleepLog['last']; @endphp
+
+                                        <p class="mt-[3px] font-mono-fq text-[11px] text-fq-text-2">
+                                            {{-- Named by the evening it began, like
+                                                 the ledger line: night_date is the
+                                                 morning it ended, and nobody calls
+                                                 that "Sunday night". --}}
+                                            {{ $night->night_date->copy()->subDay()->format('D') }} night ·
+                                            <span class="text-fq-text">{{ \App\Enums\SleepBand::say($night->minutes) }}</span>
+                                            @if ($night->asleep_minute !== null)
+                                                · {{ \App\Services\NightWindow::say($night->asleep_minute) }}
+                                                &rarr; {{ \App\Services\NightWindow::say($night->awake_minute) }}
+                                            @endif
+                                        </p>
+
+                                        <p class="mt-[2px] font-mono-fq text-[10px]" style="color: {{ $night->band()->cssVar() }}">
+                                            {{ $night->band()->glyph() }} {{ $night->band()->shortLabel() }}
+                                            @if ($night->missedCoreHours())
+                                                &middot; only {{ \App\Enums\SleepBand::say($night->coreOverlap()) }} between 12 and 6
+                                            @endif
+                                        </p>
+
+                                        <p class="mt-[4px] font-mono-fq text-[10px] text-fq-text-5">
+                                            {{ $sleepLog['answered'] }} of the last {{ $sleepLog['days'] }} nights answered ·
+                                            average {{ \App\Enums\SleepBand::say($sleepLog['averageMinutes']) }} ·
+                                            {{ $sleepLog['full'] }} full
+                                        </p>
+                                    @else
+                                        <p class="mt-[3px] font-mono-fq text-[11px] text-fq-text-5">
+                                            Nothing answered in the last {{ $sleepLog['days'] }} nights.
+                                        </p>
+                                    @endif
+                                </div>
                             @endif
 
                             <div class="mt-2 flex flex-wrap items-center gap-4">

@@ -660,6 +660,48 @@ class SleepService
     }
 
     /**
+     * The nights themselves, for a parent.
+     *
+     * The counters beside this say how the habit is going. This says what
+     * actually happened: the last night answered, with the times on it, and
+     * the average across the week — which is the number that was worth keeping
+     * the minutes for in the first place, and which until now nothing showed
+     * anybody. A kid could log 5am-to-1pm every day and a parent reading
+     * "0 full nights" would have no idea why.
+     *
+     * Hours rows only. An own-bed answer has no length to average.
+     *
+     * `last` is the most recent night *inside the window*, which is not
+     * necessarily last night — a kid who stopped answering on Tuesday should
+     * show Tuesday and a count that says how few nights that is, rather than
+     * an empty panel that reads like the card is switched off.
+     *
+     * @return array{last: ?SleepNight, answered: int, full: int,
+     *               averageMinutes: ?int, days: int}
+     */
+    public function hoursLogFor(Profile $profile, int $days = 7): array
+    {
+        $today = HouseholdClock::for($profile->household)->today();
+
+        $nights = SleepNight::where('profile_id', $profile->id)
+            ->whereNotNull('minutes')
+            ->whereDate('night_date', '>=', $today->copy()->subDays($days - 1))
+            ->whereDate('night_date', '<=', $today)
+            ->orderByDesc('night_date')
+            ->get();
+
+        return [
+            'last' => $nights->first(),
+            'answered' => $nights->count(),
+            // Counted off the band rather than off `minutes`, so the hours a
+            // night covered count here exactly as they do everywhere else.
+            'full' => $nights->filter(fn (SleepNight $night) => $night->counted())->count(),
+            'averageMinutes' => $nights->isEmpty() ? null : (int) round($nights->avg('minutes')),
+            'days' => $days,
+        ];
+    }
+
+    /**
      * The next milestone that will actually pay, or null past the last one.
      *
      * Both the run *and* the paid mark have to be cleared, and forgetting the

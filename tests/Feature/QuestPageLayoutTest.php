@@ -15,6 +15,7 @@ use App\Models\Profile;
 use App\Services\BonusShopService;
 use App\Services\BountyService;
 use App\Services\ChoreService;
+use App\Services\PerkInventoryService;
 use App\Services\SpinService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -119,7 +120,7 @@ class QuestPageLayoutTest extends TestCase
         Volt::test('kid.quests')
             ->assertOk()
             ->assertSee('Buy an OP Spin')
-            ->call('buyOpSpin')
+            ->call('buyBonusItem', PerkEffect::OpSpin->value)
             ->assertSee('Use OP Spin')
             ->call('usePerk', PerkEffect::OpSpin->value)
             ->assertSee('Wheel charged')
@@ -332,5 +333,146 @@ class QuestPageLayoutTest extends TestCase
             // earned, and the placeholder a hidden one shows until they do.
             ->assertDontSee('Chore Legend')
             ->assertDontSee('???');
+    }
+
+    /**
+     * The bonus items are sold beside the thing they act on, and the price
+     * stays up once one is owned.
+     *
+     * Hiding it the moment the pocket stopped being empty was the old
+     * behaviour, and it left a kid with no way to stock up and no way to see
+     * what the next one cost at the moment they were deciding to spend one.
+     */
+    public function test_the_board_says_how_many_charms_are_held_and_what_another_costs(): void
+    {
+        $charm = BonusPerk::where('household_id', $this->household->id)
+            ->where('effect', PerkEffect::QuestCharm)
+            ->firstOrFail();
+
+        $this->kid->update(['bonus_tickets' => $charm->cost * 3]);
+
+        // Holding none: the price, and nothing about a count.
+        Volt::test('kid.quests')
+            ->assertOk()
+            ->assertSee('Buy a '.$charm->name)
+            ->assertDontSee('1 held')
+            // Bought from the board rather than from the shop tab.
+            ->call('buyBonusItem', PerkEffect::QuestCharm->value)
+            ->assertSee('1 held')
+            ->assertSee('Use '.$charm->name)
+            // And still selling, which is the whole change.
+            ->assertSee('Buy another')
+            ->call('buyBonusItem', PerkEffect::QuestCharm->value)
+            ->assertSee('2 held');
+
+        $this->assertSame(
+            $charm->cost,
+            $this->kid->refresh()->bonus_tickets,
+            'Two charms should have cost two charms.',
+        );
+    }
+
+    /** A kid who cannot afford one is told how far off they are. */
+    public function test_the_board_says_how_many_more_tickets_a_charm_needs(): void
+    {
+        $charm = BonusPerk::where('household_id', $this->household->id)
+            ->where('effect', PerkEffect::QuestCharm)
+            ->firstOrFail();
+
+        $this->kid->update(['bonus_tickets' => $charm->cost - 2]);
+
+        Volt::test('kid.quests')
+            ->assertOk()
+            ->assertSee('2 more tickets to buy one')
+            // The refusal is the button being dead, not a spend that fails.
+            ->call('buyBonusItem', PerkEffect::QuestCharm->value);
+
+        $this->assertSame($charm->cost - 2, $this->kid->refresh()->bonus_tickets);
+        $this->assertSame(0, app(PerkInventoryService::class)->countOf($this->kid, PerkEffect::QuestCharm));
+    }
+
+    /**
+     * The page sells its own items and no others. The match in buyBonusItem()
+     * is the allow-list, so an effect with no button here is a stale tab or a
+     * poke at the wire.
+     */
+    public function test_the_page_refuses_to_sell_an_item_it_has_no_button_for(): void
+    {
+        $this->kid->update(['bonus_tickets' => 50]);
+
+        Volt::test('kid.quests')
+            ->assertOk()
+            ->call('buyBonusItem', PerkEffect::StreakRestore->value)
+            ->call('buyBonusItem', 'not_a_perk');
+
+        $this->assertSame(50, $this->kid->refresh()->bonus_tickets);
+        $this->assertSame(0, app(PerkInventoryService::class)->countOf($this->kid, PerkEffect::StreakRestore));
+    }
+
+    /** A hint is the board's other item, offered on the card it acts on. */
+    public function test_the_mystery_card_offers_to_sell_a_hint(): void
+    {
+        $hint = BonusPerk::where('household_id', $this->household->id)
+            ->where('effect', PerkEffect::MysteryHint)
+            ->firstOrFail();
+
+        $this->kid->update(['bonus_tickets' => $hint->cost]);
+
+        Volt::test('kid.quests')
+            ->assertOk()
+            ->assertSee('Buy a '.$hint->name)
+            ->call('buyBonusItem', PerkEffect::MysteryHint->value)
+            ->assertSee('1 held')
+            ->assertSee('Use '.$hint->name);
+    }
+
+    /**
+     * A respin is only worth anything once there is a result to change, which
+     * is exactly the moment a trip to the shop is most annoying — so it is
+     * offered there whether or not one is held.
+     */
+    public function test_a_respin_is_offered_beside_a_spin_that_has_landed(): void
+    {
+        $respin = BonusPerk::where('household_id', $this->household->id)
+            ->where('effect', PerkEffect::WheelRespin)
+            ->firstOrFail();
+
+        $this->kid->update(['bonus_tickets' => $respin->cost]);
+
+        // Nothing to respin before the wheel goes.
+        Volt::test('kid.quests')
+            ->assertOk()
+            ->assertDontSee('Buy a '.$respin->name)
+            ->call('spin')
+            ->call('finishSpin')
+            ->assertSee('Buy a '.$respin->name)
+            ->call('buyBonusItem', PerkEffect::WheelRespin->value)
+            ->assertSee('Use '.$respin->name)
+            ->assertSee('1 held');
+    }
+
+    /**
+     * A parent switching an item off in the console takes the whole control
+     * with it — including the line of flavour text under it, which has nothing
+     * to explain once there is no button.
+     */
+    public function test_an_item_a_parent_switched_off_is_not_offered(): void
+    {
+        $charm = BonusPerk::where('household_id', $this->household->id)
+            ->where('effect', PerkEffect::QuestCharm)
+            ->firstOrFail();
+
+        $charm->update(['enabled' => false]);
+        $this->kid->update(['bonus_tickets' => 50]);
+
+        Volt::test('kid.quests')
+            ->assertOk()
+            ->assertDontSee('Buy a '.$charm->name)
+            ->assertDontSee('random chores, +')
+            // And the wire is shut too, not just the button.
+            ->call('buyBonusItem', PerkEffect::QuestCharm->value);
+
+        $this->assertSame(50, $this->kid->refresh()->bonus_tickets);
+        $this->assertSame(0, app(PerkInventoryService::class)->countOf($this->kid, PerkEffect::QuestCharm));
     }
 }

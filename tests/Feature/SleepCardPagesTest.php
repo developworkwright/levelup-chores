@@ -3,12 +3,14 @@
 namespace Tests\Feature;
 
 use App\Enums\Constellation;
+use App\Enums\SleepCardType;
 use App\Enums\SleepOutcome;
 use App\Models\Chore;
 use App\Models\Household;
 use App\Models\LedgerEntry;
 use App\Models\Profile;
 use App\Models\SleepNight;
+use App\Services\NightWindow;
 use App\Services\SleepService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -321,5 +323,60 @@ class SleepCardPagesTest extends TestCase
         Volt::test('parent.kids')->call('toggleSleepCard', $stranger->id);
 
         $this->assertFalse($stranger->fresh()->sleep_card_enabled);
+    }
+
+    /**
+     * The counters are the score; a parent also needs the answer behind them.
+     * Without the times, "0 full nights" is a verdict with no evidence, and a
+     * kid sleeping 2am to 10am reads exactly like one sleeping four hours.
+     */
+    public function test_a_parent_sees_the_hours_and_times_a_kid_logged(): void
+    {
+        $this->kid->update(['sleep_card_type' => SleepCardType::Hours]);
+
+        // Two nights: a full one, then one long enough but at the wrong end of
+        // the clock.
+        app(SleepService::class)->recordHours($this->kid, NightWindow::DEFAULT_ASLEEP, NightWindow::DEFAULT_AWAKE);
+        $this->travel(1)->days();
+        app(SleepService::class)->recordHours($this->kid->refresh(), 900, 1380);
+
+        $this->loginParent();
+
+        Volt::test('parent.kids')
+            ->assertOk()
+            ->assertSee('What they logged')
+            // Last night, said as a length and as two times.
+            ->assertSee('8h')
+            ->assertSee('3:00 am')
+            ->assertSee('11:00 am')
+            // Why it wasn't a full one, in the same words the kid was given.
+            ->assertSee('only 3h between 12 and 6')
+            // And the week behind it, which is what the minutes were kept for.
+            ->assertSee('2 of the last 7 nights answered')
+            ->assertSee('average 8h')
+            ->assertSee('1 full');
+    }
+
+    /** A kid who has stopped answering reads as that, not as an empty panel. */
+    public function test_a_parent_sees_when_nothing_has_been_logged(): void
+    {
+        $this->kid->update(['sleep_card_type' => SleepCardType::Hours]);
+        $this->loginParent();
+
+        Volt::test('parent.kids')
+            ->assertOk()
+            ->assertSee('Nothing answered in the last 7 nights');
+    }
+
+    /** An own-bed answer has no length to show, so the panel stays away. */
+    public function test_the_hours_readout_is_absent_for_an_own_bed_kid(): void
+    {
+        app(SleepService::class)->record($this->kid, SleepOutcome::OwnBed);
+
+        $this->loginParent();
+
+        Volt::test('parent.kids')
+            ->assertOk()
+            ->assertDontSee('What they logged');
     }
 }
