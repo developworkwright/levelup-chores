@@ -1,22 +1,37 @@
-{{-- One bonus item, beside the thing it acts on.
+{{-- One bonus item, beside the thing it acts on — drawn as the thing it is
+     bought with.
 
-     The Bonus Shop is a separate tab, so a kid looking at the board has to
-     already know the charm exists, already know they own one, and leave the
-     page to find out what another costs. This says all three in place: how many
-     are held, a button to spend one, and the ticket price of the next — the
-     price stays on screen whether or not they are holding any, since "you have
-     two" and "another is three tickets" are both things worth knowing at the
-     moment the item is useful.
+     Replaces the flex-wrap row of three equal steel pills. What changed and
+     why:
+
+     1. The item has a body. One stub, so the control can sit next to a spin
+        button or over the board without floating against it.
+     2. One full-weight action, never two. Nothing held -> the whole stub buys
+        one and its price end is the target. Holding one -> the plate's button
+        is Use, and buying another is a quieter gold strip beneath it.
+     3. `N held` stops being a button. It is a `×N in your pocket` note beside
+        the name, which is where a kid reads it.
+     4. What it does always shows. The state line (blocked, or the shortfall)
+        is added under the description, not swapped in for it — "1 more ticket
+        to buy one" is no reason to want the thing.
+     5. The price is a number, not a 10px glyph pair: Baloo 24px in --fq-lime
+        with fa-ticket beside it.
 
      `entry` is what the page's bonusItem() builds:
      ['effect' => PerkEffect, 'count' => int, 'blocked' => ?string,
       'perk' => ?BonusPerk, 'shortfall' => int]
 
-     `perk` is the catalogue row and is null when a parent has switched the item
-     off — which takes the price and the buy button with it, but leaves a held
-     one spendable. The slot is the one-line "what it does", written by the page
-     because only the page knows what the item is about to act on. --}}
-@props(['entry', 'buyAction' => 'buyBonusItem'])
+     `perk` is the catalogue row and is null when a parent has switched the
+     item off — which takes the price end and the buy strip with it, but leaves
+     a held one spendable.
+
+     The slot is the one-line "what it does", written by the page because only
+     the page knows what the item is about to act on.
+
+     `notch` is the colour behind the stub, punched into the perforation. The
+     default is the page background; pass `notch="var(--fq-panel)"` inside the
+     wheel's panel. --}}
+@props(['entry', 'buyAction' => 'buyBonusItem', 'notch' => 'var(--fq-bg)'])
 
 @php
     $effect = $entry['effect'];
@@ -24,66 +39,161 @@
     $perk = $entry['perk'] ?? null;
     $count = (int) $entry['count'];
     $shortfall = (int) ($entry['shortfall'] ?? 0);
+    $blocked = $count > 0 ? $entry['blocked'] : null;
 
     // The parent-editable name where there is one — a household that renamed
     // the charm must not be told to buy something by its factory name.
     $name = $perk?->name ?? $defaults['name'];
-    $article = str_contains('aeiou', mb_strtolower(mb_substr($name, 0, 1))) ? 'an' : 'a';
 
-    // One line under the buttons, never two. A blocked Use outranks the price,
-    // because it is the answer to the button the kid is looking at.
-    $line = match (true) {
-        $count > 0 && $entry['blocked'] !== null => $entry['blocked'],
+    // The amber line under the description. A blocked Use outranks the price:
+    // it is the answer to the button the kid is looking at.
+    $note = match (true) {
+        $blocked !== null => $blocked,
         $perk !== null && $shortfall > 0 => $shortfall.' more '.Str::plural('ticket', $shortfall).' to buy one',
         default => null,
     };
 
+    // Live = anything the kid can act on right now. A dead stub drops out of
+    // the metal entirely rather than sitting at opacity .4.
+    $live = $count > 0 ? $blocked === null : ($perk !== null && $shortfall === 0);
+
     // Nothing held and nothing to sell — a parent has switched this item off.
-    // The whole control goes rather than leaving its note stranded over an
-    // empty row.
     $nothingToOffer = $count === 0 && $perk === null;
+
+    $plate = $live
+        ? 'border-color: var(--fq-steel-edge); background: linear-gradient(180deg,#1b1e25,#101318)'
+        : 'border-color: #23262d; background: var(--fq-steel-card-dim)';
 @endphp
 
 @unless ($nothingToOffer)
-    <div class="flex flex-col items-start gap-1">
-        <div class="flex flex-wrap items-center gap-2">
-            {{-- Held first, and said in words rather than as a bare multiplier
-                 on the button: this is the half a kid is most often looking
-                 for, and an item they own is worth nothing to them if they
-                 don't know they own it. --}}
-            @if ($count > 0)
-                <span
-                    class="inline-flex h-[42px] items-center rounded-[12px] border px-[12px] font-mono-fq text-[10px] tracking-[0.12em] whitespace-nowrap uppercase"
-                    style="border-color: var(--fq-steel-edge); color: var(--fq-steel-text)"
-                >{{ $count }} held</span>
-
-                <x-perk-button :entry="$entry" />
-            @endif
-
-            @if ($perk)
+    <div class="flex w-full flex-col">
+        {{-- The plate. Its right-hand end is the price when nothing is held,
+             and the Use button when something is. --}}
+        <div
+            @class(['flex items-stretch overflow-hidden rounded-[15px] border', 'rounded-b-none border-b-0' => $count > 0 && $perk])
+            style="{{ $plate }}"
+        >
+            {{-- Buying is the whole stub when nothing is held: a price with a
+                 button beside it is two targets for one intention. --}}
+            @if ($count === 0)
                 <button
                     type="button"
                     wire:click="{{ $buyAction }}('{{ $effect->value }}')"
                     @disabled($shortfall > 0)
                     title="{{ $perk->description }}"
-                    class="inline-flex h-[42px] items-center gap-2 rounded-[12px] border px-[14px] text-xs font-semibold whitespace-nowrap transition hover:brightness-125 disabled:opacity-40"
-                    style="border-color: var(--fq-steel-edge); color: var(--fq-steel-text); background: var(--fq-steel-panel)"
+                    class="flex min-w-0 flex-1 items-center gap-[11px] px-[13px] py-[12px] text-left transition enabled:hover:brightness-110"
                 >
-                    <span class="font-baloo text-sm">{{ $perk->glyph }}</span>
-                    <span>Buy {{ $count > 0 ? 'another' : $article.' '.$name }}</span>
-                    <span class="font-mono-fq text-[10px]" style="color: {{ $shortfall > 0 ? 'var(--fq-text-5)' : 'var(--fq-lime)' }}">
-                        {{ $perk->cost }}&#127903;
+                    <span
+                        class="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[12px] font-baloo text-base font-extrabold"
+                        style="background: {{ $live ? 'var(--fq-steel-dim)' : '#16191f' }}; color: {{ $live ? 'var(--fq-steel-text)' : 'var(--fq-steel-dim-link)' }}"
+                    >{{ $defaults['glyph'] }}</span>
+
+                    <span class="flex min-w-0 flex-col gap-[3px]">
+                        <span class="text-[15px] font-bold" style="color: {{ $live ? 'var(--fq-steel-name)' : 'var(--fq-steel-dim-label)' }}">{{ $name }}</span>
+
+                        @if ($slot->isNotEmpty())
+                            <span class="text-[12.5px] text-pretty" style="color: var(--fq-steel-label)">{{ $slot }}</span>
+                        @endif
+
+                        @if ($note)
+                            <span class="font-mono-fq text-[11px]" style="color: var(--fq-gold)">{{ $note }}</span>
+                        @endif
                     </span>
                 </button>
+            @else
+                <span class="flex min-w-0 flex-1 items-center gap-[11px] px-[13px] py-[12px]">
+                    <span
+                        class="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[12px] font-baloo text-base font-extrabold"
+                        style="
+                            background: {{ $live ? 'var(--fq-chrome)' : '#16191f' }};
+                            color: {{ $live ? 'var(--fq-ink-steel)' : 'var(--fq-steel-dim-link)' }};
+                        "
+                    >{{ $defaults['glyph'] }}</span>
+
+                    <span class="flex min-w-0 flex-col gap-[3px]">
+                        <span class="flex flex-wrap items-baseline gap-x-[6px]">
+                            <span class="text-[15px] font-bold" style="color: {{ $live ? 'var(--fq-steel-name)' : 'var(--fq-steel-dim-label)' }}">{{ $name }}</span>
+                            {{-- Held, in words and where a kid reads it: beside
+                                 the name, not on a pill shaped like a button. --}}
+                            <span class="font-mono-fq text-[11px]" style="color: {{ $live ? 'var(--fq-lime)' : 'var(--fq-steel-label)' }}">
+                                &times;{{ $count }} in your pocket
+                            </span>
+                        </span>
+
+                        @if ($slot->isNotEmpty())
+                            <span class="text-[12.5px] text-pretty" style="color: var(--fq-steel-label)">{{ $slot }}</span>
+                        @endif
+
+                        @if ($note)
+                            <span class="font-mono-fq text-[11px]" style="color: var(--fq-gold)">{{ $note }}</span>
+                        @endif
+                    </span>
+                </span>
+
+                <span class="grid shrink-0 place-items-center pr-[6px]">
+                    @if ($blocked)
+                        <span
+                            class="rounded-[12px] border px-[16px] py-[10px] font-baloo text-sm font-extrabold"
+                            style="border-color: var(--fq-steel-line); color: var(--fq-steel-dim-link)"
+                        >Use one</span>
+                    @else
+                        <button
+                            type="button"
+                            wire:click="usePerk('{{ $effect->value }}')"
+                            title="{{ $defaults['description'] }}"
+                            class="rounded-[12px] px-[16px] py-[11px] font-baloo text-sm font-extrabold transition hover:brightness-110"
+                            style="background: var(--fq-fill-steel); color: var(--fq-ink-steel)"
+                        >Use one</button>
+                    @endif
+                </span>
+            @endif
+
+            {{-- The perforation, and the two holes punched through it. Only
+                 drawn on the buy stub — the Use plate has no torn-off end. --}}
+            @if ($count === 0)
+                <span class="relative w-px shrink-0" style="background: repeating-linear-gradient({{ $live ? 'var(--fq-steel-line)' : '#23262d' }} 0 5px, transparent 5px 10px)">
+                    <span class="absolute -top-[7px] -left-[6px] h-[13px] w-[13px] rounded-full" style="background: {{ $notch }}"></span>
+                    <span class="absolute -bottom-[7px] -left-[6px] h-[13px] w-[13px] rounded-full" style="background: {{ $notch }}"></span>
+                </span>
+
+                {{-- The price end. On a stub they cannot afford yet it shows
+                     what they have instead, so the gap is arithmetic a kid can
+                     do rather than a number they have to go and look up. --}}
+                <span
+                    class="flex w-[92px] shrink-0 flex-col items-center justify-center gap-[1px]"
+                    style="background: {{ $live ? 'var(--fq-ticket-bg)' : '#16191f' }}"
+                >
+                    <span class="flex items-baseline gap-[4px]" style="color: {{ $live ? 'var(--fq-lime)' : 'var(--fq-text-5)' }}">
+                        <span class="font-baloo text-[24px] leading-none font-extrabold">{{ $perk->cost }}</span>
+                        <i class="fa-solid fa-ticket text-[12px]"></i>
+                    </span>
+                    <span class="font-mono-fq text-[9px] tracking-[0.12em] uppercase" style="color: {{ $live ? 'var(--fq-ticket-label)' : 'var(--fq-steel-dim-link)' }}">
+                        {{ $live ? 'Buy one' : ($perk->cost - $shortfall).' in hand' }}
+                    </span>
+                </span>
             @endif
         </div>
 
-        {{-- A disabled button with no reason on it is the thing the board
-             messages exist to stop. --}}
-        @if ($line)
-            <span class="font-mono-fq text-[10px] text-fq-text-5">{{ $line }}</span>
-        @elseif ($slot->isNotEmpty())
-            <span class="font-mono-fq text-[10px] text-fq-text-5">{{ $slot }}</span>
+        {{-- Stocking up, quieter than using: a kid holding one should be able
+             to buy a second without leaving the page, but that is never the
+             tap the screen is asking for. --}}
+        @if ($count > 0 && $perk)
+            <button
+                type="button"
+                wire:click="{{ $buyAction }}('{{ $effect->value }}')"
+                @disabled($shortfall > 0)
+                title="{{ $perk->description }}"
+                class="flex items-center justify-between gap-2 rounded-[15px] rounded-t-none border px-[13px] py-2 text-left transition enabled:hover:brightness-115 disabled:opacity-60"
+                style="border-color: {{ $live ? 'var(--fq-steel-edge)' : '#23262d' }}; background: var(--fq-ticket-bg)"
+            >
+                <span class="font-mono-fq text-[10.5px] tracking-[0.1em] uppercase" style="color: var(--fq-ticket-label)">
+                    {{ $shortfall > 0 ? $shortfall.' more '.Str::plural('ticket', $shortfall).' for another' : 'Stock up — buy another' }}
+                </span>
+                <span class="flex items-baseline gap-[4px]" style="color: {{ $shortfall > 0 ? 'var(--fq-text-5)' : 'var(--fq-lime)' }}">
+                    <span class="font-baloo text-base leading-none font-extrabold">{{ $perk->cost }}</span>
+                    <i class="fa-solid fa-ticket text-[11px]"></i>
+                </span>
+            </button>
         @endif
     </div>
 @endunless

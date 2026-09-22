@@ -1591,7 +1591,7 @@ new class extends Component
                                      beside the button, not a tab away. Gone once
                                      the wheel has gone, since a charge bought after
                                      the spin sits unseen until tomorrow. --}}
-                                <x-perk-offer :entry="$opSpinItem">
+                                <x-perk-offer :entry="$opSpinItem" notch="var(--fq-panel)">
                                     4x in play, and 3x far more likely
                                 </x-perk-offer>
                             @endif
@@ -1660,7 +1660,7 @@ new class extends Component
                                     @endif
                                 </div>
                             @else
-                                <x-perk-offer :entry="$respinItem">
+                                <x-perk-offer :entry="$respinItem" notch="var(--fq-panel)">
                                     A fresh chore and a fresh multiplier
                                 </x-perk-offer>
                             @endif
@@ -1768,7 +1768,10 @@ new class extends Component
                  because a charm changes what every row below is worth: it is a
                  control over the list, like the bands and the chips, not a
                  badge on it. --}}
-            <div class="flex flex-wrap items-center gap-2">
+            {{-- Stacked, not wrapped: the stub is full-width, so the charmed
+                 mark sits in its own row above it rather than trying to share
+                 one. --}}
+            <div class="flex flex-col items-stretch gap-2">
                 @if ($charmedCount > 0)
                     <div
                         class="flex items-center gap-2 rounded-[12px] border px-[14px] py-[10px] text-xs font-semibold"

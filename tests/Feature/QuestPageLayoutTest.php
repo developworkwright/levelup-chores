@@ -119,9 +119,10 @@ class QuestPageLayoutTest extends TestCase
 
         Volt::test('kid.quests')
             ->assertOk()
-            ->assertSee('Buy an OP Spin')
+            ->assertSee('OP Spin')
+            ->assertSee('Buy one')
             ->call('buyBonusItem', PerkEffect::OpSpin->value)
-            ->assertSee('Use OP Spin')
+            ->assertSee('Use one')
             ->call('usePerk', PerkEffect::OpSpin->value)
             ->assertSee('Wheel charged')
             ->assertSee('OP SPIN')
@@ -129,7 +130,7 @@ class QuestPageLayoutTest extends TestCase
             // the wheel has gone.
             ->call('spin')
             ->call('finishSpin')
-            ->assertDontSee('Buy an OP Spin')
+            ->assertDontSee('OP Spin')
             ->assertDontSee('Wheel charged');
     }
 
@@ -153,7 +154,7 @@ class QuestPageLayoutTest extends TestCase
         Volt::test('kid.quests')
             ->call('spin')
             ->call('finishSpin')
-            ->assertSee('Use Wheel Respin')
+            ->assertSee('Use one')
             ->assertDontSee('OP charge', escape: false);
 
         app(SpinService::class)->clearToday($this->kid);
@@ -351,19 +352,22 @@ class QuestPageLayoutTest extends TestCase
 
         $this->kid->update(['bonus_tickets' => $charm->cost * 3]);
 
-        // Holding none: the price, and nothing about a count.
+        // Holding none: the stub is the buy, and nothing about a count.
         Volt::test('kid.quests')
             ->assertOk()
-            ->assertSee('Buy a '.$charm->name)
-            ->assertDontSee('1 held')
+            ->assertSee($charm->name)
+            ->assertSee('Buy one')
+            ->assertDontSee('in your pocket')
             // Bought from the board rather than from the shop tab.
             ->call('buyBonusItem', PerkEffect::QuestCharm->value)
-            ->assertSee('1 held')
-            ->assertSee('Use '.$charm->name)
+            // Held is a note beside the name now, not a pill shaped like a
+            // button — and the one action on the plate is spending it.
+            ->assertSee('1 in your pocket')
+            ->assertSee('Use one')
             // And still selling, which is the whole change.
-            ->assertSee('Buy another')
+            ->assertSee('Stock up — buy another', escape: false)
             ->call('buyBonusItem', PerkEffect::QuestCharm->value)
-            ->assertSee('2 held');
+            ->assertSee('2 in your pocket');
 
         $this->assertSame(
             $charm->cost,
@@ -384,11 +388,47 @@ class QuestPageLayoutTest extends TestCase
         Volt::test('kid.quests')
             ->assertOk()
             ->assertSee('2 more tickets to buy one')
+            // The state a kid meets most often used to be the one state that
+            // said nothing about why they'd want the thing: the shortfall was
+            // swapped in for the description. It is added under it now.
+            ->assertSee('random chores, +')
+            // What they do have, beside the price, so the gap is arithmetic
+            // rather than a number they have to go and look up.
+            ->assertSee(($charm->cost - 2).' in hand')
             // The refusal is the button being dead, not a spend that fails.
             ->call('buyBonusItem', PerkEffect::QuestCharm->value);
 
         $this->assertSame($charm->cost - 2, $this->kid->refresh()->bonus_tickets);
         $this->assertSame(0, app(PerkInventoryService::class)->countOf($this->kid, PerkEffect::QuestCharm));
+    }
+
+    /**
+     * The fourth state: holding one that cannot be spent yet. The reason
+     * replaces neither the item's name nor what it does — both still read,
+     * and the Use is an outline rather than a button.
+     */
+    public function test_a_held_item_that_cannot_be_used_yet_still_says_what_it_does(): void
+    {
+        $respin = BonusPerk::where('household_id', $this->household->id)
+            ->where('effect', PerkEffect::WheelRespin)
+            ->firstOrFail();
+
+        $this->kid->update(['bonus_tickets' => $respin->cost * 2]);
+
+        // Bought before the wheel has gone, which is exactly when a respin is
+        // held and blocked.
+        Volt::test('kid.quests')
+            ->assertOk()
+            ->call('spin')
+            ->call('finishSpin')
+            ->call('buyBonusItem', PerkEffect::WheelRespin->value)
+            ->call('usePerk', PerkEffect::WheelRespin->value)
+            // The respin cleared the spin, so the one it just bought has
+            // nothing to act on until the wheel goes again.
+            ->call('buyBonusItem', PerkEffect::WheelRespin->value)
+            ->assertSee('1 in your pocket')
+            ->assertSee('A fresh chore and a fresh multiplier')
+            ->assertSee('Spin the wheel first');
     }
 
     /**
@@ -420,10 +460,11 @@ class QuestPageLayoutTest extends TestCase
 
         Volt::test('kid.quests')
             ->assertOk()
-            ->assertSee('Buy a '.$hint->name)
+            ->assertSee($hint->name)
+            ->assertSee('Buy one')
             ->call('buyBonusItem', PerkEffect::MysteryHint->value)
-            ->assertSee('1 held')
-            ->assertSee('Use '.$hint->name);
+            ->assertSee('1 in your pocket')
+            ->assertSee('Use one');
     }
 
     /**
@@ -442,13 +483,13 @@ class QuestPageLayoutTest extends TestCase
         // Nothing to respin before the wheel goes.
         Volt::test('kid.quests')
             ->assertOk()
-            ->assertDontSee('Buy a '.$respin->name)
+            ->assertDontSee($respin->name)
             ->call('spin')
             ->call('finishSpin')
-            ->assertSee('Buy a '.$respin->name)
+            ->assertSee($respin->name)
             ->call('buyBonusItem', PerkEffect::WheelRespin->value)
-            ->assertSee('Use '.$respin->name)
-            ->assertSee('1 held');
+            ->assertSee('Use one')
+            ->assertSee('1 in your pocket');
     }
 
     /**
@@ -467,7 +508,7 @@ class QuestPageLayoutTest extends TestCase
 
         Volt::test('kid.quests')
             ->assertOk()
-            ->assertDontSee('Buy a '.$charm->name)
+            ->assertDontSee($charm->name)
             ->assertDontSee('random chores, +')
             // And the wire is shut too, not just the button.
             ->call('buyBonusItem', PerkEffect::QuestCharm->value);
