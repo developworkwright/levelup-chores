@@ -41,9 +41,15 @@
     $shortfall = (int) ($entry['shortfall'] ?? 0);
     $blocked = $count > 0 ? $entry['blocked'] : null;
 
+    // Tickets in the pocket, where the caller knows them. Optional so the
+    // control still renders for a caller that doesn't pass it — it only costs
+    // the confirm its second line.
+    $tickets = $entry['tickets'] ?? null;
+
     // The parent-editable name where there is one — a household that renamed
     // the charm must not be told to buy something by its factory name.
     $name = $perk?->name ?? $defaults['name'];
+    $article = str_contains('aeiou', mb_strtolower(mb_substr($name, 0, 1))) ? 'an' : 'a';
 
     // The amber line under the description. A blocked Use outranks the price:
     // it is the answer to the button the kid is looking at.
@@ -65,11 +71,26 @@
         : 'border-color: #23262d; background: var(--fq-steel-card-dim)';
 @endphp
 
+{{-- `asking` is the buy confirm. The whole stub is the buy target, which is
+     the design — and the thing that turned out to be wrong about it: sitting
+     above the price bands it reads like another band, so a kid tapping to
+     filter spent a ticket instead. Nothing about that is obvious enough to fix
+     with wording, so the tap asks now.
+
+     Only buying asks. Using one is a labelled button doing what it says, and
+     the tickets went days ago.
+
+     x-show rather than <template x-if>: Livewire morphs this control on every
+     board render, and x-if clones its contents in as a sibling of the template
+     the server still thinks they are inside — so the two disagree about the
+     DOM and a button added by a round trip repaints without its handler. The
+     feelings card cost an afternoon to that. --}}
 @unless ($nothingToOffer)
-    <div class="flex w-full flex-col">
+    <div class="flex w-full flex-col" x-data="{ asking: false }">
         {{-- The plate. Its right-hand end is the price when nothing is held,
              and the Use button when something is. --}}
         <div
+            x-show="! asking"
             @class(['flex items-stretch overflow-hidden rounded-[15px] border', 'rounded-b-none border-b-0' => $count > 0 && $perk])
             style="{{ $plate }}"
         >
@@ -78,7 +99,7 @@
             @if ($count === 0)
                 <button
                     type="button"
-                    wire:click="{{ $buyAction }}('{{ $effect->value }}')"
+                    x-on:click="asking = true"
                     @disabled($shortfall > 0)
                     title="{{ $perk->description }}"
                     class="flex min-w-0 flex-1 items-center gap-[11px] px-[13px] py-[12px] text-left transition enabled:hover:brightness-110"
@@ -180,7 +201,8 @@
         @if ($count > 0 && $perk)
             <button
                 type="button"
-                wire:click="{{ $buyAction }}('{{ $effect->value }}')"
+                x-show="! asking"
+                x-on:click="asking = true"
                 @disabled($shortfall > 0)
                 title="{{ $perk->description }}"
                 class="flex items-center justify-between gap-2 rounded-[15px] rounded-t-none border px-[13px] py-2 text-left transition enabled:hover:brightness-115 disabled:opacity-60"
@@ -194,6 +216,69 @@
                     <i class="fa-solid fa-ticket text-[11px]"></i>
                 </span>
             </button>
+        @endif
+
+        {{-- The question. Drawn in the stub's own metal so it reads as the
+             same control having second thoughts, rather than as something new
+             arriving over the top of it.
+
+             Rendered whether or not there is anything to sell — a parent can
+             switch the item off between paints, and an x-show that points at
+             a branch the server dropped is the morph bug this page has been
+             bitten by twice. When $perk is null nothing can open it: both
+             triggers live inside branches that need a price. --}}
+        @if ($perk)
+            <div
+                x-show="asking"
+                x-cloak
+                class="flex flex-col gap-[10px] rounded-[15px] border px-[14px] py-[12px]"
+                style="border-color: var(--fq-steel-edge); background: linear-gradient(180deg,#1b1e25,#101318); animation: fq-pop .2s ease both"
+                data-perk-confirm="{{ $effect->value }}"
+            >
+                <p class="font-baloo text-[16px] leading-tight font-extrabold" style="color: var(--fq-steel-name)">
+                    Spend
+                    <span style="color: var(--fq-lime)">{{ $perk->cost }} <i class="fa-solid fa-ticket text-[13px]"></i></span>
+                    on {{ $count > 0 ? 'another' : $article }} {{ $name }}?
+                </p>
+
+                {{-- What the spend leaves behind. A price on its own is a
+                     number to be talked out of; this is the one a kid can
+                     weigh, and it is why `tickets` is passed at all.
+
+                     Built in PHP rather than with directives inline: a `@if`
+                     glued to the end of a word ("left@if") is not a directive
+                     at all, and Blade prints it. --}}
+                @if ($tickets !== null)
+                    @php
+                        $leftAfter = max(0, $tickets - $perk->cost);
+                        $after = 'You’ll have '.$leftAfter.' '.Str::plural('ticket', $leftAfter).' left'
+                            .($count > 0 ? ', and '.($count + 1).' in your pocket' : '').'.';
+                    @endphp
+
+                    <p class="text-[12.5px]" style="color: var(--fq-steel-label)">{{ $after }}</p>
+                @endif
+
+                <div class="flex flex-wrap gap-[8px]">
+                    <button
+                        type="button"
+                        wire:click="{{ $buyAction }}('{{ $effect->value }}')"
+                        {{-- Closed here as well as by the render that answers:
+                             Alpine state survives a morph, so a confirm left
+                             open would be sitting over the stub it just
+                             bought from. --}}
+                        x-on:click="asking = false"
+                        class="rounded-[12px] px-[16px] py-[10px] font-baloo text-sm font-extrabold transition hover:brightness-110"
+                        style="background: var(--fq-fill-steel); color: var(--fq-ink-steel)"
+                    >Yes, buy it</button>
+
+                    <button
+                        type="button"
+                        x-on:click="asking = false"
+                        class="rounded-[12px] border px-[14px] py-[10px] font-baloo text-sm font-extrabold transition hover:brightness-125"
+                        style="border-color: var(--fq-steel-line); color: var(--fq-steel-dim-label)"
+                    >Not now</button>
+                </div>
+            </div>
         @endif
     </div>
 @endunless

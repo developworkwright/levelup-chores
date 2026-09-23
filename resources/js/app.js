@@ -156,6 +156,13 @@ import './draw.js';
  */
 import './photo.js';
 
+/*
+ * The Quest Charm's wand, which flies to each chore the charm landed on and
+ * counts its payout up. Listens for `charm-cast` and owns nothing else — see
+ * the file for why the rows are rewound before it sets off.
+ */
+import './charm.js';
+
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js').catch(() => {});

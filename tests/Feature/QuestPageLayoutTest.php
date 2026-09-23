@@ -376,6 +376,113 @@ class QuestPageLayoutTest extends TestCase
         );
     }
 
+    /**
+     * A tap on the stub asks before it spends.
+     *
+     * The whole stub is the buy target, which is the design — and the thing
+     * that turned out to be wrong about it. The charm's stub sits directly
+     * above the price bands, so it reads like another band: kids tapping to
+     * filter the board bought a charm instead. Every item on this control
+     * asks now, not just that one, because the mistake is the stub's shape
+     * rather than the charm's.
+     */
+    public function test_tapping_the_stub_asks_before_it_spends(): void
+    {
+        $charm = BonusPerk::where('household_id', $this->household->id)
+            ->where('effect', PerkEffect::QuestCharm)
+            ->firstOrFail();
+
+        $this->kid->update(['bonus_tickets' => $charm->cost + 4]);
+
+        $html = Volt::test('kid.quests')->assertOk()->html();
+
+        // The question, and what the spend leaves behind — a price on its own
+        // is a number a kid can't weigh.
+        $this->assertStringContainsString('on a '.$charm->name.'?', $html);
+        $this->assertStringContainsString('You’ll have 4 tickets left.', $html);
+        $this->assertStringContainsString('Yes, buy it', $html);
+        $this->assertStringContainsString('Not now', $html);
+
+        // And the spend hangs off the confirm rather than off the stub. The
+        // count is what matters: one wire:click for this effect on the page,
+        // and it is the one inside the confirm.
+        $spend = "buyBonusItem('".PerkEffect::QuestCharm->value."')";
+
+        $this->assertSame(1, substr_count($html, $spend), 'Only the confirm should spend tickets.');
+
+        $confirm = mb_substr($html, (int) mb_strpos($html, 'data-perk-confirm="'.PerkEffect::QuestCharm->value.'"'));
+        $this->assertStringContainsString($spend, $confirm);
+    }
+
+    /** Every item on the control asks, not only the charm. */
+    public function test_all_four_bonus_items_ask_before_they_spend(): void
+    {
+        // Six, not three: the wheel draws from what is left once the quest
+        // hand is dealt, and there is no respin to sell beside a spin that
+        // never happened.
+        Chore::factory()->for($this->household)->count(3)->create();
+        $this->kid->update(['bonus_tickets' => 50]);
+
+        // No two of them are on screen at once: the charge is only sold before
+        // the wheel goes and the respin only after, so the board is read on
+        // both sides of a spin and the four are counted across the pair.
+        $page = Volt::test('kid.quests');
+
+        $asking = collect(PerkEffect::cases())
+            ->filter(function (PerkEffect $case) use ($page) {
+                return str_contains($page->html(), 'data-perk-confirm="'.$case->value.'"');
+            })
+            ->map(fn (PerkEffect $case) => $case->value);
+
+        $page->call('spin')->call('finishSpin')->assertSet('spinRevealed', true);
+
+        $asking = $asking
+            ->merge(
+                collect(PerkEffect::cases())
+                    ->filter(fn (PerkEffect $case) => str_contains($page->html(), 'data-perk-confirm="'.$case->value.'"'))
+                    ->map(fn (PerkEffect $case) => $case->value),
+            )
+            ->unique()
+            ->values()
+            ->all();
+
+        $this->assertEqualsCanonicalizing(
+            [
+                PerkEffect::QuestCharm->value,
+                PerkEffect::MysteryHint->value,
+                PerkEffect::OpSpin->value,
+                PerkEffect::WheelRespin->value,
+            ],
+            $asking,
+            'Every item this board sells should ask before it spends.',
+        );
+    }
+
+    /**
+     * Stocking up asks too. It is the quieter of the two buys and the one a
+     * kid is least likely to have meant.
+     */
+    public function test_the_stock_up_strip_asks_as_well(): void
+    {
+        $charm = BonusPerk::where('household_id', $this->household->id)
+            ->where('effect', PerkEffect::QuestCharm)
+            ->firstOrFail();
+
+        $this->kid->update(['bonus_tickets' => $charm->cost * 3]);
+
+        $html = Volt::test('kid.quests')
+            ->call('buyBonusItem', PerkEffect::QuestCharm->value)
+            ->html();
+
+        $this->assertStringContainsString('on another '.$charm->name.'?', $html);
+        $this->assertStringContainsString('and 2 in your pocket', $html);
+        $this->assertSame(
+            1,
+            substr_count($html, "buyBonusItem('".PerkEffect::QuestCharm->value."')"),
+            'The strip should open the confirm, not spend.',
+        );
+    }
+
     /** A kid who cannot afford one is told how far off they are. */
     public function test_the_board_says_how_many_more_tickets_a_charm_needs(): void
     {

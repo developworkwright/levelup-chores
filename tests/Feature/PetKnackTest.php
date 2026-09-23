@@ -781,6 +781,38 @@ class PetKnackTest extends TestCase
         $this->assertNull($this->knacks()->charm($sibling->fresh()), 'Charmed twice in a week.');
     }
 
+    /**
+     * The pet's charm flies the same wand as the bought one.
+     *
+     * A kid watching it has no reason to care which of the two cast it — and
+     * the pet's is the one most likely to be a kid's first charm of any kind,
+     * so it is the one that most needs to explain itself. See CharmWandTest
+     * for what the event has to carry.
+     */
+    public function test_the_pets_charm_flies_the_boards_wand(): void
+    {
+        Chore::factory()->for($this->household)->count(8)->create(['points' => 200]);
+        app(ChoreService::class)->forgetBoards();
+        $this->outOn($this->kid, $this->pet('Charmer', ['pet_rarity' => 'epic', 'pet_knack' => 'good_luck_charm']), 30);
+
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        Volt::test('kid.quests')
+            ->call('useCharm')
+            ->assertDispatched('charm-cast', function (string $name, array $params) {
+                $this->assertCount(ChoreService::CHARM_CHORES, $params['chores']);
+                $this->assertSame(ChoreService::CHARM_CHORES.' chores charmed!', $params['message']);
+
+                foreach ($params['chores'] as $chore) {
+                    $this->assertSame(200, $chore['from']);
+                    $this->assertSame(300, $chore['to']);
+                }
+
+                return true;
+            })
+            ->assertNotDispatched('celebrate');
+    }
+
     public function test_digger_digs_a_free_hit_on_the_lucky_block(): void
     {
         LuckyPrize::factory()->for($this->household)->create(['name' => 'Pizza night']);

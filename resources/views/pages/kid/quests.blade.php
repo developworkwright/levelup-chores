@@ -375,6 +375,57 @@ new class extends Component
     }
 
     /**
+     * Hands the board's wand the chores a charm just landed on.
+     *
+     * A charm spends a ticket and repaints five rows in one round trip, which
+     * is how kids ended up not knowing what they had bought: the board simply
+     * looked different. The wand in resources/js/charm.js flies to each row
+     * and counts its payout up — so what it needs is the *old* number as well
+     * as the new one, since only the new one survives the render.
+     *
+     * `from` is what the row paid a moment ago and `to` what it pays now; the
+     * gap between them is the charm, and showing that gap close is the whole
+     * point of the animation. `tint` is the colour the row wore before, so a
+     * wheel-boosted chore climbs in its boost colour rather than flashing lime
+     * on its way to violet.
+     *
+     * Chores rather than ids because both callers already hold the collection
+     * charmBoard() handed back — see ChoreService::charmBoard().
+     *
+     * @param  Collection<int, Chore>  $charmed
+     */
+    private function dispatchCharmCast(Collection $charmed, string $message): void
+    {
+        $boost = app(SpinService::class)->today($this->profile);
+        $percent = ChoreService::CHARM_BONUS_PERCENT;
+
+        $this->dispatch(
+            'charm-cast',
+            rate: $this->pointsPerDollar(),
+            message: $message,
+            chores: $charmed
+                ->map(function (Chore $chore) use ($boost, $percent) {
+                    // Only 'ready' chores are ever charmed, so there is no
+                    // taken-by grey to account for here — see charmBoard().
+                    $boosted = $boost && $boost->chore_id === $chore->id;
+                    $multiplier = $boosted ? $boost->multiplier : 1;
+                    $from = $chore->points * $multiplier;
+
+                    return [
+                        'id' => $chore->id,
+                        'from' => $from,
+                        'to' => $from + (int) round($chore->points * $percent / 100),
+                        'tint' => $boosted
+                            ? ($boost->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)')
+                            : 'var(--fq-lime)',
+                    ];
+                })
+                ->values()
+                ->all(),
+        );
+    }
+
+    /**
      * Every perk with a button on this page: the quest charm and the mystery
      * hint on the board, and the wheel respin beside the spin.
      */
@@ -386,11 +437,35 @@ new class extends Component
             return;
         }
 
+        // Which chores the charm lands on is decided inside the service and
+        // never comes back out of it — `use()` returns a sentence. Read off
+        // the board on both sides of the call rather than widening that return
+        // type for one page: the shop uses the same perk and has no board to
+        // animate, and the diff is exactly what changed.
+        $chores = app(ChoreService::class);
+        $before = $case === PerkEffect::QuestCharm ? $chores->charmedChoreIdsFor($this->profile) : [];
+
         try {
             $outcome = app(PerkInventoryService::class)->use($this->profile, $case);
             $this->perkMessage = null;
         } catch (PerkUnavailableException $e) {
             $this->perkMessage = $e->getMessage();
+
+            return;
+        }
+
+        if ($case === PerkEffect::QuestCharm) {
+            $landed = array_values(array_diff($chores->charmedChoreIdsFor($this->profile), $before));
+
+            $this->dispatchCharmCast(
+                Chore::whereIn('id', $landed)->get(),
+                // Not the service's "find them!" — the wand has just shown the
+                // kid every one of them, and telling someone to go and look
+                // for what they were watching is the old control's copy on a
+                // page that no longer needs it. The shop, which has no board,
+                // keeps the service's wording.
+                count($landed) === 1 ? '1 chore charmed!' : count($landed).' chores charmed!',
+            );
 
             return;
         }
@@ -479,6 +554,11 @@ new class extends Component
             'blocked' => $count > 0 ? $inventory->blockedReason($this->profile, $effect) : null,
             'perk' => $perk,
             'shortfall' => $perk ? max(0, $perk->cost - (int) $this->profile->bonus_tickets) : 0,
+            // What is in the pocket right now, so the buy confirm can say what
+            // will be left after it. "You'll have 4 left" is the half of a
+            // price a kid can actually act on — 3 tickets means nothing
+            // without knowing how many they were holding.
+            'tickets' => (int) $this->profile->bonus_tickets,
         ];
     }
 
@@ -624,10 +704,12 @@ new class extends Component
             return;
         }
 
-        $this->dispatch(
-            'celebrate',
-            message: $charmed->count() === 1 ? '1 chore just went charmed — find it!' : $charmed->count().' chores just went charmed — find them!',
-            style: 'star',
+        // The same wand as the ticket-bought charm: a kid watching it has no
+        // reason to care which of the two cast it, and the pet's version is
+        // the one most likely to be a kid's first charm of any kind.
+        $this->dispatchCharmCast(
+            $charmed,
+            $charmed->count() === 1 ? '1 chore charmed!' : $charmed->count().' chores charmed!',
         );
     }
 
@@ -2085,6 +2167,10 @@ new class extends Component
                     <button
                         type="button"
                         wire:key="chore-{{ $chore->id }}"
+                        {{-- Where the charm's wand flies to. Its own attribute
+                             rather than the wire:key, which is Livewire's to
+                             change and means nothing to a reader. --}}
+                        data-chore="{{ $chore->id }}"
                         title="{{ $chore->name }} &mdash; {{ $rowTitle }}"
                         @if ($state === 'ready')
                             wire:click="askChore({{ $chore->id }})"
@@ -2162,7 +2248,11 @@ new class extends Component
                                  lost by losing the race, and the mark is how a
                                  kid finds out where their five landed. --}}
                             @if ($charmed)
-                                <span class="mb-[2px] inline-block self-start rounded-[8px] px-[8px] py-[2px] font-mono-fq text-[9px] tracking-[0.14em] uppercase" style="background: color-mix(in srgb, var(--fq-violet) 24%, transparent); color: var(--fq-violet)">
+                                {{-- data-charm-mark: hidden and popped back in
+                                     by the wand, so the mark arrives on the
+                                     row the kid is watching rather than
+                                     already being there when they look. --}}
+                                <span data-charm-mark class="mb-[2px] inline-block self-start rounded-[8px] px-[8px] py-[2px] font-mono-fq text-[9px] tracking-[0.14em] uppercase" style="background: color-mix(in srgb, var(--fq-violet) 24%, transparent); color: var(--fq-violet)">
                                     &#10023; Charmed · +{{ $charmPercent }}%
                                 </span>
                             @endif
@@ -2193,14 +2283,15 @@ new class extends Component
                              nothing else — the bands and chips use gold for
                              *selection*, so a wheel-boosted payout keeps its own
                              colour and no filter ever paints a row. --}}
-                        <div class="flex flex-none flex-col items-end">
+                        <div data-chore-payout class="flex flex-none flex-col items-end">
                             <span
+                                data-chore-money
                                 class="font-baloo text-[19px] leading-none font-extrabold whitespace-nowrap"
                                 style="color: {{ $takenBy
                                     ? 'var(--fq-text-5)'
                                     : ($boosted ? $boostColor : ($charmed ? 'var(--fq-violet)' : 'var(--fq-lime)')) }}"
                             >{{ $money($payout) }}</span>
-                            <span class="font-mono-fq text-[8.5px] text-fq-text-4">{{ $payout }} PTS</span>
+                            <span data-chore-pts class="font-mono-fq text-[8.5px] text-fq-text-4">{{ $payout }} PTS</span>
                         </div>
 
                         {{-- What the tap does, said out loud.
