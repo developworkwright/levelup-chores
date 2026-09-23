@@ -129,6 +129,12 @@
                      That keeps the arithmetic here a subtraction rather than a
                      wrap-around special case.
 
+                     Any time of day can be given, to the minute: the steppers
+                     move by the half hour, and tapping a time opens the device's
+                     own time picker. The waking is always the first time after
+                     the bedtime the clock reads it — NightWindow::awakeAt() does
+                     the same on the server, and settle() below mirrors it.
+
                      Alpine holds both and names the band client-side, so the
                      payout moves under the thumb rather than after a round trip.
                      The server works the band out again from the times it is
@@ -140,15 +146,29 @@
                         asleep: {{ $card['startAsleep'] }},
                         awake: {{ $card['startAwake'] }},
                         step: {{ SleepBand::STEP_MINUTES }},
-                        bounds: {
-                            asleep: [{{ NightWindow::EARLIEST_ASLEEP }}, {{ NightWindow::LATEST_ASLEEP }}],
-                            awake: [{{ NightWindow::EARLIEST_AWAKE }}, {{ NightWindow::LATEST_AWAKE }}],
-                        },
+                        day: {{ NightWindow::DAY }},
                         rate: {{ $rate }},
                         pays: {{ Js::from($bands) }},
+                        wrap(minute) {
+                            return ((minute % this.day) + this.day) % this.day;
+                        },
+                        settle() {
+                            this.asleep = this.wrap(this.asleep);
+                            this.awake = this.asleep + this.wrap(this.awake - this.asleep);
+                        },
                         bump(which, by) {
-                            const [earliest, latest] = this.bounds[which];
-                            this[which] = Math.max(earliest, Math.min(latest, this[which] + by * this.step));
+                            this[which] += by * this.step;
+                            this.settle();
+                        },
+                        clock(minute) {
+                            const clock = (minute + {{ NightWindow::CORE_START }}) % this.day;
+                            return String(Math.floor(clock / 60)).padStart(2, '0') + ':' + String(clock % 60).padStart(2, '0');
+                        },
+                        pick(which, value) {
+                            if (! value) return;
+                            const [hour, minute] = value.split(':').map(Number);
+                            this[which] = hour * 60 + minute - {{ NightWindow::CORE_START }};
+                            this.settle();
                         },
                         say(minute) {
                             const clock = (minute + {{ NightWindow::CORE_START }}) % 1440;
@@ -213,10 +233,24 @@
                                         class="h-10 w-10 shrink-0 rounded-[12px] border border-fq-line-2 font-baloo text-lg font-extrabold transition hover:border-fq-cyan"
                                     >&minus;</button>
 
-                                    <p
-                                        class="flex-1 text-center font-baloo text-[22px] leading-none font-extrabold"
-                                        x-text="say({{ $which }})"
-                                    ></p>
+                                    {{-- The time itself is a native time input
+                                         laid invisibly over the styled text, so
+                                         a tap opens the phone's picker and any
+                                         minute can be set. --}}
+                                    <label class="relative flex-1 cursor-pointer text-center">
+                                        <span
+                                            class="block font-baloo text-[22px] leading-none font-extrabold underline decoration-fq-line-2 decoration-dotted underline-offset-4"
+                                            x-text="say({{ $which }})"
+                                        ></span>
+                                        <input
+                                            type="time"
+                                            aria-label="{{ $heading }} at"
+                                            class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                                            :value="clock({{ $which }})"
+                                            @click="$event.target.showPicker?.()"
+                                            @input="pick('{{ $which }}', $event.target.value)"
+                                        >
+                                    </label>
 
                                     <button
                                         type="button"

@@ -33,7 +33,7 @@ enum SleepBand: string
     /** Six. Below this the run stops, though nothing is taken away. */
     public const SHORT_MINUTES = 360;
 
-    /** Answers are taken to the half hour, which is as precise as anyone is. */
+    /** What one tap of a stepper moves a time by. Any minute can still be typed in. */
     public const STEP_MINUTES = 30;
 
     /** The most a kid can log — past this it isn't a night, it's a typo. */

@@ -249,12 +249,12 @@ class SleepService
             throw new RuntimeException('The hours card is not switched on for this kid.');
         }
 
-        // Clamped and snapped rather than rejected: the steppers can only
-        // produce times in range, so anything outside it is a stale form or a
+        // Wrapped onto the clock rather than rejected: any time of day is a
+        // real answer, so a number off the end of the day is a stale form or a
         // poke at the wire, and neither deserves to lose the kid their answer
         // for the night.
         $asleep = NightWindow::asleepAt($asleepMinute);
-        $awake = NightWindow::awakeAt($awakeMinute);
+        $awake = NightWindow::awakeAt($asleep, $awakeMinute);
         $minutes = NightWindow::lengthOf($asleep, $awake);
         $overlap = NightWindow::overlapOf($asleep, $awake);
 

@@ -58,17 +58,8 @@ final class NightWindow
      */
     public const PAYING_OVERLAP = 240;
 
-    /** The earliest bedtime the stepper offers: 6pm. */
-    public const EARLIEST_ASLEEP = 360;
-
-    /** And the latest: 4am, which is where the household day rolls anyway. */
-    public const LATEST_ASLEEP = 960;
-
-    /** The earliest waking it offers: 4am. */
-    public const EARLIEST_AWAKE = 960;
-
-    /** And the latest: noon. */
-    public const LATEST_AWAKE = 1440;
+    /** A whole day — the furthest apart a bedtime and a waking can be. */
+    public const DAY = 1440;
 
     /**
      * Where the two steppers open — 11pm to 7am. Eight hours that cover the
@@ -79,16 +70,32 @@ final class NightWindow
 
     public const DEFAULT_AWAKE = 1140;
 
-    /** A bedtime, snapped to the half hour and held inside the evening. */
+    /**
+     * A bedtime, as any time of day to the minute.
+     *
+     * The card used to hold bedtimes between 6pm and 4am on the half hour, and
+     * a kid who fell asleep outside that had no way to say so. Any clock time
+     * is an answer now; the window rules decide what the night was worth.
+     */
     public static function asleepAt(int $minute): int
     {
-        return self::snap($minute, self::EARLIEST_ASLEEP, self::LATEST_ASLEEP);
+        return self::wrap($minute);
     }
 
-    /** A waking, the same way. */
-    public static function awakeAt(int $minute): int
+    /**
+     * A waking: the first time after the bedtime that the clock reads it.
+     *
+     * Only the waking's clock time is taken from what is sent — which day it
+     * lands on falls out of the bedtime. So 7am after an 11pm bedtime is the
+     * next morning, and 2pm after a 4am one is that afternoon, which is why a
+     * waking can be more than a day's worth of minutes past noon. The same
+     * clock time as the bedtime is a night of nothing.
+     */
+    public static function awakeAt(int $asleep, int $minute): int
     {
-        return self::snap($minute, self::EARLIEST_AWAKE, self::LATEST_AWAKE);
+        $asleep = self::wrap($asleep);
+
+        return $asleep + self::wrap($minute - $asleep);
     }
 
     /**
@@ -130,10 +137,9 @@ final class NightWindow
         return sprintf('%d:%02d %s', $hour % 12 === 0 ? 12 : $hour % 12, $clock % 60, $suffix);
     }
 
-    private static function snap(int $minute, int $earliest, int $latest): int
+    /** Any number of minutes, as a time of day since noon. */
+    private static function wrap(int $minute): int
     {
-        $minute = max($earliest, min($latest, $minute));
-
-        return $minute - ($minute % SleepBand::STEP_MINUTES);
+        return (($minute % self::DAY) + self::DAY) % self::DAY;
     }
 }

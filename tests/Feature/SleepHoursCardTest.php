@@ -197,7 +197,7 @@ class SleepHoursCardTest extends TestCase
 
         // And it reads from the other end too: six in the evening to four in
         // the morning is ten hours with exactly four inside the window.
-        $result = $this->answer(600, asleep: NightWindow::EARLIEST_ASLEEP);
+        $result = $this->answer(600, asleep: 360);
 
         $this->assertSame(SleepBand::Short, $result['band']);
         $this->assertSame(50, $result['nightPoints']);
@@ -262,37 +262,58 @@ class SleepHoursCardTest extends TestCase
         $this->assertTrue($night->counted());
     }
 
-    public function test_the_times_are_snapped_to_the_half_hour_and_held_in_range(): void
+    public function test_any_time_can_be_answered_to_the_minute(): void
     {
-        // Noon and midnight-and-a-bit: both outside what the steppers can
-        // produce, so both are pulled back to the ends of their ranges rather
-        // than costing the kid their answer.
-        $result = $this->service()->recordHours($this->kid, 0, 9999);
+        // 10:47pm to 7:13am — nothing on the half hour, and kept exactly.
+        $result = $this->service()->recordHours($this->kid, 647, 1153);
 
-        $this->assertSame(NightWindow::EARLIEST_ASLEEP, $result['asleep']);
-        $this->assertSame(NightWindow::LATEST_AWAKE, $result['awake']);
-        // Fourteen hours, which is the most a night can be.
-        $this->assertSame(SleepBand::MAX_MINUTES, $result['minutes']);
+        $this->assertSame(647, $result['asleep']);
+        $this->assertSame(1153, $result['awake']);
+        $this->assertSame(506, $result['minutes']);
+        $this->assertSame(SleepBand::Full, $result['band']);
 
         $this->travel(1)->days();
 
-        $result = $this->service()->recordHours($this->kid->refresh(), 665, 1157);
+        // An early bedtime and a lie-in past noon, both outside what the card
+        // used to offer: 5pm to 12:30pm. The waking lands the next day and
+        // the length is still held to the most a night can be.
+        $result = $this->service()->recordHours($this->kid->refresh(), 300, 30);
 
-        // Snapped down to the half hour rather than rejected.
+        $this->assertSame(300, $result['asleep']);
+        $this->assertSame(1470, $result['awake']);
+        $this->assertSame(SleepBand::MAX_MINUTES, $result['minutes']);
+        $this->assertSame('12:30 pm', NightWindow::say($result['awake']));
+
+        $this->assertSame(1470, SleepNight::where('profile_id', $this->kid->id)->latest('id')->first()->awake_minute);
+    }
+
+    public function test_a_waking_is_read_as_the_first_time_after_the_bedtime(): void
+    {
+        // 4am to 2pm: sent as 2pm on the noon-based clock (120), and read as
+        // that afternoon rather than the one before the bedtime.
+        $result = $this->service()->recordHours($this->kid, 960, 120);
+
+        $this->assertSame(1560, $result['awake']);
+        $this->assertSame(600, $result['minutes']);
+        // Ten hours, only two of them between 12 and 6 — the sleep-all-day
+        // answer the paying floor exists for.
+        $this->assertSame(SleepBand::Poor, $result['band']);
+
+        $this->travel(1)->days();
+
+        // And numbers off either end of the day wrap onto the clock rather
+        // than costing the kid their answer: a whole day either side of 11pm
+        // and 7am is still 11pm and 7am.
+        $result = $this->service()->recordHours($this->kid->refresh(), 660 - NightWindow::DAY, 1140 + NightWindow::DAY);
+
         $this->assertSame(660, $result['asleep']);
         $this->assertSame(1140, $result['awake']);
         $this->assertSame(480, $result['minutes']);
     }
 
-    public function test_a_night_cannot_end_before_it_began(): void
+    public function test_a_waking_at_the_bedtime_is_a_night_of_nothing(): void
     {
-        // Four in the morning to four in the morning: the only pair the
-        // steppers can be pushed into where nothing was slept at all.
-        $result = $this->service()->recordHours(
-            $this->kid,
-            NightWindow::LATEST_ASLEEP,
-            NightWindow::EARLIEST_AWAKE,
-        );
+        $result = $this->service()->recordHours($this->kid, 960, 960);
 
         $this->assertSame(0, $result['minutes']);
         $this->assertSame(SleepBand::Poor, $result['band']);
