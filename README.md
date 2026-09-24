@@ -22,7 +22,7 @@ A self-hosted, gamified chore and allowance tracker for households — a chore b
 
 Chore charts fail because they're a list of obligations with a delayed, abstract payoff. This one borrows from games instead: a surprise assignment each morning, a secret chore worth a jackpot, a wheel that multiplies your take, streaks that compound, and a shop where points become real things.
 
-Everything is scoped to one household. There's no public sign-up, no email/password, and no kid-vs-kid leaderboard — just a profile picker, a 4-digit PIN, and one shared family goal, drawn as a monster the kids gang up on.
+Everything is scoped to one household. There's no public sign-up and no email/password — just a profile picker, a 4-digit PIN, and one shared family goal, drawn as a monster the kids gang up on. The only boards that rank one person against another are the arcade's weekly game boards.
 
 ---
 
@@ -43,9 +43,8 @@ Everything is scoped to one household. There's no public sign-up, no email/passw
 
 ```mermaid
 flowchart LR
-    A["🎁 Open the chest<br/><i>deals today's quest hand</i>"] --> B["✅ Clear the quest<br/><i>the best-paying card</i>"]
-    A --> D["🎯 Claim any side quest<br/><i>one is secretly the Mystery</i>"]
-    B --> D
+    A["🏠 Open Home<br/><i>the whole day in one list</i>"] --> D["🎯 Claim any chore<br/><i>one is secretly the Mystery</i>"]
+    D --> B["⚡ Powered Up<br/><i>the day's first chore</i>"]
     D --> E["🧑‍⚖️ Parent approves"]
     E --> F["💰 Points · XP · Streak"]
     E --> H["⚔️ Damage lands on the monster<br/><i>double on a weak point</i>"]
@@ -60,6 +59,10 @@ flowchart LR
 
 **There is no "main quest" any more, and nothing about the streak waits on one.** Every chore is claimable from the moment a kid opens the app, and any one of them approved keeps the run alive. The daily quest — a chest, a hand of three cards, one chore that mattered more than the others — was removed: it hid part of the board behind itself, and everything it paid for is paid by the board. What survived it is the **Quest Charm**, which now lights up five random chores at +50% for the kid who cast it.
 
+A kid lands on **Home**, which lays the day out in one list: the work, the bonus chest, the bonus wheel, the streak chest, the weekly prize and the fight, then feelings, gratitude, meals and the daily gift, with the Family Feed beside them. Every row works right there, none of them link off to another page, and they aren't numbered. The order is a habit, not a gate.
+
+The day's first chore also switches the kid to **Powered Up**, a bolt beside their name that lights up and makes the bonus chest roll better. It adds something extra. It never locks anything, and a claim still waiting for approval counts.
+
 The board also **moves on the claim, not the approval** — a chore locks for the whole household the second someone taps it, so nobody is blocked waiting on a parent to check their phone. Points, streaks and monster damage, however, only land once a parent signs off.
 
 ---
@@ -73,26 +76,48 @@ The board also **moves on the claim, not the approval** — a chore locks for th
 | ✧ | **Quest Charm** | A ticket buys one. Cast it over the board and **five random chores** pay you half again for the rest of the day — for you only, and you don't get to pick which five. |
 | 🕵️ | **Mystery Chore** | Each day one chore is secretly worth **+500 points**. Nobody knows which. The first kid in the household to finish it wins — then everyone sees who got it. |
 | 🙋 | **Help Wanted** | A parent flags the one job that actually needs doing. It jumps to the top of the board in its own colour, and whoever finishes it earns a **bonus ticket**. The flag clears itself overnight. |
-| 🎡 | **Bonus Wheel** | One spin a day. Lands on a chore and multiplies it **2×**, or **3×** on a 35% roll. |
+| 🎡 | **Bonus Wheel** | One spin a day, from a row on Home. Lands on a chore and multiplies it **2×**, or **3×** on a 35% roll. |
+| 🎁 | **Bonus Chest** | One a day for every kid, work or not — turning up is the habit. Doing a chore doesn't unlock it, it improves the roll. |
 | 🔥 | **Streak Chest** | Consecutive days with **any** approved chore build a streak. Milestones pay real money and unlock a chest with a reveal animation. |
 | 🛒 | **Loot Shop** | Spend points on rewards the parent defines — screen time, Robux, dessert pick, a family outing. |
 | 🏅 | **Badges** | 13 achievements on their own tab, each with what unlocks it and the XP it pays. 5 are secret — name and description stay hidden until earned. |
-| 🎟️ | **Bonus Shop** | Levelling up, earning badges and beating monsters mint **tickets**. Spend them on wheel respins, quest charms, streak repairs, Mystery Chore hints, OP spins, or the right to name a monster. Spending never costs XP — your level is permanent. |
-| 👹 | **The Arena** | The family goal, standing as a monster. Every chore you finish is damage; beat it and the household gets what it was guarding. |
+| 🎟️ | **Bonus Shop** | Levelling up, earning badges and beating monsters mint **tickets**. Spend them on wheel respins, quest charms, streak repairs, Night Savers, Mystery Chore hints, OP spins, or the right to name a monster. Spending never costs XP — your level is permanent. |
+| 🎖️ | **Ranks** | A title every five levels, from Prowler up to Doomlord at 95, shown on the login tiles. A rank-up pays 5 tickets, and some loot stays locked (visible, dimmed) until you reach a level. |
+| 🧱 | **Lucky Block** | Three tickets hits the block for one random prize from a list a parent writes. It asks before it spends. |
+| 🪞 | **Locker** | Cosmetics bought with tickets: frames, avatars, plates, themes, patterns, arcade cabinets and sparks. Try one on before buying it. The stock rotates weekly, and limited items never come back. |
+| 🤝 | **Trades & Jobs** | Swap currency with a sibling, or post a job and pay whoever does it. A job always runs the full cycle: claim, done, confirm. |
+| 👹 | **The Arena** | The family goal, standing as a monster. Every chore you finish is damage; beat it and the household gets what it was guarding. It's the fight row on Home. The **Household** page shows the week's standings and whose streak is at risk. |
 | 🐾 | **Pets** | Bought with tickets or hatched from a surprise egg, a pet runs around your pages and **grows up with your chores**. Every pet helps in the arcade with its **style**; rarer pets also have a **knack** — a trick like sniffing out the Mystery Chore or batting the Bonus Wheel one chore over (kids see it called a **perk**). Feed it a **Power Treat** for more. The Pets page is the pet's own room — its bed and toy drawn in, a Feed button, its age along the floor — with what it does underneath and the shop beside it on a big screen. |
-| 🕹️ | **Arcade** | Little games with a weekly board per game. Every run pays **arcade tokens**, capped each day — and every chore you claim raises the cap. Tokens buy pet gear and candy at the prize counter, or swap for tickets. |
+| 🕹️ | **Arcade** | Little games with a weekly board per game, under real names (parents play too). Every run pays **arcade tokens**, capped each day — and every chore you claim raises the cap. Tokens buy pet gear and candy at the prize counter, or swap for tickets. |
+| 🌙 | **Bedtime cards** | Opt-in, per kid. The **own-bed** card lights a star for each night spent in their own bed, and the stars build constellations. The **hours** card asks for bedtime and wake-up time and pays for a full night that covers midnight to 6am. A bad night never takes anything away. It only stops the run. |
+| 💬 | **Feelings** | Everyone answers once a day, parents too, and nobody sees the house's answers until they've given their own. It pays nothing, and it keeps no streak or chart, on purpose. A kid can keep the "because" private or lock it with their PIN. |
+| 📣 | **Family Feed** | Rooms for the whole house, for the kids, and a room per kid with the grown-ups, plus direct messages. Text, stamps, drawings, photos and replies. Every room says who can read it. |
+| 📓 | **Journal** | Gratitude lists, and the Quote Wall: the funny things the kids say, written down by a parent. It never picks a winner. |
+| 🎁 | **Daily Gift** | One free ticket a day to give a sibling. The house mints it, so giving costs nothing, and an ungiven gift is gone at the rollover. |
+| 🎵 | **Music** | A player in the header, and personal playlists built on the Music page. |
+| 🎉 | **Celebration days** | On a special day (the first day of school, say) a chest opens once the kid answers "how did it go?". Every answer pays exactly the same. |
 
 ### For parents
 
-| | Tab | What you do there |
+The rail holds four pages: **Home · Quests · Kids & Points · Activity**. Everything else is setup, one tap further in the ☰ sheet.
+
+| | Page | What you do there |
 |---|---|---|
-| ✅ | **Approvals** | One queue for chore completions *and* reward redemptions. Approve or send back. |
+| 🏠 | **Home** | The Family Feed, plus one row each for chore approvals, redemption requests, jobs on offer and Lucky Block wins. Any row with something waiting is highlighted. Feelings and meals sit below them. |
 | 📋 | **Quests** | Search, add and edit chores — points, cadence, minimum age, quest eligibility, and the mystery hint. Plus the two ways to say something is urgent: a deadline to beat, and the Help Wanted flag. |
 | 🎁 | **Loot Shop** | Manage the reward catalog and pricing, plus perk pricing and which perks are switched on. |
 | 👹 | **Monsters** | Name what the monster is guarding, price it, set its health, swap its face or its weak chore, and nudge the bar by hand. Plus the trophy shelf of everything the family has put down. |
 | 🐾 | **Pets** | Make pets from one generated picture (the prompt is on the page), try each age out on your own screen, set each pet's rarity, style and knack, give old pets new art — and see every kid's pet, how grown it is and what its knack has left. |
 | 👨‍👩‍👧 | **Kids & Points** | Balances, tickets, levels, manual adjustments, cash-in/payout, PIN resets, per-kid spin reset, quest swap, and today's Mystery Chore. |
 | 📜 | **Activity** | The full append-only points ledger, plus a separate card for ticket activity. |
+| 🧱 | **Lucky Block** | The Lucky Block's prize list. Odds are flat. |
+| 🪞 | **Cosmetics** | Locker stock, prices, and uploaded art for limited items. |
+| 🕹️ | **Arcade** / 🍬 **Candy** | The weekly boards, and the candy shelf at the prize counter: name, token price, how many are in the cupboard. |
+| 🎵 | **Music** | The song library, plus the grown-ups' own playlists. |
+| 💬 | **Quotes** | Write down what the kids said, backdated up to a week. |
+| 🍽️ | **Meals** | What's for dinner each night this week. The kids see it on Home. |
+| 📊 | **Standings** | How the week is going, per kid. |
+| 🙏 | **Gratitude** | Every gratitude list, paged and filterable by kid. |
 
 Parents can opt into **web push notifications**, so a claim buzzes their phone instead of requiring them to check the app.
 
@@ -168,7 +193,7 @@ Kids get a push the moment you flag something, so the ask reaches them rather th
 
 <br>
 
-**Any approved chore earns the day** — no chore has special standing. A kid who does one small job keeps their run. What a day needs is one chore a parent actually signed off: a claim sitting in the approvals queue keeps the kid off the Arena's at-risk lane, but it doesn't bank the day until it's approved.
+**Any approved chore earns the day** — no chore has special standing. A kid who does one small job keeps their run. What a day needs is one chore a parent actually signed off: a claim sitting in the approvals queue keeps the kid off the Household page's at-risk lane, but it doesn't bank the day until it's approved.
 
 The streak is *recomputed* by walking back over earned days rather than incremented — so a parent clearing several days of backlog can approve them in any order and still land on the right number.
 
@@ -252,14 +277,16 @@ Three currencies, doing three different jobs:
 | | Earned by | Spent on |
 |---|---|---|
 | **Points** | Approved chores | Loot Shop — real-world rewards a parent hands over |
-| **XP** | Chores (+25) and badges (50–400) | **Nothing.** It only ever goes up, and it drives your level |
-| **Tickets** | 1 per level crossed, 1 per badge, and a payout every time a monster falls | Bonus Shop — perks that bend the game's own rules |
+| **XP** | Chores (+50) and badges (50–400) | **Nothing.** It only ever goes up, and it drives your level |
+| **Tickets** | 1 per level crossed (5 for a new rank), 1 per badge, a payout every time a monster falls, chests, Help Wanted, gifts, and 10 arcade tokens each | Bonus Shop, Lucky Block and Locker — perks, prizes and cosmetics |
+
+A level costs 200 XP through level 10, 350 through 20, and 500 after that. The cost stays flat within each band, so there's always one simple rule to say out loud. A change to the curve must never take a level off a kid.
 
 The point of the split: a kid should never have to choose between keeping their progress and buying something. XP *mints* tickets, it isn't *converted* into them, so a level once reached is permanent no matter how much gets spent.
 
 A monster falling is a rare, whole-household event and pays every kid at once — worth remembering if perks ever start feeling cheap.
 
-Both minting paths are guarded by high-water marks — `tickets_granted_through_level` and `streak_milestone_paid_through`. XP can fall (`quest:reset-today` claws back 25 per undone approval) and a streak can lapse and be repaired, so without them the same threshold could pay out twice.
+Both minting paths are guarded by high-water marks — `tickets_granted_through_level` and `streak_milestone_paid_through`. XP can fall (`quest:reset-today` claws back 50 per undone approval) and a streak can lapse and be repaired, so without them the same threshold could pay out twice.
 
 Perks apply **instantly** with no parent approval, which is the line between the two shops: loot is a promise someone has to keep, a perk is a rule bending itself.
 
@@ -297,7 +324,7 @@ A chore finished at 1am should count for the day that's ending, not the one star
 | Push | Web Push (VAPID) for parent alerts |
 | Deploy | Built for [Laravel Cloud](https://cloud.laravel.com) |
 
-No SPA framework, no heavy client build. The wheel is a `conic-gradient`, the avatars are coloured tiles, the badges are single glyphs — there isn't a raster image in the UI.
+No SPA framework, no heavy client build. The wheel is a `conic-gradient`, the badges are single glyphs, and the cosmetics and arcade prizes are drawn in code. The only raster images are ones people add: pet sprite sheets, feed drawings and photos, and uploaded cosmetic art. Uploads and songs go to an S3 bucket in production.
 
 ---
 
@@ -339,6 +366,8 @@ The seeder creates a placeholder household. **Change these PINs immediately** fr
 | Ziggy | 6 | `3333` |
 | Parent | — | `4444` |
 
+Grown-up logins are managed with `parent:save` (below), not from the console. There's no screen for them on purpose.
+
 ---
 
 ## ⚙️ Configuration
@@ -357,6 +386,7 @@ Per-household settings live in the `households` row rather than in config:
 | `day_boundary_hour` | `4` | Hour the household "day" rolls over |
 | `points_per_dollar` | `100` | Conversion rate for cash-out |
 | `spin_enabled` | `true` | Bonus wheel on/off |
+| `sleep_card_enabled` | `false` | Bedtime cards on/off for the household; each kid also has their own switch |
 
 The family goals themselves live in the `monsters` table rather than on the household — one row per monster ever faced, living or beaten — and are edited from the **Monsters** tab.
 
@@ -427,6 +457,15 @@ Any option you leave off is left untouched, so that command changes the age and 
 
 New profiles start on PIN **`1111`** — change it from **Kids & Points** in the parent console once they've logged in.
 
+### Managing grown-ups
+
+```bash
+php artisan parent:save Mom --pin=4321
+php artisan parent:save Dad --rename-from=Parent
+```
+
+Works like `kid:save`: the first name is the key, and any option you leave off stays as it is. `--rename-from=` renames an existing parent instead of creating a new one, which is how the seeded "Parent" becomes a real person. There's no delete command, deliberately: removing a parent would orphan everything they approved or wrote.
+
 ### Household settings
 
 ```bash
@@ -470,6 +509,21 @@ Moving the boundary **earlier** is safe. Moving it **later** starts today later,
 | `php artisan wheel:reset-spin` | Clear today's spin so a kid can spin again. |
 
 Both accept `--kid=Name` to scope to one profile and `--dry-run` to preview without writing.
+
+### Maintenance and diagnostics
+
+| Command | Purpose |
+|---|---|
+| `php artisan xp:reconcile` | Rebuild each kid's XP from approved chores, badges and XP chests, and mint any level-up tickets that fall out. Only raises XP unless you pass `--allow-decrease`. `--kid=`, `--dry-run`. |
+| `php artisan engagement:report` | Which features each kid still uses, and when they stopped. Counts actions, not visits. `--days=`, `--weeks=`, `--kid=`, `--csv=`. |
+| `php artisan notifications:test` | Send a test push and report which link in the chain is broken. `--check` reports without sending. |
+| `php artisan arcade:announce {game?}` | Push "new game in the arcade" to every kid. `--dry-run`. |
+| `php artisan arcade:last-call` | The Sunday-evening push before the board week closes. Normally sent by the app as people use it; `--force` sends now. |
+| `php artisan arcade:post-score {kid} {game} {score}` | Record a run the app refused, on a kid's behalf. `--week=` files it under another week. |
+| `php artisan feed:repair-media` | Re-point feed drawings and photos whose stored path has lost its file. Reports only, unless you pass `--apply`. |
+| `php artisan cosmetics:clean-art` | Re-run the upload tidy-up over stored cosmetic art. `--pretend` to preview. |
+
+Nothing here needs a scheduler. The app is built for a host that scales to zero, so daily work (rollovers, weekly prizes, flags expiring) happens the next time someone opens the app.
 
 ---
 
