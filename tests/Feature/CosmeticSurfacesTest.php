@@ -6,6 +6,7 @@ use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\Cosmetic;
 use App\Models\Household;
+use App\Models\OwnedCosmetic;
 use App\Models\Profile;
 use App\Services\CosmeticService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -37,9 +38,23 @@ class CosmeticSurfacesTest extends TestCase
     {
         $kid = Profile::factory()->for($this->household)->create(['name' => $name, 'bonus_tickets' => 50]);
 
+        // Owned outright rather than bought: several of these looks are
+        // weekly or limited, and whether they are on sale depends on the week
+        // the suite happens to run in. This file is about where a look shows,
+        // not about the shop.
         foreach ($looks as [$slot, $recipe]) {
             $item = Cosmetic::where('household_id', $this->household->id)->where('slot', $slot)->where('recipe', $recipe)->firstOrFail();
-            app(CosmeticService::class)->buy($kid, $item);
+
+            OwnedCosmetic::create([
+                'household_id' => $this->household->id,
+                'profile_id' => $kid->id,
+                'cosmetic_id' => $item->id,
+                'tickets_paid' => $item->cost,
+            ]);
+
+            // The service memoises what a kid owns; a fresh one sees the row.
+            app()->forgetScopedInstances();
+            app(CosmeticService::class)->wear($kid, $item);
         }
 
         app()->forgetScopedInstances();
