@@ -108,6 +108,11 @@ class BoardVisibilityTest extends TestCase
 
     public function test_toggling_hides_a_chore_whose_deadline_passed(): void
     {
+        // Noon in the factory household's Chicago: a deadline set just before
+        // now must land in today's household day, which a run just after the
+        // 4am boundary would put in yesterday's.
+        $this->travelTo(Carbon::parse('12:00', 'America/Chicago'));
+
         $household = $this->household();
         $this->chore($household, 'Feed animals', ['expires_at' => now()->subHour()]);
         $this->loginKid($household);

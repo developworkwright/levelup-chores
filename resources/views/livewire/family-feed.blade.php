@@ -48,6 +48,14 @@ new class extends Component
     /** The open room. Null is the phone's room list; a laptop lands on Everyone. */
     public ?int $roomId = null;
 
+    /**
+     * How many of the open room's messages are on screen.
+     *
+     * Grows by FeedService::PER_ROOM each time the oldest one scrolls into
+     * view, and starts over when another room is opened.
+     */
+    public int $shown = FeedService::PER_ROOM;
+
     public string $draft = '';
 
     /** Which composer tray is open, if any: 'stamps', 'draw', 'shout' or 'photo'. */
@@ -152,9 +160,16 @@ new class extends Component
         }
 
         $this->roomId = $room->id;
+        $this->shown = FeedService::PER_ROOM;
         $this->closeTrays();
 
         $this->feed()->markRead($this->profile, $room);
+    }
+
+    /** One more page of the open room, from the scroll reaching its oldest message. */
+    public function loadOlder(): void
+    {
+        $this->shown += FeedService::PER_ROOM;
     }
 
     public function showTray(string $tray): void
@@ -417,6 +432,15 @@ new class extends Component
 
         $rooms = $feed->roomsFor($this->profile);
 
+        // One past what is shown, to learn whether there is anything older
+        // without a second query; the extra one is the oldest, and is dropped.
+        $messages = $room ? $feed->messagesIn($this->profile, $room, $this->shown + 1) : collect();
+        $hasOlder = $messages->count() > $this->shown;
+
+        if ($hasOlder) {
+            $messages = $messages->slice(1)->values();
+        }
+
         return [
             'rooms' => array_filter($rooms, fn (array $r) => $r['room']->kind->isGroup()),
             // Everything waiting in a room that is not the open one. On a phone
@@ -437,7 +461,8 @@ new class extends Component
             'accent' => $room?->accentFor($this->profile, $roster) ?? 'var(--fq-text-3)',
             'members' => $room?->membersFrom($roster) ?? collect(),
             'placeholder' => $room?->composerPlaceholderFor($this->profile, $roster) ?? '',
-            'messages' => $room ? $feed->messagesIn($this->profile, $room) : collect(),
+            'messages' => $messages,
+            'hasOlder' => $hasOlder,
             'house' => $feed->houseToday($this->profile),
             'gratitude' => $feed->gratitudeToday($this->profile),
             'dinner' => $this->showDinner
@@ -942,6 +967,31 @@ new class extends Component
                             Nobody has said anything here yet. Go first.
                         </p>
                     @endforelse
+
+                    {{-- The oldest message is at the bottom, so reaching it asks
+                         for the page before. Keyed on the count so a fresh
+                         sentinel is observed after each page — if the page
+                         was short and it is still on screen, it asks again.
+                         The button is the same thing for anyone not scrolling. --}}
+                    @if ($hasOlder)
+                        <div
+                            wire:key="older-{{ $shown }}"
+                            x-data
+                            x-intersect.margin.600px="$wire.loadOlder()"
+                            class="flex justify-center py-2"
+                        >
+                            <button
+                                type="button"
+                                wire:click="loadOlder"
+                                wire:loading.attr="disabled"
+                                wire:target="loadOlder"
+                                class="min-h-[44px] rounded-full border border-fq-line-2 px-4 text-[13.5px] text-fq-text-3 transition hover:bg-fq-panel-alt"
+                            >
+                                <span wire:loading.remove wire:target="loadOlder">Show older messages</span>
+                                <span wire:loading wire:target="loadOlder">Loading…</span>
+                            </button>
+                        </div>
+                    @endif
                 </div>
             @endif
         </div>

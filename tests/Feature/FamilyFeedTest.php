@@ -485,6 +485,53 @@ class FamilyFeedTest extends TestCase
         $page->call('showTray', 'draw')->assertSee('fqDrawPad', escape: false);
     }
 
+    /**
+     * A room pages back rather than stopping: the first page is the newest
+     * PER_ROOM, scrolling to the bottom brings the page before, and opening
+     * another room starts over from its newest.
+     */
+    public function test_a_room_pages_back_through_older_messages(): void
+    {
+        Auth::guard('profile')->login($this->raylan);
+
+        $room = $this->room(FeedRoomKind::Everyone);
+        $total = FeedService::PER_ROOM + 5;
+
+        foreach (range(1, $total) as $n) {
+            FeedMessage::factory()->create([
+                'household_id' => $this->household->id,
+                'room_id' => $room->id,
+                'profile_id' => $this->westin->id,
+                'body' => sprintf('message number %03d', $n),
+            ]);
+        }
+
+        $page = Volt::test('family-feed')
+            ->assertSee(sprintf('message number %03d', $total))
+            ->assertSee(sprintf('message number %03d', 6))
+            ->assertDontSee(sprintf('message number %03d', 5))
+            ->assertSee('Show older messages');
+
+        $page->call('loadOlder')
+            ->assertSee(sprintf('message number %03d', 1))
+            ->assertSee(sprintf('message number %03d', $total))
+            ->assertDontSee('Show older messages');
+
+        $page->call('open', $this->room(FeedRoomKind::Kids)->id)
+            ->assertSet('shown', FeedService::PER_ROOM);
+    }
+
+    public function test_a_short_room_offers_nothing_older(): void
+    {
+        Auth::guard('profile')->login($this->raylan);
+
+        $this->feed()->say($this->westin, $this->room(FeedRoomKind::Everyone), 'just the one');
+
+        Volt::test('family-feed')
+            ->assertSee('just the one')
+            ->assertDontSee('Show older messages');
+    }
+
     public function test_a_shout_out_needs_somebody_to_be_about(): void
     {
         Auth::guard('profile')->login($this->raylan);
