@@ -128,6 +128,11 @@ class ChoreDeadlineTest extends TestCase
      */
     public function test_a_closed_chore_is_never_charmed(): void
     {
+        // Noon in the factory household's Chicago: a deadline set just before
+        // now must land in today's household day, which a run just after the
+        // 4am boundary would put in yesterday's.
+        $this->travelTo(Carbon::parse('12:00', 'America/Chicago'));
+
         $household = Household::factory()->create();
         $kid = Profile::factory()->for($household)->create();
 
@@ -145,6 +150,11 @@ class ChoreDeadlineTest extends TestCase
 
     public function test_a_closed_chore_is_never_the_mystery_chore(): void
     {
+        // Noon in the factory household's Chicago: a deadline set just before
+        // now must land in today's household day, which a run just after the
+        // 4am boundary would put in yesterday's.
+        $this->travelTo(Carbon::parse('12:00', 'America/Chicago'));
+
         $household = Household::factory()->create();
 
         $safe = Chore::factory()->for($household)->create(['name' => 'Safe mystery']);

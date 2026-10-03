@@ -121,6 +121,11 @@ class BoardOrderTest extends TestCase
 
     public function test_a_closed_chore_drops_out_of_the_urgent_tier(): void
     {
+        // Noon in the factory household's Chicago: a deadline set just before
+        // now must land in today's household day, which a run just after the
+        // 4am boundary would put in yesterday's.
+        $this->travelTo(Carbon::parse('12:00', 'America/Chicago'));
+
         $household = $this->household();
         $kid = Profile::factory()->for($household)->create();
 
