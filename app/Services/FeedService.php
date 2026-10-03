@@ -62,11 +62,11 @@ class FeedService
     public const REACTIONS = ['👍', '❤️', '😂', '👏', '👀', '🔥'];
 
     /**
-     * How many messages a room shows at once.
+     * How many messages a room loads at a time.
      *
-     * There is no paging back. A room between five people who live together is
-     * a conversation, not an archive, and infinite scroll on a phone a
-     * six-year-old is holding is a way to lose the composer.
+     * The first screenful, and the size of each page after it: scrolling to the
+     * oldest message on screen asks for this many more. The composer sits above
+     * the newest message, so paging back down the room never moves it.
      */
     public const PER_ROOM = 60;
 
@@ -295,9 +295,11 @@ class FeedService
      * Reactions and authors come eager, because the page asks every message for
      * both — lazily, a room of sixty messages is a hundred and twenty queries.
      *
+     * The newest `$limit` of them; the room pages back by asking for more.
+     *
      * @return Collection<int, FeedMessage>
      */
-    public function messagesIn(Profile $viewer, FeedRoom $room): Collection
+    public function messagesIn(Profile $viewer, FeedRoom $room, int $limit = self::PER_ROOM): Collection
     {
         abort_unless($room->readableBy($viewer), 403);
 
@@ -316,7 +318,7 @@ class FeedService
                 ]),
             ])
             ->latest('id')
-            ->limit(self::PER_ROOM)
+            ->limit($limit)
             ->get()
             ->reverse()
             ->values();
