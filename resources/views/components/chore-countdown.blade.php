@@ -10,6 +10,12 @@
         closesAt: {{ $closesAt->getTimestampMs() }},
         remaining: '',
         timer: null,
+        {{-- Alpine calls this when the element leaves the page — a
+             morph that swaps the branch, or wire:navigate away. Without
+             it the interval outlives the element and keeps ticking. --}}
+        destroy() {
+            clearInterval(this.timer);
+        },
         tick() {
             const left = this.closesAt - Date.now();
 
@@ -32,7 +38,6 @@
         },
     }"
     x-init="tick(); timer = setInterval(() => tick(), 1000)"
-    x-on:destroy="clearInterval(timer)"
     {{ $attributes->merge(['class' => 'inline-flex items-center gap-[6px] rounded-[8px] px-[10px] py-1 font-mono-fq text-[10px] tracking-[0.1em] uppercase']) }}
     style="background: color-mix(in srgb, var(--fq-cyan) 20%, transparent); color: var(--fq-cyan)"
 >
