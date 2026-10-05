@@ -153,7 +153,7 @@ new class extends Component
         $requested = request()->query('row');
 
         if (is_string($requested) && in_array($requested, self::ROWS, true)) {
-            $this->toggleRow($requested);
+            $this->toggleRow($requested, open: true);
         }
 
         $chests = app(ChestService::class);
@@ -177,14 +177,31 @@ new class extends Component
      * Opens a row, or shuts the open one. Only ever one at a time: without that
      * the column grows back into the page of stacked heroes this replaced.
      *
+     * The handles say which way they mean (`$open`) rather than flipping
+     * whatever the server has now. A second tap on a slow round trip is queued
+     * behind the first, so a blind flip opened the panel and then shut it again
+     * under the kid — mid-chest, or halfway through typing a gratitude line.
+     * Said this way, a repeated tap asks for what the first one did. Null still
+     * flips, for a caller that has nothing to say.
+     *
      * Opening the gift row is what reads the gifts in it — the row's alert is
      * for gifts nobody has looked at yet.
      */
-    public function toggleRow(string $key): void
+    public function toggleRow(string $key, ?bool $open = null): void
     {
-        $this->openRow = $this->openRow === $key ? null : $key;
+        $open ??= $this->openRow !== $key;
 
-        if ($this->openRow === 'gift') {
+        if (! $open) {
+            if ($this->openRow === $key) {
+                $this->openRow = null;
+            }
+
+            return;
+        }
+
+        $this->openRow = $key;
+
+        if ($key === 'gift') {
             app(GiftService::class)->markSeen($this->profile);
         }
     }
@@ -875,7 +892,7 @@ new class extends Component
                             <span class="flex-1"></span>
                             <button
                                 type="button"
-                                wire:click="toggleRow('work')"
+                                wire:click="toggleRow('work', false)"
                                 aria-label="Close"
                                 class="grid h-8 w-8 place-items-center rounded-[11px] border text-[12px]"
                                 style="border-color: var(--fq-line-2); background: var(--fq-sunk); color: var(--fq-text-3)"
@@ -1479,7 +1496,7 @@ new class extends Component
                         <span class="flex-1"></span>
                         <button
                             type="button"
-                            wire:click="toggleRow('gift')"
+                            wire:click="toggleRow('gift', false)"
                             aria-label="Close"
                             class="grid h-8 w-8 place-items-center rounded-[11px] border text-[12px]"
                             style="border-color: var(--fq-line-2); background: var(--fq-sunk); color: var(--fq-text-3)"

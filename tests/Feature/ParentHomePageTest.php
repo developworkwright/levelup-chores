@@ -77,16 +77,16 @@ class ParentHomePageTest extends TestCase
         Volt::test('parent.home')
             ->assertOk()
             ->assertSeeInOrder([
-                "toggleRow('approvals')",
-                "toggleRow('redemptions')",
-                "toggleRow('jobs')",
-                "toggleRow('lucky')",
-                "toggleRow('feelings')",
-                "toggleRow('meals')",
+                "toggleRow('approvals'",
+                "toggleRow('redemptions'",
+                "toggleRow('jobs'",
+                "toggleRow('lucky'",
+                "toggleRow('feelings'",
+                "toggleRow('meals'",
             ], escape: false)
             // Gratitude is a page of its own in the menu, with every entry.
-            ->assertDontSee("toggleRow('gratitude')", escape: false)
-            ->assertDontSee("toggleRow('celebration')", escape: false);
+            ->assertDontSee("toggleRow('gratitude'", escape: false)
+            ->assertDontSee("toggleRow('celebration'", escape: false);
     }
 
     /** Nothing opens itself: the rows say what is waiting, and a tap opens it. */
@@ -142,6 +142,19 @@ class ParentHomePageTest extends TestCase
             ->call('toggleRow', 'feelings')
             ->assertSet('openRow', null)
             ->assertDontSee('How are you feeling today?');
+    }
+
+    public function test_a_repeated_tap_to_open_a_row_keeps_it_open(): void
+    {
+        Auth::guard('profile')->login($this->parent);
+
+        Volt::test('parent.home')
+            ->call('toggleRow', 'meals', true)
+            ->call('toggleRow', 'meals', true)
+            ->assertSet('openRow', 'meals')
+            ->call('toggleRow', 'feelings', true)
+            ->call('toggleRow', 'meals', false)
+            ->assertSet('openRow', 'feelings');
     }
 
     public function test_the_meals_row_lists_the_menu_and_links_to_the_planner(): void

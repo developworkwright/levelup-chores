@@ -55,7 +55,7 @@ class MonsterPresenceTest extends TestCase
         Volt::test('kid.home')
             ->assertOk()
             ->assertDontSee('Boss Fight')
-            ->assertDontSee("toggleRow('fight')", false)
+            ->assertDontSee("toggleRow('fight'", false)
             ->assertDontSee('fq-watcher', false);
     }
 
