@@ -641,7 +641,7 @@
                  drawn by the shell, so `$wire` here is whichever page happens to
                  be underneath. This hears the broadcast instead, and draws
                  nothing at all. --}}
-            <livewire:playlist-quick-add />
+            <livewire:playlist-quick-add wire:key="playlist-quick-add" />
         @endif
     </div>
 @endif

@@ -1636,7 +1636,7 @@ new class extends Component
                 status-color="var(--fq-coral)"
             />
 
-            <livewire:family-feed :embedded="true" :show-dinner="false" :capped="false" :quiet="false" />
+            <livewire:family-feed :embedded="true" :show-dinner="false" :capped="false" :quiet="false" wire:key="family-feed" />
         </div>
         </div>{{-- /the room --}}
     </div>

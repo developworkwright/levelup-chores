@@ -226,6 +226,28 @@ class KidHomePageTest extends TestCase
             ->assertSet('openRow', null);
     }
 
+    /**
+     * The feed beside the day keeps its identity while rows open and shut.
+     *
+     * Left to Livewire's own key, the child's key took in the wire:key of any
+     * panel open above it — the bonus chest's, say — so every tap on a tile
+     * minted a new key, threw the feed away and mounted a fresh one: every
+     * message re-sent with the tap, and the open room and a half-typed draft
+     * gone with it.
+     */
+    public function test_opening_a_row_does_not_rebuild_the_feed(): void
+    {
+        $children = fn (Testable $page): array => (fn () => $this->lastState->getSnapshot()['memo']['children'])->call($page);
+
+        $page = Volt::test('kid.home');
+        $before = $children($page);
+
+        $page->call('toggleRow', 'chest', true)->assertSet('openRow', 'chest');
+
+        $this->assertArrayHasKey('family-feed', $before);
+        $this->assertSame($before, $children($page));
+    }
+
     /** An open row is not remembered: the next visit starts shut again. */
     public function test_an_open_row_is_not_remembered(): void
     {
@@ -517,8 +539,10 @@ class KidHomePageTest extends TestCase
             ->assertSee('How are you today?')
             ->assertDontSee('How are you feeling today?');
 
-        $this->reopen()
-            ->call('toggleRow', 'feelings')
+        // A full load, so the feed is drawn too — a tap re-renders the page
+        // around the feed without rebuilding it.
+        $this->get(route('kid.home', ['row' => 'feelings']))
+            ->assertOk()
             ->assertSeeInOrder(['Feelings', 'How are you feeling today?', 'Message everyone']);
     }
 

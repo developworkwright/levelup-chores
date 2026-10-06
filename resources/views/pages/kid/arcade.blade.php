@@ -28,5 +28,5 @@ new class extends Component
 }; ?>
 
 <x-kid.shell :profile="$profile" active="arcade">
-    <livewire:arcade />
+    <livewire:arcade wire:key="arcade" />
 </x-kid.shell>

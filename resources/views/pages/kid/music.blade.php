@@ -34,5 +34,5 @@ new class extends Component
 }; ?>
 
 <x-kid.shell :profile="$profile" active="music">
-    <livewire:playlist-builder audience="kid" />
+    <livewire:playlist-builder audience="kid" wire:key="playlist-builder" />
 </x-kid.shell>
