@@ -257,6 +257,6 @@ class SiblingGiftTest extends TestCase
 
         Volt::test('kid.home')
             ->assertDontSee('Daily Gift')
-            ->assertDontSee("toggleRow('gift')", false);
+            ->assertDontSee("toggleRow('gift'", false);
     }
 }

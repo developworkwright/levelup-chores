@@ -15,7 +15,9 @@
      somebody — a parent's queue with items in it. It reads as a notification
      (the feed's unread red, a dot, an edge) and never as a fill: a gold fill is
      what "open" looks like, and the two were being confused.
-     The toggle calls the page's own toggleRow(). --}}
+     The toggle calls the page's own toggleRow(), saying which way it means: a
+     second tap that lands while the first is still on its way asks for the
+     same thing again, rather than shutting what the first one opened. --}}
 @props([
     'rows',
     'openRow' => null,
@@ -36,7 +38,7 @@
         <button
             type="button"
             wire:key="tile-{{ $row['key'] }}"
-            wire:click="toggleRow('{{ $row['key'] }}')"
+            wire:click="toggleRow('{{ $row['key'] }}', {{ $open ? 'false' : 'true' }})"
             aria-expanded="{{ $open ? 'true' : 'false' }}"
             aria-controls="day-panel"
             @class([
@@ -93,7 +95,7 @@
     <button
         type="button"
         wire:key="row-{{ $row['key'] }}"
-        wire:click="toggleRow('{{ $row['key'] }}')"
+        wire:click="toggleRow('{{ $row['key'] }}', {{ $open ? 'false' : 'true' }})"
         aria-expanded="{{ $open ? 'true' : 'false' }}"
         aria-controls="day-panel"
         @class([

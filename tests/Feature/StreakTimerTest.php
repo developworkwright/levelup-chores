@@ -253,6 +253,27 @@ class StreakTimerTest extends TestCase
             ->assertSee('Until bedtime');
     }
 
+    /**
+     * Both clocks — the strip and the header tile — stop their interval when
+     * Alpine tears them down. `x-on:destroy` is not an Alpine hook, so a timer
+     * hung off it outlived every page a kid left.
+     */
+    public function test_the_streak_clocks_stop_ticking_when_they_leave_the_page(): void
+    {
+        $this->at('2026-05-01 12:00');
+        $this->earnedRunEndingYesterday(6);
+
+        Auth::guard('profile')->login($this->kid);
+
+        $html = Volt::test('kid.home')->call('toggleRow', 'streak')
+            ->assertSee('Until bedtime')
+            ->assertSee('TILL BED')
+            ->assertDontSee('x-on:destroy', false)
+            ->html();
+
+        $this->assertSame(2, substr_count($html, 'destroy() {'));
+    }
+
     public function test_home_offers_a_first_streak_to_a_kid_who_has_none(): void
     {
         $this->at('2026-05-01 12:00');

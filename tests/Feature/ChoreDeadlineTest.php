@@ -197,6 +197,21 @@ class ChoreDeadlineTest extends TestCase
             ->assertSee('Closes in');
     }
 
+    /** See StreakTimerTest: Alpine runs destroy(), not an x-on:destroy listener. */
+    public function test_the_deadline_countdown_stops_ticking_when_it_leaves_the_page(): void
+    {
+        $household = $this->household();
+        $kid = Profile::factory()->for($household)->create();
+        $this->chore($household, now()->addHour());
+
+        Auth::guard('profile')->login($kid);
+
+        Volt::test('kid.quests')
+            ->assertSee('Closes in')
+            ->assertSee('destroy() {', false)
+            ->assertDontSee('x-on:destroy', false);
+    }
+
     public function test_a_parent_can_put_a_chore_on_the_clock(): void
     {
         Notification::fake();

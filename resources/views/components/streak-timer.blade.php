@@ -108,6 +108,12 @@
                 closesAt: {{ $closesAt->getTimestampMs() }},
                 remaining: '',
                 timer: null,
+                {{-- Alpine calls this when the element leaves the page — a
+                     morph that swaps the branch, or wire:navigate away. Without
+                     it the interval outlives the element and keeps ticking. --}}
+                destroy() {
+                    clearInterval(this.timer);
+                },
                 tick() {
                     const left = this.closesAt - Date.now();
 
@@ -132,7 +138,6 @@
                 },
             }"
             x-init="tick(); timer = setInterval(() => tick(), 1000)"
-            x-on:destroy="clearInterval(timer)"
             class="flex shrink-0 flex-col items-end"
         >
             <span class="font-baloo text-[22px] leading-none font-extrabold" style="color: {{ $accent }}" x-text="remaining"></span>

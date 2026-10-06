@@ -123,9 +123,9 @@ class KidHomePageTest extends TestCase
         Volt::test('kid.home')
             ->assertOk()
             ->assertSee('0 of 5 done')
-            ->assertSee("toggleRow('feelings')", escape: false)
-            ->assertSee("toggleRow('gratitude')", escape: false)
-            ->assertSee("toggleRow('meals')", escape: false);
+            ->assertSee("toggleRow('feelings'", escape: false)
+            ->assertSee("toggleRow('gratitude'", escape: false)
+            ->assertSee("toggleRow('meals'", escape: false);
     }
 
     public function test_every_row_of_the_day_is_on_the_index(): void
@@ -137,10 +137,10 @@ class KidHomePageTest extends TestCase
             ->assertSee('Bonus Wheel')
             ->assertSee('Streak Chest')
             ->assertSee('Weekly Prize')
-            ->assertSee("toggleRow('chest')", escape: false)
+            ->assertSee("toggleRow('chest'", escape: false)
             // The fight went to Quests, beside the board that hurts it.
             ->assertDontSee('The Fight')
-            ->assertDontSee("toggleRow('fight')", escape: false);
+            ->assertDontSee("toggleRow('fight'", escape: false);
     }
 
     /** A shut row still answers "what now". */
@@ -192,6 +192,38 @@ class KidHomePageTest extends TestCase
             ->call('toggleRow', 'work')
             ->assertSet('openRow', null)
             ->assertDontSee('Work today');
+    }
+
+    /**
+     * A second tap that lands while the first is still on its way asks for the
+     * same thing again. A blind flip opened the panel and then shut it under
+     * the kid — mid-chest, or halfway through a gratitude line.
+     */
+    public function test_a_repeated_tap_to_open_a_row_keeps_it_open(): void
+    {
+        Volt::test('kid.home')
+            ->call('toggleRow', 'gratitude', true)
+            ->call('toggleRow', 'gratitude', true)
+            ->assertSet('openRow', 'gratitude')
+            ->assertSee('Today you were grateful for', false);
+    }
+
+    public function test_a_late_tap_to_shut_a_row_does_not_shut_the_next_one(): void
+    {
+        $this->open('work')
+            ->call('toggleRow', 'chest', true)
+            ->call('toggleRow', 'work', false)
+            ->assertSet('openRow', 'chest');
+    }
+
+    public function test_a_shut_handle_asks_to_open_and_an_open_one_asks_to_shut(): void
+    {
+        Volt::test('kid.home')
+            ->assertSee("toggleRow('chest', true)", escape: false)
+            ->call('toggleRow', 'chest', true)
+            ->assertSee("toggleRow('chest', false)", escape: false)
+            ->call('toggleRow', 'chest', false)
+            ->assertSet('openRow', null);
     }
 
     /** An open row is not remembered: the next visit starts shut again. */

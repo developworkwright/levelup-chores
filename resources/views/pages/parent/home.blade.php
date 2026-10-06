@@ -60,10 +60,20 @@ new class extends Component
      * Everything starts shut, every visit. What is waiting is said by the rows
      * themselves — a queue with anything in it is lit in its own colour — so
      * the page doesn't need to open one to make the point.
+     *
+     * `$open` is which way the handle meant, so a second tap queued behind a
+     * slow first one repeats it rather than undoing it — see the kid's Home,
+     * where the same flip shut panels on kids mid-tap.
      */
-    public function toggleRow(string $key): void
+    public function toggleRow(string $key, ?bool $open = null): void
     {
-        $this->openRow = $this->openRow === $key ? null : $key;
+        $open ??= $this->openRow !== $key;
+
+        if ($open) {
+            $this->openRow = $key;
+        } elseif ($this->openRow === $key) {
+            $this->openRow = null;
+        }
     }
 
     /** Offers of work a grown-up could hire, soonest to lapse first. */
