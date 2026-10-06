@@ -40,6 +40,6 @@ new class extends Component
             kids can see exactly how you did, which is the point.
         </p>
 
-        <livewire:arcade />
+        <livewire:arcade wire:key="arcade" />
     </div>
 </x-parent.shell>

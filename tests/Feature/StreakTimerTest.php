@@ -11,6 +11,7 @@ use App\Services\StreakService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Livewire\Volt\Volt;
 use Tests\TestCase;
 
@@ -272,6 +273,42 @@ class StreakTimerTest extends TestCase
             ->html();
 
         $this->assertSame(2, substr_count($html, 'destroy() {'));
+    }
+
+    /**
+     * One render of Home asks whether today is safe sixteen times; the answer
+     * is read once a request and forgotten the moment a completion is written.
+     */
+    public function test_a_secured_day_is_read_once_and_forgotten_when_work_comes_in(): void
+    {
+        $this->at('2026-05-01 12:00');
+
+        $streaks = app(StreakService::class);
+        $this->assertSame($streaks, app(StreakService::class));
+
+        $this->assertFalse($streaks->streakDaySecuredToday($this->kid));
+
+        DB::enableQueryLog();
+        $this->assertFalse($streaks->streakDaySecuredToday($this->kid));
+        $this->assertCount(0, DB::getQueryLog());
+
+        $this->claim(CompletionStatus::Pending);
+
+        $this->assertTrue($streaks->streakDaySecuredToday($this->kid));
+        $this->assertFalse($streaks->streakDayEarnedOn($this->kid, now()));
+    }
+
+    public function test_an_approval_is_seen_by_a_day_already_asked_about(): void
+    {
+        $this->at('2026-05-01 12:00');
+
+        $streaks = app(StreakService::class);
+        $this->claim(CompletionStatus::Pending);
+        $this->assertFalse($streaks->streakDayEarnedOn($this->kid, now()));
+
+        ChoreCompletion::where('profile_id', $this->kid->id)->first()->update(['status' => CompletionStatus::Approved]);
+
+        $this->assertTrue($streaks->streakDayEarnedOn($this->kid, now()));
     }
 
     public function test_home_offers_a_first_streak_to_a_kid_who_has_none(): void

@@ -28,5 +28,5 @@ new class extends Component
 }; ?>
 
 <x-kid.shell :profile="$profile" active="family">
-    <livewire:family-feed />
+    <livewire:family-feed wire:key="family-feed" />
 </x-kid.shell>

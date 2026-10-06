@@ -850,7 +850,7 @@
             >
                 <x-slot:controls>
                     <x-sound-toggle small />
-                    <livewire:push-toggle audience="kid" />
+                    <livewire:push-toggle audience="kid" wire:key="push-toggle" />
                 </x-slot:controls>
             </x-nav-sheet>
         </div>

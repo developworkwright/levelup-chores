@@ -454,6 +454,6 @@ new class extends Component
              library rather than on a tab of its own: this is the music screen,
              and the album that was just added is the one anybody is about to
              make a list out of. --}}
-        <livewire:playlist-builder audience="parent" />
+        <livewire:playlist-builder audience="parent" wire:key="playlist-builder" />
     </div>
 </x-parent.shell>

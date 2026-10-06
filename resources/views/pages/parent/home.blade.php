@@ -450,7 +450,7 @@ new class extends Component
 }; ?>
 
 <x-parent.shell :profile="$profile" active="home">
-    <livewire:push-toggle audience="parent" />
+    <livewire:push-toggle audience="parent" wire:key="push-toggle" />
 
     {{-- Two columns at desk size, one everywhere else — the kid's Home, for the
          grown-ups. The rows are a 340px rail and the feed gets the rest; on a
@@ -778,7 +778,7 @@ new class extends Component
         <div class="flex min-w-0 flex-col gap-3">
             <h2 class="font-baloo text-xl font-bold">Family</h2>
 
-            <livewire:family-feed :embedded="true" :capped="false" :quiet="false" />
+            <livewire:family-feed :embedded="true" :capped="false" :quiet="false" wire:key="family-feed" />
         </div>
     </div>
 </x-parent.shell>

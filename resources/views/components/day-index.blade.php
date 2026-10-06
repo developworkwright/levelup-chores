@@ -42,7 +42,13 @@
             aria-expanded="{{ $open ? 'true' : 'false' }}"
             aria-controls="day-panel"
             @class([
-                'relative flex min-h-[72px] flex-col justify-center gap-[3px] rounded-[14px] border px-2 py-[9px] text-center transition',
+                'relative flex min-h-[72px] flex-col justify-center gap-[3px] rounded-[14px] border px-2 py-[9px] text-center transition active:scale-[.97]',
+                // Lit from the tap until the panel lands. Livewire sets
+                // data-loading on the button that sent the request, so a slow
+                // round trip still reads as "heard you" rather than a miss —
+                // which is what had kids tapping twice. Not gold: gold is what
+                // an *open* tile looks like.
+                'data-loading:animate-pulse data-loading:outline-2 data-loading:-outline-offset-2 data-loading:outline-fq-text',
                 // A tile left alone on the last line of three takes the line,
                 // rather than sitting in the corner looking like it fell off.
                 'col-span-3' => $loop->last && count($rows) % 3 === 1,
@@ -99,7 +105,8 @@
         aria-expanded="{{ $open ? 'true' : 'false' }}"
         aria-controls="day-panel"
         @class([
-            'hidden items-center gap-[11px] rounded-[16px] border p-3 text-left transition lg:flex',
+            'hidden items-center gap-[11px] rounded-[16px] border p-3 text-left transition active:scale-[.99] lg:flex',
+            'data-loading:animate-pulse data-loading:outline-2 data-loading:-outline-offset-2 data-loading:outline-fq-text',
             'lg:mt-[6px]' => $breakBefore !== null && $index === $breakBefore,
             'opacity-[.72] hover:opacity-100' => ! $open && ($row['done'] || $row['quiet']),
         ])

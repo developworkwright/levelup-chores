@@ -2,8 +2,12 @@
 
 namespace App\Providers;
 
+use App\Models\ChoreCompletion;
+use App\Models\StreakRepair;
+use App\Models\StreakRescue;
 use App\Services\ChoreService;
 use App\Services\CosmeticService;
+use App\Services\StreakService;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -42,6 +46,10 @@ class AppServiceProvider extends ServiceProvider
         // ask what somebody is wearing on one request, and the household's
         // catalog should be one query however many of them ask.
         $this->app->scoped(CosmeticService::class);
+
+        // Scoped so its memo of earned and waiting days is shared by everything
+        // that asks on one request — see StreakService::$earnedWindows.
+        $this->app->scoped(StreakService::class);
     }
 
     /**
@@ -49,6 +57,23 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        /*
+         * What the streak service remembers is only as good as the three tables
+         * it read. They are written from four services, so the forgetting hangs
+         * off the models rather than off each writer — a fifth writer cannot
+         * forget to forget. Only an instance this request already built has
+         * anything to drop.
+         */
+        foreach ([ChoreCompletion::class, StreakRepair::class, StreakRescue::class] as $model) {
+            $model::saved(fn () => $this->forgetStreakDays());
+            $model::deleted(fn () => $this->forgetStreakDays());
+        }
+    }
+
+    private function forgetStreakDays(): void
+    {
+        if ($this->app->resolved(StreakService::class)) {
+            $this->app->make(StreakService::class)->forgetDays();
+        }
     }
 }

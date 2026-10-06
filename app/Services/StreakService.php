@@ -83,6 +83,34 @@ class StreakService
      */
     public const STREAK_REPEAT_MULTIPLIER = 2;
 
+    /**
+     * Answers already given this request, keyed by profile and the window's
+     * boundaries: earned days for {@see earnedDaysBetween()}, and whether work
+     * was waiting on a grown-up for {@see workedOn()}.
+     *
+     * The service is scoped (see AppServiceProvider), and one render of kid
+     * Home asks whether today is safe sixteen times — the header tile, the
+     * chest, the streak row, the bedtime strip — at four queries a time. Every
+     * tile tap paid for all of them before the panel could open.
+     *
+     * Dropped by {@see forgetDays()} whenever a chore completion, a repair or a
+     * rescue is written, from wherever it is written — AppServiceProvider
+     * hangs that off the models, because the writes live in four services.
+     *
+     * @var array<string, array<string, true>>
+     */
+    private array $earnedWindows = [];
+
+    /** @var array<string, bool> */
+    private array $pendingDays = [];
+
+    /** Forgets every answer above. See AppServiceProvider::boot(). */
+    public function forgetDays(): void
+    {
+        $this->earnedWindows = [];
+        $this->pendingDays = [];
+    }
+
     /** Safety bound on the streak walk-back so odd data can't loop forever. */
     private const MAX_STREAK_DAYS = 366;
 
@@ -463,12 +491,22 @@ class StreakService
     public function earnedDaysBetween(Profile $profile, Carbon $from, Carbon $to): array
     {
         $clock = HouseholdClock::for($profile->household);
+        $start = $clock->startOf($from);
+        $end = $clock->startOf($to->copy()->addDay());
+        $key = $profile->id.'|'.$from->toDateString().'|'.$to->toDateString().'|'.$start->getTimestamp().'|'.$end->getTimestamp();
+
+        return $this->earnedWindows[$key] ??= $this->findEarnedDays($profile, $clock, $from, $to, $start, $end);
+    }
+
+    /** @return array<string, true> */
+    private function findEarnedDays(Profile $profile, HouseholdClock $clock, Carbon $from, Carbon $to, Carbon $start, Carbon $end): array
+    {
         $days = [];
 
         ChoreCompletion::where('profile_id', $profile->id)
             ->where('status', CompletionStatus::Approved)
-            ->where('submitted_at', '>=', $clock->startOf($from))
-            ->where('submitted_at', '<', $clock->startOf($to->copy()->addDay()))
+            ->where('submitted_at', '>=', $start)
+            ->where('submitted_at', '<', $end)
             ->get(['submitted_at'])
             ->each(function (ChoreCompletion $completion) use ($clock, &$days) {
                 $days[$clock->dayFor($completion->submitted_at)->toDateString()] = true;
@@ -592,11 +630,13 @@ class StreakService
         }
 
         $clock = HouseholdClock::for($profile->household);
+        $start = $clock->startOf($day);
+        $end = $clock->startOf($day->copy()->addDay());
 
-        return ChoreCompletion::where('profile_id', $profile->id)
+        return $this->pendingDays[$profile->id.'|'.$start->getTimestamp().'|'.$end->getTimestamp()] ??= ChoreCompletion::where('profile_id', $profile->id)
             ->where('status', CompletionStatus::Pending)
-            ->where('submitted_at', '>=', $clock->startOf($day))
-            ->where('submitted_at', '<', $clock->startOf($day->copy()->addDay()))
+            ->where('submitted_at', '>=', $start)
+            ->where('submitted_at', '<', $end)
             ->exists();
     }
 
