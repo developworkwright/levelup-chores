@@ -89,6 +89,7 @@ Rewards are tickets, points, XP, or a perk straight into the inventory. A perk r
 | Name a Monster | Sets `monsters.nickname` on a live monster nobody has named yet — shown everywhere via `Monster::displayName()` |
 | Night Saver | Buys back a night out of their own bed — see the sleep card |
 | Quest Charm | A bet on the quest chest, cast before it opens — see [[chores-and-quests]] |
+| Rain Check | Saves today's landed boost as tomorrow's `rain_checks` row; respin still allowed, one per day — see [[bonus-wheel]] |
 
 Hints are deliberately per-kid: one sibling paying must not clue in the rest. Note the mystery chore's own selection now favours chores that *have* a hint, so this perk always has something to sell.
 

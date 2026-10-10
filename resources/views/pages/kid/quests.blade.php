@@ -16,6 +16,7 @@ use App\Models\Bounty;
 use App\Models\Chore;
 use App\Models\ChoreCompletion;
 use App\Models\Profile;
+use App\Models\RainCheck;
 use App\Models\Spin;
 use App\Services\BadgeService;
 use App\Services\BonusShopService;
@@ -396,7 +397,7 @@ new class extends Component
      */
     private function dispatchCharmCast(Collection $charmed, string $message): void
     {
-        $boost = app(SpinService::class)->today($this->profile);
+        $boosts = app(SpinService::class)->boostsFor($this->profile);
         $percent = ChoreService::CHARM_BONUS_PERCENT;
 
         $this->dispatch(
@@ -404,11 +405,11 @@ new class extends Component
             rate: $this->pointsPerDollar(),
             message: $message,
             chores: $charmed
-                ->map(function (Chore $chore) use ($boost, $percent) {
+                ->map(function (Chore $chore) use ($boosts, $percent) {
                     // Only 'ready' chores are ever charmed, so there is no
                     // taken-by grey to account for here — see charmBoard().
-                    $boosted = $boost && $boost->chore_id === $chore->id;
-                    $multiplier = $boosted ? $boost->multiplier : 1;
+                    $multiplier = $boosts[$chore->id] ?? 1;
+                    $boosted = $multiplier > 1;
                     $from = $chore->points * $multiplier;
 
                     return [
@@ -416,7 +417,7 @@ new class extends Component
                         'from' => $from,
                         'to' => $from + (int) round($chore->points * $percent / 100),
                         'tint' => $boosted
-                            ? ($boost->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)')
+                            ? ($multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)')
                             : 'var(--fq-lime)',
                     ];
                 })
@@ -514,6 +515,7 @@ new class extends Component
             PerkEffect::QuestCharm => 'cast it over the board!',
             PerkEffect::OpSpin => 'charge the wheel before you spin!',
             PerkEffect::WheelRespin => 'send the wheel round again!',
+            PerkEffect::RainCheck => 'save your boost for tomorrow!',
             PerkEffect::MysteryHint => 'read your clue!',
             default => null,
         };
@@ -863,7 +865,7 @@ new class extends Component
      *
      * @return ?array{claimable: bool, label: string, note: ?string}
      */
-    private function boostClaim(?Spin $boost): ?array
+    private function boostClaim(Spin|RainCheck|null $boost): ?array
     {
         if (! $boost) {
             return null;
@@ -874,8 +876,14 @@ new class extends Component
 
         $state = $service->stateFor($this->profile, $chore);
         $claimant = $service->claimantFor($chore);
+        // Only today's spin can be saved for later; a rain check is the boost
+        // that was saved, and pays today.
+        $savedForLater = $boost instanceof Spin && app(SpinService::class)->isBanked($boost);
 
         return match (true) {
+            // Banked tonight: it pays nothing today, so offering the claim
+            // would be a button that hands the chore in at 1x.
+            $savedForLater => ['claimable' => false, 'label' => 'Saved for tomorrow', 'note' => null],
             $state === 'ready' => ['claimable' => true, 'label' => 'Mark it done', 'note' => null],
             $state === 'pending' => ['claimable' => false, 'label' => 'Waiting on a parent', 'note' => null],
             $state === 'expired' => ['claimable' => false, 'label' => "Time's up", 'note' => 'A parent is taking that one.'],
@@ -894,11 +902,12 @@ new class extends Component
      * disabled button in a browser is never the thing standing between a kid
      * and a double claim.
      */
-    public function claimBoostedChore(): void
+    public function claimBoostedChore(bool $rainCheck = false): void
     {
         $this->boostMessage = null;
 
-        $boost = app(SpinService::class)->today($this->profile);
+        $spins = app(SpinService::class);
+        $boost = $rainCheck ? $spins->rainCheckForToday($this->profile) : $spins->today($this->profile);
         $claim = $this->boostClaim($boost);
 
         if (! $claim) {
@@ -1069,6 +1078,7 @@ new class extends Component
         $shown = $this->hideUnavailable ? $board->reject($isUnavailable) : $board;
 
         $boost = $spin->today($this->profile);
+        $rainCheck = $spin->rainCheckForToday($this->profile);
 
         // Before wheelChores(), which forces in whatever today's spin landed
         // on: with the spin gone there is nothing to force, and the wheel this
@@ -1179,6 +1189,16 @@ new class extends Component
             'sniffMaybe' => $knacks->sniffedToday($this->profile),
             'boost' => $boost,
             'boostClaim' => $this->boostClaim($boost),
+            // Yesterday's boost, saved by a Rain Check and paying today.
+            'rainCheck' => $rainCheck,
+            'rainCheckClaim' => $this->boostClaim($rainCheck),
+            // Tonight's, saved for tomorrow — still there after a respin, and
+            // the one the next rain check would replace.
+            'savedForTomorrow' => $spin->rainCheckForTomorrow($this->profile),
+            'boostBanked' => $boost !== null && $spin->isBanked($boost),
+            // Chore id => multiplier for everything boosted today, which is
+            // what the board rows read rather than today's spin alone.
+            'boosts' => $spin->boostsFor($this->profile),
             'wheelChores' => $wheelChores,
             'wheelSlice' => 360 / max(1, $wheelChores->count()),
             // The three bonus items this page acts on, each the same control:
@@ -1186,6 +1206,7 @@ new class extends Component
             // next. See bonusItem().
             'respinItem' => $this->bonusItem(PerkEffect::WheelRespin, $perks, $inventory),
             'opSpinItem' => $this->bonusItem(PerkEffect::OpSpin, $perks, $inventory),
+            'rainCheckItem' => $this->bonusItem(PerkEffect::RainCheck, $perks, $inventory),
             // Whether the charge is already on the wheel, which is the one
             // state where neither half of that control has anything to offer.
             'wheelCharged' => $spin->isCharged($this->profile),
@@ -1748,6 +1769,32 @@ new class extends Component
                             @endif
                         @endif
 
+                        {{-- Tomorrow's rain check, whichever spin it came from.
+                             Shown outside the spin's own state because it
+                             outlives it: a kid who saved a boost and respun
+                             still needs to see what is waiting for tomorrow. --}}
+                        @if ($savedForTomorrow)
+                            <div
+                                class="flex items-center gap-2 rounded-[12px] border px-[14px] py-[10px] text-xs font-semibold"
+                                style="border-color: color-mix(in srgb, var(--fq-blue) 55%, transparent); background: color-mix(in srgb, var(--fq-blue) 14%, transparent); color: var(--fq-blue)"
+                                data-rain-check-banked
+                            >
+                                <span class="font-baloo text-sm">☂</span>
+                                <span>{{ $savedForTomorrow->multiplier }}x on {{ $savedForTomorrow->chore->name }} saved for tomorrow</span>
+                            </div>
+                        @endif
+
+                        {{-- The rain check itself: offered on the same terms as
+                             the respin — once the wheel has landed, held or not —
+                             because a 3x on pulling weeds at 9pm is the moment
+                             it's for. There is only ever one for tomorrow, so on
+                             a respun wheel the offer says it will swap. --}}
+                        @if ($spinRevealed && $boost && ! $spinning && ! $boostBanked)
+                            <x-perk-offer :entry="$rainCheckItem" notch="var(--fq-panel)">
+                                {{ $savedForTomorrow ? 'Swap tomorrow’s rain check for this boost' : 'Keep this boost for tomorrow instead' }}
+                            </x-perk-offer>
+                        @endif
+
                         @if ($perkMessage)
                             <p class="text-[13px] text-fq-text-4">{{ $perkMessage }}</p>
                         @endif
@@ -1755,6 +1802,42 @@ new class extends Component
 
                     <div class="flex flex-1 flex-col rounded-[22px] border border-fq-line bg-fq-panel p-[18px]">
                         <h3 class="font-baloo text-lg font-bold">Active Boost</h3>
+
+                        {{-- Yesterday's, saved by a Rain Check. Above today's own
+                             because it is the one that runs out tonight. --}}
+                        @if ($rainCheck)
+                            @php $rainColor = $rainCheck->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)'; @endphp
+                            <div class="mt-3 flex items-center justify-between gap-3 rounded-[16px] border p-[14px]" style="border-color: color-mix(in srgb, var(--fq-blue) 50%, transparent); background: color-mix(in srgb, var(--fq-blue) 12%, transparent)" data-rain-check>
+                                <span class="min-w-0">
+                                    <span class="block font-mono-fq text-[9px] tracking-[0.14em] uppercase" style="color: var(--fq-blue)">☂ Rain check &middot; today only</span>
+                                    <span class="block text-sm font-semibold">{{ $rainCheck->chore->name }}</span>
+                                    <span class="font-mono-fq text-[10px] tracking-[0.1em] text-fq-text-4 uppercase">
+                                        {{ number_format($rainCheck->chore->points) }} &rarr; {{ number_format($rainCheck->chore->points * $rainCheck->multiplier) }} pts
+                                    </span>
+                                </span>
+                                <span class="font-baloo text-[22px] font-extrabold whitespace-nowrap" style="color: {{ $rainColor }}">{{ $rainCheck->multiplier }}x</span>
+                            </div>
+
+                            @if ($rainCheckClaim && $rainCheckClaim['claimable'])
+                                <button
+                                    type="button"
+                                    wire:click="claimBoostedChore(true)"
+                                    class="mt-3 w-full rounded-[14px] py-[11px] text-sm font-semibold text-fq-bg transition hover:brightness-110"
+                                    style="background: var(--fq-lime)"
+                                >{{ $rainCheckClaim['label'] }}</button>
+                            @elseif ($rainCheckClaim)
+                                <button
+                                    type="button"
+                                    disabled
+                                    class="mt-3 w-full cursor-default rounded-[14px] bg-fq-panel-alt py-[11px] text-sm font-semibold text-fq-text-4"
+                                >{{ $rainCheckClaim['label'] }}</button>
+                            @endif
+
+                            @if ($rainCheckClaim && $rainCheckClaim['note'])
+                                <p class="mt-2 text-[13px] text-fq-text-5">{{ $rainCheckClaim['note'] }}</p>
+                            @endif
+                        @endif
+
                         @if ($spinRevealed && $boost)
                             <div class="mt-3 flex items-center justify-between gap-3 rounded-[16px] border p-[14px]" style="{{ $boostTint }}">
                                 <span class="min-w-0">
@@ -1791,7 +1874,7 @@ new class extends Component
                             @if ($boostMessage)
                                 <p class="mt-2 text-[13px] font-semibold text-fq-gold">{{ $boostMessage }}</p>
                             @endif
-                        @else
+                        @elseif (! $rainCheck)
                             <p class="mt-3 text-[13px] text-fq-text-5">No boost yet today.</p>
                         @endif
                     </div>
@@ -2097,14 +2180,18 @@ new class extends Component
                         $closesAt = $entry['closesAt'];
                         $helpWanted = $entry['helpWanted'];
                         $charmed = $entry['charmed'];
-                        $boosted = $boost && $boost->chore_id === $chore->id;
+                        // Every boost paying today — a rain check from yesterday
+                        // as well as today's spin — so the row quotes what
+                        // SpinService::multiplierFor() will actually pay.
+                        $rowMultiplier = $boosts[$chore->id] ?? 1;
+                        $boosted = $rowMultiplier > 1;
                         // Read off the board rather than recomputed: the charm
                         // rides on top of the multiplier rather than inside it,
                         // exactly as ChoreService::claim() pays it, and this row
                         // has to quote the number that will actually land.
                         $charmBonus = $entry['charmBonus'];
-                        $payout = $chore->points * ($boosted ? $boost->multiplier : 1) + $charmBonus;
-                        $boostColor = $boosted && $boost->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)';
+                        $payout = $chore->points * $rowMultiplier + $charmBonus;
+                        $boostColor = $rowMultiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)';
                         $dimmed = $takenBy || $state === 'expired';
                         // After a sniff, every card is marked: a "maybe!" on the
                         // few still in the running, a paw print on everything
@@ -2260,7 +2347,7 @@ new class extends Component
                             <span class="font-mono-fq text-[9px] tracking-[0.06em] text-fq-text-4 uppercase">
                                 {{ implode(' · ', $tags) }}
                                 @if ($boosted)
-                                    · <span style="color: {{ $boostColor }}">{{ $boost->multiplier }}x wheel boost</span>
+                                    · <span style="color: {{ $boostColor }}">{{ $rowMultiplier }}x wheel boost</span>
                                 @endif
                             </span>
                             @if ($status)
@@ -2347,10 +2434,11 @@ new class extends Component
             @if ($confirming)
                 @php
                     $askChore = $confirming['chore'];
-                    $askBoosted = $boost && $boost->chore_id === $askChore->id;
+                    $askMultiplier = $boosts[$askChore->id] ?? 1;
+                    $askBoosted = $askMultiplier > 1;
                     $askCharmed = $confirming['charmed'];
                     $askCharmBonus = $confirming['charmBonus'];
-                    $askPayout = $askChore->points * ($askBoosted ? $boost->multiplier : 1) + $askCharmBonus;
+                    $askPayout = $askChore->points * $askMultiplier + $askCharmBonus;
                     $askTags = [$askChore->cadence->kidLabel()];
 
                     if ($askChore->effort) {
@@ -2435,7 +2523,7 @@ new class extends Component
                                 @endif
                                 @if ($askBoosted)
                                     <span class="inline-block rounded-[8px] px-[8px] py-[3px] font-mono-fq text-[9px] tracking-[0.14em] uppercase" style="background: color-mix(in srgb, var(--fq-magenta) 22%, transparent); color: var(--fq-magenta)">
-                                        {{ $boost->multiplier }}x wheel boost
+                                        {{ $askMultiplier }}x wheel boost
                                     </span>
                                 @endif
                                 @if ($confirming['closesAt'])

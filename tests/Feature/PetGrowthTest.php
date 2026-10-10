@@ -622,6 +622,24 @@ class PetGrowthTest extends TestCase
         $this->assertStringContainsString('missing its head', $prompt);
     }
 
+    /**
+     * Generators kept the four legs of a turtle but deformed them wherever a
+     * pose asked for a body it does not have — a scruff, haunches, rearing up.
+     * The prompt counts the legs, guards them like the head, and lets a pose
+     * bend to the body rather than the limbs bend to the pose.
+     */
+    public function test_the_prompt_insists_on_every_leg_and_fits_the_pose_to_the_body(): void
+    {
+        $prompt = CosmeticSlot::PET_FAMILY_PROMPT;
+
+        $this->assertStringContainsString('[BODY:', $prompt);
+        $this->assertStringContainsString('EVERY LEG IS IN EVERY CELL', $prompt);
+        $this->assertStringContainsString('missing, extra, fused or deformed leg is thrown away', $prompt);
+        $this->assertStringContainsString('FIT THE POSE TO THE BODY', $prompt);
+        $this->assertStringContainsString('with no scruff', $prompt);
+        $this->assertStringContainsString('stick-thin leg', $prompt);
+    }
+
     public function test_the_all_ages_prompt_lays_out_nine_by_six_and_spells_out_the_held_pose(): void
     {
         $prompt = CosmeticSlot::PET_FAMILY_PROMPT;

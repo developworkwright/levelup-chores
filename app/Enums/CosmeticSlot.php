@@ -220,7 +220,7 @@ enum CosmeticSlot: string
      * that copying: a young pet that has to be visibly shorter than the adult
      * cannot be the adult again. The app draws each age's own art full size.
      */
-    public const PET_FAMILY_PROMPT = 'A sprite sheet of ONE pet character at three ages — baby, young and adult — [SUBJECT: a stubby three-eyed swamp gremlin with a long tail], rendered as [STYLE: bold flat cartoon with thick dark outlines]. It is the same individual animal growing up: identical colours, identical markings in the same places, the same number of eyes, limbs, ears and tails. Only its proportions and size change.
+    public const PET_FAMILY_PROMPT = 'A sprite sheet of ONE pet character at three ages — baby, young and adult — [SUBJECT: a stubby three-eyed swamp gremlin with a long tail], rendered as [STYLE: bold flat cartoon with thick dark outlines]. Its body is [BODY: four legs, one long tail, two ears, three eyes] — exactly that, in every cell, at every age. It is the same individual animal growing up: identical colours, identical markings in the same places, the same number of eyes, limbs, ears and tails. Only its proportions and size change.
 
 The pet\'s toy is [TOY: a squeaky rubber bone]. It is the same toy at every age, and it ages with the pet: brand new and shiny with the BABY, chewed and scuffed with the YOUNG pet, ragged, torn and patched with the ADULT — visibly the same toy, visibly well loved.
 
@@ -274,13 +274,30 @@ cell, never hidden behind the body and never replaced by the belly: the lying
 down poses (Back, Sleep) and the head down ones (Sniff, Play) show the face
 just as clearly as Idle does. A cell whose animal has no head is thrown away.
 
+EVERY LEG IS IN EVERY CELL — count them. The animal has exactly the legs its
+BODY says, in every cell: never one fewer, never one extra. Each leg is joined
+to the body at the shoulder or hip, keeps the thickness and length it has in
+Idle, bends only where a real leg bends, and ends in a foot or paw. Legs are
+never fused together, melted into the body, stretched into sticks or merged
+into one stump. A leg behind the body still shows its foot past the edge, and
+legs tucked in (Jump, Held, Sleep) still show every foot. A cell with a
+missing, extra, fused or deformed leg is thrown away.
+
+FIT THE POSE TO THE BODY. The poses below are written for a furry four-legged
+animal with ears, a tail and a loose scruff. Where this animal\'s body cannot
+really do a pose — a shell, a stiff back, short legs, no ears, no neck — draw
+the nearest version its own body can do, with every leg drawn as above. Never
+bend, stretch, merge or invent a limb to force a pose: a believable easier
+pose beats a deformed exact one.
+
 THE EIGHTEEN CELLS OF EACH AGE, in order:
 1. Idle — standing, facing the viewer, relaxed.
 2. Blink — exactly cell 1 with its eyes closed.
-3. Sit — sitting upright on its haunches, facing the viewer, content, tail
-   curled round its feet.
+3. Sit — sitting on its haunches, facing the viewer, content, tail curled
+   round its feet (or the nearest settled, resting pose its body allows).
 4. Crouch — squashed down low, about to jump.
-5. Jump — in the air, stretched tall, feet tucked up (may leave the foot line).
+5. Jump — in the air, stretched tall, every foot tucked up and still visible
+   (may leave the foot line).
 6. Landed — flattened on the foot line as if it has just dropped, dizzy, not
    hurt.
 7. Walk — side view facing right, mid-stride: the near front leg and the far
@@ -290,24 +307,27 @@ THE EIGHTEEN CELLS OF EACH AGE, in order:
    leg. Cells 7 and 8 played one after the other make it walk.
 9. Happy — eyes squeezed shut, grinning, as if it has just been petted.
 10. Surprised — standing, facing the viewer, startled: eyes wide, ears and
-    tail straight up, leaning back a little. Amazed, not scared.
-11. Held — hanging in mid-air as if lifted by the scruff of its neck: the
-    scruff at the top of the cell, the body hanging straight down below it,
-    every leg dangling limp, feet off the foot line. Surprised, not upset.
+    tail straight up (whichever it has), leaning back a little. Amazed, not
+    scared.
+11. Held — hanging in mid-air as if lifted by the scruff of its neck (or,
+    with no scruff, by the top of its back or shell): that point at the top of
+    the cell, the body hanging below it, every leg dangling limp at its normal
+    length and thickness, feet off the foot line. Surprised, not upset.
     NOT sitting, NOT standing. Draw NO hand, arm or person holding it —
     whatever lifts it is off the picture; only the pet is drawn.
 12. Sniff — side view facing right, head down and nose to the foot line,
     sniffing the ground, tail up.
-13. Swipe — side view facing right, standing on three legs with one front paw
+13. Swipe — side view facing right, standing on its other legs with one front paw
     raised and swiping out in front of it, as if batting at something. The
     paw is EMPTY.
 14. Play — side view facing right, pouncing: front end down low, both front
     paws stretched out in front of it flat on the foot line, rear end up, tail
     wagging. The paws are EMPTY, with clear space right in front of them.
-15. Toss — standing up on its hind legs, facing the viewer, looking up, both
-    front paws raised together above its head, open and EMPTY, as if it has
-    just thrown something up into the air.
-16. Back — lying on its back, belly up, happy, all four paws in the air: the
+15. Toss — reared up on its hind legs (or as far up as its body can rear),
+    facing the viewer, looking up, both front paws raised together above its
+    head, open and EMPTY, as if it has just thrown something up into the air.
+    The hind legs stay two separate legs, each with its own foot planted.
+16. Back — lying on its back, belly up, happy, every paw in the air: the
     two front paws held together, open and EMPTY, above its chest, with clear
     space above them. Full size: as long as it is when walking. ITS HEAD IS
     DRAWN, at one end of the body, resting on the foot line and tipped back so
@@ -322,8 +342,8 @@ THE EIGHTEEN CELLS OF EACH AGE, in order:
 MUST NOT INCLUDE: a background, ground, cast shadow or scenery; grid lines,
 borders, cell outlines or a ruled foot line; text, labels, numerals, "zzz",
 hearts, question marks or sound effects; more than one character in a cell; an animal
-missing its head, or with its head cropped or hidden; a
-hand, arm or person anywhere; the toy in any cell but 18; anything held in the
+missing its head, or with its head cropped or hidden; an animal with a
+missing, extra, fused or stick-thin leg; a hand, arm or person anywhere; the toy in any cell but 18; anything held in the
 paws or mouth; any prop other than the toy; motion blur or speed lines; any
 drawing touching another drawing or the edge of its cell.';
 

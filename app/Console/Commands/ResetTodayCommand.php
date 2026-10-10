@@ -9,6 +9,7 @@ use App\Models\ChoreCompletion;
 use App\Models\LedgerEntry;
 use App\Models\MonsterHit;
 use App\Models\Profile;
+use App\Models\RainCheck;
 use App\Models\Redemption;
 use App\Models\Spin;
 use App\Services\ChoreService;
@@ -145,6 +146,11 @@ class ResetTodayCommand extends Command
 
                 Spin::where('profile_id', $kid->id)
                     ->whereDate('spin_date', $clock->today())
+                    ->delete();
+
+                // Saved today for tomorrow, so it is part of today being undone.
+                RainCheck::where('profile_id', $kid->id)
+                    ->whereDate('for_date', $clock->today()->addDay())
                     ->delete();
 
                 DB::table('profile_badges')

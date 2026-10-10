@@ -106,6 +106,9 @@ class PerkInventoryService
     public function blockedReason(Profile $profile, PerkEffect $effect): ?string
     {
         return match ($effect) {
+            // Deliberately not refused once the spin is saved for tomorrow: the
+            // rain check lives on its own row, so a kid can bank a boost they
+            // can't do tonight and still respin for one they can.
             PerkEffect::WheelRespin => $this->spins->hasSpunToday($profile)
                 ? null
                 : 'Spin the wheel first',
@@ -117,6 +120,30 @@ class PerkInventoryService
             PerkEffect::NightSaver => $this->sleep->saveReason($profile),
             PerkEffect::QuestCharm => $this->questCharmReason($profile),
             PerkEffect::OpSpin => $this->opSpinReason($profile),
+            PerkEffect::RainCheck => $this->rainCheckReason($profile),
+        };
+    }
+
+    /**
+     * A rain check saves a boost nobody has cashed yet.
+     *
+     * Once the kid has handed the chore in at the boost, it has paid, and
+     * banking it after would pay it twice. A sibling getting there first is
+     * deliberately *not* a refusal — a boost on a chore that's gone for today
+     * is one of the best reasons to save it.
+     *
+     * Holding a rain check for tomorrow already is not a refusal either: a
+     * respin and a second bank replace it, which the wheel warns about.
+     */
+    private function rainCheckReason(Profile $profile): ?string
+    {
+        $spin = $this->spins->today($profile);
+
+        return match (true) {
+            $spin === null => 'Spin the wheel first',
+            $this->spins->isBanked($spin) => 'Already saved for tomorrow',
+            $this->chores->hasCashedBoost($profile, $spin) => 'You already did this one',
+            default => null,
         };
     }
 
@@ -171,7 +198,22 @@ class PerkInventoryService
             PerkEffect::NightSaver => $this->applyNightSaver($profile),
             PerkEffect::QuestCharm => $this->applyQuestCharm($profile),
             PerkEffect::OpSpin => $this->applyOpSpin($profile),
+            PerkEffect::RainCheck => $this->applyRainCheck($profile),
         };
+    }
+
+    private function applyRainCheck(Profile $profile): string
+    {
+        $replacing = $this->spins->rainCheckForTomorrow($profile);
+        $saved = $this->spins->bank($profile);
+
+        if (! $saved) {
+            throw new PerkUnavailableException('There is no boost to save.');
+        }
+
+        return $replacing
+            ? "Swapped! {$saved->multiplier}x on {$saved->chore->name} tomorrow instead."
+            : "Saved! {$saved->multiplier}x on {$saved->chore->name} tomorrow.";
     }
 
     private function applyOpSpin(Profile $profile): string

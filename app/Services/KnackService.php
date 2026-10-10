@@ -239,7 +239,7 @@ class KnackService
 
         $spin = app(SpinService::class)->today($kid);
 
-        if ($spin === null || $spin->multiplier !== 2) {
+        if ($spin === null || app(SpinService::class)->isBanked($spin) || $spin->multiplier !== 2) {
             return null;
         }
 
@@ -531,13 +531,15 @@ class KnackService
      * Today's spin, when a knack on the wheel can still act on it: it has
      * landed, and the chore it landed on is still there to do. A boost moved
      * or rolled again after the chore is claimed would be changing a job the
-     * kid has already handed in.
+     * kid has already handed in. A banked spin is closed too: the kid has put
+     * that boost away for tomorrow, and a knack reworking it tonight would be
+     * changing a boost that isn't on today's wheel any more.
      */
     private function openSpin(Profile $kid): ?Spin
     {
         $spin = app(SpinService::class)->today($kid);
 
-        return $spin !== null && app(ChoreService::class)->stateFor($kid, $spin->chore) === 'ready' ? $spin : null;
+        return $spin !== null && ! app(SpinService::class)->isBanked($spin) && app(ChoreService::class)->stateFor($kid, $spin->chore) === 'ready' ? $spin : null;
     }
 
     /**

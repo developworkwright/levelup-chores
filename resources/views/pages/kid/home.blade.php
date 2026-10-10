@@ -511,6 +511,8 @@ new class extends Component
         app(StreakService::class)->syncStreak($this->profile);
 
         $boost = $spins->today($this->profile);
+        // Saved for tomorrow by a Rain Check, so it pays nothing today.
+        $boostBanked = $boost !== null && $spins->isBanked($boost);
 
         $household = $this->profile->household;
         $chores = app(ChoreService::class);
@@ -582,7 +584,7 @@ new class extends Component
                 'label' => 'Bonus Wheel',
                 'accent' => 'var(--fq-magenta)',
                 'tileLabel' => 'Spin',
-                'sub' => $boost ? $boost->multiplier.'x on '.$boost->chore->name : 'Doubles one chore',
+                'sub' => $boost ? $boost->multiplier.'x on '.$boost->chore->name.($boostBanked ? ' tomorrow' : '') : 'Doubles one chore',
                 'status' => $spunToday ? 'USED' : '1 WAITING',
                 'statusColor' => $spunToday ? 'var(--fq-text-4)' : 'var(--fq-magenta)',
                 'done' => $spunToday,
@@ -766,6 +768,7 @@ new class extends Component
             // copy asks the chest's own question.
             'chestBoosted' => app(ChestService::class)->isBoosted($this->profile),
             'boost' => $boost,
+            'boostBanked' => $boostBanked,
             // Only for the section header's "n waiting" pill. The feed itself
             // is a nested component and reads its own rooms — this page holds
             // none of its state.
@@ -1125,7 +1128,7 @@ new class extends Component
                                 class="block font-baloo text-base leading-tight font-extrabold"
                                 style="color: {{ $boost->multiplier >= 3 ? 'var(--fq-gold)' : 'var(--fq-magenta)' }}"
                             >{{ $boost->multiplier }}x on {{ $boost->chore->name }}</span>
-                            <span class="mt-[2px] block text-xs text-fq-text-4">Claim it on the Quests page.</span>
+                            <span class="mt-[2px] block text-xs text-fq-text-4">{{ $boostBanked ? '☂ Saved for tomorrow.' : 'Claim it on the Quests page.' }}</span>
                         @else
                             <span class="block font-baloo text-base leading-tight font-extrabold" style="color: var(--fq-magenta)">
                                 Your Bonus Wheel spin is waiting

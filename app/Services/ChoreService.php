@@ -14,6 +14,7 @@ use App\Models\DailyMystery;
 use App\Models\Household;
 use App\Models\MysteryHintPurchase;
 use App\Models\Profile;
+use App\Models\Spin;
 use App\Notifications\ChoreClosingSoon;
 use App\Notifications\ChoreReviewed;
 use App\Notifications\HelpWantedPosted;
@@ -404,6 +405,21 @@ class ChoreService
      * A rejected claim doesn't count. Nothing was earned by work a parent sent
      * back, so redoing it is owed the bonus the board promised the first time.
      */
+    /**
+     * Whether the kid has handed in the spin's chore since the wheel stopped —
+     * the claim that paid the boost. Counted from the spin rather than from
+     * the start of the day, so an unlimited chore done before spinning doesn't
+     * read as a boost already spent.
+     */
+    public function hasCashedBoost(Profile $profile, Spin $spin): bool
+    {
+        return ChoreCompletion::where('profile_id', $profile->id)
+            ->where('chore_id', $spin->chore_id)
+            ->where('status', '!=', CompletionStatus::Rejected)
+            ->where('submitted_at', '>=', $spin->created_at)
+            ->exists();
+    }
+
     private function charmPaidToday(Profile $profile, Chore $chore): bool
     {
         $clock = HouseholdClock::for($profile->household);

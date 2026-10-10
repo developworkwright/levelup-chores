@@ -415,7 +415,7 @@ class QuestPageLayoutTest extends TestCase
     }
 
     /** Every item on the control asks, not only the charm. */
-    public function test_all_four_bonus_items_ask_before_they_spend(): void
+    public function test_all_five_bonus_items_ask_before_they_spend(): void
     {
         // Six, not three: the wheel draws from what is left once the quest
         // hand is dealt, and there is no respin to sell beside a spin that
@@ -424,8 +424,8 @@ class QuestPageLayoutTest extends TestCase
         $this->kid->update(['bonus_tickets' => 50]);
 
         // No two of them are on screen at once: the charge is only sold before
-        // the wheel goes and the respin only after, so the board is read on
-        // both sides of a spin and the four are counted across the pair.
+        // the wheel goes and the respin and rain check only after, so the board is read on
+        // both sides of a spin and the five are counted across the pair.
         $page = Volt::test('kid.quests');
 
         $asking = collect(PerkEffect::cases())
@@ -452,6 +452,7 @@ class QuestPageLayoutTest extends TestCase
                 PerkEffect::MysteryHint->value,
                 PerkEffect::OpSpin->value,
                 PerkEffect::WheelRespin->value,
+                PerkEffect::RainCheck->value,
             ],
             $asking,
             'Every item this board sells should ask before it spends.',

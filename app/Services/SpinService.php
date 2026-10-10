@@ -6,6 +6,7 @@ use App\Enums\PetKnack;
 use App\Enums\PetStage;
 use App\Models\Chore;
 use App\Models\Profile;
+use App\Models\RainCheck;
 use App\Models\Spin;
 use Illuminate\Support\Collection;
 use RuntimeException;
@@ -139,8 +140,14 @@ class SpinService
 
         $spinToday = $this->today($profile);
 
+        // Yesterday's rain check already carries a boost today, and the two
+        // don't stack — see boostsFor() — so landing on it again would be a
+        // spin that won nothing.
+        $rainCheckChoreId = $this->rainCheckForToday($profile)?->chore_id;
+
         $eligible = $profile->household->chores
             ->filter(fn (Chore $chore) => $chore->isAppropriateFor($profile))
+            ->reject(fn (Chore $chore) => $chore->id === $rainCheckChoreId && $chore->id !== $spinToday?->chore_id)
             // Cooldowns are household-wide, so a chore a sibling already
             // claimed can no longer be earned — landing a 3x boost on it
             // would be a prize that pays nothing. A parent can bar a chore
@@ -284,10 +291,93 @@ class SpinService
         $spin->update(['chore_id' => $chore->id]);
     }
 
-    public function multiplierFor(Profile $profile, Chore $chore): int
+    /**
+     * A Rain Check: today's boost saved for tomorrow. It stops paying today,
+     * and the kid is free to respin for another boost — the saved one lives
+     * on its own row, so a respin deleting the spin doesn't take it.
+     *
+     * One rain check per kid per day. Banking again the same evening (after a
+     * respin) **replaces** tomorrow's rain check rather than adding a second.
+     *
+     * Returns null when there is no spin today or this spin is already saved.
+     */
+    public function bank(Profile $profile): ?RainCheck
     {
         $spin = $this->today($profile);
 
-        return ($spin && $spin->chore_id === $chore->id) ? $spin->multiplier : 1;
+        if ($spin === null || $this->isBanked($spin)) {
+            return null;
+        }
+
+        // Looked up with whereDate() rather than updateOrCreate()'s equality
+        // match: the date cast stores a time part, so a plain '2026-05-02'
+        // would miss the row and trip the unique index instead of replacing.
+        $rainCheck = $this->rainCheckForTomorrow($profile) ?? new RainCheck([
+            'profile_id' => $profile->id,
+            'for_date' => HouseholdClock::for($profile->household)->today()->addDay(),
+        ]);
+
+        $rainCheck->fill([
+            'spin_id' => $spin->id,
+            'chore_id' => $spin->chore_id,
+            'multiplier' => $spin->multiplier,
+        ])->save();
+
+        return $rainCheck;
+    }
+
+    /** Whether this spin's boost has been saved for tomorrow. */
+    public function isBanked(Spin $spin): bool
+    {
+        return RainCheck::where('spin_id', $spin->id)->exists();
+    }
+
+    /** Yesterday's saved boost, paying today. */
+    public function rainCheckForToday(Profile $profile): ?RainCheck
+    {
+        return $this->rainCheckFor($profile, HouseholdClock::for($profile->household)->today()->toDateString());
+    }
+
+    /** The boost saved for tomorrow, which the next rain check would replace. */
+    public function rainCheckForTomorrow(Profile $profile): ?RainCheck
+    {
+        return $this->rainCheckFor($profile, HouseholdClock::for($profile->household)->today()->addDay()->toDateString());
+    }
+
+    private function rainCheckFor(Profile $profile, string $date): ?RainCheck
+    {
+        return RainCheck::where('profile_id', $profile->id)
+            ->whereDate('for_date', $date)
+            ->first();
+    }
+
+    /**
+     * Every boost paying today, chore id => multiplier: today's spin unless
+     * it was saved for tomorrow, and yesterday's rain check. Where both sit on
+     * one chore (a pet can bat today's boost onto it) the bigger wins — they
+     * don't multiply, or a rain check would be a way to stack 3x on 3x.
+     *
+     * @return array<int, int>
+     */
+    public function boostsFor(Profile $profile): array
+    {
+        $today = $this->today($profile);
+        $paying = array_filter([
+            $today && ! $this->isBanked($today) ? $today : null,
+            $this->rainCheckForToday($profile),
+        ]);
+
+        $boosts = [];
+
+        foreach ($paying as $boost) {
+            $boosts[$boost->chore_id] = max($boosts[$boost->chore_id] ?? 1, $boost->multiplier);
+        }
+
+        return $boosts;
+    }
+
+    public function multiplierFor(Profile $profile, Chore $chore): int
+    {
+        return $this->boostsFor($profile)[$chore->id] ?? 1;
     }
 }

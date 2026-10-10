@@ -20,6 +20,7 @@ enum PerkEffect: string
     case NightSaver = 'night_saver';
     case QuestCharm = 'quest_charm';
     case OpSpin = 'op_spin';
+    case RainCheck = 'rain_check';
 
     /**
      * How using this perk should celebrate — one of the styles in
@@ -43,6 +44,8 @@ enum PerkEffect: string
             // stops — so this is the sparkle of one taking hold rather than
             // the payoff.
             self::QuestCharm, self::OpSpin => 'star',
+            // Nothing has been won yet — a boost has been put by for tomorrow.
+            self::RainCheck => 'star',
             default => 'confetti',
         };
     }
@@ -111,6 +114,15 @@ enum PerkEffect: string
                 'description' => 'Charge the wheel before you spin: a shot at 4x, and a better chance at 3x. Spent the moment the wheel goes.',
                 'cost' => 5,
                 'glyph' => '⚡',
+            ],
+            // Under the respin on purpose. A respin buys a new roll; this only
+            // moves a boost the wheel already gave, and the kid still has to
+            // get to the chore tomorrow before anyone else does.
+            self::RainCheck => [
+                'name' => 'Rain Check',
+                'description' => "Landed on something you can't do right now? Save today's boost for tomorrow instead of losing it.",
+                'cost' => 2,
+                'glyph' => '☂',
             ],
         };
     }

@@ -45,6 +45,17 @@ If the household has 10 or fewer eligible chores (`MAX_WHEEL_CHORES = 10`), all 
 
 Do not confuse this deterministic subset hash with the actual spin *result*, which is genuinely random (`Arr::random()`/`$eligible->random()`). Changing the subset-selection hash to real randomness would make the wheel's visible options change between renders, which is the specific bug this design avoids.
 
+## Rain Check (banking a boost)
+
+The `RainCheck` perk copies today's landed boost (chore + multiplier) into a `rain_checks` row for tomorrow. It lives in its **own table** because it has to outlive the spin: a kid can bank a boost they can't do tonight, then **respin** (the respin perk deletes the spin row) for one they can. Next day only; nothing expires it, `rainCheckForToday()` just stops matching.
+
+- **One rain check per kid per day** (unique `profile_id` + `for_date`). Banking a respun boost **replaces** tomorrow's rain check; the wheel says "Swap" when it would.
+- `isBanked($spin)` is "a rain check points at this spin". A banked spin pays nothing today, and pet knacks (`openSpin()`, `fetchable()`) leave it alone.
+- **`boostsFor()` is the source of truth for what pays**: today's spin unless banked, plus today's rain check. Same chore → the bigger multiplier, never the product. `multiplierFor()` and the board rows both read it.
+- Tomorrow's wheel leaves the rain-check chore off, since landing on it would win nothing.
+- Refused before a spin, on a spin already banked, and once the kid has claimed the chore since the spin (`ChoreService::hasCashedBoost()`). A sibling taking the chore is **not** a refusal.
+- `resetByParent()` leaves a rain check alone; `quest:reset-today` deletes the one saved today.
+
 ## Badge tie-in
 
 Landing a 3x multiplier at any point unlocks the `wheel_winner` badge — see [[badges]].
