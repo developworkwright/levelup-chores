@@ -8,11 +8,13 @@ use App\Services\ChoreService;
  * A rarer pet's own trick, on top of its style. Commons have none.
  *
  * Which knacks a pet can have is its tier's call (rarity()), and how strong
- * one is is its age's: a baby has not learned it yet, a young pet does it at
- * half strength, and a grown one does it properly — see allowance() and
- * describe(). Half strength is a weaker version of the trick wherever one
- * makes sense (a young Sniffer leaves five chores in the running, a grown one
- * three), and the same trick less often only where it doesn't.
+ * one is is its age's: a baby does what a young pet does, half as often; a
+ * young pet does it at half strength; and a grown one does it properly — see
+ * allowance() and describe(). Half strength is a weaker version of the trick
+ * wherever one makes sense (a young Sniffer leaves five chores in the
+ * running, a grown one three), and the same trick less often only where it
+ * doesn't. A baby has a level of its own because a kid who has just hatched
+ * an egg wants it to help now, not ten chores from now.
  *
  * A knack is used where it matters, on the page it matters on: the pet goes
  * to the thing and offers it, and the kid taps the offer. Guard Dog, Night
@@ -28,6 +30,8 @@ enum PetKnack: string
     public const TIP_EVERY_ADULT = 2;
 
     public const TIP_EVERY_YOUNG = 4;
+
+    public const TIP_EVERY_BABY = 6;
 
     /** Sure Paw: how many chores a young pet sniffs out to choose between. */
     public const PAW_PICKS_YOUNG = 3;
@@ -103,8 +107,8 @@ enum PetKnack: string
 
     /**
      * How many times it can be used, over how many days, at this age — or
-     * null for a knack that is simply always on, and for a baby, which has
-     * not learned it yet (see unlocked()).
+     * null for a knack that is simply always on. A baby gets a young pet's
+     * trick, half as often.
      *
      * A rolling window, not a calendar one: a use comes back that many days
      * after it was spent, so "next one Thursday" is always a real answer and
@@ -114,8 +118,14 @@ enum PetKnack: string
      */
     public function allowance(PetStage $stage): ?array
     {
-        if (! self::unlocked($stage)) {
-            return null;
+        if ($stage === PetStage::Baby) {
+            return match ($this) {
+                self::CoinSniffer, self::BigPockets, self::Sidekick, self::TipJar => null,
+                self::Fetch, self::SecondLook, self::Digger => ['uses' => 1, 'days' => 30],
+                self::Sniffer, self::LuckyTail, self::GoodLuckCharm, self::SurePaw => ['uses' => 1, 'days' => 14],
+                self::PawNudge => ['uses' => 1, 'days' => 7],
+                self::GuardDog, self::NightOwl => ['uses' => 1, 'days' => 90],
+            };
         }
 
         $grown = $stage === PetStage::Adult;
@@ -167,10 +177,34 @@ enum PetKnack: string
         return $this !== self::TipJar;
     }
 
-    /** Whether a pet this age can do its knack at all. A baby is still learning. */
-    public static function unlocked(PetStage $stage): bool
+    /** Big Pockets: how many more arcade tokens a day, at this age. */
+    public static function pockets(PetStage $stage): int
     {
-        return $stage !== PetStage::Baby;
+        return match ($stage) {
+            PetStage::Adult => 10,
+            PetStage::Young => 5,
+            PetStage::Baby => 3,
+        };
+    }
+
+    /** Sidekick: how much harder chores hit the monster, as a percentage, at this age. */
+    public static function sidekickPercent(PetStage $stage): int
+    {
+        return match ($stage) {
+            PetStage::Adult => 10,
+            PetStage::Young => 5,
+            PetStage::Baby => 3,
+        };
+    }
+
+    /** Tip Jar: how many signed-off chores a tip costs, at this age. */
+    public static function tipEvery(PetStage $stage): int
+    {
+        return match ($stage) {
+            PetStage::Adult => self::TIP_EVERY_ADULT,
+            PetStage::Young => self::TIP_EVERY_YOUNG,
+            PetStage::Baby => self::TIP_EVERY_BABY,
+        };
     }
 
     /**
@@ -184,16 +218,9 @@ enum PetKnack: string
         return in_array($this, [self::GuardDog, self::NightOwl, self::LuckyTail, self::TipJar], true);
     }
 
-    /**
-     * How often it can do it at this age, in a kid's words — from allowance().
-     * Null for a baby, which can't do it at all yet.
-     */
-    public function howOften(PetStage $stage): ?string
+    /** How often it can do it at this age, in a kid's words — from allowance(). */
+    public function howOften(PetStage $stage): string
     {
-        if (! self::unlocked($stage)) {
-            return null;
-        }
-
         $allowance = $this->allowance($stage);
 
         if ($allowance === null) {
@@ -205,6 +232,7 @@ enum PetKnack: string
             14 => 'every 2 weeks',
             30 => 'a month',
             60 => 'every 2 months',
+            90 => 'every 3 months',
             default => "every {$allowance['days']} days",
         };
 
@@ -213,22 +241,21 @@ enum PetKnack: string
         return "{$times} {$every}".($this->automatic() ? ', by itself' : '');
     }
 
-    /** What it does at this age, in a kid's words. A baby's says when it learns. */
+    /**
+     * What it does at this age, in a kid's words. Where a baby does a young
+     * pet's trick, only less often, it shares the young words.
+     */
     public function describe(PetStage $stage): string
     {
-        if (! self::unlocked($stage)) {
-            return 'Still learning this one — it can do it once it grows up a bit.';
-        }
-
         $grown = $stage === PetStage::Adult;
 
         return match ($this) {
-            self::CoinSniffer => $grown
-                ? 'Sniffs out a bonus token every time you reach a new rung in a game.'
-                : 'Sniffs out a bonus token on every other new rung in a game.',
-            self::BigPockets => $grown
-                ? 'You can earn 10 more arcade tokens a day.'
-                : 'You can earn 5 more arcade tokens a day.',
+            self::CoinSniffer => match ($stage) {
+                PetStage::Adult => 'Sniffs out a bonus token every time you reach a new rung in a game.',
+                PetStage::Young => 'Sniffs out a bonus token on every other new rung in a game.',
+                PetStage::Baby => 'Sniffs out a bonus token on your first new rung of the day.',
+            },
+            self::BigPockets => 'You can earn '.self::pockets($stage).' more arcade tokens a day.',
             self::Fetch => 'Landed a 2x on the Bonus Wheel? It fetches you another go at the boost — same chore.',
             self::Sniffer => $grown
                 ? 'Sniffs the quest board and narrows the Mystery Chore down to 3. It won\'t say which of the 3 it is.'
@@ -249,12 +276,10 @@ enum PetKnack: string
             self::Digger => 'Digs you a free hit on the Lucky Block.',
             self::GuardDog => 'Guards your streak the day you miss.',
             self::NightOwl => 'Saves your bedtime run after a night out of your own bed.',
-            self::Sidekick => $grown
-                ? 'Jumps in on the monster — your chores hit 10% harder.'
-                : 'Jumps in on the monster — your chores hit 5% harder.',
+            self::Sidekick => 'Jumps in on the monster — your chores hit '.self::sidekickPercent($stage).'% harder.',
             self::TipJar => $grown
                 ? 'Tips you a bonus ticket for every other chore a grown-up signs off.'
-                : 'Tips you a bonus ticket for every '.self::TIP_EVERY_YOUNG.'th chore a grown-up signs off.',
+                : 'Tips you a bonus ticket for every '.self::tipEvery($stage).'th chore a grown-up signs off.',
             self::SurePaw => $grown
                 ? 'Puts the Bonus Wheel\'s boost on any chore you point at. The boost itself is still a surprise.'
                 : 'Sniffs out '.self::PAW_PICKS_YOUNG.' chores on the Bonus Wheel and puts the boost on whichever one you pick. The boost itself is still a surprise.',

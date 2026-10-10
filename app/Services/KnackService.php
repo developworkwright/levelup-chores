@@ -27,8 +27,8 @@ use RuntimeException;
 /**
  * What the pet a kid has out can do for them, and how much of it is left.
  *
- * Only the pet that is out, only a kid's, and only once it is past being a
- * baby — see PetKnack. A visiting sibling's pet brings its looks, never its
+ * Only the pet that is out, and only a kid's — at every age, a baby's the
+ * weakest (see PetKnack). A visiting sibling's pet brings its looks, never its
  * knack. Grown-ups' pets are for trying pets out and have no knacks at all.
  *
  * Uses are counted over a rolling window (PetKnack::allowance()), so nothing
@@ -58,7 +58,7 @@ class KnackService
      * `left` counts banked Power Treats too (`treats` of them); `doubled` is
      * an always-on knack fed a treat today.
      *
-     * @return array{pet: Cosmetic, knack: PetKnack, stage: PetStage, unlocked: bool, strength: ?string, description: string, automatic: bool, uses: ?int, left: ?int, treats: int, doubled: bool, days: ?int, backAt: ?CarbonInterface, choresToUnlock: ?int, choresToFull: ?int}|null
+     * @return array{pet: Cosmetic, knack: PetKnack, stage: PetStage, strength: string, description: string, automatic: bool, uses: ?int, left: ?int, treats: int, doubled: bool, days: ?int, backAt: ?CarbonInterface, choresToHalf: ?int, choresToFull: ?int}|null
      */
     public function stateFor(Profile $kid): ?array
     {
@@ -74,7 +74,6 @@ class KnackService
         }
 
         $stage = $this->pets->stageOf($kid, $pet);
-        $unlocked = PetKnack::unlocked($stage);
         $allowance = $knack->allowance($stage);
         $growth = $this->pets->growthOf($kid, $pet);
 
@@ -85,14 +84,12 @@ class KnackService
             'pet' => $pet,
             'knack' => $knack,
             'stage' => $stage,
-            'unlocked' => $unlocked,
-            'strength' => match (true) {
-                ! $unlocked => null,
-                $stage === PetStage::Adult => 'full',
-                default => 'half',
+            'strength' => match ($stage) {
+                PetStage::Adult => 'full',
+                PetStage::Young => 'half',
+                PetStage::Baby => 'baby',
             },
-            // A baby's is what it will do once it learns it, so the kid knows what's coming.
-            'description' => $knack->describe($unlocked ? $stage : PetStage::Young),
+            'description' => $knack->describe($stage),
             'automatic' => $knack->automatic(),
             'uses' => $allowance['uses'] ?? null,
             'left' => $left === null ? null : $left + $treats,
@@ -100,21 +97,21 @@ class KnackService
             'doubled' => $knack->alwaysOn() && $this->doubledToday($kid, $knack),
             'days' => $allowance['days'] ?? null,
             'backAt' => $backAt,
-            'choresToUnlock' => $unlocked ? null : PetStage::Young->startsAt() - $growth,
+            'choresToHalf' => $stage === PetStage::Baby ? PetStage::Young->startsAt() - $growth : null,
             'choresToFull' => $stage === PetStage::Adult ? null : PetStage::Adult->startsAt() - $growth,
         ];
     }
 
     /**
      * Whether this kid's pet can do this knack right now: it is the knack of
-     * the pet they have out, the pet is old enough, and a use is left. An
-     * always-on knack is available whenever the pet has it.
+     * the pet they have out, and a use is left. An always-on knack is
+     * available whenever the pet has it.
      */
     public function available(Profile $kid, PetKnack $knack): bool
     {
         $state = $this->stateFor($kid);
 
-        if ($state === null || $state['knack'] !== $knack || ! $state['unlocked']) {
+        if ($state === null || $state['knack'] !== $knack) {
             return false;
         }
 
@@ -136,7 +133,7 @@ class KnackService
 
             $state = $this->stateFor($kid);
 
-            if ($state === null || $state['knack'] !== $knack || ! $state['unlocked'] || $state['left'] === null || $state['left'] < 1) {
+            if ($state === null || $state['knack'] !== $knack || $state['left'] === null || $state['left'] < 1) {
                 return false;
             }
 
@@ -163,28 +160,24 @@ class KnackService
     }
 
     /**
-     * How old the kid's pet is, if it has this knack and is old enough to do
-     * it — null otherwise. What the always-on knacks read to know how strong
-     * to be.
+     * How old the kid's pet is, if it has this knack — null otherwise. What
+     * the always-on knacks read to know how strong to be.
      */
     public function strengthFor(Profile $kid, PetKnack $knack): ?PetStage
     {
         $state = $this->stateFor($kid);
 
-        return $state !== null && $state['knack'] === $knack && $state['unlocked'] ? $state['stage'] : null;
+        return $state !== null && $state['knack'] === $knack ? $state['stage'] : null;
     }
 
     /**
-     * Big Pockets: how much more the arcade will pay this kid today — 5 for a
-     * young pet, 10 for a grown one, nothing without the knack.
+     * Big Pockets: how much more the arcade will pay this kid today — see
+     * PetKnack::pockets() — nothing without the knack.
      */
     public function pocketsFor(Profile $kid): int
     {
-        $pockets = match ($this->strengthFor($kid, PetKnack::BigPockets)) {
-            PetStage::Adult => 10,
-            PetStage::Young => 5,
-            default => 0,
-        };
+        $stage = $this->strengthFor($kid, PetKnack::BigPockets);
+        $pockets = $stage === null ? 0 : PetKnack::pockets($stage);
 
         return $pockets * ($pockets > 0 && $this->doubledToday($kid, PetKnack::BigPockets) ? 2 : 1);
     }
@@ -192,17 +185,45 @@ class KnackService
     /**
      * Coin Sniffer: bonus tokens for a run that reached this many new rungs.
      * One a rung grown; young, every other one — the first, the third — so a
-     * run that reached one new rung is never told the pet found nothing.
+     * run that reached one new rung is never told the pet found nothing; a
+     * baby, one on the day's first run to reach a new rung, and none after.
      */
     public function coinsSniffedFor(Profile $kid, int $newRungs): int
     {
         $coins = match ($this->strengthFor($kid, PetKnack::CoinSniffer)) {
             PetStage::Adult => $newRungs,
             PetStage::Young => (int) ceil($newRungs / 2),
+            PetStage::Baby => $newRungs > 0 && ! $this->coinsSniffedToday($kid) ? 1 : 0,
             default => 0,
         };
 
         return $coins * ($coins > 0 && $this->doubledToday($kid, PetKnack::CoinSniffer) ? 2 : 1);
+    }
+
+    /**
+     * Notes that the Coin Sniffer's line on a run was paid, so a baby's one
+     * a day is spent. Only once it was actually paid — a line the cap turned
+     * away found the kid nothing, and the baby gets to try again.
+     */
+    public function recordCoinsSniffed(Profile $kid, int $tokens): void
+    {
+        PetKnackUse::create([
+            'household_id' => $kid->household_id,
+            'profile_id' => $kid->id,
+            'cosmetic_id' => $this->cosmetics->wornIn($kid, CosmeticSlot::Pet)?->id,
+            'knack' => PetKnack::CoinSniffer,
+            'payload' => ['day' => HouseholdClock::for($kid->household)->today()->toDateString(), 'tokens' => $tokens],
+            'used_at' => now(),
+        ]);
+    }
+
+    /** Whether the Coin Sniffer has already found this kid a token today. */
+    private function coinsSniffedToday(Profile $kid): bool
+    {
+        return PetKnackUse::where('profile_id', $kid->id)
+            ->where('knack', PetKnack::CoinSniffer->value)
+            ->where('payload->day', HouseholdClock::for($kid->household)->today()->toDateString())
+            ->exists();
     }
 
     /**
@@ -391,8 +412,6 @@ class KnackService
 
     /**
      * Buys a Power Treat for the knack of the pet that is out, and feeds it.
-     * Only a pet old enough to have learned its knack takes one — a baby has
-     * nothing to power up yet.
      *
      * @throws InsufficientTicketsException
      * @throws PerkUnavailableException
@@ -403,10 +422,6 @@ class KnackService
 
         if ($state === null) {
             throw new PerkUnavailableException('Your pet needs a knack to power up.');
-        }
-
-        if (! $state['unlocked']) {
-            throw new PerkUnavailableException($state['pet']->name.' is still learning its knack — a treat will help once it grows up a bit.');
         }
 
         if (! $state['knack']->takesTreat()) {
@@ -432,6 +447,61 @@ class KnackService
 
             return $treat;
         });
+    }
+
+    /**
+     * The first trick, the moment an egg hatches: a free Power Treat for the
+     * new pet's knack, so the kid can watch it help straight away — one more
+     * use banked, or an always-on knack doubled for the rest of the day. Tip
+     * Jar takes no treat (PetKnack::takesTreat()), so it tips a ticket there
+     * and then instead, and counts its rhythm from the chore that hatched it.
+     *
+     * @return string|null a line for the hatch to say, or null for a pet with no knack
+     */
+    public function hatchGift(Profile $kid): ?string
+    {
+        $state = $this->stateFor($kid);
+
+        if ($state === null) {
+            return null;
+        }
+
+        $pet = $state['pet'];
+        $knack = $state['knack'];
+
+        if (! $knack->takesTreat()) {
+            DB::transaction(function () use ($kid, $pet) {
+                PetKnackUse::create([
+                    'household_id' => $kid->household_id,
+                    'profile_id' => $kid->id,
+                    'cosmetic_id' => $pet->id,
+                    'knack' => PetKnack::TipJar,
+                    'payload' => [
+                        'completion_id' => ChoreCompletion::where('profile_id', $kid->id)->where('status', CompletionStatus::Approved)->max('id'),
+                        'tickets' => 1,
+                        'hatched' => true,
+                    ],
+                    'used_at' => now(),
+                ]);
+
+                app(TicketService::class)->record($kid, TicketKind::Pet, 1, $pet->name.' tipped you for hatching it', $pet);
+            });
+
+            return "{$pet->name} tipped you a ticket already!";
+        }
+
+        PetTreat::create([
+            'household_id' => $kid->household_id,
+            'profile_id' => $kid->id,
+            'cosmetic_id' => $pet->id,
+            'knack' => $knack,
+            'tickets_paid' => 0,
+            'day' => HouseholdClock::for($kid->household)->today()->toDateString(),
+        ]);
+
+        return $knack->alwaysOn()
+            ? "It hatched with a Power Treat — {$knack->label()} is doubled today!"
+            : "It hatched with a Power Treat — {$knack->label()} is ready to go!";
     }
 
     /** Treats waiting to pay for a use of this knack. */
@@ -689,8 +759,8 @@ class KnackService
      * ------------------------------------------------------------------ */
 
     /**
-     * Tip Jar: every other signed-off chore (every fourth while young) drops
-     * a bonus ticket in the kid's pocket, by itself. Counted from the last
+     * Tip Jar: every other signed-off chore (every fourth while young, every
+     * sixth while a baby) drops a bonus ticket in the kid's pocket, by itself. Counted from the last
      * tip rather than from a total, so it keeps its rhythm when a pet is
      * swapped, grows up, or is put away for a while.
      *
@@ -706,7 +776,7 @@ class KnackService
             return null;
         }
 
-        $every = $stage === PetStage::Adult ? PetKnack::TIP_EVERY_ADULT : PetKnack::TIP_EVERY_YOUNG;
+        $every = PetKnack::tipEvery($stage);
 
         return DB::transaction(function () use ($kid, $completion, $every) {
             Profile::whereKey($kid->id)->lockForUpdate()->first();
@@ -929,15 +999,13 @@ class KnackService
 
     /**
      * Sidekick: how much harder this kid's chores hit the monster, as a
-     * percentage — 5 young, 10 grown, doubled on a Power Treat day.
+     * percentage — see PetKnack::sidekickPercent() — doubled on a Power
+     * Treat day.
      */
     public function sidekickPercentFor(Profile $kid): int
     {
-        $percent = match ($this->strengthFor($kid, PetKnack::Sidekick)) {
-            PetStage::Adult => 10,
-            PetStage::Young => 5,
-            default => 0,
-        };
+        $stage = $this->strengthFor($kid, PetKnack::Sidekick);
+        $percent = $stage === null ? 0 : PetKnack::sidekickPercent($stage);
 
         return $percent * ($percent > 0 && $this->doubledToday($kid, PetKnack::Sidekick) ? 2 : 1);
     }

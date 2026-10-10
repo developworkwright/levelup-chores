@@ -888,9 +888,7 @@ new class extends Component
                                     @if ($row['knack'])
                                         <p class="text-[11px] text-fq-text-4">
                                             <i class="fa-solid {{ $row['knack']['knack']->icon() }} mr-[3px]"></i>{{ $row['knack']['knack']->label() }}:
-                                            @if (! $row['knack']['unlocked'])
-                                                still learning
-                                            @elseif ($row['knack']['uses'] === null)
+                                            @if ($row['knack']['uses'] === null)
                                                 always on{{ $row['knack']['doubled'] ? ', doubled today' : '' }}
                                             @else
                                                 {{ $row['knack']['left'] }} left{{ $row['knack']['treats'] > 0 ? ' ('.$row['knack']['treats'].' from treats)' : '' }}
@@ -1145,7 +1143,6 @@ new class extends Component
                             </select>
                             @if ($chosenKnack = App\Enums\PetKnack::tryFrom($petKnack))
                                 <x-perk-by-age :knack="$chosenKnack" />
-                                <span class="text-[11px] text-fq-text-4">Not yet as a baby.</span>
                             @endif
                             @error('petKnack') <span class="text-[12px] text-fq-danger">Pick a knack for a {{ mb_strtolower($tier->label()) }} pet.</span> @enderror
                         </label>

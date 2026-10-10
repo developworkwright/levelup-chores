@@ -252,9 +252,15 @@ class PetService
 
         $pet = $this->hatch($kid, $egg);
 
-        return $pet
-            ? "Your egg hatched — meet {$pet->name}!"
-            : 'Your egg is ready to hatch — it is waiting for its pet.';
+        if ($pet === null) {
+            return 'Your egg is ready to hatch — it is waiting for its pet.';
+        }
+
+        // Its first trick, there and then. Resolved here rather than injected:
+        // KnackService already takes this service.
+        $gift = app(KnackService::class)->hatchGift($kid->fresh());
+
+        return trim("Your egg hatched — meet {$pet->name}! {$gift}");
     }
 
     /**

@@ -427,9 +427,9 @@ new class extends Component
                             @php
                                 [$strengthLabel, $strengthInk] = match (true) {
                                     $knack['doubled'] => ['Doubled today', '#7dffb0'],
-                                    ! $knack['unlocked'] => ['Still learning', '#8c7bab'],
                                     $knack['strength'] === 'full' => ['Full strength', '#7dffb0'],
-                                    default => ['Half strength', '#ffe14d'],
+                                    $knack['strength'] === 'half' => ['Half strength', '#ffe14d'],
+                                    default => ['Baby steps', '#c8bade'],
                                 };
                             @endphp
                             <div class="flex flex-col gap-[6px] rounded-[16px] border p-[12px]" style="border-color: {{ $tier->color() }}55; background: #0b0616" data-pet-knack="{{ $knack['knack']->value }}">
@@ -438,7 +438,7 @@ new class extends Component
                                     <span class="font-baloo text-[16px] leading-tight font-extrabold">{{ $knack['knack']->label() }}</span>
                                 </span>
                                 <span class="font-mono-fq text-[8px] tracking-[0.1em] uppercase" style="color: {{ $strengthInk }}" @if ($knack['doubled']) data-knack-doubled @endif>{{ $strengthLabel }}</span>
-                                <x-perk-by-age :knack="$knack['knack']" :stage="$knack['unlocked'] ? $knack['stage'] : null" :ink="$tier->color()" class="flex-1" />
+                                <x-perk-by-age :knack="$knack['knack']" :stage="$knack['stage']" :ink="$tier->color()" class="flex-1" />
 
                                 @if ($knack['uses'] !== null)
                                     <span class="flex flex-wrap items-center gap-[4px]" data-knack-left="{{ $knack['left'] }}">
@@ -454,20 +454,20 @@ new class extends Component
                                             · {{ $knack['automatic'] ? 'it goes off by itself' : 'it offers when it can help' }}
                                         </span>
                                     </span>
-                                @elseif ($knack['unlocked'])
+                                @else
                                     <span class="text-[10.5px] text-fq-text-4">Always on.</span>
                                 @endif
 
-                                @if ($knack['choresToUnlock'] !== null)
-                                    <span class="text-[10.5px] text-fq-text-4">Learns it in {{ $knack['choresToUnlock'] }} more {{ Str::plural('chore', $knack['choresToUnlock']) }}.</span>
+                                @if ($knack['choresToHalf'] !== null)
+                                    <span class="text-[10.5px] text-fq-text-4">Half strength in {{ $knack['choresToHalf'] }} more {{ Str::plural('chore', $knack['choresToHalf']) }}.</span>
                                 @elseif ($knack['choresToFull'] !== null)
                                     <span class="text-[10.5px] text-fq-text-4">Full strength in {{ $knack['choresToFull'] }} more {{ Str::plural('chore', $knack['choresToFull']) }}.</span>
                                 @endif
 
                                 {{-- Power Treat: one more use, or double today. --}}
-                                @if ($knack['unlocked'] && ! $knack['knack']->takesTreat())
+                                @if (! $knack['knack']->takesTreat())
                                     <span class="mt-[2px] text-[10px] text-pretty" style="color: #8c7bab" data-no-treat>No Power Treat for this one — it pays in tickets already.</span>
-                                @elseif ($knack['unlocked'])
+                                @else
                                     <button
                                         type="button"
                                         wire:click="buyTreat"

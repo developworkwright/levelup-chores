@@ -243,6 +243,12 @@ class TokenService
 
         $earned = array_sum(array_column($lines, 'tokens'));
 
+        foreach ($lines as $line) {
+            if (($line['pet'] ?? false) && $line['paid']) {
+                app(KnackService::class)->recordCoinsSniffed($kid, $line['tokens']);
+            }
+        }
+
         if ($paid > 0) {
             $this->record(
                 $kid,

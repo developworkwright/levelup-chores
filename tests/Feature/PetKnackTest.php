@@ -10,6 +10,7 @@ use App\Enums\PetStage;
 use App\Enums\PetStyle;
 use App\Enums\SleepOutcome;
 use App\Enums\TicketKind;
+use App\Enums\TokenKind;
 use App\Exceptions\PerkUnavailableException;
 use App\Models\BonusPerk;
 use App\Models\BonusTicketEntry;
@@ -146,13 +147,30 @@ class PetKnackTest extends TestCase
         $this->assertSame([PetKnack::CoinSniffer, PetKnack::BigPockets, PetKnack::Fetch, PetKnack::Sniffer], PetRarity::Rare->knacks());
     }
 
-    /** A baby is still learning; young is half strength; grown is the whole thing. */
+    /** A baby does a young pet's trick half as often; young is half strength; grown is the whole thing. */
     public function test_knacks_grow_with_the_pet(): void
     {
         foreach (PetKnack::cases() as $knack) {
-            $this->assertNull($knack->allowance(PetStage::Baby), $knack->value);
-            $this->assertStringContainsString('Still learning', $knack->describe(PetStage::Baby));
+            $baby = $knack->allowance(PetStage::Baby);
+            $young = $knack->allowance(PetStage::Young);
+
+            $this->assertSame($young === null, $baby === null, $knack->value.' is always on at one age and not the other.');
+
+            if ($baby !== null) {
+                $this->assertEqualsWithDelta($young['uses'] / $young['days'] / 2, $baby['uses'] / $baby['days'], 0.02, $knack->value.' is not half as often as young.');
+            }
         }
+
+        $this->assertSame(['uses' => 1, 'days' => 14], PetKnack::Sniffer->allowance(PetStage::Baby));
+        $this->assertSame(['uses' => 1, 'days' => 30], PetKnack::Fetch->allowance(PetStage::Baby));
+        $this->assertSame(['uses' => 1, 'days' => 7], PetKnack::PawNudge->allowance(PetStage::Baby));
+        $this->assertSame(['uses' => 1, 'days' => 90], PetKnack::GuardDog->allowance(PetStage::Baby));
+        $this->assertStringContainsString('down to 5', PetKnack::Sniffer->describe(PetStage::Baby));
+        $this->assertStringContainsString('whichever way it likes', PetKnack::PawNudge->describe(PetStage::Baby));
+        $this->assertStringContainsString('3 more arcade tokens', PetKnack::BigPockets->describe(PetStage::Baby));
+        $this->assertStringContainsString('3% harder', PetKnack::Sidekick->describe(PetStage::Baby));
+        $this->assertStringContainsString('every 6th chore', PetKnack::TipJar->describe(PetStage::Baby));
+        $this->assertStringContainsString('first new rung of the day', PetKnack::CoinSniffer->describe(PetStage::Baby));
 
         $this->assertSame(['uses' => 1, 'days' => 7], PetKnack::Sniffer->allowance(PetStage::Young));
         $this->assertSame(['uses' => 2, 'days' => 7], PetKnack::Sniffer->allowance(PetStage::Adult));
@@ -189,17 +207,67 @@ class PetKnackTest extends TestCase
         $this->assertSame(PetKnack::GuardDog, $this->pet('Rex', ['pet_rarity' => 'legendary', 'pet_knack' => 'guard_dog'])->knack());
     }
 
-    public function test_a_baby_is_still_learning_its_knack(): void
+    /** A baby can use its knack straight away, just less often than a young pet. */
+    public function test_a_baby_does_its_knack_less_often(): void
     {
         $sniffy = $this->pet('Sniffy', ['pet_rarity' => 'rare', 'pet_knack' => 'sniffer']);
         $this->outOn($this->kid, $sniffy, 4);
+        $kid = $this->kid->fresh();
 
-        $state = $this->knacks()->stateFor($this->kid->fresh());
+        $state = $this->knacks()->stateFor($kid);
 
-        $this->assertFalse($state['unlocked']);
-        $this->assertSame(6, $state['choresToUnlock']);
-        $this->assertFalse($this->knacks()->available($this->kid->fresh(), PetKnack::Sniffer));
-        $this->assertFalse($this->knacks()->use($this->kid->fresh(), PetKnack::Sniffer));
+        $this->assertSame('baby', $state['strength']);
+        $this->assertSame(6, $state['choresToHalf']);
+        $this->assertSame(26, $state['choresToFull']);
+        $this->assertSame(1, $state['left']);
+        $this->assertSame(14, $state['days']);
+
+        $this->assertTrue($this->knacks()->available($kid, PetKnack::Sniffer));
+        $this->assertTrue($this->knacks()->use($kid, PetKnack::Sniffer));
+        $this->assertFalse($this->knacks()->use($kid, PetKnack::Sniffer), 'Sniffed twice in a fortnight.');
+
+        $this->travel(14)->days();
+        $this->travel(1)->minutes();
+        $this->assertSame(1, $this->knacks()->stateFor($kid)['left']);
+    }
+
+    /** The always-on knacks are on as a baby too, only a little weaker. */
+    public function test_a_babys_always_on_knacks_are_a_little_weaker(): void
+    {
+        $this->outOn($this->kid, $this->pet('Buddy', ['pet_rarity' => 'legendary', 'pet_knack' => 'sidekick']), 0);
+        $this->assertSame(3, $this->knacks()->sidekickPercentFor($this->kid->fresh()));
+
+        $this->outOn($this->kid, $this->pet('Pockets', ['pet_rarity' => 'rare', 'pet_knack' => 'big_pockets']), 0);
+        $this->assertSame(3, $this->knacks()->pocketsFor($this->kid->fresh()));
+    }
+
+    public function test_a_baby_tip_jar_tips_every_sixth_chore(): void
+    {
+        $this->outOn($this->kid, $this->pet('Tipper', ['pet_rarity' => 'legendary', 'pet_knack' => 'tip_jar']), 0);
+
+        $this->approve(5);
+        $this->assertSame(0, $this->tipped());
+
+        $this->approve(1);
+        $this->assertSame(1, $this->tipped());
+    }
+
+    /** A baby's Lucky Tail charges the spin as a young one does — a better shot at 3x, not the OP table. */
+    public function test_a_baby_lucky_tail_charges_the_spin(): void
+    {
+        $this->outOn($this->kid, $this->pet('Wags', ['pet_rarity' => 'epic', 'pet_knack' => 'lucky_tail']), 0);
+        Chore::factory()->for($this->household)->count(3)->create();
+        app(ChoreService::class)->forgetBoards();
+        $kid = $this->kid->fresh();
+
+        $this->assertSame(PetStage::Baby, $this->knacks()->luckyTailReady($kid));
+
+        $spin = app(SpinService::class)->spin($kid);
+
+        $this->assertFalse($spin->was_op);
+        $this->assertContains($spin->multiplier, [2, 3]);
+        $this->assertTrue($this->knacks()->luckyTailOn($spin));
+        $this->assertSame(0, $this->knacks()->stateFor($kid)['left']);
     }
 
     /** Uses come back on a rolling window — nothing has to reset on a schedule. */
@@ -420,7 +488,7 @@ class PetKnackTest extends TestCase
         $base = TokenService::BASE_CAP;
 
         $this->outOn($this->kid, $pockets, 4);
-        $this->assertSame($base, $tokens->capFor($this->kid->fresh()), 'A baby has not learned it yet.');
+        $this->assertSame($base + 3, $tokens->capFor($this->kid->fresh()), 'A baby makes a little room.');
 
         $this->outOn($this->kid, $pockets, 12);
         $this->assertSame($base + 5, $tokens->capFor($this->kid->fresh()));
@@ -456,6 +524,44 @@ class PetKnackTest extends TestCase
         // No new rung, nothing sniffed.
         $again = $tokens->payRun($this->kid->fresh(), ArcadeGame::StackTheMess, $score, $score);
         $this->assertNull(collect($again['lines'])->firstWhere('pet', true));
+    }
+
+    /** A baby Coin Sniffer finds one token a day — on the first run to reach a new rung. */
+    public function test_a_baby_coin_sniffer_finds_one_token_a_day(): void
+    {
+        $tokens = app(TokenService::class);
+        $ladder = ArcadeService::milestonesFor(ArcadeGame::StackTheMess);
+        $this->outOn($this->kid, $this->pet('Coins', ['pet_rarity' => 'rare', 'pet_knack' => 'coin_sniffer']), 2);
+
+        // No new rung: nothing found, and the day's token is still to find.
+        $none = $tokens->payRun($this->kid->fresh(), ArcadeGame::StackTheMess, $ladder[0][0], null);
+        $this->assertNull(collect($none['lines'])->firstWhere('pet', true));
+
+        $first = $tokens->payRun($this->kid->fresh(), ArcadeGame::StackTheMess, $ladder[3][0], null);
+        $this->assertSame(1, collect($first['lines'])->firstWhere('pet', true)['tokens']);
+
+        $second = $tokens->payRun($this->kid->fresh(), ArcadeGame::WindyWalkies, ArcadeService::milestonesFor(ArcadeGame::WindyWalkies)[2][0], null);
+        $this->assertNull(collect($second['lines'])->firstWhere('pet', true), 'Sniffed twice in a day.');
+
+        $this->travel(1)->days();
+        $tomorrow = $tokens->payRun($this->kid->fresh(), ArcadeGame::StackTheMess, $ladder[3][0], null);
+        $this->assertSame(1, collect($tomorrow['lines'])->firstWhere('pet', true)['tokens']);
+    }
+
+    /** A line the cap turned away found nothing, so the baby's token is still there to find. */
+    public function test_a_baby_coin_sniffer_turned_away_by_the_cap_tries_again(): void
+    {
+        $tokens = app(TokenService::class);
+        $ladder = ArcadeService::milestonesFor(ArcadeGame::StackTheMess);
+        $this->outOn($this->kid, $this->pet('Coins', ['pet_rarity' => 'rare', 'pet_knack' => 'coin_sniffer']), 2);
+        $kid = $this->kid->fresh();
+
+        // Today's room, spent down to nothing but a run and its rungs.
+        $tokens->record($kid, TokenKind::Run, $tokens->capFor($kid) - 4, 'Earlier runs', ArcadeGame::StackTheMess);
+
+        $full = $tokens->payRun($kid->fresh(), ArcadeGame::StackTheMess, $ladder[3][0], null);
+        $this->assertFalse(collect($full['lines'])->firstWhere('pet', true)['paid']);
+        $this->assertSame(0, PetKnackUse::where('knack', PetKnack::CoinSniffer->value)->count());
     }
 
     /** A 2x on the wheel, on a chore still to do: Fetch rolls the boost again. */
@@ -1017,17 +1123,72 @@ class PetKnackTest extends TestCase
         $this->assertSame(10, $this->knacks()->pocketsFor($kid));
     }
 
-    public function test_a_baby_or_a_common_takes_no_treat(): void
+    /** Hatches the egg holding this pet, with the chores that crack it. */
+    private function hatchInto(Cosmetic $pet): void
+    {
+        app(PetService::class)->buyEgg($this->kid->fresh(), $pet);
+        app()->forgetScopedInstances();
+
+        $this->approve(PetEgg::CRACKS_TO_HATCH);
+    }
+
+    /** The first trick: a pet hatches with a free Power Treat, ready to use. */
+    public function test_a_pet_hatches_with_a_free_power_treat(): void
+    {
+        $fetcher = $this->pet('Fetcher', ['pet_rarity' => 'rare', 'pet_knack' => 'fetch', 'stock' => 'egg']);
+
+        $this->hatchInto($fetcher);
+
+        $treat = PetTreat::sole();
+        $this->assertSame(0, $treat->tickets_paid);
+        $this->assertSame($fetcher->id, $treat->cosmetic_id);
+        $this->assertSame(PetKnack::Fetch, $treat->knack);
+
+        $state = $this->knacks()->stateFor($this->kid->fresh());
+        $this->assertSame(PetStage::Baby, $state['stage']);
+        $this->assertSame(2, $state['left'], 'Its own use, and the hatching treat.');
+    }
+
+    public function test_an_always_on_pet_hatches_doubled_for_the_day(): void
+    {
+        $this->hatchInto($this->pet('Pockets', ['pet_rarity' => 'rare', 'pet_knack' => 'big_pockets', 'stock' => 'egg']));
+
+        $this->assertSame(6, $this->knacks()->pocketsFor($this->kid->fresh()));
+
+        $this->travel(1)->days();
+        $this->assertSame(3, $this->knacks()->pocketsFor($this->kid->fresh()));
+    }
+
+    /** Tip Jar takes no treat, so it tips on the spot and keeps its rhythm from there. */
+    public function test_a_tip_jar_pet_tips_a_ticket_as_it_hatches(): void
+    {
+        $this->hatchInto($this->pet('Tipper', ['pet_rarity' => 'legendary', 'pet_knack' => 'tip_jar', 'stock' => 'egg']));
+
+        $this->assertSame(1, $this->tipped());
+        $this->assertSame(0, PetTreat::count());
+
+        $this->approve(PetKnack::TIP_EVERY_BABY - 1);
+        $this->assertSame(1, $this->tipped(), 'The chores that cracked the egg counted towards a tip.');
+
+        $this->approve(1);
+        $this->assertSame(2, $this->tipped());
+    }
+
+    public function test_a_common_hatches_with_no_gift(): void
+    {
+        $this->hatchInto($this->pet('Plain', ['stock' => 'egg']));
+
+        $this->assertSame(0, PetTreat::count());
+        $this->assertSame(0, $this->tipped());
+    }
+
+    public function test_a_baby_takes_a_treat_and_a_common_does_not(): void
     {
         $sniffy = $this->pet('Sniffy', ['pet_rarity' => 'rare', 'pet_knack' => 'sniffer']);
         $this->outOn($this->kid, $sniffy, 3);
 
-        try {
-            $this->knacks()->buyTreat($this->kid->fresh());
-            $this->fail('A baby took a treat.');
-        } catch (PerkUnavailableException $e) {
-            $this->assertStringContainsString('still learning', $e->getMessage());
-        }
+        $this->knacks()->buyTreat($this->kid->fresh());
+        $this->assertSame(2, $this->knacks()->stateFor($this->kid->fresh())['left'], 'The baby\'s own use, and the treat\'s.');
 
         $this->outOn($this->kid, $this->pet('Plain'), 40);
         $this->expectException(PerkUnavailableException::class);
@@ -1084,8 +1245,8 @@ class PetKnackTest extends TestCase
         $this->assertSame($tabby->id, $this->kid->fresh()->worn_pet_id);
     }
 
-    /** A baby can't use its perk yet, but the kid is told what it will do. */
-    public function test_a_babys_perk_card_says_what_the_perk_will_do(): void
+    /** A baby's perk card says what it does now, and what it will do as it grows. */
+    public function test_a_babys_perk_card_says_what_it_does_at_every_age(): void
     {
         $sniffy = $this->pet('Sniffy', ['pet_rarity' => 'rare', 'pet_style' => 'lucky', 'pet_knack' => 'sniffer']);
         $this->outOn($this->kid, $sniffy, 0);
@@ -1093,14 +1254,14 @@ class PetKnackTest extends TestCase
         Auth::guard('profile')->login($this->kid->fresh());
 
         Volt::test('kid.pets')
-            ->assertSee('Still learning')
+            ->assertSee('Baby steps')
             ->assertSee('narrows the Mystery Chore down to 5')
             ->assertSee('narrows the Mystery Chore down to 3')
+            ->assertSee('Baby · Once every 2 weeks')
             ->assertSee('Young · Once a week')
             ->assertSee('Grown up · 2 times a week')
-            ->assertDontSee('Still learning this one')
-            ->assertSee('Learns it in 10 more chores.')
-            ->assertDontSee('data-power-treat', false);
+            ->assertSee('Half strength in 10 more chores.')
+            ->assertSee('data-power-treat', false);
     }
 
     /** Tip Jar: a ticket every other signed-off chore, by itself. */
@@ -1159,11 +1320,10 @@ class PetKnackTest extends TestCase
         $this->assertSame(2, $this->tipped());
     }
 
-    /** No pet out, or a baby, and nothing is tipped. */
-    public function test_a_baby_tips_nothing(): void
+    /** No pet out, and nothing is tipped. A baby tips — see test_a_baby_tip_jar_tips_every_sixth_chore. */
+    public function test_no_pet_out_tips_nothing(): void
     {
-        $tipper = $this->pet('Tipper', ['pet_rarity' => 'legendary', 'pet_knack' => 'tip_jar']);
-        $this->outOn($this->kid, $tipper, 0);
+        $this->pet('Tipper', ['pet_rarity' => 'legendary', 'pet_knack' => 'tip_jar']);
 
         $this->approve(6);
 
@@ -1269,7 +1429,9 @@ class PetKnackTest extends TestCase
     /** How often, in a kid's words, straight from the allowance. */
     public function test_how_often_a_perk_goes_off_at_each_age(): void
     {
-        $this->assertNull(PetKnack::Fetch->howOften(PetStage::Baby));
+        $this->assertSame('Once a month', PetKnack::Fetch->howOften(PetStage::Baby));
+        $this->assertSame('Once every 3 months, by itself', PetKnack::GuardDog->howOften(PetStage::Baby));
+        $this->assertSame('Always on', PetKnack::Sidekick->howOften(PetStage::Baby));
         $this->assertSame('Once every 2 weeks', PetKnack::Fetch->howOften(PetStage::Young));
         $this->assertSame('Once a week', PetKnack::Fetch->howOften(PetStage::Adult));
         $this->assertSame('2 times a week', PetKnack::PawNudge->howOften(PetStage::Adult));

@@ -200,13 +200,13 @@ class SpinService
 
         // A pet's Lucky Tail charges the spin by itself — the week's first,
         // and only when the kid has not charged it already, so it never lands
-        // on top of a ticket they spent. Grown, the full OP table; young, a
-        // better shot at 3x. See KnackService::luckyTailReady().
+        // on top of a ticket they spent. Grown, the full OP table; young or a
+        // baby, a better shot at 3x. See KnackService::luckyTailReady().
         $knacks = app(KnackService::class);
         $tail = $charged ? null : $knacks->luckyTailReady($profile);
 
         $chore = $eligible->random();
-        $multiplier = $this->rollMultiplier($charged || $tail === PetStage::Adult, $tail === PetStage::Young);
+        $multiplier = $this->rollMultiplier($charged || $tail === PetStage::Adult, $tail !== null && $tail !== PetStage::Adult);
 
         // Spent by the spin, not by the result. What the wheel landed on is
         // already decided by the time the charge clears, so there is nothing
