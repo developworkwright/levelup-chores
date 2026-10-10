@@ -1123,6 +1123,58 @@ class PetKnackTest extends TestCase
         $this->assertSame(10, $this->knacks()->pocketsFor($kid));
     }
 
+    /** Doubling does not stack, so a second treat the same day is refused and costs nothing. */
+    public function test_an_always_on_knack_takes_one_treat_a_day(): void
+    {
+        $pockets = $this->pet('Pockets', ['pet_rarity' => 'rare', 'pet_knack' => 'big_pockets']);
+        $this->outOn($this->kid, $pockets, 30);
+
+        $this->knacks()->buyTreat($this->kid->fresh());
+        $tickets = $this->kid->fresh()->bonus_tickets;
+
+        try {
+            $this->knacks()->buyTreat($this->kid->fresh());
+            $this->fail('A second treat the same day should be refused.');
+        } catch (PerkUnavailableException $e) {
+            $this->assertSame('Big Pockets is already doubled today.', $e->getMessage());
+        }
+
+        $this->assertSame(1, PetTreat::count());
+        $this->assertSame($tickets, $this->kid->fresh()->bonus_tickets);
+
+        $this->travel(1)->days();
+        $this->knacks()->buyTreat($this->kid->fresh());
+        $this->assertSame(2, PetTreat::count(), 'A new day takes a new treat.');
+    }
+
+    /** A knack with uses still banks as many treats as the kid likes. */
+    public function test_treats_for_a_knack_with_uses_stack_in_one_day(): void
+    {
+        $sniffy = $this->pet('Sniffy', ['pet_rarity' => 'rare', 'pet_knack' => 'sniffer']);
+        $this->outOn($this->kid, $sniffy, 30);
+
+        $this->knacks()->buyTreat($this->kid->fresh());
+        $this->knacks()->buyTreat($this->kid->fresh());
+
+        $this->assertSame(2, $this->knacks()->stateFor($this->kid->fresh())['treats']);
+    }
+
+    public function test_the_pets_page_disables_the_treat_once_doubled(): void
+    {
+        $pockets = $this->pet('Pockets', ['pet_rarity' => 'rare', 'pet_knack' => 'big_pockets']);
+        $this->outOn($this->kid, $pockets, 30);
+        $this->knacks()->buyTreat($this->kid->fresh());
+
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        Volt::test('kid.pets')
+            ->assertSee('Already doubled today — come back tomorrow for another.')
+            ->call('buyTreat')
+            ->assertSee('Big Pockets is already doubled today.');
+
+        $this->assertSame(1, PetTreat::count());
+    }
+
     /** Hatches the egg holding this pet, with the chores that crack it. */
     private function hatchInto(Cosmetic $pet): void
     {

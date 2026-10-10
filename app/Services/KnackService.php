@@ -39,8 +39,9 @@ use RuntimeException;
  *
  * **Power Treats** add to that, bought with tickets and fed to the pet: one
  * more use of a knack that is spent, banked until the week's own run out; or,
- * for an always-on knack, double strength for the rest of the day. No limit
- * on how many — each costs a ticket less than the Bonus Shop perk the knack
+ * for an always-on knack, double strength for the rest of the day — one a
+ * day there, since doubling does not stack. Otherwise no limit on how
+ * many — each costs a ticket less than the Bonus Shop perk the knack
  * matches (treatPrice()), so having the pet is always the cheaper way. A
  * knack that pays in tickets itself takes none at all — PetKnack::takesTreat().
  */
@@ -431,6 +432,14 @@ class KnackService
         $price = $this->treatPrice($kid, $state['knack']);
 
         return DB::transaction(function () use ($kid, $state, $price) {
+            // Locked, so two taps in the same moment cannot both double the day.
+            Profile::whereKey($kid->id)->lockForUpdate()->first();
+
+            // Doubling is on or off, so a second treat today would buy nothing.
+            if ($state['knack']->alwaysOn() && $this->doubledToday($kid, $state['knack'])) {
+                throw new PerkUnavailableException($state['knack']->label().' is already doubled today.');
+            }
+
             // Fresh, inside the transaction: the header can hold a stale copy.
             $kid->refresh();
 

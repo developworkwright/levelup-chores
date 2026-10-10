@@ -472,13 +472,13 @@ new class extends Component
                                         type="button"
                                         wire:click="buyTreat"
                                         wire:confirm="Give {{ $out->name }} a Power Treat for {{ $treatPrice }} {{ Str::plural('ticket', $treatPrice) }}? You'd have {{ $profile->bonus_tickets - $treatPrice }} left."
-                                        @disabled($profile->bonus_tickets < $treatPrice)
+                                        @disabled($profile->bonus_tickets < $treatPrice || $knack['doubled'])
                                         class="mt-[2px] flex items-center justify-center gap-[6px] rounded-[10px] px-[10px] py-[8px] font-baloo text-[13px] font-extrabold disabled:opacity-40"
                                         style="background: linear-gradient(150deg,#fff6b0,#ffc93d); color: #1a1200"
                                         data-power-treat
                                     ><i class="fa-solid fa-cookie-bite"></i>Power Treat · {{ $treatPrice }} ✦</button>
                                     <span class="text-[10px] text-pretty" style="color: #8c7bab">
-                                        {{ $knack['knack']->alwaysOn() ? 'Doubles '.$knack['knack']->label().' for the rest of today.' : 'One more '.$knack['knack']->label().', on top of the free ones. It keeps until you need it.' }}
+                                        {{ $knack['knack']->alwaysOn() ? ($knack['doubled'] ? 'Already doubled today — come back tomorrow for another.' : 'Doubles '.$knack['knack']->label().' for the rest of today.') : 'One more '.$knack['knack']->label().', on top of the free ones. It keeps until you need it.' }}
                                     </span>
                                     @if ($treatNote)
                                         <span class="text-[11px] text-fq-danger" data-treat-note>{{ $treatNote }}</span>
