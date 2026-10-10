@@ -778,6 +778,18 @@ class PetKnackTest extends TestCase
 
         // One nudge a spin.
         $this->assertNull($this->knacks()->nudgeTargets($kid));
+
+        // A respin is a new spin, and the pet has a nudge left for it.
+        app(SpinService::class)->clearToday($kid);
+        Spin::create([
+            'profile_id' => $kid->id,
+            'spin_date' => HouseholdClock::for($this->household)->today(),
+            'chore_id' => $wheel[2]->id,
+            'multiplier' => 2,
+            'was_op' => false,
+        ]);
+
+        $this->assertNotNull($this->knacks()->nudgeTargets($kid->fresh()));
     }
 
     /** Young: it picks its own way, and it can be put back — the nudge is spent either way. */
@@ -929,6 +941,7 @@ class PetKnackTest extends TestCase
 
         Volt::test('kid.loot')
             ->assertSee('data-fq-knack-offer="digger"', false)
+            ->assertSee('Save it for later')
             ->call('useDigger')
             ->assertSee('Pizza night')
             ->assertDontSee('data-fq-knack-offer="digger"', false);
@@ -1378,6 +1391,72 @@ class PetKnackTest extends TestCase
 
         // One point per spin.
         $this->assertNull($this->knacks()->pawTargets($kid->fresh()));
+
+        // A respin is a new spin: the pet's second use of the week points on it.
+        app(SpinService::class)->clearToday($kid);
+        $again = Spin::create([
+            'profile_id' => $kid->id,
+            'spin_date' => HouseholdClock::for($this->household)->today(),
+            'chore_id' => $wheel->first()->id,
+            'multiplier' => 3,
+            'was_op' => false,
+        ]);
+
+        $target = $this->knacks()->pawTargets($kid->fresh())->first();
+        $this->assertSame($target->id, $this->knacks()->surePaw($kid->fresh(), $target->id)?->id);
+        $this->assertSame($target->id, $again->fresh()->chore_id);
+
+        // Out of its own uses now: a third spin needs a Power Treat.
+        app(SpinService::class)->clearToday($kid);
+        Spin::create([
+            'profile_id' => $kid->id,
+            'spin_date' => HouseholdClock::for($this->household)->today(),
+            'chore_id' => $wheel->first()->id,
+            'multiplier' => 2,
+            'was_op' => false,
+        ]);
+
+        $this->assertNull($this->knacks()->pawTargets($kid->fresh()));
+        $this->knacks()->buyTreat($kid->fresh());
+        $this->assertNotNull($this->knacks()->pawTargets($kid->fresh()));
+    }
+
+    /** A kid who buys a Power Treat can point again on the same spin — once per treat. */
+    public function test_a_power_treat_lets_sure_paw_point_again_on_the_same_spin(): void
+    {
+        $pointer = $this->pet('Pointer', ['pet_rarity' => 'legendary', 'pet_knack' => 'sure_paw']);
+        $this->outOn($this->kid, $pointer, 12);
+        $wheel = Chore::factory()->for($this->household)->count(6)->create();
+
+        $spin = Spin::create([
+            'profile_id' => $this->kid->id,
+            'spin_date' => HouseholdClock::for($this->household)->today(),
+            'chore_id' => $wheel->first()->id,
+            'multiplier' => 3,
+            'was_op' => false,
+        ]);
+
+        $kid = $this->kid->fresh();
+        $first = $this->knacks()->pawTargets($kid)->first();
+        $this->knacks()->surePaw($kid, $first->id);
+        $this->assertNull($this->knacks()->pawTargets($kid->fresh()), 'Its own use pointed twice on one spin.');
+
+        foreach ([1, 2] as $treat) {
+            $this->knacks()->buyTreat($kid->fresh());
+
+            $targets = $this->knacks()->pawTargets($kid->fresh());
+            $this->assertCount(PetKnack::PAW_PICKS_YOUNG, $targets, "Treat {$treat} did not point again.");
+            $this->assertNotContains($spin->fresh()->chore_id, $targets->pluck('id')->all());
+
+            $next = $targets->first();
+            $this->assertSame($next->id, $this->knacks()->surePaw($kid->fresh(), $next->id)?->id);
+            $this->assertSame($next->id, $spin->fresh()->chore_id);
+            $this->assertSame(3, $spin->fresh()->multiplier, 'The boost itself is never touched.');
+
+            $this->assertNull($this->knacks()->pawTargets($kid->fresh()), 'Pointed again with the treat spent.');
+        }
+
+        $this->assertSame(0, PetTreat::whereNull('knack_use_id')->count());
     }
 
     /** A young one narrows the wheel to three of its own choosing. */
@@ -1423,6 +1502,7 @@ class PetKnackTest extends TestCase
 
         Volt::test('kid.quests')
             ->assertSee('data-fq-knack-offer="sure_paw"', false)
+            ->assertSee('Save it for another spin')
             ->assertSee('can put the boost on the chore you pick');
     }
 

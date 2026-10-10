@@ -553,7 +553,8 @@ class KnackService
     {
         $spin = $this->available($kid, PetKnack::PawNudge) ? $this->openSpin($kid) : null;
 
-        if ($spin === null || $this->nudgedToday($kid) !== null) {
+        // One nudge a spin, not a day: a respin is a new spin, and the pet may bat that one too.
+        if ($spin === null || ($this->nudgedToday($kid)['spin_id'] ?? null) === $spin->id) {
             return null;
         }
 
@@ -831,13 +832,27 @@ class KnackService
      * The three are picked from the spin itself, so they are the same three
      * every time the page is drawn until the kid chooses.
      *
+     * Its own uses point once a spin. A Power Treat is a kid paying to point
+     * again, so with one banked the pet will go again on the same spin, as
+     * many times as there are treats — and a young pet sniffs out a fresh
+     * three each time, or the second go would offer what the first did.
+     *
      * @return Collection<int, Chore>|null
      */
     public function pawTargets(Profile $kid): ?Collection
     {
         $spin = $this->available($kid, PetKnack::SurePaw) ? $this->openSpin($kid) : null;
 
-        if ($spin === null || $this->pawedToday($kid) !== null) {
+        if ($spin === null) {
+            return null;
+        }
+
+        $pointed = PetKnackUse::where('profile_id', $kid->id)
+            ->where('knack', PetKnack::SurePaw->value)
+            ->where('payload->spin_id', $spin->id)
+            ->count();
+
+        if ($pointed > 0 && $this->stateFor($kid)['treats'] < 1) {
             return null;
         }
 
@@ -857,7 +872,7 @@ class KnackService
         // The pet's own three: steady for this spin, so the offer does not
         // shuffle under a kid deciding between them.
         return $wheel
-            ->sortBy(fn (Chore $chore) => crc32($spin->id.':'.$chore->id))
+            ->sortBy(fn (Chore $chore) => crc32($spin->id.':'.$pointed.':'.$chore->id))
             ->take(PetKnack::PAW_PICKS_YOUNG)
             ->values();
     }

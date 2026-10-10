@@ -1535,6 +1535,7 @@ new class extends Component
                         <x-knack-offer
                             wire:key="knack-fetch-{{ $boost->id }}"
                             :knack="App\Enums\PetKnack::Fetch"
+                            save="Save it for another spin"
                             :pet="$knack['pet']->name"
                             offer="can fetch you another go at that boost."
                             question="Send {{ $knack['pet']->name }} to fetch a better boost? Same chore — it might come back 3x!"
@@ -1562,6 +1563,7 @@ new class extends Component
                         <x-knack-offer
                             wire:key="knack-nudge-{{ $boost->id }}"
                             :knack="App\Enums\PetKnack::PawNudge"
+                            save="Save it for another spin"
                             :pet="$knack['pet']->name"
                             offer="can bat the wheel one chore over — same boost."
                             :question="$grownNudge ? 'Which way should '.$knack['pet']->name.' bat the wheel?' : 'Let '.$knack['pet']->name.' bat the wheel? It picks which way!'"
@@ -1582,6 +1584,7 @@ new class extends Component
                         <x-knack-offer
                             wire:key="knack-paw-{{ $boost->id }}"
                             :knack="App\Enums\PetKnack::SurePaw"
+                            save="Save it for another spin"
                             :pet="$knack['pet']->name"
                             offer="can put the boost on the chore you pick — same boost."
                             :question="'Which chore should '.$knack['pet']->name.' put the boost on?'"
@@ -1611,6 +1614,7 @@ new class extends Component
                         <x-knack-offer
                             wire:key="knack-second-look-{{ $boost->id }}"
                             :knack="App\Enums\PetKnack::SecondLook"
+                            save="Save it for another spin"
                             :pet="$knack['pet']->name"
                             offer="can spin the wheel again for you."
                             question="Let {{ $knack['pet']->name }} give the wheel a second spin? You'll land somewhere new."

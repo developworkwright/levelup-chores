@@ -8,12 +8,14 @@
 
      Yes plays the pet's part first (`fq-pet-act`, the steps in `act`) and then
      calls the Livewire action — the order the chests use, so the result lands
-     after the pet has done the thing. "Save it" puts the bubble away for this
+     after the pet has done the thing. The save button puts the bubble away for this
      visit only.
 
      `offer` is the line, `question` the confirm, `yes` its button. `choices`
      swaps the one yes for several — [label, argument] pairs, each calling the
-     action with its argument — which is how a grown Paw Nudge asks which way. --}}
+     action with its argument — which is how a grown Paw Nudge asks which way.
+     `save` is the button that puts the offer away without spending anything;
+     the wheel's offers say what it is being saved for. --}}
 @props([
     'knack',
     'pet',
@@ -25,6 +27,7 @@
     'uses' => null,
     'act' => [['happy', 1.2]],
     'choices' => null,
+    'save' => 'Save it for later',
 ])
 
 @php $key = $knack->value; @endphp
@@ -80,7 +83,8 @@
                 type="button"
                 x-on:click="open = false; window.dispatchEvent(new CustomEvent('fq-knack-dismiss', { detail: { knack: '{{ $key }}' } }))"
                 class="rounded-[10px] border border-fq-line-3 px-[12px] py-[8px] font-baloo text-[14px] font-extrabold text-fq-text-3"
-            >Save it</button>
+                data-knack-save
+            >{{ $save }}</button>
         </div>
     </div>
 </div>
