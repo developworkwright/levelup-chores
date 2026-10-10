@@ -1506,6 +1506,34 @@ class PetKnackTest extends TestCase
             ->assertSee('can put the boost on the chore you pick');
     }
 
+    /** A treat cost tickets, so the confirm says when this use is the one that spends it. */
+    public function test_the_offer_says_when_it_will_use_up_a_power_treat(): void
+    {
+        $pointer = $this->pet('Pointer', ['pet_rarity' => 'legendary', 'pet_knack' => 'sure_paw']);
+        $this->outOn($this->kid, $pointer, 12);
+        Chore::factory()->for($this->household)->count(5)->create();
+        $kid = $this->kid->fresh();
+
+        Auth::guard('profile')->login($kid);
+        app(SpinService::class)->spin($kid);
+
+        // Its own use is still there: the treat is safe, and the card says so.
+        $this->knacks()->buyTreat($kid->fresh());
+
+        Volt::test('kid.quests')
+            ->assertSee('You have 1 of 1 left')
+            ->assertSee('Your Power Treat stays saved.')
+            ->assertDontSee('data-knack-spends-treat', false);
+
+        // Its own use spent: the next one is the treat's.
+        $this->knacks()->surePaw($kid->fresh(), $this->knacks()->pawTargets($kid->fresh())->first()->id);
+
+        Volt::test('kid.quests')
+            ->assertSee('data-knack-spends-treat', false)
+            ->assertSee('This will use up a Power Treat — you have 1.')
+            ->assertDontSee('comes back on its own');
+    }
+
     /** How often, in a kid's words, straight from the allowance. */
     public function test_how_often_a_perk_goes_off_at_each_age(): void
     {
@@ -1719,5 +1747,156 @@ class PetKnackTest extends TestCase
         $styles = array_map(fn (int $id) => PetStyle::startingFor($id), range(1, 8));
 
         $this->assertCount(4, array_unique(array_map(fn (PetStyle $style) => $style->value, $styles)));
+    }
+
+    /* ------------------------------------------------------------------ *
+     * The pet's menu, and a treat sold where it is used
+     * ------------------------------------------------------------------ */
+
+    /** The shell gives the kid's own pet a menu — and an egg none. */
+    public function test_the_kids_pet_has_a_menu_on_their_pages_and_an_egg_does_not(): void
+    {
+        $this->outOn($this->kid, $this->pet('Fetcher', ['pet_rarity' => 'rare', 'pet_knack' => 'fetch']), 12);
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        $this->get(route('kid.home'))
+            ->assertOk()
+            ->assertSee('menu="'.$this->kid->id.'"', false)
+            ->assertSee('data-pet-menu', false)
+            ->assertSee('data-pet-menu-tuck', false);
+
+        $inside = $this->pet('Inside', ['stock' => 'egg']);
+        // The page above read the catalogue before this egg was in it.
+        app(CosmeticService::class)->forget();
+        app(PetService::class)->buyEgg($this->kid->fresh(), $inside);
+        app()->forgetScopedInstances();
+
+        $this->get(route('kid.home'))
+            ->assertOk()
+            ->assertDontSee('menu="'.$this->kid->id.'"', false)
+            ->assertDontSee('data-pet-menu', false);
+    }
+
+    public function test_the_pet_menu_sells_a_power_treat_on_the_spot(): void
+    {
+        $this->outOn($this->kid, $this->pet('Fetcher', ['pet_rarity' => 'rare', 'pet_knack' => 'fetch']), 12);
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        Volt::test('pet-menu')
+            ->assertSee('data-pet-menu-page', false)
+            ->assertSee('Power Treat · 2 ✦')
+            ->assertSee('For Fetch.')
+            ->call('buyTreat')
+            ->assertDispatched('fq-pet-treat')
+            ->assertDispatched('pet-treat-bought');
+
+        $this->assertSame(1, PetTreat::count());
+        $this->assertSame(98, $this->kid->fresh()->bonus_tickets);
+
+        // Short of tickets: said in the menu, nothing bought.
+        $this->kid->update(['bonus_tickets' => 1]);
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        Volt::test('pet-menu')
+            ->assertSee('1 more ticket and Fetcher can have one.')
+            ->call('buyTreat')
+            ->assertSee('Not enough tickets for a Power Treat yet.')
+            ->assertNotDispatched('fq-pet-treat');
+
+        $this->assertSame(1, PetTreat::count());
+    }
+
+    /** No treat to sell for a Common or a Tip Jar, and no link to the page they are on. */
+    public function test_the_pet_menu_only_offers_what_this_pet_can_use(): void
+    {
+        $this->outOn($this->kid, $this->pet('Plain'), 12);
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        Volt::test('pet-menu', ['onPetsPage' => true])
+            ->assertDontSee('data-pet-menu-treat', false)
+            ->assertDontSee('data-pet-menu-page', false)
+            ->assertSee('data-pet-menu-tuck', false);
+
+        $this->outOn($this->kid, $this->pet('Tipper', ['pet_rarity' => 'legendary', 'pet_knack' => 'tip_jar']), 30);
+        Auth::guard('profile')->login($this->kid->fresh());
+
+        Volt::test('pet-menu')->assertDontSee('data-pet-menu-treat', false);
+    }
+
+    public function test_a_grown_up_has_no_pet_menu(): void
+    {
+        Auth::guard('profile')->login($this->parent);
+
+        Volt::test('pet-menu')->assertForbidden();
+    }
+
+    /** Out of uses on a spin the pet could help with: the treat is sold beside the wheel. */
+    public function test_a_treat_is_offered_by_the_wheel_when_the_perk_has_run_out(): void
+    {
+        $this->outOn($this->kid, $this->pet('Looker', ['pet_rarity' => 'epic', 'pet_knack' => 'second_look']), 30);
+        $this->spunWheel();
+        $kid = $this->kid->fresh();
+
+        $this->assertFalse($this->knacks()->treatWouldHelp($kid), 'It has a use left — nothing to sell.');
+
+        // Its week's use, spent on an earlier spin.
+        $this->knacks()->use($kid, PetKnack::SecondLook);
+        $this->assertTrue($this->knacks()->treatWouldHelp($kid->fresh()));
+
+        Auth::guard('profile')->login($kid->fresh());
+
+        Volt::test('kid.quests')
+            ->assertDontSee('data-fq-knack-offer="second_look"', false)
+            ->assertSee('data-wheel-treat="second_look"', false)
+            ->assertSee('is out of Second Look for now.')
+            ->call('buyTreat')
+            ->assertDispatched('fq-pet-treat')
+            ->assertDontSee('data-wheel-treat=', false)
+            ->assertSee('data-fq-knack-offer="second_look"', false)
+            ->assertSee('data-knack-spends-treat', false);
+
+        $this->assertSame(1, PetTreat::count());
+    }
+
+    /** Nothing to sell when a treat would not help: no spin, the wrong boost, or a claimed chore. */
+    public function test_no_treat_is_offered_by_the_wheel_when_it_would_not_help(): void
+    {
+        $this->outOn($this->kid, $this->pet('Fetcher', ['pet_rarity' => 'rare', 'pet_knack' => 'fetch']), 30);
+        $kid = $this->kid->fresh();
+        $this->knacks()->use($kid, PetKnack::Fetch);
+
+        $this->assertFalse($this->knacks()->treatWouldHelp($kid), 'No spin yet.');
+
+        [, $spin] = $this->spunWheel();
+        $this->assertFalse($this->knacks()->treatWouldHelp($kid->fresh()), 'Fetch only re-rolls a 2x.');
+
+        $spin->update(['multiplier' => 2]);
+        $this->assertTrue($this->knacks()->treatWouldHelp($kid->fresh()));
+
+        app(ChoreService::class)->claim($kid->fresh(), $spin->chore);
+        app(ChoreService::class)->forgetBoards();
+        $this->assertFalse($this->knacks()->treatWouldHelp($kid->fresh()), 'The spun chore is already handed in.');
+    }
+
+    /** Sure Paw's own use points once a spin, so the treat is offered for a second go even with a use in hand. */
+    public function test_a_treat_is_offered_for_another_sure_paw_on_the_same_spin(): void
+    {
+        $this->outOn($this->kid, $this->pet('Pointer', ['pet_rarity' => 'legendary', 'pet_knack' => 'sure_paw']), 30);
+        $this->spunWheel();
+        $kid = $this->kid->fresh();
+
+        $this->assertFalse($this->knacks()->treatWouldHelp($kid));
+
+        $this->knacks()->surePaw($kid, $this->knacks()->pawTargets($kid)->first()->id);
+
+        $this->assertSame(1, $this->knacks()->stateFor($kid->fresh())['left'], 'A grown pet has its second use of the week.');
+        $this->assertTrue($this->knacks()->treatWouldHelp($kid->fresh()));
+
+        Auth::guard('profile')->login($kid->fresh());
+        Volt::test('kid.quests')->assertSee('has used Sure Paw on this spin.');
+
+        $this->knacks()->buyTreat($kid->fresh());
+        $this->assertFalse($this->knacks()->treatWouldHelp($kid->fresh()), 'The treat is banked — the offer itself is back.');
+        $this->assertNotNull($this->knacks()->pawTargets($kid->fresh()));
     }
 }

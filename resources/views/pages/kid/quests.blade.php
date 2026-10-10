@@ -677,6 +677,26 @@ new class extends Component
     }
 
     /**
+     * A Power Treat bought beside the wheel, when the pet could help with this
+     * spin and has run out — see KnackService::treatWouldHelp(). The pet eats
+     * it, and the offer it pays for is on the page when this draws again.
+     */
+    public function buyTreat(): void
+    {
+        try {
+            app(KnackService::class)->buyTreat($this->profile);
+        } catch (InsufficientTicketsException|PerkUnavailableException $e) {
+            $this->perkMessage = $e instanceof InsufficientTicketsException ? 'Not enough tickets for a Power Treat yet.' : $e->getMessage();
+
+            return;
+        }
+
+        $this->profile->refresh();
+        $this->perkMessage = null;
+        $this->dispatch('fq-pet-treat');
+    }
+
+    /**
      * The pet's Second Look: today's spin cleared and the wheel back to the
      * top, the same as the respin perk leaves it, ready for another spin.
      */
@@ -1181,6 +1201,10 @@ new class extends Component
             // A young pet's nudge, to keep or put back.
             'nudged' => $knack && ! $this->spinning ? $knacks->nudgedToday($this->profile) : null,
             'secondLookOffer' => $knack && ! $this->spinning && $this->spinRevealed && $knacks->secondLookable($this->profile),
+            // Out of uses on a spin it could help with: what a treat costs, to sell one here.
+            'wheelTreat' => $knack && ! $this->spinning && $this->spinRevealed && $knacks->treatWouldHelp($this->profile)
+                ? $knacks->treatPrice($this->profile, $knack['knack'])
+                : null,
             // Lucky Tail waiting to charge the spin, and whether it charged this one.
             'luckyTail' => $knack && ! $this->spinRevealed && ! $this->spinning ? $knacks->luckyTailReady($this->profile) : null,
             'luckyTailBoost' => $boost !== null && $knacks->luckyTailOn($boost),
@@ -1543,6 +1567,7 @@ new class extends Component
                             action="useFetch"
                             :left="$knack['left']"
                             :uses="$knack['uses']"
+                            :treats="$knack['treats']"
                             :act="[['sniff', 0.6], ['jump', 0.4], ['happy', 1.2]]"
                             class="max-w-[300px]"
                         />
@@ -1572,6 +1597,7 @@ new class extends Component
                             :choices="$nudgeChoices"
                             :left="$knack['left']"
                             :uses="$knack['uses']"
+                            :treats="$knack['treats']"
                             :act="[['crouch', 0.3], ['swipe', 0.7], ['happy', 1]]"
                             class="max-w-[300px]"
                         />
@@ -1593,6 +1619,7 @@ new class extends Component
                             :choices="$pawTargets->map(fn ($chore) => [$chore->name, $chore->id])->all()"
                             :left="$knack['left']"
                             :uses="$knack['uses']"
+                            :treats="$knack['treats']"
                             :act="[['crouch', 0.3], ['swipe', 0.7], ['happy', 1]]"
                             class="max-w-[300px]"
                         />
@@ -1622,9 +1649,35 @@ new class extends Component
                             action="useSecondLook"
                             :left="$knack['left']"
                             :uses="$knack['uses']"
+                            :treats="$knack['treats']"
                             :act="[['jump', 0.4], ['swipe', 0.6], ['happy', 1]]"
                             class="max-w-[300px]"
                         />
+                    @endif
+
+                    {{-- The pet could help with this spin and has run out: a
+                         Power Treat, sold here rather than a page away. Buying
+                         one brings the offer above back. --}}
+                    @if ($wheelTreat !== null)
+                        <div class="flex w-full max-w-[300px] flex-col gap-[6px] rounded-[12px] border border-dashed border-fq-gold px-[12px] py-[9px] text-left" data-wheel-treat="{{ $knack['knack']->value }}">
+                            <span class="text-[12.5px] text-pretty text-fq-text-2">
+                                <i class="fa-solid {{ $knack['knack']->icon() }} mr-[3px] text-[12px] text-fq-gold"></i><strong>{{ $knack['pet']->name }}</strong>
+                                {{ $knack['left'] > 0 ? 'has used '.$knack['knack']->label().' on this spin.' : 'is out of '.$knack['knack']->label().' for now.' }}
+                                A Power Treat gets you one more.
+                            </span>
+                            <button
+                                type="button"
+                                wire:click="buyTreat"
+                                wire:confirm="Give {{ $knack['pet']->name }} a Power Treat for {{ $wheelTreat }} {{ Str::plural('ticket', $wheelTreat) }}? You'd have {{ $profile->bonus_tickets - $wheelTreat }} left."
+                                @disabled($profile->bonus_tickets < $wheelTreat)
+                                class="flex items-center justify-center gap-[6px] rounded-[10px] px-[10px] py-[8px] font-baloo text-[13px] font-extrabold disabled:opacity-40"
+                                style="background: linear-gradient(150deg,#fff6b0,#ffc93d); color: #1a1200"
+                                data-wheel-treat-buy
+                            ><i class="fa-solid fa-cookie-bite"></i>Power Treat · {{ $wheelTreat }} ✦</button>
+                            @if ($profile->bonus_tickets < $wheelTreat)
+                                <span class="text-[10.5px] text-fq-text-4">{{ $wheelTreat - $profile->bonus_tickets }} more {{ Str::plural('ticket', $wheelTreat - $profile->bonus_tickets) }} and you can.</span>
+                            @endif
+                        </div>
                     @endif
                 </div>
 
@@ -2123,6 +2176,7 @@ new class extends Component
                     action="useSniffer"
                     :left="$knack['left']"
                     :uses="$knack['uses']"
+                    :treats="$knack['treats']"
                     :act="[['sniff', 1.4], ['sniff', 0.8], ['happy', 1]]"
                 />
             @endif
@@ -2139,6 +2193,7 @@ new class extends Component
                     action="useCharm"
                     :left="$knack['left']"
                     :uses="$knack['uses']"
+                    :treats="$knack['treats']"
                     :act="[['sit', 0.8], ['jump', 0.4], ['happy', 1]]"
                 />
             @endif

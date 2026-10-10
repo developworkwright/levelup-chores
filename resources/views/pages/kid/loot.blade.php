@@ -338,6 +338,7 @@ new class extends Component
             action="useDigger"
             :left="$digger['left']"
             :uses="$digger['uses']"
+            :treats="$digger['treats']"
             :act="[['sniff', 0.6], ['swipe', 0.4], ['swipe', 0.4], ['happy', 1]]"
             class="mt-3"
         />

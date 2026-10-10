@@ -963,6 +963,15 @@
             {{-- A tap on nothing in particular drops a snack there. Buttons,
                  links and anything else tappable keep their taps. --}}
             feed-on-tap
+            {{-- A tap on the pet itself pets it and pops its menu up — the
+                 pets page, a Power Treat, tucking it in. Whose pet it is, so
+                 a tucked-in pet is one kid's and not the whole tablet's. Never
+                 an egg: there is nothing to manage yet. --}}
+            @if (! isset($ownPet['egg'])) menu="{{ $profile->id }}" @endif
         ></fq-pets>
+
+        @if (! isset($ownPet['egg']))
+            <livewire:pet-menu :on-pets-page="$active === 'pets'" wire:key="pet-menu" />
+        @endif
     @endif
 </div>

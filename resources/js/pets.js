@@ -214,6 +214,34 @@ function eggSvg(cracks, hue, pattern) {
 }
 
 /** A URL, safe inside a CSS url("..."). See cosmetic-elements.js for why not encodeURI. */
+/**
+ * Tucked in: a kid put their pet to sleep from its menu because it was in the
+ * way. Kept in this browser, per kid, and only for the day it was done on —
+ * tomorrow it is up again without anybody having to remember to wake it.
+ * Nothing on the server knows; like feeding, it is play.
+ */
+function tuckedKey(kid) {
+    return `fq-pet-tucked-${kid}`;
+}
+
+function tuckedIn(kid) {
+    try {
+        return localStorage.getItem(tuckedKey(kid)) === new Date().toDateString();
+    } catch {
+        return false;
+    }
+}
+
+function tuckIn(kid, tucked) {
+    try {
+        tucked
+            ? localStorage.setItem(tuckedKey(kid), new Date().toDateString())
+            : localStorage.removeItem(tuckedKey(kid));
+    } catch {
+        // Private mode: it sleeps until the page changes, and that is fine.
+    }
+}
+
 function cssUrl(src) {
     return String(src).replace(/["\\]/g, (character) => '\\' + character).replace(/[\r\n]/g, '');
 }
@@ -640,7 +668,9 @@ class Pet {
             }
         }
 
-        if (world.asleep) {
+        // A visitor on its way out keeps walking: it was sent home because the
+        // kid tucked their own pet in, and must not lie down in the doorway.
+        if (world.asleep && ! this.leaving) {
             if (this.state !== 'sleeping' && this.state !== 'happy') {
                 // Bedtime in its own bed, when it has one; anywhere, when not.
                 if (world.bed && ! this.visiting) {
@@ -1579,6 +1609,7 @@ class FqPets extends HTMLElement {
         // A Power Treat bought on the Pets page — see KnackService::buyTreat().
         this.onTreat = () => this.feed(undefined, true);
         this.onTap = (event) => this.feedAt(event);
+        this.onTuck = (event) => this.tuck(Boolean(event.detail?.tucked));
         this.onGear = (event) => this.takeGear(event.detail?.gear);
         this.onTry = (event) => this.tryOn(event.detail ?? null);
         this.onScroll = () => {
@@ -1630,6 +1661,7 @@ class FqPets extends HTMLElement {
         window.addEventListener('fq-pet-treat', this.onTreat);
         window.addEventListener('fq-pet-gear', this.onGear);
         window.addEventListener('fq-pet-try', this.onTry);
+        window.addEventListener('fq-pet-tuck', this.onTuck);
         document.addEventListener('click', this.onTap);
         window.addEventListener('scroll', this.onScroll, { passive: true });
         document.addEventListener('visibilitychange', this.onVisible);
@@ -1645,6 +1677,7 @@ class FqPets extends HTMLElement {
         window.removeEventListener('fq-pet-treat', this.onTreat);
         window.removeEventListener('fq-pet-gear', this.onGear);
         window.removeEventListener('fq-pet-try', this.onTry);
+        window.removeEventListener('fq-pet-tuck', this.onTuck);
         document.removeEventListener('click', this.onTap);
         window.removeEventListener('scroll', this.onScroll);
         document.removeEventListener('visibilitychange', this.onVisible);
@@ -1664,7 +1697,7 @@ class FqPets extends HTMLElement {
         }
 
         if (this.world) {
-            this.world.asleep = this.hasAttribute('asleep');
+            this.world.asleep = this.sleepy();
             this.syncToy();
             this.syncBed();
         }
@@ -1758,7 +1791,9 @@ class FqPets extends HTMLElement {
         return [
             egg !== null ? { egg, hue: parseInt(this.getAttribute('egg-hue'), 10), pattern: this.getAttribute('egg-pattern'), scale: parseFloat(this.getAttribute('scale')) || 1 } : null,
             egg === null && mine ? { src: mine, rig: read('rig'), effect: this.getAttribute('effect'), scale: parseFloat(this.getAttribute('scale')) || 1 } : null,
-            visitor && visitor.src ? { ...visitor, visiting: true } : null,
+            // Nobody comes round while the kid's own pet is tucked in: a pet
+            // put to bed for being distracting is not helped by a second one.
+            visitor && visitor.src && ! tuckedIn(this.menuFor()) ? { ...visitor, visiting: true } : null,
         ].filter(Boolean);
     }
 
@@ -1853,8 +1888,9 @@ class FqPets extends HTMLElement {
 
         root.append(style);
 
+        this.tucked = Boolean(this.menuFor()) && tuckedIn(this.menuFor());
         this.world = new World(this);
-        this.world.asleep = this.hasAttribute('asleep');
+        this.world.asleep = this.sleepy();
         // Knacks are offered on a kid's own pages only — never on the login
         // door, and never a grown-up's (who has none).
         this.world.offers = this.hasAttribute('feed-on-tap') && ! this.sheets();
@@ -2138,6 +2174,45 @@ class FqPets extends HTMLElement {
         this.paint();
     }
 
+    /**
+     * Whether the pets here should be asleep: it is bedtime (`asleep`, the
+     * server's call), or the kid tucked theirs in from its menu.
+     */
+    sleepy() {
+        return this.hasAttribute('asleep') || this.tucked;
+    }
+
+    /**
+     * The kid's own pet has a menu — the pets page, a Power Treat, tucking it
+     * in. Only the shell's layer (`menu`, holding the kid's id): not the login
+     * door, not a pet being tried out, not a grown-up's.
+     */
+    menuFor() {
+        return this.getAttribute('menu');
+    }
+
+    /** Tucked in or woken up, from the menu. */
+    tuck(tucked) {
+        if (! this.menuFor() || ! this.world) {
+            return;
+        }
+
+        tuckIn(this.menuFor(), tucked);
+        this.tucked = tucked;
+        this.world.asleep = this.sleepy();
+
+        if (! this.world.asleep) {
+            this.world.pets.forEach((pet) => pet.act('happy', 'happy', 1.2));
+        } else {
+            // A sibling's pet visiting goes home, rather than bedding down here.
+            this.world.pets.filter((pet) => pet.visiting && ! pet.leaving).forEach((pet) => pet.leave());
+        }
+
+        this.syncToy();
+        this.syncBed();
+        this.paint();
+    }
+
     /** Whether this layer is the login door's row of pets. */
     sheets() {
         return this.hasAttribute('sheets');
@@ -2199,6 +2274,19 @@ class FqPets extends HTMLElement {
 
             if (! moved) {
                 thing.pet ? thing.pet() : null;
+
+                // The kid's own pet, on their own pages: its menu pops up over
+                // its head. See resources/views/livewire/pet-menu.blade.php.
+                if (thing instanceof Pet && ! thing.visiting && this.menuFor()) {
+                    const box = sprite.getBoundingClientRect();
+
+                    this.world.emit('fq-pet-menu', {
+                        x: box.left + box.width / 2,
+                        y: box.top,
+                        tucked: this.tucked,
+                        bedtime: this.hasAttribute('asleep'),
+                    });
+                }
             } else if (thing.held) {
                 thing.drop ? thing.drop() : (thing.held = false);
             }

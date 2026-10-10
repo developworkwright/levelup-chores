@@ -14,6 +14,8 @@
      `offer` is the line, `question` the confirm, `yes` its button. `choices`
      swaps the one yes for several — [label, argument] pairs, each calling the
      action with its argument — which is how a grown Paw Nudge asks which way.
+     `treats` is how many Power Treats are banked: when the pet's own uses are
+     gone the confirm says this one spends a treat, since a treat cost tickets.
      `save` is the button that puts the offer away without spending anything;
      the wheel's offers say what it is being saved for. --}}
 @props([
@@ -24,6 +26,7 @@
     'yes',
     'action',
     'left' => null,
+    'treats' => 0,
     'uses' => null,
     'act' => [['happy', 1.2]],
     'choices' => null,
@@ -61,8 +64,13 @@
     >
         <p class="font-baloo text-[16px] leading-tight font-extrabold">🐾 {{ $question }}</p>
 
-        @if ($left !== null && $uses !== null)
-            <p class="text-[11.5px] text-fq-text-4">You have {{ $left }} of {{ $uses }} left — it comes back on its own.</p>
+        @if ($left !== null && $treats > 0 && $left <= $treats)
+            {{-- The pet's own uses go first (KnackService::use()), so this one is a treat's. --}}
+            <p class="text-[11.5px] font-bold text-fq-gold" data-knack-spends-treat>
+                <i class="fa-solid fa-cookie-bite mr-[3px]"></i>This will use up a Power Treat — you have {{ $treats }}. The free ones from {{ $pet }} are all used.
+            </p>
+        @elseif ($left !== null && $uses !== null)
+            <p class="text-[11.5px] text-fq-text-4">You have {{ $left - $treats }} of {{ $uses }} left — it comes back on its own.@if ($treats > 0) Your Power {{ Str::plural('Treat', $treats) }} {{ $treats === 1 ? 'stays' : 'stay' }} saved. @endif</p>
         @endif
 
         <div class="flex flex-wrap gap-[8px]">

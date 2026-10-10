@@ -558,6 +558,17 @@ class KnackService
             return null;
         }
 
+        return $this->nudgeWays($kid, $spin);
+    }
+
+    /**
+     * The chores a nudge could land on from this spin, either way round —
+     * whether or not the pet has a nudge to spend on it.
+     *
+     * @return array{left: ?Chore, right: ?Chore}|null
+     */
+    private function nudgeWays(Profile $kid, Spin $spin): ?array
+    {
         $wheel = app(SpinService::class)->eligibleChoresFor($kid)->values();
         $at = $wheel->search(fn (Chore $chore) => $chore->id === $spin->chore_id);
 
@@ -847,19 +858,13 @@ class KnackService
             return null;
         }
 
-        $pointed = PetKnackUse::where('profile_id', $kid->id)
-            ->where('knack', PetKnack::SurePaw->value)
-            ->where('payload->spin_id', $spin->id)
-            ->count();
+        $pointed = $this->pointedOn($kid, $spin);
 
         if ($pointed > 0 && $this->stateFor($kid)['treats'] < 1) {
             return null;
         }
 
-        $chores = app(ChoreService::class);
-        $wheel = app(SpinService::class)->eligibleChoresFor($kid)
-            ->filter(fn (Chore $chore) => $chore->id !== $spin->chore_id && $chores->stateFor($kid, $chore) === 'ready')
-            ->values();
+        $wheel = $this->pawWheel($kid, $spin);
 
         if ($wheel->isEmpty()) {
             return null;
@@ -875,6 +880,65 @@ class KnackService
             ->sortBy(fn (Chore $chore) => crc32($spin->id.':'.$pointed.':'.$chore->id))
             ->take(PetKnack::PAW_PICKS_YOUNG)
             ->values();
+    }
+
+    /** How many times Sure Paw has already moved this spin's boost. */
+    private function pointedOn(Profile $kid, Spin $spin): int
+    {
+        return PetKnackUse::where('profile_id', $kid->id)
+            ->where('knack', PetKnack::SurePaw->value)
+            ->where('payload->spin_id', $spin->id)
+            ->count();
+    }
+
+    /**
+     * Every chore on the wheel the boost could be moved to: still there to
+     * do, and not the one carrying it.
+     *
+     * @return Collection<int, Chore>
+     */
+    private function pawWheel(Profile $kid, Spin $spin): Collection
+    {
+        $chores = app(ChoreService::class);
+
+        return app(SpinService::class)->eligibleChoresFor($kid)
+            ->filter(fn (Chore $chore) => $chore->id !== $spin->chore_id && $chores->stateFor($kid, $chore) === 'ready')
+            ->values();
+    }
+
+    /**
+     * Whether a Power Treat is the only thing between the pet and helping
+     * with the spin on the wheel right now: its knack is a wheel one, the spin
+     * is one it could act on, and it has simply run out. What puts the treat
+     * button beside the wheel, where the kid wants it, instead of leaving
+     * them to guess that the Pets page sells one.
+     *
+     * Lucky Tail is a wheel knack too, but it charges a spin before it is
+     * spun and by itself — there is no moment to offer a treat for it here.
+     */
+    public function treatWouldHelp(Profile $kid): bool
+    {
+        $state = $this->stateFor($kid);
+        $spin = $state !== null && $state['left'] !== null && $state['knack']->takesTreat() ? $this->openSpin($kid) : null;
+
+        if ($spin === null) {
+            return false;
+        }
+
+        $out = $state['left'] < 1;
+
+        return match ($state['knack']) {
+            PetKnack::Fetch => $out && $spin->multiplier === 2,
+            PetKnack::SecondLook => $out,
+            PetKnack::PawNudge => $out
+                && ($this->nudgedToday($kid)['spin_id'] ?? null) !== $spin->id
+                && $this->nudgeWays($kid, $spin) !== null,
+            // Its own uses point once a spin; a treat is what points again.
+            PetKnack::SurePaw => $state['treats'] < 1
+                && ($out || $this->pointedOn($kid, $spin) > 0)
+                && $this->pawWheel($kid, $spin)->isNotEmpty(),
+            default => false,
+        };
     }
 
     /**
