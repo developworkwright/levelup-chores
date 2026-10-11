@@ -2,8 +2,10 @@
 
 use App\Enums\AccentColor;
 use App\Enums\ProfileRole;
+use App\Enums\PetStage;
 use App\Models\Profile;
 use App\Services\CosmeticService;
+use App\Services\PetService;
 use App\Services\StreakService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
@@ -97,8 +99,8 @@ new class extends Component
             // row's width rather than a pixel count, so each pen still lines up
             // with its kid's tile however the row wraps.
             // Each at its own kid's stage, so a baby looks like one here too.
-            'pets' => collect($kids)
-                ->map(fn (Profile $kid) => app(App\Services\PetService::class)->spriteFor($kid))
+            'pets' => $pets = collect($kids)
+                ->map(fn (Profile $kid) => app(PetService::class)->spriteFor($kid))
                 ->map(fn (?array $pet, int $index) => $pet === null ? null : [
                     ...$pet,
                     'home' => round(($index + 0.5) / max(1, count($kids)), 4),
@@ -113,6 +115,9 @@ new class extends Component
                 ])
                 ->filter()
                 ->values(),
+            // How tall the strip under the tiles has to be for the biggest
+            // animal out to stand in it without its head reaching a name plate.
+            'petPenHeight' => (int) ceil($pets->max('scale') * PetStage::ENGINE_BOX) + 8,
             'parents' => Profile::query()
                 ->where('role', ProfileRole::Parent)
                 ->orderBy('id')
@@ -134,17 +139,31 @@ new class extends Component
         <p class="font-baloo text-xl font-bold text-fq-text-3">Select your avatar</p>
     </div>
 
-    {{-- The pets, one per kid who has one out, each penned around its own tile
+    {{-- The pets, one per kid who has one out, each penned under its own tile
          so the row reads as one animal per child. Petting works; dragging does
          not — this page is public, and a stranger who found the URL should not
          be able to rearrange the family's pets.
 
          `home` is a fraction of the row's width rather than a pixel, so the
-         pens still line up with the tiles when the row wraps on a phone. --}}
-    <div class="relative flex flex-wrap justify-center gap-x-[14px] gap-y-4">
+         pens still line up with the tiles when the row wraps on a phone.
+
+         The pets stand in a strip of padding below the tiles rather than on
+         the row itself: the layer's floor is its own bottom edge, and with the
+         layer laid over the row alone the animals stood on the name plates and
+         covered the tiles a kid was trying to tap. The strip is as tall as the
+         biggest pet out, and grows with the window exactly as the layer's own
+         zoom does — see screenZoom() in pets.js. --}}
+    <div
+        class="relative"
+        @if ($pets->isNotEmpty())
+            style="padding-bottom: clamp({{ $petPenHeight }}px, {{ round($petPenHeight / 9, 2) }}vw, {{ (int) ceil($petPenHeight * 1.6) }}px)"
+        @endif
+    >
         @if ($pets->isNotEmpty())
             <fq-pets sheets="{{ $pets->toJson(JSON_UNESCAPED_SLASHES) }}"></fq-pets>
         @endif
+
+    <div class="flex flex-wrap justify-center gap-x-[14px] gap-y-4">
 
         @foreach ($kids as $i => $kid)
             @php
@@ -231,6 +250,7 @@ new class extends Component
                 @endif
             </a>
         @endforeach
+    </div>
     </div>
 
     @if ($parents->isNotEmpty())

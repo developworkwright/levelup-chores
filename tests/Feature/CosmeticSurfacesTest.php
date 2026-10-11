@@ -190,13 +190,17 @@ class CosmeticSurfacesTest extends TestCase
         $this->assertSame(2, substr_count($html, '&quot;toy&quot;:true'));
         // And nothing can be dragged about on a page anybody can open.
         $this->assertStringNotContainsString('<fq-pets drag', $html);
+        // They stand in a strip below the tiles, tall enough for a baby.
+        $this->assertStringContainsString('padding-bottom: clamp(89px, 9.89vw, 143px)', $html);
     }
 
     public function test_the_door_has_no_pet_layer_when_nobody_has_one_out(): void
     {
         Profile::factory()->for($this->household)->create(['name' => 'Westin']);
 
-        Volt::test('login')->assertDontSee('<fq-pets', false);
+        Volt::test('login')
+            ->assertDontSee('<fq-pets', false)
+            ->assertDontSee('padding-bottom', false);
     }
 
     public function test_a_kids_own_pet_is_on_every_page_of_theirs_and_can_be_dragged(): void
