@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\ArcadeGame;
+use App\Enums\PetStyle;
 use App\Models\ArcadeScore;
 use App\Models\Household;
 use App\Models\Profile;
@@ -93,7 +94,7 @@ class ArcadePenguinTest extends TestCase
     public function test_the_board_measures_the_run_in_metres(): void
     {
         /*
-         * Score *is* distance here and nothing else adds to it — rings, mines
+         * Score *is* distance here and nothing else adds to it — rings, seals
          * and power-ups are worth having because they carry the penguin
          * further, never because they pay points. That is what keeps this board
          * impossible to farm, and it is only true while the word under the
@@ -289,6 +290,28 @@ class ArcadePenguinTest extends TestCase
             "/wake\(\) \{\s*(\/\/[^\n]*\n\s*)*if \(localStorage\.getItem\('fq-muted'\) === '1'\)/",
             $source,
             'penguin-launch.js no longer checks the mute toggle in its audio gateway.'
+        );
+    }
+
+    public function test_the_ice_has_seals_on_it_and_no_mines(): void
+    {
+        /*
+         * The mine became a seal in a later drop of the artwork, with the same
+         * radius and the same pop, so nothing about a run changed but what the
+         * kid is looking at. A half-applied swap is the failure worth catching:
+         * an item spawned as one kind and collided or drawn as the other is a
+         * rescue that sits on the ice and does nothing.
+         */
+        $source = file_get_contents(resource_path('js/penguin-launch.js'));
+
+        $this->assertDoesNotMatchRegularExpression('/mine/i', $source);
+        $this->assertStringContainsString("kind: 'seal'", $source);
+        $this->assertStringContainsString('const SEAL_R = 17;', $source);
+        $this->assertStringContainsString('const SEAL_POP = 700;', $source);
+
+        $this->assertStringContainsString(
+            'rings and seals bigger',
+            ArcadeGame::PenguinLaunch->styleHelp(PetStyle::Big),
         );
     }
 

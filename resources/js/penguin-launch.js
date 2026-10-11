@@ -5,7 +5,7 @@
  * build step, mounted exactly like `ball-pit.js` and `grand-tour.js`.
  *
  * You are the penguin. Haul yourself back into the sling, let go, and get as
- * far across the ice as you can. Rings boost you, mines pop you back into the
+ * far across the ice as you can. Rings boost you, seals bounce you back into the
  * air, and the run ends when you finally slide to a stop.
  *
  * DELIBERATELY BALLISTIC — there is no button in the air.
@@ -92,7 +92,7 @@ const DEAD_TIME = 0.45;
  * it. This is the reward for landing shallow: hitting a slick flat and fast
  * turns the ground itself into a boost, and the run keeps building after the
  * arc is spent. Friction nearly vanishes on it, so it also carries a dying
- * slide far enough to reach the next ring arc or mine.
+ * slide far enough to reach the next ring arc or seal.
  *
  * SLICK_MAX caps what the ice alone can give you — past that you have to earn
  * speed in the air.
@@ -107,19 +107,19 @@ const RING_BOOST = 1.11;
 const RING_CHAIN_MAX = 1.5;
 const CHAIN_WINDOW = 1.4;
 
-/** Mines are a pure rescue — a big pop upward, no cost, always good to hit. */
-const MINE_R = 17;
-const MINE_POP = 700;
+/** Seals are a pure rescue — a big pop upward, no cost, always good to hit. */
+const SEAL_R = 17;
+const SEAL_POP = 700;
 
 /*
  * A pet's style on the ice — see PenguinLaunch. How much of the speed a rough
  * landing costs a Steady pet's penguin; how much bigger a Big pet makes rings
- * and mines; how much harder a Quick pet's sling fires.
+ * and seals; how much harder a Quick pet's sling fires.
  */
 const STEADY_LANDING = 0.5;
 const BIG_REACH = 1.6;
 const QUICK_SLING = 1.06;
-/** A Lucky pet's pop, as a share of a mine's: a rescue, not a jackpot. */
+/** A Lucky pet's pop, as a share of a seal's: a rescue, not a jackpot. */
 const LUCKY_POP = 0.6;
 
 /** Power-ups, both timed. */
@@ -251,8 +251,8 @@ const Sfx = {
         this.tone(560 + n * 90, 0.13, 0.1, 1180 + n * 120);
     },
 
-    mine() {
-        this.tone(140, 0.26, 0.14, 640, 'square');
+    seal() {
+        this.tone(520, 0.18, 0.14, 260, 'triangle');
     },
 
     pickup() {
@@ -278,7 +278,7 @@ class PenguinLaunch {
      * ArcadeGame::styleHelp() for what the kid is told each one does here:
      *
      *   steady  a rough landing costs STEADY_LANDING as much speed
-     *   big     rings and mines BIG_REACH bigger — drawn bigger and hit bigger
+     *   big     rings and seals BIG_REACH bigger — drawn bigger and hit bigger
      *   quick   the sling fires QUICK_SLING as hard
      *   lucky   the first time the run would end, a pop back into the air
      */
@@ -313,7 +313,7 @@ class PenguinLaunch {
         this.metres = 0;
         this.milestone = 0;
         this.rings = 0;
-        this.mines = 0;
+        this.seals = 0;
         this.chain = 0;
         this.chainAt = -99;
         this.balloon = 0;
@@ -756,7 +756,7 @@ class PenguinLaunch {
 
     /**
      * A Lucky pet's catch: the first time the slide dies, a pop back into
-     * the air — a mine's worth, from nowhere — and the run carries on.
+     * the air — a seal's worth, from nowhere — and the run carries on.
      *
      * @returns {boolean} whether it caught this one
      */
@@ -767,11 +767,11 @@ class PenguinLaunch {
 
         this.caught = true;
         this.still = 0;
-        this.vy = -MINE_POP * LUCKY_POP;
+        this.vy = -SEAL_POP * LUCKY_POP;
         this.vx = Math.max(this.vx, 160);
         this.grounded = false;
         this.shake = 0.4;
-        Sfx.mine();
+        Sfx.seal();
         this.burst(this.x, this.y, 16, GOLD);
         this.flash = { t: 0.9, text: '🐾 LUCKY!' };
 
@@ -848,10 +848,10 @@ class PenguinLaunch {
 
                 this.frontier = x + n * 88 + 200;
             } else if (roll < 0.66) {
-                // Mines sit ON the ice, so they catch a dying run.
+                // Seals sit ON the ice, so they catch a dying run.
                 const mx = x + 60;
 
-                this.items.push({ kind: 'mine', x: mx, y: terrainY(mx) - MINE_R + 4, gone: false });
+                this.items.push({ kind: 'seal', x: mx, y: terrainY(mx) - SEAL_R + 4, gone: false });
                 this.frontier = x + 320 + Math.random() * 240;
             } else if (roll < 0.82) {
                 const w = 260 + Math.random() * 260;
@@ -890,7 +890,7 @@ class PenguinLaunch {
                 continue;
             }
 
-            // The magnet only reaches rings — a magnet that dragged mines to
+            // The magnet only reaches rings — a magnet that dragged seals to
             // you would be a punishment dressed as a power-up.
             if (this.magnet > 0 && it.kind === 'ring') {
                 const dx = this.x - it.x;
@@ -903,7 +903,7 @@ class PenguinLaunch {
                 }
             }
 
-            const reach = (it.kind === 'ring' ? RING_R : MINE_R + 4) * (this.style === 'big' ? BIG_REACH : 1);
+            const reach = (it.kind === 'ring' ? RING_R : SEAL_R + 4) * (this.style === 'big' ? BIG_REACH : 1);
 
             if (Math.hypot(this.x - it.x, this.y - it.y) > reach + PENGUIN_R - 6) {
                 continue;
@@ -924,16 +924,16 @@ class PenguinLaunch {
                 this.burst(it.x, it.y, 10, GOLD);
                 this.shocks.push({ x: it.x, y: it.y, r: RING_R, grow: 260, life: 0.36, col: CORAL, w: 5 });
                 this.flash = { t: 0.4, text: this.chain > 1 ? 'RING \u00d7' + this.chain : 'RING' };
-            } else if (it.kind === 'mine') {
-                this.mines += 1;
-                this.vy = -MINE_POP;
+            } else if (it.kind === 'seal') {
+                this.seals += 1;
+                this.vy = -SEAL_POP;
                 this.grounded = false;
                 this.shake = 0.5;
-                Sfx.mine();
+                Sfx.seal();
                 this.spray(700);
                 this.burst(it.x, it.y, 18, CORAL);
-                this.shocks.push({ x: it.x, y: it.y, r: MINE_R, grow: 460, life: 0.5, col: INK, w: 6 });
-                this.flash = { t: 0.5, text: 'POP!' };
+                this.shocks.push({ x: it.x, y: it.y, r: SEAL_R, grow: 460, life: 0.5, col: INK, w: 6 });
+                this.flash = { t: 0.5, text: 'BOING!' };
             } else if (it.kind === 'balloon') {
                 this.balloon = BALLOON_TIME;
                 Sfx.pickup();
@@ -983,7 +983,7 @@ class PenguinLaunch {
             label: MILESTONES[this.milestone][1],
             metres: this.metres,
             rings: this.rings,
-            mines: this.mines,
+            seals: this.seals,
         });
     }
 
@@ -1575,8 +1575,8 @@ class PenguinLaunch {
                 continue;
             }
 
-            // A Big pet's rings and mines: drawn as big as they now are to hit.
-            const grown = this.style === 'big' && (it.kind === 'ring' || it.kind === 'mine');
+            // A Big pet's rings and seals: drawn as big as they now are to hit.
+            const grown = this.style === 'big' && (it.kind === 'ring' || it.kind === 'seal');
 
             if (grown) {
                 ctx.save();
@@ -1628,50 +1628,176 @@ class PenguinLaunch {
                 continue;
             }
 
-            if (it.kind === 'mine') {
-                const blink = 0.5 + Math.sin(this.t * 6 + it.x) * 0.5;
+            if (it.kind === 'seal') {
+                // Drawn like the penguin: inked sticker outlines, gradient fur,
+                // big eyes. Faces the oncoming run, coral ball on the nose.
+                const breathe = Math.sin(this.t * 2.6 + it.x) * 0.035;
+                const blink = Math.sin(this.t * 0.9 + it.x) > 0.985;
+                const hop = Math.abs(Math.sin(this.t * 3.4 + it.x));
 
-                ctx.fillStyle = INK;
+                ctx.save();
+                ctx.translate(it.x, it.y + 13);
 
-                for (let i = 0; i < 8; i++) {
-                    ctx.save();
-                    ctx.translate(it.x, it.y);
-                    ctx.rotate((i / 8) * Math.PI * 2 + 0.4);
-                    ctx.beginPath();
-                    ctx.moveTo(0, -MINE_R - 9);
-                    ctx.lineTo(-4.5, -MINE_R + 3);
-                    ctx.lineTo(4.5, -MINE_R + 3);
-                    ctx.closePath();
-                    ctx.fill();
-                    ctx.restore();
-                }
-
-                const mg = ctx.createRadialGradient(it.x - 6, it.y - 7, 2, it.x, it.y, MINE_R);
-
-                mg.addColorStop(0, '#37648f');
-                mg.addColorStop(1, INK);
-                ctx.fillStyle = mg;
+                ctx.fillStyle = 'rgba(13,43,69,0.14)';
                 ctx.beginPath();
-                ctx.arc(it.x, it.y, MINE_R, 0, Math.PI * 2);
+                ctx.ellipse(4, 1, 30, 4, 0, 0, Math.PI * 2);
                 ctx.fill();
 
-                ctx.strokeStyle = CORAL;
-                ctx.lineWidth = 4;
+                ctx.scale(1 - breathe * 0.5, 1 + breathe);
+                ctx.translate(0, -13);
+                ctx.lineJoin = 'round';
+
+                const fur = ctx.createLinearGradient(0, -22, 0, 13);
+                fur.addColorStop(0, '#5d7896');
+                fur.addColorStop(0.6, '#86a0bb');
+                fur.addColorStop(1, '#c7d6e5');
+
+                // Tail flippers, splayed.
+                ctx.fillStyle = '#4f6987';
+                ctx.strokeStyle = INK;
+                ctx.lineWidth = 3;
                 ctx.beginPath();
-                ctx.arc(it.x, it.y, MINE_R, 0, Math.PI * 2);
+                ctx.moveTo(21, 5);
+                ctx.quadraticCurveTo(29, -2, 37, -3);
+                ctx.quadraticCurveTo(35, 5, 24, 10);
+                ctx.closePath();
+                ctx.moveTo(21, 8);
+                ctx.quadraticCurveTo(31, 9, 37, 14);
+                ctx.quadraticCurveTo(29, 15.5, 21, 12.5);
+                ctx.closePath();
+                ctx.fill();
                 ctx.stroke();
 
-                ctx.fillStyle = 'rgba(255,255,255,0.55)';
+                // Body: a fat comma, chest up, tapering to the tail.
+                ctx.fillStyle = fur;
+                ctx.lineWidth = 3.5;
                 ctx.beginPath();
-                ctx.ellipse(it.x - 5, it.y - 6, 4.5, 3, -0.6, 0, Math.PI * 2);
+                ctx.moveTo(-13, 12.5);
+                ctx.bezierCurveTo(-22, 5, -19, -11, -7, -12);
+                ctx.bezierCurveTo(6, -12, 15, -3, 25, 6);
+                ctx.quadraticCurveTo(26, 12.5, 18, 13);
+                ctx.quadraticCurveTo(2, 14.5, -13, 12.5);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+
+                // Spots along the back.
+                ctx.fillStyle = 'rgba(13,43,69,0.2)';
+                for (const p of [[2, -5, 3, 2], [9, -1.5, 2.2, 1.6], [-3, -1, 1.8, 1.4], [14, 3, 1.6, 1.2]]) {
+                    ctx.beginPath();
+                    ctx.ellipse(p[0], p[1], p[2], p[3], 0.4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Belly sheen.
+                ctx.fillStyle = 'rgba(255,255,255,0.35)';
+                ctx.beginPath();
+                ctx.ellipse(2, 9, 13, 3, 0, 0, Math.PI * 2);
                 ctx.fill();
 
-                ctx.globalAlpha = 0.45 + blink * 0.55;
-                ctx.fillStyle = CORAL;
+                // Front flipper.
+                ctx.fillStyle = '#4f6987';
+                ctx.lineWidth = 2.5;
                 ctx.beginPath();
-                ctx.arc(it.x, it.y, 4.5, 0, Math.PI * 2);
+                ctx.ellipse(-4, 8.5, 8, 3.4, 0.45, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                // Head, tipped back to balance the ball.
+                const hx = -12, hy = -14;
+                const head = ctx.createLinearGradient(hx - 10, hy - 10, hx + 8, hy + 10);
+                head.addColorStop(0, '#93abc4');
+                head.addColorStop(1, '#6f8aa8');
+                ctx.fillStyle = head;
+                ctx.lineWidth = 3.5;
+                ctx.beginPath();
+                ctx.arc(hx, hy, 12, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                // Muzzle: two puffy cheeks and a button nose.
+                ctx.fillStyle = '#eef3f8';
+                ctx.beginPath();
+                ctx.ellipse(hx - 6, hy + 5, 6.5, 4.4, -0.1, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = INK;
+                ctx.beginPath();
+                ctx.ellipse(hx - 7, hy + 2, 2.6, 1.9, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = 'rgba(13,43,69,0.4)';
+                for (const d of [[hx - 9.5, hy + 5.5], [hx - 7.5, hy + 7], [hx - 3.5, hy + 6.5], [hx - 2, hy + 5]]) {
+                    ctx.beginPath();
+                    ctx.arc(d[0], d[1], 0.6, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.strokeStyle = 'rgba(13,43,69,0.55)';
+                ctx.lineWidth = 1.2;
+                ctx.beginPath();
+                ctx.moveTo(hx - 11, hy + 4.5); ctx.lineTo(hx - 18, hy + 3);
+                ctx.moveTo(hx - 11, hy + 6.5); ctx.lineTo(hx - 17.5, hy + 8);
+                ctx.stroke();
+
+                ctx.fillStyle = BLUSH;
+                ctx.globalAlpha = 0.6;
+                ctx.beginPath();
+                ctx.ellipse(hx + 3, hy + 4, 2.6, 1.6, 0, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.globalAlpha = 1;
+
+                // Eyes, same build as the penguin's: ink, highlight, blink.
+                for (const e of [[hx + 1, hy - 3.5, 3.4], [hx - 7, hy - 3.5, 2.8]]) {
+                    if (blink) {
+                        ctx.strokeStyle = INK;
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(e[0] - e[2], e[1]);
+                        ctx.quadraticCurveTo(e[0], e[1] + 2, e[0] + e[2], e[1]);
+                        ctx.stroke();
+                        continue;
+                    }
+                    ctx.fillStyle = INK;
+                    ctx.beginPath();
+                    ctx.arc(e[0], e[1], e[2], 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = ICE;
+                    ctx.beginPath();
+                    ctx.arc(e[0] - e[2] * 0.35, e[1] - e[2] * 0.4, e[2] * 0.38, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Beach ball, hopping and spinning on the nose.
+                const bx = hx - 6, by = hy - 9 - hop * 7;
+                ctx.save();
+                ctx.translate(bx, by - 7);
+                ctx.rotate(this.t * 3 + it.x);
+                ctx.beginPath();
+                ctx.arc(0, 0, 7.5, 0, Math.PI * 2);
+                ctx.fillStyle = CORAL;
+                ctx.fill();
+                ctx.save();
+                ctx.clip();
+                ctx.fillStyle = ICE;
+                ctx.fillRect(-2.6, -8, 5.2, 16);
+                ctx.fillStyle = GOLD;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.arc(0, 0, 8, Math.PI * 0.15, Math.PI * 0.6);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+                ctx.strokeStyle = INK;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(0, 0, 7.5, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
+
+                ctx.fillStyle = 'rgba(255,255,255,0.7)';
+                ctx.beginPath();
+                ctx.arc(bx - 3, by - 10, 1.8, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
 
                 if (grown) {
                     ctx.restore();
@@ -2213,7 +2339,7 @@ class PenguinLaunch {
 
         ctx.font = '600 11px Outfit, system-ui, sans-serif';
         ctx.fillStyle = 'rgba(13,43,69,0.62)';
-        ctx.fillText(this.rings + ' RINGS \u00b7 ' + this.mines + ' MINES', W / 2, H / 2 + 44);
+        ctx.fillText(this.rings + ' RINGS \u00b7 ' + this.seals + ' SEALS', W / 2, H / 2 + 44);
 
         if (this.best > this.metres) {
             ctx.fillText('BEST ' + this.best + 'm', W / 2, H / 2 + 66);

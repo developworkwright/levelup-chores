@@ -259,7 +259,7 @@ enum ArcadeGame: string
              */
             self::GrandTour => 'points',
             /*
-             * Metres, and there is nothing else in the number. Rings, mines
+             * Metres, and there is nothing else in the number. Rings, seals
              * and power-ups are worth having because they carry the penguin
              * further, never because they add points — which is what makes
              * this the one board that cannot be farmed.
@@ -341,7 +341,7 @@ enum ArcadeGame: string
             },
             self::PenguinLaunch => match ($style) {
                 PetStyle::Steady => 'softens your landings — a bumpy one costs half the speed.',
-                PetStyle::Big => 'makes the rings and mines bigger and easier to hit.',
+                PetStyle::Big => 'makes the rings and seals bigger and easier to hit.',
                 PetStyle::Quick => 'pulls the sling tighter — every launch flies a little further.',
                 PetStyle::Lucky => 'pops you back into the air the first time you slide to a stop.',
             },

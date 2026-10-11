@@ -161,7 +161,7 @@ class ArcadePetStyleTest extends TestCase
 
         $html = Volt::test('arcade')
             ->call('switchTo', ArcadeGame::PenguinLaunch->value)
-            ->assertSee('rings and mines bigger')
+            ->assertSee('rings and seals bigger')
             ->html();
 
         $this->assertMatchesRegularExpression('/<penguin-launch\s+pet-style="big"/', $html);
