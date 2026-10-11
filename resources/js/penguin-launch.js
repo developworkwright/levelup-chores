@@ -107,7 +107,7 @@ const RING_BOOST = 1.11;
 const RING_CHAIN_MAX = 1.5;
 const CHAIN_WINDOW = 1.4;
 
-/** Seals are a pure rescue — a big pop upward, no cost, always good to hit. */
+/** Seals are a pure rescue — a big belly-bounce upward, no cost, always good to hit. */
 const SEAL_R = 17;
 const SEAL_POP = 700;
 
@@ -886,7 +886,7 @@ class PenguinLaunch {
 
     collect(dt) {
         for (const it of this.items) {
-            if (it.gone || it.kind === 'slick') {
+            if (it.gone || it.used || it.kind === 'slick') {
                 continue;
             }
 
@@ -909,7 +909,14 @@ class PenguinLaunch {
                 continue;
             }
 
-            it.gone = true;
+            // A seal stays on the ice after you bounce off it, so it is spent
+            // rather than removed — the draw squashes its belly from hitAt.
+            if (it.kind === 'seal') {
+                it.used = true;
+                it.hitAt = this.t;
+            } else {
+                it.gone = true;
+            }
 
             if (it.kind === 'ring') {
                 this.chain = this.t - this.chainAt < CHAIN_WINDOW ? this.chain + 1 : 1;
@@ -1629,175 +1636,208 @@ class PenguinLaunch {
             }
 
             if (it.kind === 'seal') {
-                // Drawn like the penguin: inked sticker outlines, gradient fur,
-                // big eyes. Faces the oncoming run, coral ball on the nose.
-                const breathe = Math.sin(this.t * 2.6 + it.x) * 0.035;
-                const blink = Math.sin(this.t * 0.9 + it.x) > 0.985;
-                const hop = Math.abs(Math.sin(this.t * 3.4 + it.x));
+                // A Weddell seal curled like a banana on its back — head and
+                // tail in the air, rocking — belly up. The belly is what you
+                // bounce off. A hit does not remove it: the belly squashes and
+                // springs back, the eyes go happy, and hearts float up.
+                const k = it.hitAt === undefined ? 9 : this.t - it.hitAt;
+                const seed = it.x * 0.37;
+                const sq = k < 0.9 ? Math.sin(k * 20) * Math.exp(-k * 6) * 0.42 : 0;
+                const breathe = Math.sin(this.t * 2.2 + seed) * 0.03;
+                const wave = Math.sin(this.t * 3 + seed) * 0.28;
+                const happy = k < 1.4;
+                const blink = Math.sin(this.t * 0.8 + seed) > 0.975;
 
                 ctx.save();
                 ctx.translate(it.x, it.y + 13);
-
-                ctx.fillStyle = 'rgba(13,43,69,0.14)';
-                ctx.beginPath();
-                ctx.ellipse(4, 1, 30, 4, 0, 0, Math.PI * 2);
-                ctx.fill();
-
-                ctx.scale(1 - breathe * 0.5, 1 + breathe);
-                ctx.translate(0, -13);
                 ctx.lineJoin = 'round';
+                ctx.lineCap = 'round';
 
-                const fur = ctx.createLinearGradient(0, -22, 0, 13);
-                fur.addColorStop(0, '#5d7896');
-                fur.addColorStop(0.6, '#86a0bb');
-                fur.addColorStop(1, '#c7d6e5');
-
-                // Tail flippers, splayed.
-                ctx.fillStyle = '#4f6987';
-                ctx.strokeStyle = INK;
-                ctx.lineWidth = 3;
+                ctx.fillStyle = 'rgba(13,43,69,0.13)';
                 ctx.beginPath();
-                ctx.moveTo(21, 5);
-                ctx.quadraticCurveTo(29, -2, 37, -3);
-                ctx.quadraticCurveTo(35, 5, 24, 10);
-                ctx.closePath();
-                ctx.moveTo(21, 8);
-                ctx.quadraticCurveTo(31, 9, 37, 14);
-                ctx.quadraticCurveTo(29, 15.5, 21, 12.5);
-                ctx.closePath();
+                ctx.ellipse(6, 1, 30, 4, 0, 0, Math.PI * 2);
                 ctx.fill();
-                ctx.stroke();
 
-                // Body: a fat comma, chest up, tapering to the tail.
+                ctx.translate(6, 0);
+                ctx.rotate(Math.sin(this.t * 1.9 + seed) * 0.13);
+                ctx.translate(-6, 0);
+                ctx.scale(1 + sq * 0.45, 1 - sq + breathe);
+
+                const flipper = (x, y, a, l, w) => {
+                    ctx.save();
+                    ctx.translate(x, y);
+                    ctx.rotate(a);
+                    ctx.fillStyle = '#55657a';
+                    ctx.strokeStyle = INK;
+                    ctx.lineWidth = 2.6;
+                    ctx.beginPath();
+                    ctx.ellipse(0, -l * 0.45, w, l * 0.5, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.restore();
+                };
+
+                // Tail flippers, up in the air.
+                flipper(33, -18, 0.6 - wave * 0.5, 12, 3.6);
+                flipper(35, -13, 1.3 - wave * 0.5, 12, 3.6);
+
+                // Body: the banana.
+                const fur = ctx.createLinearGradient(0, -38, 0, 0);
+                fur.addColorStop(0, '#9fb0bf');
+                fur.addColorStop(1, '#5f7080');
                 ctx.fillStyle = fur;
-                ctx.lineWidth = 3.5;
+                ctx.strokeStyle = INK;
+                ctx.lineWidth = 3.2;
                 ctx.beginPath();
-                ctx.moveTo(-13, 12.5);
-                ctx.bezierCurveTo(-22, 5, -19, -11, -7, -12);
-                ctx.bezierCurveTo(6, -12, 15, -3, 25, 6);
-                ctx.quadraticCurveTo(26, 12.5, 18, 13);
-                ctx.quadraticCurveTo(2, 14.5, -13, 12.5);
+                ctx.moveTo(-20, -8);
+                ctx.bezierCurveTo(-28, -14, -22, -28, -4, -28);
+                ctx.bezierCurveTo(14, -28, 28, -22, 34, -12);
+                ctx.bezierCurveTo(30, -4, 22, 0, 6, 0);
+                ctx.bezierCurveTo(-8, 0, -16, -3, -20, -8);
                 ctx.closePath();
                 ctx.fill();
                 ctx.stroke();
 
-                // Spots along the back.
-                ctx.fillStyle = 'rgba(13,43,69,0.2)';
-                for (const p of [[2, -5, 3, 2], [9, -1.5, 2.2, 1.6], [-3, -1, 1.8, 1.4], [14, 3, 1.6, 1.2]]) {
+                // Belly: the landing pad.
+                ctx.fillStyle = '#eef2f6';
+                ctx.beginPath();
+                ctx.ellipse(4, -21, 14, 6, -0.05, Math.PI, Math.PI * 2);
+                ctx.ellipse(4, -21, 14, 2.7, -0.05, 0, Math.PI);
+                ctx.fill();
+                ctx.fillStyle = 'rgba(255,255,255,0.95)';
+                ctx.beginPath();
+                ctx.ellipse(-0.2, -24.7, 5.6, 1.5, -0.08, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Spots down the side.
+                ctx.fillStyle = 'rgba(13,43,69,0.18)';
+                for (const p of [[6, -8, 2.6, 1.6], [16, -11, 2, 1.3], [-4, -8, 1.8, 1.2], [24, -14, 1.5, 1.1]]) {
                     ctx.beginPath();
-                    ctx.ellipse(p[0], p[1], p[2], p[3], 0.4, 0, Math.PI * 2);
+                    ctx.ellipse(p[0], p[1], p[2], p[3], 0.5, 0, Math.PI * 2);
                     ctx.fill();
                 }
 
-                // Belly sheen.
-                ctx.fillStyle = 'rgba(255,255,255,0.35)';
+                // Head, in the air.
+                const hx = -23, hy = -17, r = 10.5;
+                const hg = ctx.createLinearGradient(hx, hy - r, hx, hy + r);
+                hg.addColorStop(0, '#9fb0bf');
+                hg.addColorStop(1, '#5f7080');
+                ctx.fillStyle = hg;
+                ctx.strokeStyle = INK;
+                ctx.lineWidth = 3.2;
                 ctx.beginPath();
-                ctx.ellipse(2, 9, 13, 3, 0, 0, Math.PI * 2);
-                ctx.fill();
-
-                // Front flipper.
-                ctx.fillStyle = '#4f6987';
-                ctx.lineWidth = 2.5;
-                ctx.beginPath();
-                ctx.ellipse(-4, 8.5, 8, 3.4, 0.45, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.stroke();
-
-                // Head, tipped back to balance the ball.
-                const hx = -12, hy = -14;
-                const head = ctx.createLinearGradient(hx - 10, hy - 10, hx + 8, hy + 10);
-                head.addColorStop(0, '#93abc4');
-                head.addColorStop(1, '#6f8aa8');
-                ctx.fillStyle = head;
-                ctx.lineWidth = 3.5;
-                ctx.beginPath();
-                ctx.arc(hx, hy, 12, 0, Math.PI * 2);
+                ctx.arc(hx, hy, r, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.stroke();
 
-                // Muzzle: two puffy cheeks and a button nose.
-                ctx.fillStyle = '#eef3f8';
-                ctx.beginPath();
-                ctx.ellipse(hx - 6, hy + 5, 6.5, 4.4, -0.1, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.fillStyle = INK;
-                ctx.beginPath();
-                ctx.ellipse(hx - 7, hy + 2, 2.6, 1.9, 0, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.fillStyle = 'rgba(13,43,69,0.4)';
-                for (const d of [[hx - 9.5, hy + 5.5], [hx - 7.5, hy + 7], [hx - 3.5, hy + 6.5], [hx - 2, hy + 5]]) {
-                    ctx.beginPath();
-                    ctx.arc(d[0], d[1], 0.6, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-                ctx.strokeStyle = 'rgba(13,43,69,0.55)';
-                ctx.lineWidth = 1.2;
-                ctx.beginPath();
-                ctx.moveTo(hx - 11, hy + 4.5); ctx.lineTo(hx - 18, hy + 3);
-                ctx.moveTo(hx - 11, hy + 6.5); ctx.lineTo(hx - 17.5, hy + 8);
-                ctx.stroke();
+                // Face. On its back, so the muzzle points up and a little
+                // away from the body (A), eyes either side of that line.
+                const A = -2.05, dx = Math.cos(A), dy = Math.sin(A), px = -dy, py = dx;
+                const at = (f, s) => [hx + dx * r * f + px * r * s, hy + dy * r * f + py * r * s];
 
                 ctx.fillStyle = BLUSH;
-                ctx.globalAlpha = 0.6;
-                ctx.beginPath();
-                ctx.ellipse(hx + 3, hy + 4, 2.6, 1.6, 0, 0, Math.PI * 2);
-                ctx.fill();
+                ctx.globalAlpha = 0.7;
+                for (const s of [0.72, -0.72]) {
+                    const [x, y] = at(-0.05, s);
+                    ctx.beginPath();
+                    ctx.ellipse(x, y, r * 0.24, r * 0.15, A, 0, Math.PI * 2);
+                    ctx.fill();
+                }
                 ctx.globalAlpha = 1;
 
-                // Eyes, same build as the penguin's: ink, highlight, blink.
-                for (const e of [[hx + 1, hy - 3.5, 3.4], [hx - 7, hy - 3.5, 2.8]]) {
-                    if (blink) {
+                const mf = 0.58, [nx, ny] = at(0.8, 0);
+                ctx.fillStyle = '#eef2f6';
+                for (const s of [0.24, -0.24]) {
+                    const [x, y] = at(mf, s);
+                    ctx.beginPath();
+                    ctx.arc(x, y, r * 0.24, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.fillStyle = INK;
+                ctx.beginPath();
+                ctx.ellipse(nx, ny, r * 0.17, r * 0.12, A, 0, Math.PI * 2);
+                ctx.fill();
+
+                // :3 — two little humps under the nose.
+                ctx.strokeStyle = INK;
+                ctx.lineWidth = 1.1;
+                const [m0, m1] = at(mf - 0.1, 0), mr = r * 0.12;
+                ctx.beginPath();
+                for (const s of [1, -1]) {
+                    const cx = m0 + px * mr * s, cy = m1 + py * mr * s;
+                    ctx.moveTo(cx + Math.cos(A + Math.PI / 2 + 0.25) * mr, cy + Math.sin(A + Math.PI / 2 + 0.25) * mr);
+                    ctx.arc(cx, cy, mr, A + Math.PI / 2 + 0.25, A + Math.PI * 1.5 - 0.25);
+                }
+                ctx.stroke();
+
+                ctx.fillStyle = 'rgba(13,43,69,0.35)';
+                for (const s of [1, -1]) {
+                    for (const i of [-0.04, 0.1]) {
+                        const [x, y] = at(mf + i, s * 0.5);
+                        ctx.beginPath();
+                        ctx.arc(x, y, 0.5, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+
+                // Eyes: two highlights each, a blink now and then, squeezed
+                // happy after a bounce.
+                for (const [s, sz] of [[0.46, 0.3], [-0.46, 0.26]]) {
+                    const [x, y] = at(0.1, s), er = r * sz;
+                    if (happy || blink) {
                         ctx.strokeStyle = INK;
                         ctx.lineWidth = 2;
                         ctx.beginPath();
-                        ctx.moveTo(e[0] - e[2], e[1]);
-                        ctx.quadraticCurveTo(e[0], e[1] + 2, e[0] + e[2], e[1]);
+                        if (happy) {
+                            ctx.arc(x - dx * er * 0.6, y - dy * er * 0.6, er * 0.95, A - 0.35 - Math.PI / 2 + 0.9, A - 0.35 + Math.PI / 2 - 0.2);
+                        } else {
+                            ctx.moveTo(x + px * er, y + py * er);
+                            ctx.quadraticCurveTo(x - dx * 1.6, y - dy * 1.6, x - px * er, y - py * er);
+                        }
                         ctx.stroke();
                         continue;
                     }
                     ctx.fillStyle = INK;
                     ctx.beginPath();
-                    ctx.arc(e[0], e[1], e[2], 0, Math.PI * 2);
+                    ctx.arc(x, y, er, 0, Math.PI * 2);
                     ctx.fill();
                     ctx.fillStyle = ICE;
                     ctx.beginPath();
-                    ctx.arc(e[0] - e[2] * 0.35, e[1] - e[2] * 0.4, e[2] * 0.38, 0, Math.PI * 2);
+                    ctx.arc(x - er * 0.3, y - er * 0.35, er * 0.42, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.arc(x + er * 0.4, y + er * 0.35, er * 0.18, 0, Math.PI * 2);
                     ctx.fill();
                 }
 
-                // Beach ball, hopping and spinning on the nose.
-                const bx = hx - 6, by = hy - 9 - hop * 7;
-                ctx.save();
-                ctx.translate(bx, by - 7);
-                ctx.rotate(this.t * 3 + it.x);
-                ctx.beginPath();
-                ctx.arc(0, 0, 7.5, 0, Math.PI * 2);
-                ctx.fillStyle = CORAL;
-                ctx.fill();
-                ctx.save();
-                ctx.clip();
-                ctx.fillStyle = ICE;
-                ctx.fillRect(-2.6, -8, 5.2, 16);
-                ctx.fillStyle = GOLD;
-                ctx.beginPath();
-                ctx.moveTo(0, 0);
-                ctx.arc(0, 0, 8, Math.PI * 0.15, Math.PI * 0.6);
-                ctx.closePath();
-                ctx.fill();
-                ctx.restore();
-                ctx.strokeStyle = INK;
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.arc(0, 0, 7.5, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.restore();
-
-                ctx.fillStyle = 'rgba(255,255,255,0.7)';
-                ctx.beginPath();
-                ctx.arc(bx - 3, by - 10, 1.8, 0, Math.PI * 2);
-                ctx.fill();
+                // Front flippers at the shoulders, waving.
+                flipper(-10, -26, -0.7 + wave, 11, 2.8);
+                flipper(-5, -27, -0.15 + wave, 11, 2.8);
 
                 ctx.restore();
+
+                // Hearts, floating up off a bounced seal.
+                if (happy) {
+                    ctx.fillStyle = CORAL;
+                    ctx.strokeStyle = INK;
+                    ctx.lineWidth = 1.6;
+                    for (const h of [[-6, 0, 1], [8, 0.18, 0.8]]) {
+                        const hk = k - h[1];
+                        if (hk < 0) {
+                            continue;
+                        }
+                        const p = hk / 1.2;
+                        const x = it.x + h[0] + Math.sin(hk * 7) * 3, y = it.y - 21 - p * 34, hr = 4.2 * h[2];
+                        ctx.globalAlpha = Math.max(0, 1 - p);
+                        ctx.beginPath();
+                        ctx.moveTo(x, y + hr);
+                        ctx.bezierCurveTo(x - hr * 1.6, y - hr * 0.2, x - hr * 0.7, y - hr * 1.4, x, y - hr * 0.4);
+                        ctx.bezierCurveTo(x + hr * 0.7, y - hr * 1.4, x + hr * 1.6, y - hr * 0.2, x, y + hr);
+                        ctx.fill();
+                        ctx.stroke();
+                    }
+                    ctx.globalAlpha = 1;
+                }
 
                 if (grown) {
                     ctx.restore();

@@ -315,6 +315,24 @@ class ArcadePenguinTest extends TestCase
         );
     }
 
+    public function test_a_bounced_seal_stays_on_the_ice_but_cannot_be_hit_twice(): void
+    {
+        /*
+         * A seal is spent rather than removed, so it can squash and send up
+         * hearts after the bounce. The two halves have to arrive together: a
+         * seal that is kept but still collides pops the penguin every frame it
+         * overlaps, and counts a seal each time.
+         */
+        $source = file_get_contents(resource_path('js/penguin-launch.js'));
+
+        $this->assertStringContainsString("if (it.gone || it.used || it.kind === 'slick') {", $source);
+        $this->assertMatchesRegularExpression(
+            "/if \(it\.kind === 'seal'\) \{\s*it\.used = true;\s*it\.hitAt = this\.t;\s*\} else \{\s*it\.gone = true;/",
+            $source,
+            'A bounced seal is no longer marked spent in place of being removed.'
+        );
+    }
+
     public function test_the_rail_lists_the_slide_as_a_game_rather_than_a_toy(): void
     {
         $this->loginKid();
